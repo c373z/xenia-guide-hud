@@ -1857,10 +1857,15 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
             uint32_t guide_handler = ks->sys_app_handler(0xFF);
             if (guide_handler) {
               auto* mem = ks->memory();
-              uint32_t inner = mem->SystemHeapAlloc(0x20, 16);
-              uint32_t buf = mem->SystemHeapAlloc(0x20, 16);
-              std::memset(mem->TranslateVirtual(inner), 0, 0x20);
-              std::memset(mem->TranslateVirtual(buf), 0, 0x20);
+              // hud copies 0x47C bytes out of the inner struct and writes
+              // the result size through the third argument, so that must be
+              // a pointer, not a size.
+              uint32_t inner = mem->SystemHeapAlloc(0x500, 16);
+              uint32_t buf = mem->SystemHeapAlloc(0x40, 16);
+              uint32_t out_sz = mem->SystemHeapAlloc(0x10, 16);
+              std::memset(mem->TranslateVirtual(inner), 0, 0x500);
+              std::memset(mem->TranslateVirtual(buf), 0, 0x40);
+              std::memset(mem->TranslateVirtual(out_sz), 0, 0x10);
               auto* iw = mem->TranslateVirtual<xe::be<uint32_t>*>(inner);
               iw[2] = static_cast<uint32_t>(cvars::guide_subcommand);
               auto* bw = mem->TranslateVirtual<xe::be<uint32_t>*>(buf);
@@ -1868,7 +1873,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
               bw[1] = inner;
               XELOGI("Bootstrap: Guide dispatch msg=80000004 subcmd={} -> {:08X}",
                      int32_t(cvars::guide_subcommand), guide_handler);
-              uint64_t gargs[] = {0x80000004ull, buf, 0x20};
+              uint64_t gargs[] = {0x80000004ull, buf, out_sz};
               uint64_t gres = ks->processor()->Execute(ts, guide_handler, gargs,
                                                        xe::countof(gargs));
               XELOGI("Bootstrap: Guide handler returned {:08X}",
@@ -1951,10 +1956,15 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                 return 1;
               }
               auto* mem = ks->memory();
-              uint32_t inner = mem->SystemHeapAlloc(0x20, 16);
-              uint32_t buf = mem->SystemHeapAlloc(0x20, 16);
-              std::memset(mem->TranslateVirtual(inner), 0, 0x20);
-              std::memset(mem->TranslateVirtual(buf), 0, 0x20);
+              // hud copies 0x47C bytes out of the inner struct and writes the
+              // result size through the third argument, so that is a pointer,
+              // not a size.
+              uint32_t inner = mem->SystemHeapAlloc(0x500, 16);
+              uint32_t buf = mem->SystemHeapAlloc(0x40, 16);
+              uint32_t out_sz = mem->SystemHeapAlloc(0x10, 16);
+              std::memset(mem->TranslateVirtual(inner), 0, 0x500);
+              std::memset(mem->TranslateVirtual(buf), 0, 0x40);
+              std::memset(mem->TranslateVirtual(out_sz), 0, 0x10);
               auto* iw = mem->TranslateVirtual<xe::be<uint32_t>*>(inner);
               iw[2] = static_cast<uint32_t>(cvars::guide_subcommand);
               auto* bw = mem->TranslateVirtual<xe::be<uint32_t>*>(buf);
@@ -1962,7 +1972,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
               bw[1] = inner;
               XELOGI("Guide: dispatch msg=80000004 subcmd={} -> {:08X}",
                      int32_t(cvars::guide_subcommand), h);
-              uint64_t gargs[] = {0x80000004ull, buf, 0x20};
+              uint64_t gargs[] = {0x80000004ull, buf, out_sz};
               uint64_t r = ks->processor()->Execute(ts, h, gargs,
                                                     xe::countof(gargs));
               XELOGI("Guide: handler returned {:08X}",
