@@ -1576,12 +1576,38 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
   uint32_t workspace_address = 0;
   module->GetOptHeader(XEX_HEADER_EXECUTION_INFO, &info);
 
-  kernel_state_->memory()
-      ->LookupHeapByType(false, 0x1000)
-      ->Alloc(module->workspace_size(), 0x1000,
-              kMemoryAllocationReserve | kMemoryAllocationCommit,
-              kMemoryProtectRead | kMemoryProtectWrite, false,
-              &workspace_address);
+  // The title workspace (/XEXWORKSPACE) is addressed by the guest as the
+  // region immediately following the module image, not as an arbitrary
+  // allocation. xam derives its heap base from the image end, so placing this
+  // anywhere else leaves xam's heaps uninitialized and every xam allocation
+  // fails. Try the fixed address first and only fall back to a floating
+  // allocation if that range is unavailable.
+  if (module->xex_module()) {
+    workspace_address = xe::round_up(
+        module->xex_module()->base_address() + module->xex_module()->image_size(),
+        0x1000);
+    auto* heap = kernel_state_->memory()->LookupHeap(workspace_address);
+    if (!heap ||
+        !heap->AllocFixed(workspace_address, module->workspace_size(), 0x1000,
+                          kMemoryAllocationReserve | kMemoryAllocationCommit,
+                          kMemoryProtectRead | kMemoryProtectWrite)) {
+      XELOGW("Title workspace: could not reserve {} bytes at {:08X}",
+             module->workspace_size(), workspace_address);
+      workspace_address = 0;
+    } else {
+      XELOGI("Title workspace: {:08X}-{:08X} ({} bytes)", workspace_address,
+             workspace_address + module->workspace_size(),
+             module->workspace_size());
+    }
+  }
+  if (!workspace_address) {
+    kernel_state_->memory()
+        ->LookupHeapByType(false, 0x1000)
+        ->Alloc(module->workspace_size(), 0x1000,
+                kMemoryAllocationReserve | kMemoryAllocationCommit,
+                kMemoryProtectRead | kMemoryProtectWrite, false,
+                &workspace_address);
+  }
 
   if (!info) {
     title_id_ = 0;
