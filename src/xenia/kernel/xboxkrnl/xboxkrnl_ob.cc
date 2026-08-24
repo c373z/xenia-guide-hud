@@ -433,6 +433,44 @@ dword_result_t ObCreateObject_entry(
 }
 DECLARE_XBOXKRNL_EXPORT1(ObCreateObject, kNone, kImplemented);
 
+// Creates a namespace directory object (e.g. \SystemNamedObjects). Xenia has
+// no guest object namespace, so hand back a handle to a plain object and let
+// name-based lookups resolve through the existing object table.
+dword_result_t NtCreateDirectoryObject_entry(
+    lpdword_t handle_out, pointer_t<X_OBJECT_ATTRIBUTES> obj_attributes) {
+  if (!handle_out) {
+    return X_STATUS_INVALID_PARAMETER;
+  }
+  auto directory = object_ref<XObject>(
+      new XObject(kernel_state(), XObject::Type::Undefined));
+  if (obj_attributes) {
+    directory->SetAttributes(obj_attributes);
+  }
+  *handle_out = directory->handle();
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XBOXKRNL_EXPORT1(NtCreateDirectoryObject, kNone, kSketchy);
+
+// Resolves an object-namespace symbolic link (e.g. \Device\Flash) to its
+// target path via the VFS symbolic link table.
+dword_result_t ObTranslateSymbolicLink_entry(pointer_t<X_ANSI_STRING> link_name,
+                                             pointer_t<X_ANSI_STRING> out_target) {
+  if (!link_name || !out_target) {
+    return X_STATUS_INVALID_PARAMETER;
+  }
+  std::string name(
+      kernel_memory()->TranslateVirtual<const char*>(link_name->pointer),
+      link_name->length);
+  std::string target;
+  if (!kernel_state()->file_system()->FindSymbolicLink(name, target)) {
+    XELOGD("ObTranslateSymbolicLink: no link for {}", name);
+    return X_STATUS_OBJECT_NAME_NOT_FOUND;
+  }
+  XELOGD("ObTranslateSymbolicLink: {} -> {}", name, target);
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XBOXKRNL_EXPORT1(ObTranslateSymbolicLink, kNone, kSketchy);
+
 }  // namespace xboxkrnl
 }  // namespace kernel
 }  // namespace xe

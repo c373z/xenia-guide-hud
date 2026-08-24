@@ -1767,6 +1767,37 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
         [this]() { on_shader_storage_initialization(false); });
   }
 
+  // If a real xam was loaded, its DllMain must run on a guest thread before
+  // the title starts, otherwise the title spins waiting for an uninitialized
+  // xam. Do this synchronously so xam is ready before the main thread exists.
+  if (module->is_executable() && lle_xam_module_ &&
+      lle_xam_module_->entry_point()) {
+    auto* ks = kernel_state_.get();
+    auto xam_mod = lle_xam_module_;
+    // SetExecutableModule first: InitializeGuestObject acquires the title
+    // process thread_list_spinlock, which is only valid once initialized.
+    kernel_state_->SetExecutableModule(module);
+    auto xam_boot =
+        kernel::object_ref<kernel::XHostThread>(new kernel::XHostThread(
+            ks, 1024 * 1024, 0, [ks, xam_mod]() -> int {
+              auto* ts = kernel::XThread::GetCurrentThread()->thread_state();
+              uint64_t args[] = {xam_mod->handle(), 1 /* PROCESS_ATTACH */, 0};
+              XELOGI("LLE xam: DllMain entry={:08X}", xam_mod->entry_point());
+              ks->processor()->Execute(ts, xam_mod->entry_point(), args,
+                                       xe::countof(args));
+              XELOGI("LLE xam: DllMain returned");
+              return 0;
+            }));
+    xam_boot->set_name("LLE xam init");
+    if (XSUCCEEDED(xam_boot->Create())) {
+      XELOGI("LLE xam: waiting for init thread");
+      xam_boot->Wait(0, 0, 0, nullptr);
+      XELOGI("LLE xam: init complete");
+    } else {
+      XELOGE("LLE xam: failed to create init thread");
+    }
+  }
+
   kernel::object_ref<kernel::XThread> main_thread;
   if (!module->is_executable() && cvars::allow_dll_module_launch) {
     // DLL modules have no title entry point to launch, and their DllMain must

@@ -9,6 +9,7 @@
 
 #include "xenia/kernel/util/shim_utils.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_private.h"
+#include "xenia/cpu/processor.h"
 #include "xenia/kernel/xthread.h"
 #include "xenia/xbox.h"
 
@@ -145,6 +146,35 @@ dword_result_t MicDeviceRequest_entry(pointer_t<X_MIC_DEVICE> device_ptr) {
   return X_ERROR_SUCCESS;
 }
 DECLARE_XBOXKRNL_EXPORT1(MicDeviceRequest, kNone, kStub);
+
+// Debug monitor RPC used by retail xam/dash builds. There is no debug monitor
+// attached; report failure so callers take the "not present" path.
+dword_result_t ExDebugMonitorService_entry(dword_t r3, dword_t r4, dword_t r5,
+                                           dword_t r6) {
+  return X_STATUS_UNSUCCESSFUL;
+}
+DECLARE_XBOXKRNL_EXPORT1(ExDebugMonitorService, kNone, kStub);
+
+// Runs a routine on every logical processor via IPI. Xenia has no real IPI
+// mechanism; invoke the routine once on the calling thread, which is
+// sufficient for the initialization uses in xam.
+dword_result_t KeIpiGenericCall_entry(lpvoid_t routine, dword_t context,
+                                      const ppc_context_t& ppc_context) {
+  if (routine) {
+    uint64_t args[] = {context};
+    ppc_context->processor->Execute(ppc_context->thread_state,
+                                    routine.guest_address(), args,
+                                    xe::countof(args));
+  }
+  return 0;
+}
+DECLARE_XBOXKRNL_EXPORT1(KeIpiGenericCall, kNone, kSketchy);
+
+// Reads a Digital Video Encoder register. No DVE is emulated; report zero.
+dword_result_t VdReadDVERegisterUlong_entry(dword_t offset) {
+  return 0;
+}
+DECLARE_XBOXKRNL_EXPORT1(VdReadDVERegisterUlong, kNone, kStub);
 
 }  // namespace xboxkrnl
 }  // namespace kernel

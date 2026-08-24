@@ -857,6 +857,17 @@ void RtlGetStackLimits_entry(lpdword_t out_end, lpdword_t out_base,
 }
 DECLARE_XBOXKRNL_EXPORT1(RtlGetStackLimits, kNone, kImplemented);
 
+// Debug-build assertion helper. Retail modules link it but only call it on a
+// failed assert; log and continue rather than terminating the guest.
+void RtlAssert_entry(lpstring_t failed_assertion, lpstring_t file_name,
+                     dword_t line_number, lpstring_t message) {
+  XELOGE("RtlAssert: {} at {}:{} {}",
+         failed_assertion ? failed_assertion.value() : "(null)",
+         file_name ? file_name.value() : "(null)", uint32_t(line_number),
+         message ? message.value() : "");
+}
+DECLARE_XBOXKRNL_EXPORT1(RtlAssert, kNone, kImplemented);
+
 }  // namespace xboxkrnl
 }  // namespace kernel
 }  // namespace xe
