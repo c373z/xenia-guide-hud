@@ -2194,17 +2194,37 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                             kernel::XThread::GetCurrentThread()->thread_state();
                                                 // 81A34E78 is a constructor: it stores through r3.
                         // Give it a real zeroed buffer instead of address 0.
-                        // Its own max store offset is 76, so 80 bytes suffice;
-                        // allocate 4 KiB so any overrun stays contained.
-                        uint32_t self = ks->memory()->SystemHeapAlloc(0x1000, 16);
+                        // Size it properly: the factory addresses sub-objects
+                        // with addis/addi pairs (addis +0x10000 then a negative
+                        // addi), so a naive scan of small stw displacements
+                        // reported 76 bytes when the real span is 33956
+                        // (0x84A4). Allocate 64 KiB - comfortably past that.
+                        const uint32_t kSelfSize = 0x10000;
+                        uint32_t self =
+                            ks->memory()->SystemHeapAlloc(kSelfSize, 128);
                         std::memset(ks->memory()->TranslateVirtual(self), 0,
-                                    0x1000);
+                                    kSelfSize);
                         XELOGI("Guide: XamApp factory 81A34E78 this={:08X}",
                                self);
                         uint64_t aa[] = {self};
                         ks->processor()->Execute(ats, 0x81A34E78u, aa,
                                                  xe::countof(aa));
                         XELOGI("Guide: XamApp factory returned");
+                        // The factory constructs three XamApp instances at
+                        // this+10832, +17880 and +24928 (the three calls to
+                        // the ctor 81A4E640). XamApp's entry 81A4E3D0 reads
+                        // this+204/+232/+236, so run it on the first instance
+                        // - that is the chain that reaches the 0x1015 handler.
+                        for (uint32_t inst : {10832u, 17880u, 24928u}) {
+                          uint32_t obj = self + inst;
+                          XELOGI("Guide: XamApp entry 81A4E3D0 this={:08X} "
+                                 "(+{})", obj, inst);
+                          uint64_t ea[] = {obj};
+                          uint64_t er = ks->processor()->Execute(
+                              ats, 0x81A4E3D0u, ea, xe::countof(ea));
+                          XELOGI("Guide: XamApp entry returned {:08X}",
+                                 static_cast<uint32_t>(er));
+                        }
                         return 0;
                       }, ks->GetSystemProcess()));
                   app_thread->set_name("XamApp");
