@@ -672,6 +672,10 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
            "[1]={:08X}",
            render_obj, rvt, rvt ? rd(rvt + 28) : 0, rvt ? rd(rvt + 4) : 0);
   }
+  // First call in that registration routine is xam's
+  // GamerCardRegisterControls; read its thunk to get the real target.
+  XELOGI("GuideBootstrap: thunk 913FEA04: {:08X} {:08X} {:08X} {:08X}",
+         rd(0x913FEA04u), rd(0x913FEA08u), rd(0x913FEA0Cu), rd(0x913FEA10u));
   uint32_t obj_vt = rd(guide_bs_obj_);
   uint32_t scene_fn = obj_vt ? rd(obj_vt + 27 * 4) : 0;
   uint64_t ir = 0;
