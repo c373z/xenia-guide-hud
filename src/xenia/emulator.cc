@@ -2084,9 +2084,47 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
               // registrars that populate it have no callers anywhere inside
               // xam - something outside the module drives them on hardware,
               // the same shape as the heap-init routine. Drive them here.
+              // xam's core XUI class registrars are unreachable from its own
+              // code: no bl, no b, and no pointer table outside .pdata. They
+              // build a descriptor with the class name at +84 and the parent
+              // at +88 (the hud-side wrappers use +100/+104) and call the
+              // register entry at 81956318. Drive them directly. The list is
+              // run twice because registration resolves the parent at call
+              // time, so classes registered in the first pass unblock the
+              // ones that depend on them in the second.
               if (cvars::lle_xam_xui_init) {
-                for (uint32_t reg : {0x81AA7320u, 0x8174FF38u, 0x81750350u,
-                                      0x817503E8u, 0x8199BE08u, 0x8176B2C8u}) {
+                static const uint32_t kXuiCore[] = {
+                    0x8194F860u, 0x8194F950u, 0x8194FAC0u, 0x8194FBE8u,
+                    0x8194FCD8u, 0x8194FDC8u, 0x8194FEB0u, 0x8194FFA0u,
+                    0x81950090u, 0x81950178u, 0x81950268u, 0x81950350u,
+                    0x819504C0u, 0x819505B0u, 0x819506A0u, 0x819507D0u,
+                    0x819508C0u, 0x819509B0u, 0x81950AA0u, 0x81950B88u,
+                    0x81950C78u, 0x81950D68u, 0x81950E58u, 0x81950F48u,
+                    0x81951038u, 0x81951128u, 0x81951218u, 0x81951308u,
+                    0x819513F8u, 0x81952428u, 0x819524D0u, 0x81952580u,
+                    0x81952628u, 0x81953298u, 0x81953338u, 0x819533E8u,
+                    0x819536B0u, 0x81970290u};
+                int prev_ok = -1;
+                for (int pass = 0; pass < 8; ++pass) {
+                  int ok = 0, fail = 0;
+                  for (uint32_t reg : kXuiCore) {
+                    uint64_t rargs[] = {0};
+                    uint64_t rr = ks->processor()->Execute(ts, reg, rargs,
+                                                           xe::countof(rargs));
+                    if (static_cast<uint32_t>(rr) & 0x80000000u) {
+                      ++fail;
+                    } else {
+                      ++ok;
+                    }
+                  }
+                  XELOGI("Guide: XUI core pass {}: {} ok, {} failed", pass, ok,
+                         fail);
+                  if (ok == prev_ok) {
+                    break;  // converged - remaining failures are not ordering
+                  }
+                  prev_ok = ok;
+                }
+                for (uint32_t reg : {0x817503E8u, 0x8199BE08u, 0x8176B2C8u}) {
                   uint64_t rargs[] = {0};
                   XELOGI("Guide: XUI registrar {:08X}", reg);
                   uint64_t rr = ks->processor()->Execute(ts, reg, rargs,
