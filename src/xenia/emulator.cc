@@ -1166,6 +1166,18 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
               // never dereferenced there (the register is reloaded from
               // [obj+12] immediately after the test), so forcing it non-zero
               // is safe and lets XuiRenderCreateDC run.
+              // The XUI render context global (81D6C978) is written inside
+              // the function containing runtime 818FF278. Find which export
+              // that is by listing the XUI ordinal range.
+              auto xm = ks->GetModule("xam.xex", true);
+              if (xm) {
+                for (uint32_t ord = 0x340; ord <= 0x358; ++ord) {
+                  uint32_t fa = xm->GetProcAddressByOrdinal(ord);
+                  if (fa) {
+                    XELOGI("Guide button: xam ord {:03X} -> {:08X}", ord, fa);
+                  }
+                }
+              }
               if (cvars::guide_call_xuiinit) {
                 // Target read out of hud's XuiInit thunk at 913FE7E4
                 // (lis 0x8195 / ori 0x3760). XuiInit accepts null params -
@@ -2510,7 +2522,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                 if (cvars::lle_xam_trace_loader && !loader_bp) {
                   loader_bp = std::make_unique<cpu::Breakpoint>(
                       ks->processor(), cpu::Breakpoint::AddressType::kGuest,
-                      0x913EC578ull,
+                      0x81949B60ull,
                       [](cpu::Breakpoint* bp, cpu::ThreadDebugInfo* ti,
                          uint64_t host_pc) {
                         auto* th = kernel::XThread::GetCurrentThread();
@@ -2520,7 +2532,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                         }
                         auto* c = th->thread_state()->context();
                         XELOGI(
-                            "LoaderTrace: SCENE 913EC578 lr={:08X} r3={:08X} "
+                            "LoaderTrace: CSWRAP 81949B60 lr={:08X} r3={:08X} "
                             "r4={:08X} r5={:08X} r6={:08X} r7={:08X} "
                             "r29={:08X} r30={:08X}",
                             static_cast<uint32_t>(c->lr),
@@ -2535,7 +2547,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                   // AddBreakpoint installs it when the processor is running.
                   ks->processor()->AddBreakpoint(loader_bp.get());
                   XELOGI(
-                      "LoaderTrace: 913EC578 exec_state={} patched={} host={:X}",
+                      "LoaderTrace: 81949B60 exec_state={} patched={} host={:X}",
                       static_cast<int>(ks->processor()->execution_state()),
                       loader_bp->backend_data().size(),
                       loader_bp->backend_data().empty()
