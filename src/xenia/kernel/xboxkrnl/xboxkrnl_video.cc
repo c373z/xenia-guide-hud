@@ -663,6 +663,15 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
     XELOGI("GuideBootstrap: [guide+4] = skin module {:08X}",
            guide_bs_skin_module_);
   }
+  {
+    // hud's init ends in a virtual call to the render sub-object's vtable[7]
+    // (913ea924: lwz r10,0(r31) / lwz r11,28(r10) / bctrl). That call is where
+    // it hangs once the extra XUI classes are registered.
+    uint32_t rvt = rd(render_obj);
+    XELOGI("GuideBootstrap: render obj {:08X} vtable {:08X} [7]={:08X} "
+           "[1]={:08X}",
+           render_obj, rvt, rvt ? rd(rvt + 28) : 0, rvt ? rd(rvt + 4) : 0);
+  }
   uint32_t obj_vt = rd(guide_bs_obj_);
   uint32_t scene_fn = obj_vt ? rd(obj_vt + 27 * 4) : 0;
   uint64_t ir = 0;
