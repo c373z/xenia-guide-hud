@@ -38,6 +38,7 @@
 #include "xenia/gpu/graphics_system.h"
 #include "xenia/hid/input_driver.h"
 #include "xenia/hid/input_system.h"
+#include "xenia/kernel/kernel_flags.h"
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/title_id_utils.h"
 #include "xenia/kernel/user_module.h"
@@ -1515,6 +1516,25 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
 
   // Allow xam to request module loads.
   auto xam = kernel_state()->GetKernelModule<kernel::xam::XamModule>("xam.xex");
+
+  // LLE xam bootstrap: load the real xam.xex as a guest module before the main
+  // module, so the main module's xam imports bind against xam's real export
+  // table instead of Xenia's HLE xam. See XexModule::SetupLibraryImports.
+  if (!cvars::lle_xam.empty()) {
+    XELOGI("LLE xam: loading guest xam from {}", cvars::lle_xam);
+    auto xam_module = kernel_state_->LoadUserModule(cvars::lle_xam, false);
+    if (!xam_module) {
+      XELOGE("LLE xam: failed to load {}", cvars::lle_xam);
+      return X_STATUS_NOT_FOUND;
+    }
+    X_RESULT xam_result =
+        kernel_state_->FinishLoadingUserModule(xam_module, false);
+    if (XFAILED(xam_result)) {
+      XELOGE("LLE xam: failed to finish loading {}", cvars::lle_xam);
+      return xam_result;
+    }
+    XELOGI("LLE xam: loaded at {:08X}", xam_module->hmodule_ptr());
+  }
 
   XELOGI("Loading module {}", module_path);
   auto module = kernel_state_->LoadUserModule(module_path);

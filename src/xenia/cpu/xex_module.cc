@@ -23,6 +23,8 @@
 #include "xenia/cpu/lzx.h"
 #include "xenia/cpu/processor.h"
 #include "xenia/emulator.h"
+#include "xenia/base/utf8.h"
+#include "xenia/kernel/kernel_flags.h"
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/user_module.h"
 #include "xenia/kernel/xmodule.h"
@@ -1221,12 +1223,25 @@ bool XexModule::Unload() {
 
 bool XexModule::SetupLibraryImports(const std::string_view name,
                                     const xex2_import_library* library) {
+  // When LLE xam is enabled and a real xam.xex has been loaded as a guest
+  // module, resolve xam.xex imports against its actual export table rather
+  // than Xenia's HLE export tables. XamModule stays registered so host-side
+  // services (app manager, content manager, loader data) keep working.
+  const bool lle_xam_override =
+      !cvars::lle_xam.empty() &&
+      utf8::equal_case(utf8::find_name_from_guest_path(name), "xam.xex") &&
+      kernel_state_->GetModule(name, true) != nullptr;
+
   ExportResolver* kernel_resolver = nullptr;
-  if (kernel_state_->IsKernelModule(name)) {
+  if (!lle_xam_override && kernel_state_->IsKernelModule(name)) {
     kernel_resolver = processor_->export_resolver();
   }
 
-  auto user_module = kernel_state_->GetModule(name);
+  auto user_module = lle_xam_override ? kernel_state_->GetModule(name, true)
+                                      : kernel_state_->GetModule(name);
+  if (lle_xam_override) {
+    XELOGI("LLE xam: resolving {} imports against guest module", name);
+  }
 
   auto base_name = utf8::find_base_name_from_guest_path(name);
 

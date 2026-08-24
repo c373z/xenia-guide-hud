@@ -14,3 +14,9 @@ DEFINE_bool(headless, false,
             "UI");
 DEFINE_bool(log_high_frequency_kernel_calls, false,
             "Log kernel calls with the kHighFrequency tag.", "Logging");
+DEFINE_string(lle_xam, "",
+              "Guest path to a real xam.xex (e.g. \"GAME:\\\\xam.xex\") to "
+              "load as a guest module. Guest imports of xam.xex then resolve "
+              "against its real export table instead of Xenia's HLE xam. "
+              "Leave blank to use the HLE xam.",
+              "Kernel");
