@@ -29,6 +29,12 @@ DEFINE_bool(lle_xam_app_host, false,
             "0x254, XamAppLoad 0x244). Xenia declares these but implements "
             "none of them, and they are how system apps get hosted.",
             "Kernel");
+DEFINE_bool(guide_call_xuiinit, true,
+            "Call real xam's XuiInit (81953760) before hud's XUI init. xam's "
+            "XuiRenderCreateDC returns E_UNEXPECTED while xam's XUI context "
+            "global at 81D6C978 is null, and hud calls XuiInit only after "
+            "CreateDC - it assumes its host initialised XUI first.",
+            "Kernel");
 DEFINE_bool(guide_force_render_gate, true,
             "Force [guide+20] non-zero before hud's XUI init. That field only "
             "gates DC creation in the init at hud+0xA898 and is never "

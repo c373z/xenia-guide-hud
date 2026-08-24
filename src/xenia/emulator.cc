@@ -1151,6 +1151,14 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                 return xe::load_and_swap<uint32_t>(
                     ks->memory()->TranslateVirtual(a));
               };
+              // Dump hud's XUI import thunks. The import-table dump marks
+              // these "!!" (no HLE implementation), which says nothing about
+              // where the LLE override actually pointed them.
+              for (uint32_t th : {0x913FE7E4u, 0x913FE7F4u, 0x913FE874u}) {
+                XELOGI("Guide button: thunk {:08X}: {:08X} {:08X} {:08X} "
+                       "{:08X}",
+                       th, rd(th), rd(th + 4), rd(th + 8), rd(th + 12));
+              }
               XELOGI("Guide button: pre-init  +8={:08X} +12={:08X} "
                      "+20={:08X}",
                      rd(obj + 8), rd(obj + 12), rd(obj + 20));
@@ -1158,6 +1166,19 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
               // never dereferenced there (the register is reloaded from
               // [obj+12] immediately after the test), so forcing it non-zero
               // is safe and lets XuiRenderCreateDC run.
+              if (cvars::guide_call_xuiinit) {
+                // Target read out of hud's XuiInit thunk at 913FE7E4
+                // (lis 0x8195 / ori 0x3760). XuiInit accepts null params -
+                // that case branches straight to the real init - and returns
+                // 1 if XUI was already initialised.
+                XELOGI("Guide button: XUI ctx before = {:08X}",
+                       rd(0x81D6C978u));
+                uint64_t xa[] = {0};
+                uint64_t xr = ks->processor()->Execute(ts, 0x81953760u, xa,
+                                                       xe::countof(xa));
+                XELOGI("Guide button: XuiInit returned {:08X}, ctx now {:08X}",
+                       static_cast<uint32_t>(xr), rd(0x81D6C978u));
+              }
               if (cvars::guide_force_render_gate) {
                 xe::store_and_swap<uint32_t>(
                     ks->memory()->TranslateVirtual(obj + 20), 1u);
