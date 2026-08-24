@@ -1116,8 +1116,9 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
     uint32_t buf = guide_buf_;
     uint32_t osz = guide_out_sz_;
     uint32_t hud_base = guide_hud_base_;
+    uint32_t skin_mod = guide_skin_module_;
     auto t = kernel::object_ref<kernel::XHostThread>(new kernel::XHostThread(
-        ks, 512 * 1024, 0, [ks, handler, buf, osz, hud_base]() -> int {
+        ks, 512 * 1024, 0, [ks, handler, buf, osz, hud_base, skin_mod]() -> int {
           auto* ts = kernel::XThread::GetCurrentThread()->thread_state();
           uint64_t a[] = {0x80000004ull, buf, osz};
           XELOGI("Guide button: dispatching open to {:08X}", handler);
@@ -1222,7 +1223,8 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
               }
               if (cvars::guide_bootstrap_on_title_thread) {
                 kernel::xboxkrnl::QueueGuideBootstrap(
-                    hud_base, obj, cvars::guide_use_title_device);
+                    hud_base, obj, cvars::guide_use_title_device,
+                    skin_mod);
                 XELOGI("Guide button: queued XUI bootstrap for the title "
                        "thread (hud {:08X}, obj {:08X})",
                        hud_base, obj);
@@ -2282,11 +2284,37 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                 return 1;
               }
               auto* ts = kernel::XThread::GetCurrentThread()->thread_state();
-              uint64_t args[] = {hud->handle(), 1 /* PROCESS_ATTACH */, 0};
+              // DllMain's first argument is the module's hmodule, not a
+              // kernel object handle. hud keeps it and later hands it to
+              // XexGetModuleSection to find its own "hud" resource section;
+              // passing the handle made that lookup fail with
+              // "no module for hmodule F8000494".
+              uint64_t args[] = {hud->hmodule_ptr(), 1 /* PROCESS_ATTACH */,
+                                 0};
               XELOGI("Guide: DllMain entry={:08X}", hud->entry_point());
               ks->processor()->Execute(ts, hud->entry_point(), args,
                                        xe::countof(args));
               XELOGI("Guide: DllMain returned");
+
+              // Load hud's XUI skin package. hud asks
+              // XamBuildResourceLocator for a locator into this module; with
+              // no module the locator comes back empty and no scene loads.
+              // hud.xex carries its own XUI skin as a resource section named
+              // "hud" (91401000, 167581b in the XEX resource table), which is
+              // exactly the container it passes to XamBuildResourceLocator.
+              // So the module it wants is itself, not a separate package.
+              guide_skin_module_ = hud->hmodule_ptr();
+              XELOGI("Guide: hud handle={:08X} hmodule_ptr={:08X}",
+                     hud->handle(), hud->hmodule_ptr());
+              if (!cvars::guide_skin_path.empty()) {
+                auto skin = ks->LoadUserModule(cvars::guide_skin_path, false);
+                if (skin) {
+                  ks->FinishLoadingUserModule(skin, false);
+                  guide_skin_module_ = skin->hmodule_ptr();
+                  XELOGI("Guide: skin override {} -> hmodule {:08X}",
+                         cvars::guide_skin_path, guide_skin_module_);
+                }
+              }
 
               uint32_t h = ks->sys_app_handler(0xFF);
               if (!h) {

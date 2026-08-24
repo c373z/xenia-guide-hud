@@ -73,6 +73,18 @@ dword_result_t XexGetModuleSection_entry(lpvoid_t hmodule, lpstring_t name,
   X_STATUS result = X_STATUS_SUCCESS;
 
   auto module = XModule::GetFromHModule(kernel_state(), hmodule);
+  if (!module) {
+    // Some callers hold a kernel object handle rather than an hmodule (which
+    // in Xenia is a pointer to a guest LDR entry whose checksum field stashes
+    // the handle). hud does this when looking up its own "hud" resource
+    // section, so accept both forms rather than failing the lookup.
+    module = kernel_state()->object_table()->LookupObject<XModule>(
+        hmodule.guest_address());
+    if (module) {
+      XELOGD("XexGetModuleSection: hmodule {:08X} was a kernel handle",
+             hmodule.guest_address());
+    }
+  }
   if (module) {
     uint32_t section_data = 0;
     uint32_t section_size = 0;

@@ -29,7 +29,7 @@ void SetGuideDrawHook(uint32_t fn, uint32_t self);
 // title's D3D device is thread-affine, so every XUI call that touches it -
 // render host, CreateDC, hud's init - has to happen there, not just the draw.
 void QueueGuideBootstrap(uint32_t hud_base, uint32_t guide_obj,
-                         bool use_title_device);
+                         bool use_title_device, uint32_t skin_module);
 
 }  // namespace xboxkrnl
 }  // namespace kernel

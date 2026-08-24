@@ -35,6 +35,14 @@ DEFINE_uint32(xbox_hardware_info_flags, 0x20,
               "0x200 of this word, so without that bit xam never creates a "
               "device and the Guide can never get a render context.",
               "Kernel");
+DEFINE_string(guide_skin_path, "",
+              "Guest path to hud's XUI skin package. hud builds its resource "
+              "locators with XamBuildResourceLocator(module, \"hud\", "
+              "\"strings.xus\"), and its module argument comes from "
+              "[guide+4], which its constructor leaves 0 - so the locator is "
+              "empty and the scene cannot load. Leave blank to use hud itself, "
+              "which carries its skin as a resource section named \"hud\".",
+              "Kernel");
 DEFINE_bool(guide_bootstrap_on_title_thread, true,
             "Run the whole XUI bootstrap (render host, CreateDC, hud init) "
             "from inside the title's swap, on the title's render thread. The "

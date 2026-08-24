@@ -574,13 +574,15 @@ DECLARE_XBOXKRNL_EXPORT1(VdSetStudioRGBMode, kVideo, kStub);
 static uint32_t guide_bs_hud_base_ = 0;
 static uint32_t guide_bs_obj_ = 0;
 static bool guide_bs_use_title_device_ = false;
+static uint32_t guide_bs_skin_module_ = 0;
 static std::atomic<bool> guide_bs_pending_{false};
 
 void QueueGuideBootstrap(uint32_t hud_base, uint32_t guide_obj,
-                         bool use_title_device) {
+                         bool use_title_device, uint32_t skin_module) {
   guide_bs_hud_base_ = hud_base;
   guide_bs_obj_ = guide_obj;
   guide_bs_use_title_device_ = use_title_device;
+  guide_bs_skin_module_ = skin_module;
   guide_bs_pending_ = true;
 }
 
@@ -624,6 +626,18 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   // calls the init itself with this+16, and then builds the scene via
   // XuiSceneCreate. Calling the init directly gives a root element with no
   // scene under it, which draws nothing.
+  // hud reads [guide+4] as the module for XamBuildResourceLocator and its
+  // constructor leaves it 0, which builds an empty locator. Setting it to
+  // hud's own hmodule is load-bearing: without it the scene creator fails
+  // D0000034, with it the failure moves past resource lookup to 80300004.
+  // (The handle that reaches XexGetModuleSection comes from somewhere else
+  // in hud - both values matter.)
+  if (guide_bs_skin_module_) {
+    xe::store_and_swap<uint32_t>(
+        memory->TranslateVirtual(guide_bs_obj_ + 4), guide_bs_skin_module_);
+    XELOGI("GuideBootstrap: [guide+4] = skin module {:08X}",
+           guide_bs_skin_module_);
+  }
   uint32_t obj_vt = rd(guide_bs_obj_);
   uint32_t scene_fn = obj_vt ? rd(obj_vt + 27 * 4) : 0;
   uint64_t ir = 0;
