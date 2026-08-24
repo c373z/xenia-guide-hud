@@ -2179,11 +2179,32 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                   XELOGI("Guide: sysapp table walk 8177FE50");
                   ks->processor()->Execute(ts, 0x8177FE50u, sa,
                                            xe::countof(sa));
-                  XELOGI("Guide: sysapp root 81751428");
-                  uint64_t sr = ks->processor()->Execute(ts, 0x81751428u, sa,
-                                                         xe::countof(sa));
-                  XELOGI("Guide: sysapp table walk returned {:08X}",
-                         static_cast<uint32_t>(sr));
+                  // 81751428 turned out to be a teardown path: it runs an
+                  // app whose main is the ExTerminateTitleProcess wrapper.
+                  // 81A34E78 is the factory that constructs XamApp itself -
+                  // it calls XamApp's constructor (81A4E640) three times and
+                  // has no callers anywhere in xam.
+                  // XamApp's factory runs the app's message pump, so it
+                  // never returns - that is what a system app does. Run it on
+                  // its own guest thread and carry on, otherwise the Guide
+                  // sequence blocks here forever.
+                  auto app_thread = kernel::object_ref<kernel::XHostThread>(
+                      new kernel::XHostThread(ks, 1024 * 1024, 0, [ks]() -> int {
+                        auto* ats =
+                            kernel::XThread::GetCurrentThread()->thread_state();
+                        uint64_t aa[] = {0};
+                        XELOGI("Guide: XamApp factory 81A34E78 (own thread)");
+                        ks->processor()->Execute(ats, 0x81A34E78u, aa,
+                                                 xe::countof(aa));
+                        XELOGI("Guide: XamApp factory returned");
+                        return 0;
+                      }, ks->GetSystemProcess()));
+                  app_thread->set_name("XamApp");
+                  if (XFAILED(app_thread->Create())) {
+                    XELOGE("Guide: failed to create XamApp thread");
+                  }
+                  // Give it time to construct and register before we look.
+                  xe::threading::Sleep(std::chrono::seconds(5));
                 }
                 // xam locates a system app as 0x81D4E550 - appid*192
                 // (81786078), then 817863F8 requires fields +8 and +16
