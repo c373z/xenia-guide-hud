@@ -1970,14 +1970,27 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
               auto* bw = mem->TranslateVirtual<xe::be<uint32_t>*>(buf);
               bw[0] = 1;
               bw[1] = inner;
-              XELOGI("Guide: dispatch msg={:08X} subcmd={} -> {:08X}",
-                     uint32_t(cvars::guide_message),
+              // 0x80000004 constructs the Guide object and stores it at
+              // 91400690. Every other message loads that object and would
+              // dereference null if it does not exist yet, so always create
+              // first.
+              XELOGI("Guide: create msg=80000004 subcmd={} -> {:08X}",
                      int32_t(cvars::guide_subcommand), h);
-              uint64_t gargs[] = {static_cast<uint64_t>(cvars::guide_message), buf, out_sz};
-              uint64_t r = ks->processor()->Execute(ts, h, gargs,
-                                                    xe::countof(gargs));
-              XELOGI("Guide: handler returned {:08X}",
-                     static_cast<uint32_t>(r));
+              uint64_t cargs[] = {0x80000004ull, buf, out_sz};
+              uint64_t cres = ks->processor()->Execute(ts, h, cargs,
+                                                       xe::countof(cargs));
+              XELOGI("Guide: create returned {:08X}",
+                     static_cast<uint32_t>(cres));
+
+              const uint32_t msg = static_cast<uint32_t>(cvars::guide_message);
+              if (msg != 0x80000004u) {
+                XELOGI("Guide: dispatch msg={:08X} -> {:08X}", msg, h);
+                uint64_t gargs[] = {msg, buf, out_sz};
+                uint64_t r = ks->processor()->Execute(ts, h, gargs,
+                                                      xe::countof(gargs));
+                XELOGI("Guide: handler returned {:08X}",
+                       static_cast<uint32_t>(r));
+              }
               return 0;
             }));
     hud_boot->set_name("Guide Loader");
