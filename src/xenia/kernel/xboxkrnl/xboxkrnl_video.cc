@@ -456,12 +456,17 @@ DECLARE_XBOXKRNL_EXPORT2(VdPersistDisplay, kVideo, kImplemented, kSketchy);
 dword_result_t VdRetrainEDRAMWorker_entry(unknown_t unk0) { return 0; }
 DECLARE_XBOXKRNL_EXPORT1(VdRetrainEDRAMWorker, kVideo, kStub);
 
+DEFINE_int32(vd_retrain_edram_result, 0,
+             "Value returned by VdRetrainEDRAM. The dashboard retries this "
+             "until it reports success; games do not care.",
+             "Video");
+
 dword_result_t VdRetrainEDRAM_entry(unknown_t unk0, unknown_t unk1,
                                     unknown_t unk2, unknown_t unk3,
                                     unknown_t unk4, unknown_t unk5) {
-  return 0;
+  return static_cast<uint32_t>(cvars::vd_retrain_edram_result);
 }
-DECLARE_XBOXKRNL_EXPORT1(VdRetrainEDRAM, kVideo, kStub);
+DECLARE_XBOXKRNL_EXPORT2(VdRetrainEDRAM, kVideo, kStub, kHighFrequency);
 
 void VdSwap_entry(
     lpvoid_t buffer_ptr,        // ptr into primary ringbuffer
