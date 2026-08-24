@@ -78,6 +78,12 @@ DEFINE_string(
     "module.",
     "General");
 
+DEFINE_bool(allow_dll_module_launch, false,
+            "Allow launching a non-executable (DLL) XEX module directly, such "
+            "as the Xbox 360 Guide (hud.xex) or xam.xex. Normally these are "
+            "loaded by xam rather than booted.",
+            "General");
+
 DEFINE_bool(allow_game_relative_writes, false,
             "Not useful to non-developers. Allows code to write to paths "
             "relative to game://. Used for "
@@ -1518,9 +1524,15 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
   }
 
   if (!module->is_executable()) {
-    kernel_state_->UnloadUserModule(module, false);
-    XELOGE("Failed to load user module {}", path);
-    return X_STATUS_NOT_SUPPORTED;
+    if (!cvars::allow_dll_module_launch) {
+      kernel_state_->UnloadUserModule(module, false);
+      XELOGE("Failed to load user module {}", path);
+      return X_STATUS_NOT_SUPPORTED;
+    }
+    // System DLL modules (hud.xex, xam.xex, ...) are normally loaded by xam
+    // rather than booted. Allow launching them directly so their imports can
+    // be resolved and reported.
+    XELOGW("Launching non-executable (DLL) module {}", path);
   }
 
   X_RESULT result = kernel_state_->ApplyTitleUpdate(module);
