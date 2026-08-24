@@ -24,6 +24,8 @@
 #include "xenia/base/assert.h"
 #include "xenia/base/clock.h"
 #include "xenia/base/cvar.h"
+
+DECLARE_string(keybind_guide);
 #include "xenia/base/debugging.h"
 #include "xenia/base/logging.h"
 #include "xenia/base/platform.h"
@@ -1039,6 +1041,26 @@ void EmulatorWindow::ApplyDisplayConfigForCvars() {
 void EmulatorWindow::OnKeyDown(ui::KeyEvent& e) {
   if (!emulator_initialized_) {
     return;
+  }
+
+  // Guide (Xbox) button. The winkey driver maps this key to
+  // X_INPUT_GAMEPAD_GUIDE, but only inside GetState - and that path is
+  // filtered out entirely when keyboard_mode is Disabled (the default), while
+  // the ImGui GUIDE test only runs when a dialog is open. Handle it here, on
+  // the same window key path that F12 uses, so the press is never silently
+  // swallowed. cvars::keybind_guide holds the bound key ("0x08" by default).
+  {
+    uint32_t guide_vk = 0;
+    const std::string& kb = cvars::keybind_guide;
+    if (kb.size() > 2 && kb[0] == '0' && (kb[1] == 'x' || kb[1] == 'X')) {
+      guide_vk = std::strtoul(kb.c_str() + 2, nullptr, 16);
+    }
+    if (guide_vk != 0 &&
+        static_cast<uint32_t>(e.virtual_key()) == guide_vk) {
+      emulator_->on_guide_button_pressed(0);
+      e.set_handled(true);
+      return;
+    }
   }
 
   switch (e.virtual_key()) {
