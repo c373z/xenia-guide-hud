@@ -2301,6 +2301,27 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                             XELOGE("Guide: failed to create pump thread");
                           }
                           xe::threading::Sleep(std::chrono::seconds(3));
+                          // Re-read app 0xFE after the pump has had time to
+                          // run. If the pump publishes its wait event (or a
+                          // queue) into the app entry, it will appear here -
+                          // that is the field XMsgStartIORequest would need in
+                          // order to wake it, and the one our hand-written
+                          // entry omits.
+                          {
+                            uint32_t fe2 = 0x81D4E550u - 0xFEu * 192u;
+                            auto* q = ks->memory()->TranslateVirtual(fe2);
+                            std::string d1, d2;
+                            for (int i = 0; i < 12; ++i) {
+                              d1 += fmt::format("{:08X} ",
+                                  xe::load_and_swap<uint32_t>(q + i * 4));
+                            }
+                            for (int i = 12; i < 24; ++i) {
+                              d2 += fmt::format("{:08X} ",
+                                  xe::load_and_swap<uint32_t>(q + i * 4));
+                            }
+                            XELOGI("Guide: app FE after pump [0..47]:  {}", d1);
+                            XELOGI("Guide: app FE after pump [48..95]: {}", d2);
+                          }
                         }
                         return 0;
                       }, ks->GetSystemProcess()));
