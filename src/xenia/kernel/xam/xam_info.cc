@@ -947,6 +947,45 @@ dword_result_t XamLookupCommonStringByIndex_entry(dword_t string_index) {
 }
 DECLARE_XAM_EXPORT1(XamLookupCommonStringByIndex, kNone, kImplemented);
 
+// --- Dashboard (dash.xex 17489) startup requirements ---------------------
+// The retail dashboard queries these during boot. None have observable
+// behaviour under Xenia, but answering them keeps startup moving.
+
+// Experience mode selects the shell variant. Report "not set".
+dword_result_t XamPackageManagerGetExperienceMode_entry(lpdword_t mode_out) {
+  if (mode_out) {
+    *mode_out = 0;
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamPackageManagerGetExperienceMode, kNone, kStub);
+
+// Drains queued logon transitions. Nothing is queued in Xenia.
+dword_result_t XamUserFlushLogonQueue_entry() { return X_ERROR_SUCCESS; }
+DECLARE_XAM_EXPORT1(XamUserFlushLogonQueue, kUserProfiles, kStub);
+
+dword_result_t XamBackgroundDownloadSetMode_entry(dword_t mode) {
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamBackgroundDownloadSetMode, kNone, kStub);
+
+dword_result_t XamBackgroundDownloadNetworkStorageRegisterChangeCallback_entry(
+    lpvoid_t callback, lpvoid_t context) {
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamBackgroundDownloadNetworkStorageRegisterChangeCallback,
+                    kNone, kStub);
+
+// Kinect fitness profile storage - no NUI device is emulated.
+dword_result_t XamFitnessClearBodyProfileRecords_entry(dword_t user_index) {
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamFitnessClearBodyProfileRecords, kNone, kStub);
+
+// Xbox Data File subsystem used by the dashboard package manager.
+dword_result_t XdfInitialize_entry(lpvoid_t param) { return X_ERROR_SUCCESS; }
+DECLARE_XAM_EXPORT1(XdfInitialize, kNone, kStub);
+
 }  // namespace xam
 }  // namespace kernel
 }  // namespace xe

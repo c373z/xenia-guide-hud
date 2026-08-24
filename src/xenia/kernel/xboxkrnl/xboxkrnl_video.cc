@@ -468,6 +468,11 @@ dword_result_t VdRetrainEDRAM_entry(unknown_t unk0, unknown_t unk1,
 }
 DECLARE_XBOXKRNL_EXPORT2(VdRetrainEDRAM, kVideo, kStub, kHighFrequency);
 
+// Selects studio (16-235) vs full (0-255) RGB output range. The host
+// presenter always works in full range.
+dword_result_t VdSetStudioRGBMode_entry(dword_t mode) { return 0; }
+DECLARE_XBOXKRNL_EXPORT1(VdSetStudioRGBMode, kVideo, kStub);
+
 void VdSwap_entry(
     lpvoid_t buffer_ptr,        // ptr into primary ringbuffer
     lpvoid_t fetch_ptr,         // frontbuffer Direct3D 9 texture header fetch
