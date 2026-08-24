@@ -2192,17 +2192,16 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                       new kernel::XHostThread(ks, 1024 * 1024, 0, [ks]() -> int {
                         auto* ats =
                             kernel::XThread::GetCurrentThread()->thread_state();
-                        uint64_t aa[] = {0};
-                        // WARNING: 81A34E78 is a CONSTRUCTOR, not a
-                        // parameterless root - it does stw r8,0(r3) at
-                        // 81A3C0A0. Calling it with r3=0 writes a vtable
-                        // and fields to guest address 0. Left disabled;
-                        // a real object of the right size must be
-                        // allocated and passed before this is useful.
-                        XELOGE("Guide: XamApp factory needs a this "
-                               "pointer - skipping (would corrupt addr 0)");
-                        return 0;
-                        XELOGI("Guide: XamApp factory 81A34E78 (own thread)");
+                                                // 81A34E78 is a constructor: it stores through r3.
+                        // Give it a real zeroed buffer instead of address 0.
+                        // Its own max store offset is 76, so 80 bytes suffice;
+                        // allocate 4 KiB so any overrun stays contained.
+                        uint32_t self = ks->memory()->SystemHeapAlloc(0x1000, 16);
+                        std::memset(ks->memory()->TranslateVirtual(self), 0,
+                                    0x1000);
+                        XELOGI("Guide: XamApp factory 81A34E78 this={:08X}",
+                               self);
+                        uint64_t aa[] = {self};
                         ks->processor()->Execute(ats, 0x81A34E78u, aa,
                                                  xe::countof(aa));
                         XELOGI("Guide: XamApp factory returned");
