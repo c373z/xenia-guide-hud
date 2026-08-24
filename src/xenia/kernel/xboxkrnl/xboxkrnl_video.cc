@@ -660,6 +660,16 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   XELOGI("GuideBootstrap: hud globals 91400168={:08X} 91400170={:08X} "
          "91400690={:08X}",
          rd(0x91400168u), rd(0x91400170u), rd(0x91400690u));
+  // Scene loading stops at 80300004: xam's XUI resource-provider global
+  // (81D6C978's neighbour at 81D6D0AC) is null. XuiInit copies it from
+  // params[+8], but only when params[0] >= 0xC, and hud's init builds default
+  // params {12, 0, 0} whenever its second argument is zero - which is what
+  // hud's own scene creator and this bootstrap both pass. The host is meant to
+  // supply a params struct carrying the provider: a C++ object whose vtable[1]
+  // opens a resource by name (ghidra 81987F24). xam has a one-argument setter
+  // for it at ghidra 81946AE0 / runtime 8193F8E0, so installing one is easy
+  // once we know which object to install. Letting hud call XuiInit itself
+  // does not help - its params are null too.
   SetGuideDrawHook(guide_bs_hud_base_ + 0xAB28u, render_obj);
   XELOGI("GuideBootstrap: draw hook installed on title thread");
 }
