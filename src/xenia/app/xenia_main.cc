@@ -673,6 +673,21 @@ void EmulatorApp::EmulatorThread() {
     fs->RegisterSymbolicLink("e:", "\\DEVKIT");
   }
 
+  // The 17489 dashboard resolves DASHUSER: during startup for its per-user
+  // data. Without it every access fails with "device not found".
+  {
+    auto dashuser_device = std::make_unique<xe::vfs::HostPathDevice>(
+        "\\DASHUSER", emulator_->storage_root() / "dashuser", false);
+    if (!dashuser_device->Initialize()) {
+      XELOGE("Unable to scan dashuser path");
+    } else if (!fs->RegisterDevice(std::move(dashuser_device))) {
+      XELOGE("Unable to register dashuser path");
+    } else {
+      fs->RegisterSymbolicLink("DASHUSER:", "\\DASHUSER");
+      fs->RegisterSymbolicLink("dashuser:", "\\DASHUSER");
+    }
+  }
+
   if (cvars::mount_memory_unit) {
     auto mu_device =
         std::make_unique<xe::vfs::HostPathDevice>("\\MU", "MU", false);
