@@ -20,6 +20,11 @@ DEFINE_string(lle_xam, "",
               "against its real export table instead of Xenia's HLE xam. "
               "Leave blank to use the HLE xam.",
               "Kernel");
+DEFINE_bool(lle_xam_app_host, false,
+            "Call real xam's app lifecycle entries (XamAppLoadPass2SysApps "
+            "0x254, XamAppLoad 0x244). Xenia declares these but implements "
+            "none of them, and they are how system apps get hosted.",
+            "Kernel");
 DEFINE_bool(lle_guide_draw, true,
             "Drive hud's own XUI init and render loop directly. hud is a "
             "system app that expects the system to create its thread and run "

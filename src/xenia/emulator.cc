@@ -2433,6 +2433,24 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                              m3->TranslateVirtual(0x81D426C8u)));
                 }
                 uint32_t g = xam_mod_for_guide->GetProcAddressByOrdinal(0x304);
+                // Xenia declares the whole app lifecycle API in its xam
+                // table - XamAppLoad (0x244), XamAppRequestLoad (0x248),
+                // XamAppLoadPass2SysApps (0x254), XamAppRequestLoadEx (0x299)
+                // - and implements none of it. That API *is* the hosting
+                // mechanism hud needs: something has to load and host system
+                // apps, and nothing in Xenia does. Real xam has these, so try
+                // driving them directly.
+                for (uint32_t ord : {0x254u, 0x244u}) {
+                  uint32_t fn = xam_mod_for_guide->GetProcAddressByOrdinal(ord);
+                  XELOGI("Guide: xam app-API ordinal {:X} -> {:08X}", ord, fn);
+                  if (fn && cvars::lle_xam_app_host) {
+                    uint64_t aa[] = {0};
+                    uint64_t ar =
+                        ks->processor()->Execute(ts, fn, aa, xe::countof(aa));
+                    XELOGI("Guide: ordinal {:X} returned {:08X}", ord,
+                           static_cast<uint32_t>(ar));
+                  }
+                }
                 XELOGI("Guide: XamShowGuideUI (ord 0x304) -> {:08X}", g);
                 if (g) {
                   uint64_t ga[] = {0};
