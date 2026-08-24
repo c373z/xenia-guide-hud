@@ -1962,6 +1962,32 @@ void KeInitializeTimerEx_entry(pointer_t<X_KTIMER> timer, dword_t type,
 }
 DECLARE_XBOXKRNL_EXPORT1(KeInitializeTimerEx, kThreading, kImplemented);
 
+// Declared at ordinal 0x1A but never implemented. xam's XamApp thread reaches
+// this and exits, which is why system app 0xFE never registers. Traps are not
+// involved - with ignore_trap_instructions=false no twi fires, so this is
+// normal control flow, not a failed assertion. Walk the guest stack to find
+// who calls it. Xenon MSVC stores the saved LR 8 bytes below the caller's SP.
+void ExTerminateTitleProcess_entry(dword_t exit_code, dword_t unk,
+                                   const ppc_context_t& ctx) {
+  XELOGE("ExTerminateTitleProcess(code={:08X}, unk={:08X}) - guest stack:",
+         static_cast<uint32_t>(exit_code), static_cast<uint32_t>(unk));
+  auto* mem = ctx->kernel_state->memory();
+  uint32_t sp = static_cast<uint32_t>(ctx->r[1]);
+  for (int i = 0; i < 12 && sp; ++i) {
+    uint32_t next = xe::load_and_swap<uint32_t>(mem->TranslateVirtual(sp));
+    if (!next || next <= sp) {
+      break;
+    }
+    uint32_t lr = xe::load_and_swap<uint32_t>(mem->TranslateVirtual(next - 8));
+    if (lr < 0x80000000u) {
+      break;
+    }
+    XELOGE("  frame[{}] lr={:08X}  (xam ghidra {:08X})", i, lr, lr + 0x7200u);
+    sp = next;
+  }
+}
+DECLARE_XBOXKRNL_EXPORT1(ExTerminateTitleProcess, kThreading, kStub);
+
 }  // namespace xboxkrnl
 }  // namespace kernel
 }  // namespace xe

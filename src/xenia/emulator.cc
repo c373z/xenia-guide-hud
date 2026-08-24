@@ -2173,8 +2173,14 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                   // function that actually walks the descriptor table and
                   // fills in the app entries, so call that directly.
                   uint64_t sa[] = {0};
+                  // Walker first (fills 0xEF-0xFD), then the outer root,
+                  // which creates XamApp's thread - the only thing that can
+                  // register 0xFE. The root blocks, so run it last.
                   XELOGI("Guide: sysapp table walk 8177FE50");
-                  uint64_t sr = ks->processor()->Execute(ts, 0x8177FE50u, sa,
+                  ks->processor()->Execute(ts, 0x8177FE50u, sa,
+                                           xe::countof(sa));
+                  XELOGI("Guide: sysapp root 81751428");
+                  uint64_t sr = ks->processor()->Execute(ts, 0x81751428u, sa,
                                                          xe::countof(sa));
                   XELOGI("Guide: sysapp table walk returned {:08X}",
                          static_cast<uint32_t>(sr));
