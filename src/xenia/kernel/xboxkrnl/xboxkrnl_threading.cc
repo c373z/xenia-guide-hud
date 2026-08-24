@@ -1972,6 +1972,15 @@ void ExTerminateTitleProcess_entry(dword_t exit_code, dword_t unk,
   XELOGE("ExTerminateTitleProcess(code={:08X}, unk={:08X}) - guest stack:",
          static_cast<uint32_t>(exit_code), static_cast<uint32_t>(unk));
   auto* mem = ctx->kernel_state->memory();
+  // XamApp's entry pointer is installed from [[r13+0x100]+0x14C]
+  // (81781FC4/FD8/FDC). Read the chain to see what it actually yields.
+  uint32_t r13 = static_cast<uint32_t>(ctx->r[13]);
+  uint32_t p100 = r13 ? xe::load_and_swap<uint32_t>(
+                            mem->TranslateVirtual(r13 + 0x100)) : 0;
+  uint32_t entry = p100 ? xe::load_and_swap<uint32_t>(
+                              mem->TranslateVirtual(p100 + 0x14C)) : 0;
+  XELOGE("  r13={:08X}  [r13+0x100]={:08X}  [+0x14C]={:08X} (ghidra {:08X})",
+         r13, p100, entry, entry + 0x7200u);
   uint32_t sp = static_cast<uint32_t>(ctx->r[1]);
   for (int i = 0; i < 12 && sp; ++i) {
     uint32_t next = xe::load_and_swap<uint32_t>(mem->TranslateVirtual(sp));
