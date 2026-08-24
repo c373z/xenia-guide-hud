@@ -1876,6 +1876,22 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
       XELOGI("LLE xam: waiting for init thread");
       xam_boot->Wait(0, 0, 0, nullptr);
       XELOGI("LLE xam: init complete");
+      // Read the heap descriptors straight out of guest memory rather than
+      // inferring their state from allocation-failure counts. Array is at
+      // 0x81D4E1B0 (a constant embedded in xam's code, so already a flat
+      // runtime address), 10 entries of 408 bytes. Field +4 is the "created"
+      // flag: every reader in xam early-outs when it is zero.
+      for (uint32_t i = 0; i < 10; ++i) {
+        uint32_t desc = 0x81D4E1B0u + i * 408u;
+        auto* dp = memory()->TranslateVirtual(desc);
+        XELOGI("LLE xam: heap[{}] @{:08X} +0={:08X} +4={:08X} +8={:08X} "
+               "+1C={:08X} +24={:08X}",
+               i, desc, xe::load_and_swap<uint32_t>(dp),
+               xe::load_and_swap<uint32_t>(dp + 4),
+               xe::load_and_swap<uint32_t>(dp + 8),
+               xe::load_and_swap<uint32_t>(dp + 0x1C),
+               xe::load_and_swap<uint32_t>(dp + 0x24));
+      }
       // xam's current-app-id getter (81783270) reads a global sentinel first:
       // when it holds -1 the getter short-circuits to 0xFE (XamApp) instead of
       // falling through to KeGetCurrentProcessType, which yields 0xEE on title
