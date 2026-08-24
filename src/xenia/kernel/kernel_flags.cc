@@ -20,7 +20,7 @@ DEFINE_string(lle_xam, "",
               "against its real export table instead of Xenia's HLE xam. "
               "Leave blank to use the HLE xam.",
               "Kernel");
-DEFINE_bool(lle_xam_sysapp_init, true,
+DEFINE_bool(lle_xam_sysapp_init, false,
             "Call xam's system-app initialiser (81751428) before opening the "
             "Guide. It walks the static app descriptor table at 0x81604368; "
             "nothing inside xam calls it.",
