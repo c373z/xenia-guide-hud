@@ -2440,16 +2440,26 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                 // mechanism hud needs: something has to load and host system
                 // apps, and nothing in Xenia does. Real xam has these, so try
                 // driving them directly.
-                for (uint32_t ord : {0x254u, 0x244u}) {
-                  uint32_t fn = xam_mod_for_guide->GetProcAddressByOrdinal(ord);
-                  XELOGI("Guide: xam app-API ordinal {:X} -> {:08X}", ord, fn);
-                  if (fn && cvars::lle_xam_app_host) {
-                    uint64_t aa[] = {0};
-                    uint64_t ar =
-                        ks->processor()->Execute(ts, fn, aa, xe::countof(aa));
-                    XELOGI("Guide: ordinal {:X} returned {:08X}", ord,
-                           static_cast<uint32_t>(ar));
+                // XamLoadSysApp(0x251) is the specific "load a system app"
+                // entry; it takes (id, arg) and does not store through the
+                // incoming r3, so it is safe to drive. hud registers as app
+                // 0xFF, so try that and the ids in xam's descriptor table.
+                if (cvars::lle_xam_app_host) {
+                  uint32_t load_fn =
+                      xam_mod_for_guide->GetProcAddressByOrdinal(0x251);
+                  XELOGI("Guide: XamLoadSysApp -> {:08X}", load_fn);
+                  if (load_fn) {
+                    for (uint32_t id : {0xFFu, 0xFEu, 0xF7u}) {
+                      uint64_t la[] = {id, 0};
+                      uint64_t lr = ks->processor()->Execute(
+                          ts, load_fn, la, xe::countof(la));
+                      XELOGI("Guide: XamLoadSysApp({:02X}) -> {:08X}", id,
+                             static_cast<uint32_t>(lr));
+                    }
                   }
+                  uint32_t msg_fn =
+                      xam_mod_for_guide->GetProcAddressByOrdinal(0x247);
+                  XELOGI("Guide: XamSendMessageToLoadedApps -> {:08X}", msg_fn);
                 }
                 XELOGI("Guide: XamShowGuideUI (ord 0x304) -> {:08X}", g);
                 if (g) {
