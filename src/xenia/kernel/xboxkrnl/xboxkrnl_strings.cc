@@ -792,6 +792,36 @@ dword_result_t _vsnprintf_entry(dword_t buffer_ptr, dword_t buffer_count,
            arg_ptr.value());
   }
 
+  // Diagnostic: walk the guest stack on xam heap failures. Xenon MSVC stores
+  // the saved LR 8 bytes below the caller's stack pointer.
+  {
+    std::string_view fmt(format.value());
+    if (fmt.find("from heap") != std::string_view::npos) {
+      static int seen = 0;
+      if (seen < 3) {
+        ++seen;
+        auto* mem = kernel_memory();
+        XELOGE("[heapdiag {}] \"{}\"", seen, fmt);
+        uint32_t sp = static_cast<uint32_t>(ctx->r[1]);
+        for (int i = 0; i < 14 && sp; ++i) {
+          uint32_t next =
+              xe::load_and_swap<uint32_t>(mem->TranslateVirtual(sp));
+          if (!next || next <= sp) {
+            break;
+          }
+          uint32_t lr =
+              xe::load_and_swap<uint32_t>(mem->TranslateVirtual(next - 8));
+          if (lr < 0x80000000u || lr == 0xBCBCBCBCu) {
+            break;
+          }
+          XELOGE("[heapdiag {}]   frame[{}] lr={:08X} ghidra={:08X}", seen, i,
+                 lr, lr + 0x7200u);
+          sp = next;
+        }
+      }
+    }
+  }
+
   auto buffer = kernel_memory()->TranslateVirtual<uint8_t*>(buffer_ptr);
 
   ArrayArgList args(ctx, arg_ptr.guest_address());

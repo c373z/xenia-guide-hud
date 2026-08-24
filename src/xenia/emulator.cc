@@ -1803,6 +1803,20 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
     // SetExecutableModule first: InitializeGuestObject acquires the title
     // process thread_list_spinlock, which is only valid once initialized.
     kernel_state_->SetExecutableModule(module);
+    // Neutralise the heap selector's app-id trap (Ghidra 817BAE38, runtime
+    // 817B3C38: xam .text is shifted by 0x7200 because Xenia maps the XEX
+    // basefile flat while Ghidra honours PE raw offsets). The trap fires when
+    // the current app id does not match the requested one; the value the
+    // selector actually returns is derived from flag bits further down, so
+    // branching onto the OK path yields what a matching context would have.
+    // This must happen before DllMain runs, or the JIT may already have cached
+    // the untranslated block.
+    if (cvars::lle_xam_heap_patch) {
+      auto* p = memory()->TranslateVirtual(0x817BAE38u - 0x7200u);
+      XELOGI("LLE xam: heap trap was {:08X}, patching to b +4",
+             xe::load_and_swap<uint32_t>(p));
+      xe::store_and_swap<uint32_t>(p, 0x48000004u);
+    }
     // xam selects its heap from the "current app id", which its getter
     // derives from KeGetCurrentProcessType when there is no per-thread app
     // context: SYSTEM (2) yields 0xFE, anything else 0xEE. On hardware xam
@@ -1825,6 +1839,17 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
       XELOGI("LLE xam: waiting for init thread");
       xam_boot->Wait(0, 0, 0, nullptr);
       XELOGI("LLE xam: init complete");
+      // xam's current-app-id getter (81783270) reads a global sentinel first:
+      // when it holds -1 the getter short-circuits to 0xFE (XamApp) instead of
+      // falling through to KeGetCurrentProcessType, which yields 0xEE on title
+      // threads and makes the heap selector trap. Title code calling into xam
+      // therefore lands on heap 0, the zero-sized placeholder.
+      if (cvars::lle_xam_appid_sentinel) {
+        auto* p = memory()->TranslateVirtual(0x81D227F0);
+        XELOGI("LLE xam: app-id sentinel was {:08X}, forcing FFFFFFFF",
+               xe::load_and_swap<uint32_t>(p));
+        xe::store_and_swap<uint32_t>(p, 0xFFFFFFFFu);
+      }
     } else {
       XELOGE("LLE xam: failed to create init thread");
     }

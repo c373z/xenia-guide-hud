@@ -20,6 +20,16 @@ DEFINE_string(lle_xam, "",
               "against its real export table instead of Xenia's HLE xam. "
               "Leave blank to use the HLE xam.",
               "Kernel");
+DEFINE_bool(lle_xam_heap_patch, true,
+            "Patch out the trap in xam's heap selector (817BAE38) so title "
+            "threads whose app id differs from the current one still resolve "
+            "a real heap instead of the zero-sized placeholder.",
+            "Kernel");
+DEFINE_bool(lle_xam_appid_sentinel, true,
+            "Force xam's current-app-id sentinel (81D227F0) to -1 after LLE "
+            "init so the getter reports XamApp instead of trapping the heap "
+            "selector on title threads.",
+            "Kernel");
 DEFINE_bool(lle_show_guide, false,
             "After the LLE attach sequence, call the real xam's "
             "XamShowGuideUI (ordinal 0x304) to open the Xbox Guide.",

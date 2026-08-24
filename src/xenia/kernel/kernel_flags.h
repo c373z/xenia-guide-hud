@@ -14,6 +14,8 @@
 DECLARE_bool(headless);
 DECLARE_bool(log_high_frequency_kernel_calls);
 DECLARE_string(lle_xam);
+DECLARE_bool(lle_xam_heap_patch);
+DECLARE_bool(lle_xam_appid_sentinel);
 DECLARE_bool(lle_show_guide);
 DECLARE_int32(guide_subcommand);
 DECLARE_string(guide_hud_path);
