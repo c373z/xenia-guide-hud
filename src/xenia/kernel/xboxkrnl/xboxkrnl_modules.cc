@@ -81,7 +81,11 @@ dword_result_t XexGetModuleSection_entry(lpvoid_t hmodule, lpstring_t name,
       *data_ptr = section_data;
       *size_ptr = section_size;
     }
+    XELOGD("XexGetModuleSection: module='{}' section='{}' -> {:08X} size={}",
+           module->name(), name.value(), result, section_size);
   } else {
+    XELOGE("XexGetModuleSection: no module for hmodule {:08X} (section '{}')",
+           hmodule.guest_address(), name.value());
     result = X_STATUS_INVALID_HANDLE;
   }
 
