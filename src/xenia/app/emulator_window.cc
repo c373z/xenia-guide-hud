@@ -244,6 +244,17 @@ void EmulatorWindow::SetupGraphicsSystemPresenterPainting() {
     Profiler::SetUserIO(kZOrderProfiler, window_.get(), presenter,
                         immediate_drawer_.get());
   }
+
+  // The Guide button had no action at all: ImGuiDrawer detects the press and
+  // calls onGuidePressFunction_, but nothing in the codebase ever called
+  // SetGuideButtonAction, so the handler was always null and the press was
+  // silently discarded (the source there is marked "GUIDE BUTTON - More info
+  // needed"). Give it an observable action so the input is at least
+  // acknowledged and traceable.
+  imgui_drawer_->SetGuideButtonAction([this](uint8_t user_index) {
+    XELOGI("Guide button pressed (user {})", user_index);
+    emulator_->on_guide_button_pressed(user_index);
+  });
 }
 
 void EmulatorWindow::ShutdownGraphicsSystemPresenterPainting() {

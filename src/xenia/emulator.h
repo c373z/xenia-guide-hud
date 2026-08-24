@@ -296,6 +296,10 @@ class Emulator {
   };
 
   void Pause();
+
+  // Invoked when the Guide (Xbox) button is pressed. Xenia previously had no
+  // handler wired for this at all.
+  void on_guide_button_pressed(uint8_t user_index);
   void Resume();
   bool is_paused() const { return paused_; }
   bool SaveToFile(const std::filesystem::path& path);

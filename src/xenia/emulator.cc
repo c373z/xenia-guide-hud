@@ -1100,6 +1100,19 @@ X_STATUS Emulator::CreateZarchivePackage(
   return X_STATUS_SUCCESS;
 }
 
+void Emulator::on_guide_button_pressed(uint8_t user_index) {
+  // Report what the Guide press can and cannot do in this build, so the
+  // button is no longer silently swallowed. Opening the real Guide needs
+  // hud.xex hosted by xam - see research/FINDINGS.md.
+  XELOGI("Guide button: user={} lle_xam={} hud={}", user_index,
+         cvars::lle_xam.empty() ? "off" : "on",
+         cvars::guide_hud_path.empty() ? "not loaded" : "loaded");
+  if (cvars::guide_hud_path.empty()) {
+    XELOGI(
+        "Guide button: no hud.xex configured - set guide_hud_path to load it");
+  }
+}
+
 void Emulator::Pause() {
   if (paused_) {
     return;
