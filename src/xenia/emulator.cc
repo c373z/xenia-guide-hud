@@ -1803,6 +1803,11 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
     // SetExecutableModule first: InitializeGuestObject acquires the title
     // process thread_list_spinlock, which is only valid once initialized.
     kernel_state_->SetExecutableModule(module);
+    // xam selects its heap from the "current app id", which its getter
+    // derives from KeGetCurrentProcessType when there is no per-thread app
+    // context: SYSTEM (2) yields 0xFE, anything else 0xEE. On hardware xam
+    // initialises inside the system process, so run its DllMain there or the
+    // heap selector traps on an app-id mismatch.
     auto xam_boot =
         kernel::object_ref<kernel::XHostThread>(new kernel::XHostThread(
             ks, 1024 * 1024, 0, [ks, xam_mod]() -> int {
@@ -1813,7 +1818,8 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                                        xe::countof(args));
               XELOGI("LLE xam: DllMain returned");
               return 0;
-            }));
+            },
+            ks->GetSystemProcess()));
     xam_boot->set_name("LLE xam init");
     if (XSUCCEEDED(xam_boot->Create())) {
       XELOGI("LLE xam: waiting for init thread");
