@@ -1811,8 +1811,15 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
     // branching onto the OK path yields what a matching context would have.
     // This must happen before DllMain runs, or the JIT may already have cached
     // the untranslated block.
-    if (cvars::lle_xam_heap_patch) {
-      const uint32_t trap_addr = 0x817BAE38u - 0x7200u;
+    // 817BAE38 is the app-id mismatch trap; 817BADFC terminates the 20-entry
+    // flag-mask table scan that runs before it. Both sit on the path to a real
+    // heap id, so probe them together.
+    for (uint32_t ghidra_trap :
+         {0x817BAE38u, 0x817BADFCu}) {
+      if (!cvars::lle_xam_heap_patch) {
+        break;
+      }
+      const uint32_t trap_addr = ghidra_trap - 0x7200u;
       auto* p = memory()->TranslateVirtual(trap_addr);
       // Guest code pages are mapped read-only, so the store faults unless the
       // page is temporarily made writable first.
@@ -1822,14 +1829,15 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
           heap && heap->Protect(trap_addr, 4,
                                 kMemoryProtectRead | kMemoryProtectWrite,
                                 &old_protect);
-      XELOGI("LLE xam: heap trap was {:08X}, unprotect={} old_protect={:X}",
-             xe::load_and_swap<uint32_t>(p), unprotected, old_protect);
+      XELOGI("LLE xam: trap {:08X} was {:08X}, unprotect={}", ghidra_trap,
+             xe::load_and_swap<uint32_t>(p), unprotected);
       if (unprotected) {
         xe::store_and_swap<uint32_t>(p, 0x48000004u);
-        XELOGI("LLE xam: heap trap now {:08X}", xe::load_and_swap<uint32_t>(p));
+        XELOGI("LLE xam: trap {:08X} now {:08X}", ghidra_trap,
+               xe::load_and_swap<uint32_t>(p));
         heap->Protect(trap_addr, 4, old_protect, nullptr);
       } else {
-        XELOGE("LLE xam: could not unprotect trap page, leaving it intact");
+        XELOGE("LLE xam: could not unprotect {:08X}", ghidra_trap);
       }
     }
     // xam selects its heap from the "current app id", which its getter
