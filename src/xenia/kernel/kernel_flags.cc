@@ -20,6 +20,11 @@ DEFINE_string(lle_xam, "",
               "against its real export table instead of Xenia's HLE xam. "
               "Leave blank to use the HLE xam.",
               "Kernel");
+DEFINE_bool(lle_xam_fake_app_fe, true,
+            "Fill xam's system-app table entry for 0xFE by hand, pointing it "
+            "at xam's own XamApp message handler, so XamShowGuideUI can "
+            "deliver the Guide message.",
+            "Kernel");
 DEFINE_bool(lle_xam_sysapp_init, false,  // DANGEROUS: see kNote below
 
             "Call xam's system-app initialiser (81751428) before opening the "

@@ -2225,6 +2225,51 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                           XELOGI("Guide: XamApp entry returned {:08X}",
                                  static_cast<uint32_t>(er));
                         }
+
+                        // Register app 0xFE by hand. xam locates a system app
+                        // at 0x81D4E550 - id*192 (81786078), and the validator
+                        // 817863F8 requires BOTH +8 and +16 non-zero, with the
+                        // handler at +12. Nothing in xam's own startup runs
+                        // here to do this, so point 0xFE straight at xam's real
+                        // XamApp message handler 81A5F220 - the dispatcher that
+                        // owns the 0x1015 case XamShowGuideUI sends.
+                        if (cvars::lle_xam_fake_app_fe) {
+                          uint32_t fe = 0x81D4E550u - 0xFEu * 192u;
+                          auto* p8 = ks->memory()->TranslateVirtual(fe);
+                          uint32_t ctx = self + 10832u;  // first XamApp
+                          xe::store_and_swap<uint32_t>(p8 + 8, ctx);
+                          xe::store_and_swap<uint32_t>(p8 + 12, 0x81A5F220u);
+                          xe::store_and_swap<uint32_t>(p8 + 16, 1u);
+                          xe::store_and_swap<uint32_t>(p8 + 24, 0xFEu);
+                          XELOGI("Guide: registered app FE @{:08X} "
+                                 "handler=81A5F220 ctx={:08X}", fe, ctx);
+                          // Same treatment for the apps xam ships in its
+                          // static descriptor table at 0x81604368: entries of
+                          // {name, appId, handler, flags}, ids 0xEF-0xFD. The
+                          // table walker 8177FE50 returns success but leaves
+                          // them unregistered, and something polls 0xFC
+                          // (XLiveBase) thousands of times a second when it is
+                          // missing. Register each entry that has a handler.
+                          auto* mem4 = ks->memory();
+                          for (uint32_t i = 0; i < 15; ++i) {
+                            uint32_t rec = 0x81604368u + i * 16u;
+                            uint32_t id = xe::load_and_swap<uint32_t>(
+                                mem4->TranslateVirtual(rec + 4));
+                            uint32_t handler = xe::load_and_swap<uint32_t>(
+                                mem4->TranslateVirtual(rec + 8));
+                            if (id < 0xEFu || id > 0xFDu || !handler) {
+                              continue;
+                            }
+                            uint32_t e = 0x81D4E550u - id * 192u;
+                            auto* ep = mem4->TranslateVirtual(e);
+                            xe::store_and_swap<uint32_t>(ep + 8, ctx);
+                            xe::store_and_swap<uint32_t>(ep + 12, handler);
+                            xe::store_and_swap<uint32_t>(ep + 16, 1u);
+                            xe::store_and_swap<uint32_t>(ep + 24, id);
+                            XELOGI("Guide: registered app {:02X} @{:08X} "
+                                   "handler={:08X}", id, e, handler);
+                          }
+                        }
                         return 0;
                       }, ks->GetSystemProcess()));
                   app_thread->set_name("XamApp");
