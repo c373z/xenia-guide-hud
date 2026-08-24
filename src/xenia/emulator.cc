@@ -1213,6 +1213,28 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                 XELOGI("Guide button: render host returned {:08X}, "
                        "XUI ctx now {:08X}",
                        static_cast<uint32_t>(hr), rd(0x81D6C978u));
+                uint32_t xctx = rd(0x81D6C978u);
+                if (xctx) {
+                  uint32_t cvt = rd(xctx);
+                  XELOGI("Guide button: XUI ctx {:08X} vtable {:08X}", xctx,
+                         cvt);
+                  for (int i = 0; i < 8; ++i) {
+                    XELOGI("Guide button: ctxvt[{}] = {:08X}", i,
+                           rd(cvt + i * 4));
+                  }
+                }
+              }
+              {
+                // Call xam's XuiRenderCreateDC (R 818FB038) directly with our
+                // own out-pointer, so its return value is attributable to it
+                // rather than to hud's init wrapper.
+                uint32_t dcp = ks->memory()->SystemHeapAlloc(16, 16);
+                uint64_t da2[] = {dcp};
+                uint64_t dr2 = ks->processor()->Execute(ts, 0x818FB038u, da2,
+                                                        xe::countof(da2));
+                XELOGI("Guide button: direct XuiRenderCreateDC -> {:08X}, "
+                       "dc={:08X}",
+                       static_cast<uint32_t>(dr2), rd(dcp));
               }
               if (cvars::guide_force_render_gate) {
                 xe::store_and_swap<uint32_t>(
