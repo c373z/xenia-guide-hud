@@ -17,5 +17,6 @@ DECLARE_string(lle_xam);
 DECLARE_bool(lle_show_guide);
 DECLARE_int32(guide_subcommand);
 DECLARE_string(guide_hud_path);
+DECLARE_uint32(guide_message);
 
 #endif  // XENIA_KERNEL_KERNEL_FLAGS_H_

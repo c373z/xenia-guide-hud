@@ -1873,7 +1873,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
               bw[1] = inner;
               XELOGI("Bootstrap: Guide dispatch msg=80000004 subcmd={} -> {:08X}",
                      int32_t(cvars::guide_subcommand), guide_handler);
-              uint64_t gargs[] = {0x80000004ull, buf, out_sz};
+              uint64_t gargs[] = {static_cast<uint64_t>(cvars::guide_message), buf, out_sz};
               uint64_t gres = ks->processor()->Execute(ts, guide_handler, gargs,
                                                        xe::countof(gargs));
               XELOGI("Bootstrap: Guide handler returned {:08X}",
@@ -1970,9 +1970,10 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
               auto* bw = mem->TranslateVirtual<xe::be<uint32_t>*>(buf);
               bw[0] = 1;
               bw[1] = inner;
-              XELOGI("Guide: dispatch msg=80000004 subcmd={} -> {:08X}",
+              XELOGI("Guide: dispatch msg={:08X} subcmd={} -> {:08X}",
+                     uint32_t(cvars::guide_message),
                      int32_t(cvars::guide_subcommand), h);
-              uint64_t gargs[] = {0x80000004ull, buf, out_sz};
+              uint64_t gargs[] = {static_cast<uint64_t>(cvars::guide_message), buf, out_sz};
               uint64_t r = ks->processor()->Execute(ts, h, gargs,
                                                     xe::countof(gargs));
               XELOGI("Guide: handler returned {:08X}",

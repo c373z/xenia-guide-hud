@@ -29,3 +29,7 @@ DEFINE_string(guide_hud_path, "",
               "Guide is loaded as a system app alongside the running title and "
               "the open message is dispatched to it.",
               "Kernel");
+DEFINE_uint32(guide_message, 0x80000004,
+              "Message id dispatched to the Guide (hud.xex) system app. It "
+              "accepts 0x80000002 through 0x80000010.",
+              "Kernel");
