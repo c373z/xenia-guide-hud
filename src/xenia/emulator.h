@@ -305,6 +305,7 @@ class Emulator {
   // the guest buffers used to dispatch to it. Lets the Guide button drive the
   // sequence instead of it only running once at startup.
   uint32_t guide_handler_ = 0;
+  uint32_t guide_hud_base_ = 0;
   uint32_t guide_buf_ = 0;
   uint32_t guide_out_sz_ = 0;
   void Resume();

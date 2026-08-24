@@ -1112,8 +1112,9 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
     uint32_t handler = guide_handler_;
     uint32_t buf = guide_buf_;
     uint32_t osz = guide_out_sz_;
+    uint32_t hud_base = guide_hud_base_;
     auto t = kernel::object_ref<kernel::XHostThread>(new kernel::XHostThread(
-        ks, 512 * 1024, 0, [ks, handler, buf, osz]() -> int {
+        ks, 512 * 1024, 0, [ks, handler, buf, osz, hud_base]() -> int {
           auto* ts = kernel::XThread::GetCurrentThread()->thread_state();
           uint64_t a[] = {0x80000004ull, buf, osz};
           XELOGI("Guide button: dispatching open to {:08X}", handler);
@@ -1121,6 +1122,32 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
               ks->processor()->Execute(ts, handler, a, xe::countof(a));
           XELOGI("Guide button: handler returned {:08X}",
                  static_cast<uint32_t>(r));
+          // Then drive hud's own XUI init and render loop. hud is a system
+          // app: the system normally creates its thread and calls these. Its
+          // entry points sit at fixed offsets from the module base -
+          // base+0xA898 calls XuiInit and XuiRenderCreateDC, base+0xAB28
+          // calls XuiRenderBegin/End/Present - and both take the Guide object
+          // in r3 and only read from it.
+          if (hud_base) {
+            uint32_t obj = xe::load_and_swap<uint32_t>(
+                ks->memory()->TranslateVirtual(0x91400690u));
+            if (obj) {
+              uint64_t ia[] = {obj};
+              uint64_t ir = ks->processor()->Execute(ts, hud_base + 0xA898u,
+                                                     ia, xe::countof(ia));
+              XELOGI("Guide button: XUI init returned {:08X}",
+                     static_cast<uint32_t>(ir));
+              for (int frame = 0; frame < 3600; ++frame) {
+                uint64_t da[] = {obj};
+                ks->processor()->Execute(ts, hud_base + 0xAB28u, da,
+                                         xe::countof(da));
+                xe::threading::Sleep(std::chrono::milliseconds(16));
+              }
+              XELOGI("Guide button: draw loop ended");
+            } else {
+              XELOGW("Guide button: no Guide object at 91400690");
+            }
+          }
           return 0;
         },
         ks->GetSystemProcess()));
@@ -2118,6 +2145,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
               // a while, and a Guide button press during that window would
               // otherwise find no handler recorded.
               guide_handler_ = h;
+              guide_hud_base_ = hud->xex_module()->base_address();
               guide_buf_ = buf;
               guide_out_sz_ = out_sz;
               std::memset(mem->TranslateVirtual(inner), 0, 0x500);
