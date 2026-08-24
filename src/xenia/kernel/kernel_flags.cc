@@ -20,6 +20,11 @@ DEFINE_string(lle_xam, "",
               "against its real export table instead of Xenia's HLE xam. "
               "Leave blank to use the HLE xam.",
               "Kernel");
+DEFINE_bool(lle_xam_sysapp_init, true,
+            "Call xam's system-app initialiser (81751428) before opening the "
+            "Guide. It walks the static app descriptor table at 0x81604368; "
+            "nothing inside xam calls it.",
+            "Kernel");
 DEFINE_bool(lle_xam_xui_init, false,
             "Call xam's XUI class registrars (8199BE08, 817503E8, 8176B2C8) "
             "before opening the Guide. They register the built-in XUI classes "
@@ -40,7 +45,7 @@ DEFINE_bool(lle_xam_heap_patch, false,
             "threads whose app id differs from the current one still resolve "
             "a real heap instead of the zero-sized placeholder.",
             "Kernel");
-DEFINE_bool(lle_xam_appid_sentinel, true,
+DEFINE_bool(lle_xam_appid_sentinel, false,
             "Force xam's current-app-id sentinel (81D227F0) to -1 after LLE "
             "init so the getter reports XamApp instead of trapping the heap "
             "selector on title threads.",

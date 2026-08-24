@@ -2161,6 +2161,43 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
               // which faults. XamShowGuideUI (ordinal 0x304) makes xam
               // construct its own correctly-shaped message.
               if (cvars::lle_show_guide && xam_mod_for_guide) {
+                // Nothing inside xam registers its system apps: the
+                // static descriptor table at 0x81604368 (ids 0xEF-0xFD)
+                // is walked by 8177FE50, reached only from the callerless
+                // root 81751428. XamShowGuideUI sends to app 0xFE, which
+                // is absent from that table, so drive the root first and
+                // see what the table looks like afterwards.
+                if (cvars::lle_xam_sysapp_init) {
+                  uint64_t sa[] = {0};
+                  XELOGI("Guide: sysapp init 81751428");
+                  uint64_t sr = ks->processor()->Execute(ts, 0x81751428u, sa,
+                                                         xe::countof(sa));
+                  XELOGI("Guide: sysapp init returned {:08X}",
+                         static_cast<uint32_t>(sr));
+                }
+                // xam locates a system app as 0x81D4E550 - appid*192
+                // (81786078), then 817863F8 requires fields +8 and +16
+                // to be set. XamShowGuideUI sends to app 0xFE, whose
+                // entry is 0x81D426D0. Read it before calling.
+                {
+                  auto* m3 = ks->memory();
+                  for (uint32_t id : {0xFEu, 0xFFu}) {
+                    uint32_t e = 0x81D4E550u - id * 192u;
+                    std::string f;
+                    for (int i = 0; i < 8; ++i) {
+                      f += fmt::format("{:08X} ", xe::load_and_swap<uint32_t>(
+                          m3->TranslateVirtual(e + i * 4)));
+                    }
+                    XELOGI("Guide: app {:02X} entry @{:08X}: {}", id, e, f);
+                  }
+                  for (uint32_t ord : {0x24Bu, 0x24Cu, 0x304u}) {
+                    XELOGI("Guide: xam ordinal {:X} -> {:08X}", ord,
+                           xam_mod_for_guide->GetProcAddressByOrdinal(ord));
+                  }
+                  XELOGI("Guide: current-app ptr @81D426C8 = {:08X}",
+                         xe::load_and_swap<uint32_t>(
+                             m3->TranslateVirtual(0x81D426C8u)));
+                }
                 uint32_t g = xam_mod_for_guide->GetProcAddressByOrdinal(0x304);
                 XELOGI("Guide: XamShowGuideUI (ord 0x304) -> {:08X}", g);
                 if (g) {
