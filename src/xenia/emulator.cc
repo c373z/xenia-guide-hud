@@ -2026,9 +2026,10 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
   if (!cvars::guide_hud_path.empty()) {
     auto* ks = kernel_state_.get();
     std::string hud_path = cvars::guide_hud_path;
+    auto xam_mod_for_guide = lle_xam_module_;
     auto hud_boot =
         kernel::object_ref<kernel::XHostThread>(new kernel::XHostThread(
-            ks, 1024 * 1024, 0, [ks, hud_path]() -> int {
+            ks, 1024 * 1024, 0, [ks, hud_path, xam_mod_for_guide]() -> int {
               // Give the title time to bring up graphics before overlaying.
               xe::threading::Sleep(std::chrono::seconds(8));
               XELOGI("Guide: loading {}", hud_path);
@@ -2153,6 +2154,25 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                 }
                 XELOGI("Guide: XUI crit @81D6D030: {}", cs);
                 XELOGI("Guide: XUI registry @81D6D508: {}", tb);
+              }
+              // Prefer xam's own entry point over a hand-built message.
+              // Phase 18: the payload layout was guessed, and xam stores
+              // the buffer as a typed sub-object and virtual-calls it,
+              // which faults. XamShowGuideUI (ordinal 0x304) makes xam
+              // construct its own correctly-shaped message.
+              if (cvars::lle_show_guide && xam_mod_for_guide) {
+                uint32_t g = xam_mod_for_guide->GetProcAddressByOrdinal(0x304);
+                XELOGI("Guide: XamShowGuideUI (ord 0x304) -> {:08X}", g);
+                if (g) {
+                  uint64_t ga[] = {0};
+                  uint64_t gr = ks->processor()->Execute(ts, g, ga,
+                                                         xe::countof(ga));
+                  XELOGI("Guide: XamShowGuideUI returned {:08X}",
+                         static_cast<uint32_t>(gr));
+                } else {
+                  XELOGE("Guide: could not resolve ordinal 0x304");
+                }
+                return 0;
               }
               XELOGI("Guide: create msg=80000004 subcmd={} -> {:08X}",
                      int32_t(cvars::guide_subcommand), h);
