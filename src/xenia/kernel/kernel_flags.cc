@@ -20,6 +20,11 @@ DEFINE_string(lle_xam, "",
               "against its real export table instead of Xenia's HLE xam. "
               "Leave blank to use the HLE xam.",
               "Kernel");
+DEFINE_bool(lle_guide_draw, true,
+            "Drive hud's own XUI init and render loop directly. hud is a "
+            "system app that expects the system to create its thread and run "
+            "its draw loop; nothing in this bootstrap does.",
+            "Kernel");
 DEFINE_string(lle_xam_scope, "hud.xex",
               "Which importing module gets the real guest xam. Blank means "
               "every importer, which sends dash.xex to real xam as well and "

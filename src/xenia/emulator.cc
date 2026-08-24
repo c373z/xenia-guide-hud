@@ -2381,6 +2381,36 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
               XELOGI("Guide: object @91400690 = {:08X}",
                      xe::load_and_swap<uint32_t>(
                          mem->TranslateVirtual(0x91400690u)));
+              // hud is a system app: on hardware the system creates its
+              // thread and runs its render loop. Nothing here does, which is
+              // why every message returns success and nothing draws. hud's
+              // own XUI entry points, located by scanning .text in flat
+              // address space for calls to the import thunks:
+              //   base + 0xA898  calls XuiInit + XuiRenderCreateDC
+              //   base + 0xAB28  calls XuiRenderBegin/End/Present
+              // Both take `this` in r3 and only read from it. Drive them
+              // against the Guide object the create message just produced.
+              if (cvars::lle_guide_draw) {
+                uint32_t hb = hud->xex_module()->base_address();
+                uint32_t obj = xe::load_and_swap<uint32_t>(
+                    mem->TranslateVirtual(0x91400690u));
+                if (obj) {
+                  uint64_t ia[] = {obj};
+                  XELOGI("Guide: hud XUI init {:08X} this={:08X}", hb + 0xA898u,
+                         obj);
+                  uint64_t ir = ks->processor()->Execute(ts, hb + 0xA898u, ia,
+                                                          xe::countof(ia));
+                  XELOGI("Guide: hud XUI init returned {:08X}",
+                         static_cast<uint32_t>(ir));
+                  for (int frame = 0; frame < 6000; ++frame) {
+                    uint64_t da[] = {obj};
+                    ks->processor()->Execute(ts, hb + 0xAB28u, da,
+                                             xe::countof(da));
+                    xe::threading::Sleep(std::chrono::milliseconds(16));
+                  }
+                  XELOGI("Guide: hud draw loop finished");
+                }
+              }
 
               const uint32_t msg = static_cast<uint32_t>(cvars::guide_message);
               if (msg != 0x80000004u) {
