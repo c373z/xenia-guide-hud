@@ -682,6 +682,11 @@ uint32_t xeAllocatePoolTypeWithTag(PPCContext* context, uint32_t size,
 
     uint32_t addr =
         kernel_state()->memory()->SystemHeapAlloc(adjusted_size, 64);
+    if (!addr) {
+      XELOGE("ExAllocatePool: system heap exhausted for {} bytes (tag {:08X})",
+             adjusted_size, tag);
+      return 0;
+    }
 
     auto result_ptr = context->TranslateVirtual<X_POOL_ALLOC_HEADER*>(addr);
     result_ptr->unk_2 = 170;
@@ -689,7 +694,15 @@ uint32_t xeAllocatePoolTypeWithTag(PPCContext* context, uint32_t size,
 
     return addr + sizeof(X_POOL_ALLOC_HEADER);
   } else {
-    return kernel_state()->memory()->SystemHeapAlloc(size, 4096);
+    uint32_t addr = kernel_state()->memory()->SystemHeapAlloc(size, 4096);
+    if (!addr) {
+      XELOGE("ExAllocatePool: system heap exhausted for {} bytes (tag {:08X})",
+             size, tag);
+    } else {
+      XELOGD("ExAllocatePool: {} bytes (tag {:08X}) -> {:08X}", size, tag,
+             addr);
+    }
+    return addr;
   }
 }
 
