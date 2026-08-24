@@ -126,8 +126,6 @@ class ImGuiDrawer : public WindowInputListener, public UIDrawer {
   bool IsDrawingDialogs() const { return dialog_loop_next_index_ != SIZE_MAX; }
   void DetachIfLastWindowRemoved();
   void UpdateGamepads();
-  // Polled every frame, unlike UpdateGamepads which is dialog-only.
-  void PollGuideButton();
 
   std::optional<ImGuiKey> VirtualKeyToImGuiKey(VirtualKey vkey);
 
@@ -138,7 +136,6 @@ class ImGuiDrawer : public WindowInputListener, public UIDrawer {
   hid::InputSystem* input_system_ = nullptr;
 
   std::function<void(uint8_t)> onGuidePressFunction_;
-  bool guide_was_down_[XUserMaxUserCount] = {};
   // All currently-attached dialogs that get drawn.
   std::vector<ImGuiDialog*> dialogs_;
 

@@ -594,13 +594,6 @@ void ImGuiDrawer::Draw(UIDrawContext& ui_draw_context) {
     return;
   }
 
-  // Poll the Guide button before the early-out below. Draw() returns here
-  // when there is nothing to draw, and UpdateGamepads() - which holds the
-  // original GUIDE test - only runs when a dialog is open, so with a title
-  // running the button was never tested for at all. Edge-detected, so a held
-  // button reports one press.
-  PollGuideButton();
-
   if (dialogs_.empty() && notifications_.empty()) {
     return;
   }
@@ -928,42 +921,6 @@ void ImGuiDrawer::DetachIfLastWindowRemoved() {
   // which will be persistent until new events actualize individual input
   // properties.
   ClearInput();
-}
-
-void ImGuiDrawer::PollGuideButton() {
-  if (!input_system_ || !onGuidePressFunction_) {
-    return;
-  }
-  // Diagnostic: report what the poll actually observes, so a failure can be
-  // attributed to GetState failing, to no buttons arriving, or to the GUIDE
-  // bit specifically never being set. Rate-limited to avoid flooding.
-  static uint32_t poll_n = 0;
-  static uint32_t last_seen_buttons = 0xFFFFFFFFu;
-  ++poll_n;
-  for (uint8_t i = 0; i < XUserMaxUserCount; i++) {
-    hid::X_INPUT_STATE state = {};
-    X_RESULT gr = input_system_->GetState(i, 1, &state);
-    if (i == 0 && (poll_n % 600) == 0) {
-      XELOGI("GuidePoll: user0 GetState={:08X} buttons={:04X}",
-             static_cast<uint32_t>(gr),
-             static_cast<uint32_t>(state.gamepad.buttons));
-    }
-    if (gr == X_ERROR_SUCCESS && state.gamepad.buttons != 0 &&
-        state.gamepad.buttons != last_seen_buttons) {
-      last_seen_buttons = state.gamepad.buttons;
-      XELOGI("GuidePoll: user{} buttons={:04X}", i,
-             static_cast<uint32_t>(state.gamepad.buttons));
-    }
-    if (gr != X_ERROR_SUCCESS) {
-      continue;
-    }
-    const bool down = (state.gamepad.buttons &
-                       hid::X_INPUT_GAMEPAD_BUTTON::X_INPUT_GAMEPAD_GUIDE) != 0;
-    if (down && !guide_was_down_[i]) {
-      onGuidePressFunction_(i);
-    }
-    guide_was_down_[i] = down;
-  }
 }
 
 void ImGuiDrawer::UpdateGamepads() {
