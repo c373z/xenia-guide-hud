@@ -2095,6 +2095,23 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                          static_cast<uint32_t>(rr));
                 }
               }
+              // Read xam's XUI class registry directly instead of inferring
+              // its state from HRESULTs. 81950D60 takes the critical section
+              // at 0x81D6D030 and searches the structure at 0x81D6D508; if
+              // that is all zeroes the registry was never initialised, which
+              // is a different problem from a class merely being absent.
+              {
+                auto* mem2 = ks->memory();
+                std::string cs, tb;
+                for (int i = 0; i < 8; ++i) {
+                  cs += fmt::format("{:08X} ", xe::load_and_swap<uint32_t>(
+                      mem2->TranslateVirtual(0x81D6D030u + i * 4)));
+                  tb += fmt::format("{:08X} ", xe::load_and_swap<uint32_t>(
+                      mem2->TranslateVirtual(0x81D6D508u + i * 4)));
+                }
+                XELOGI("Guide: XUI crit @81D6D030: {}", cs);
+                XELOGI("Guide: XUI registry @81D6D508: {}", tb);
+              }
               XELOGI("Guide: create msg=80000004 subcmd={} -> {:08X}",
                      int32_t(cvars::guide_subcommand), h);
               uint64_t cargs[] = {0x80000004ull, buf, out_sz};
