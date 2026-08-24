@@ -2650,7 +2650,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                 if (cvars::lle_xam_trace_loader && !loader_bp) {
                   loader_bp = std::make_unique<cpu::Breakpoint>(
                       ks->processor(), cpu::Breakpoint::AddressType::kGuest,
-                      0x913FE6D4ull,
+                      0x8194F410ull,
                       [](cpu::Breakpoint* bp, cpu::ThreadDebugInfo* ti,
                          uint64_t host_pc) {
                         auto* th = kernel::XThread::GetCurrentThread();
@@ -2659,8 +2659,22 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                           return;
                         }
                         auto* c = th->thread_state()->context();
+                        {
+                          uint32_t np = static_cast<uint32_t>(c->r[3]);
+                          std::string nm;
+                          if (np) {
+                            auto* mem = th->kernel_state()->memory();
+                            for (int i = 0; i < 40; ++i) {
+                              uint16_t ch = xe::load_and_swap<uint16_t>(
+                                  mem->TranslateVirtual(np + i * 2));
+                              if (!ch) break;
+                              nm.push_back(static_cast<char>(ch & 0x7F));
+                            }
+                          }
+                          XELOGI("LoaderTrace: FindClass name '{}'", nm);
+                        }
                         XELOGI(
-                            "LoaderTrace: SCENECREATE 913FE6D4 lr={:08X} r3={:08X} "
+                            "LoaderTrace: FINDCLASS 8194F410 lr={:08X} r3={:08X} "
                             "r4={:08X} r5={:08X} r6={:08X} r7={:08X} "
                             "r29={:08X} r30={:08X}",
                             static_cast<uint32_t>(c->lr),

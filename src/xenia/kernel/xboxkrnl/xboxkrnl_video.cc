@@ -610,8 +610,9 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
 
   uint64_t a0[] = {0};
   uint64_t hr = processor->Execute(ts, 0x8178DC58u, a0, xe::countof(a0));
-  XELOGI("GuideBootstrap: render host -> {:08X}, XUI ctx {:08X}",
-         static_cast<uint32_t>(hr), rd(0x81D6C978u));
+  XELOGI("GuideBootstrap: render host -> {:08X}, XUI ctx {:08X}, "
+         "provider {:08X}",
+         static_cast<uint32_t>(hr), rd(0x81D6C978u), rd(0x81D6D0ACu));
 
   uint32_t dcp = memory->SystemHeapAlloc(16, 16);
   uint64_t a1[] = {dcp};
