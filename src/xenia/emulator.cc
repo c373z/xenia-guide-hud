@@ -1191,6 +1191,19 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                 XELOGI("Guide button: XuiInit returned {:08X}, ctx now {:08X}",
                        static_cast<uint32_t>(xr), rd(0x81D6C978u));
               }
+              if (cvars::guide_create_xam_device) {
+                uint32_t gate_ptr = rd(0x815F048Cu);
+                uint32_t gate = gate_ptr ? rd(gate_ptr) : 0;
+                XELOGI("Guide button: device gate [815F048C]={:08X} "
+                       "[*]={:08X} bit200={}",
+                       gate_ptr, gate, (gate & 0x200) ? "set" : "clear");
+                uint64_t ca[] = {0};
+                uint64_t cr = ks->processor()->Execute(ts, 0x8178F748u, ca,
+                                                       xe::countof(ca));
+                XELOGI("Guide button: xam CreateDevice returned {:08X}, "
+                       "device now {:08X}",
+                       static_cast<uint32_t>(cr), rd(0x81D43684u));
+              }
               if (cvars::guide_call_render_host) {
                 XELOGI("Guide button: D3D device global 81D43684 = {:08X}",
                        rd(0x81D43684u));

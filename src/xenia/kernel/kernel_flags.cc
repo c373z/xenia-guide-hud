@@ -29,6 +29,18 @@ DEFINE_bool(lle_xam_app_host, false,
             "0x254, XamAppLoad 0x244). Xenia declares these but implements "
             "none of them, and they are how system apps get hosted.",
             "Kernel");
+DEFINE_uint32(xbox_hardware_info_flags, 0x20,
+              "XboxHardwareInfo flags word (guest 801D0030). Xenia has always "
+              "hardcoded 0x20. Real xam gates its D3D device creation on bit "
+              "0x200 of this word, so without that bit xam never creates a "
+              "device and the Guide can never get a render context.",
+              "Kernel");
+DEFINE_bool(guide_create_xam_device, false,
+            "Call xam's D3D device creation (runtime 8178F748). It is the "
+            "only site that takes the address of xam's device global "
+            "(81D43684) and passes it to xam's CreateDevice at ghidra "
+            "819FBF28. Gated inside xam on bit 0x200 of [[815F048C]].",
+            "Kernel");
 DEFINE_bool(guide_call_render_host, false,
             "Call xam's XUI render-host init (runtime 8178DC58) after "
             "XuiInit. It is the only caller of xam ordinal 0x352, which is "

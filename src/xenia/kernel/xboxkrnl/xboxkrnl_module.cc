@@ -7,6 +7,7 @@
  ******************************************************************************
  */
 
+#include "xenia/kernel/kernel_flags.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_module.h"
 
 #include "xenia/base/logging.h"
@@ -146,7 +147,8 @@ XboxkrnlModule::XboxkrnlModule(Emulator* emulator, KernelState* kernel_state)
   auto lpXboxHardwareInfo = memory_->TranslateVirtual(XboxHardwareInfo);
   export_resolver_->SetVariableMapping(
       "xboxkrnl.exe", ordinals::XboxHardwareInfo, XboxHardwareInfo);
-  xe::store_and_swap<uint32_t>(lpXboxHardwareInfo + 0, 0x20);  // flags
+  xe::store_and_swap<uint32_t>(lpXboxHardwareInfo + 0,
+                               cvars::xbox_hardware_info_flags);  // flags
   xe::store_and_swap<uint8_t>(lpXboxHardwareInfo + 4, 0x06);   // cpu count
   // Remaining 11b are zeroes?
 
