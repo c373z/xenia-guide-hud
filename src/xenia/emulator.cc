@@ -1876,6 +1876,18 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
       XELOGI("LLE xam: waiting for init thread");
       xam_boot->Wait(0, 0, 0, nullptr);
       XELOGI("LLE xam: init complete");
+      // The tag->index mapper (817BA1D8) returns a single flag bit as the
+      // index for the 0x10000000 request class, so requests like 0x18100000
+      // land on heap[0] deterministically - and heap[0] is the 0xCCCC
+      // placeholder. Copy heap[1]'s descriptor over it to test whether that
+      // is the whole story: if so the failures go away while xam stays up.
+      if (cvars::lle_xam_heap0_alias) {
+        auto* d0 = memory()->TranslateVirtual(0x81D4E1B0u);
+        auto* d1 = memory()->TranslateVirtual(0x81D4E1B0u + 408u);
+        std::memcpy(d0, d1, 408);
+        xe::store_and_swap<uint32_t>(d0, 0);  // keep id field as index 0
+        XELOGI("LLE xam: aliased heap[0] to heap[1]");
+      }
       // Read the heap descriptors straight out of guest memory rather than
       // inferring their state from allocation-failure counts. Array is at
       // 0x81D4E1B0 (a constant embedded in xam's code, so already a flat

@@ -14,6 +14,7 @@
 DECLARE_bool(headless);
 DECLARE_bool(log_high_frequency_kernel_calls);
 DECLARE_string(lle_xam);
+DECLARE_bool(lle_xam_heap0_alias);
 DECLARE_bool(lle_xam_heap_init);
 DECLARE_bool(lle_xam_heap_patch);
 DECLARE_bool(lle_xam_appid_sentinel);

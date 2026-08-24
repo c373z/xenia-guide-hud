@@ -20,6 +20,11 @@ DEFINE_string(lle_xam, "",
               "against its real export table instead of Xenia's HLE xam. "
               "Leave blank to use the HLE xam.",
               "Kernel");
+DEFINE_bool(lle_xam_heap0_alias, false,
+            "Copy xam heap[1]'s descriptor over heap[0], which is left as the "
+            "0xCCCC placeholder. Requests in the 0x10000000 class map to index "
+            "0 deterministically, so they all fail against the placeholder.",
+            "Kernel");
 DEFINE_bool(lle_xam_heap_init, false,
             "After xam's DllMain, call its heap-creation routine (817B4B70) "
             "directly. xam's heap descriptors are never built under our "
