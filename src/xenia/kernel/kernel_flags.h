@@ -14,6 +14,7 @@
 DECLARE_bool(headless);
 DECLARE_bool(log_high_frequency_kernel_calls);
 DECLARE_string(lle_xam);
+DECLARE_string(lle_xam_scope);
 DECLARE_bool(lle_xam_fake_app_fe);
 DECLARE_bool(lle_xam_sysapp_init);
 DECLARE_bool(lle_xam_xui_init);

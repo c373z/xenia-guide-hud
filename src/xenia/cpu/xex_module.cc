@@ -1227,10 +1227,28 @@ bool XexModule::SetupLibraryImports(const std::string_view name,
   // module, resolve xam.xex imports against its actual export table rather
   // than Xenia's HLE export tables. XamModule stays registered so host-side
   // services (app manager, content manager, loader data) keep working.
+  // Scope the override to the modules that actually need real xam. Rebinding
+  // *every* importer sends dash.xex to real xam too, and Xenia's profile,
+  // media and input emulation live inside its HLE xam - so dash loses the
+  // services it needs and renders a bare background (verified: 20916 HLE Xam
+  // calls in the working config, 0 under a blanket override). hud.xex and the
+  // Guide modules are the ones that need the real thing, for XUI.
+  // Module names arrive without the extension ("hud", not "hud.xex"), so
+  // compare base names on both sides.
+  const bool importer_wants_real_xam =
+      cvars::lle_xam_scope.empty() ||
+      utf8::equal_case(
+          utf8::find_base_name_from_guest_path(name_),
+          utf8::find_base_name_from_guest_path(cvars::lle_xam_scope));
   const bool lle_xam_override =
-      !cvars::lle_xam.empty() &&
+      !cvars::lle_xam.empty() && importer_wants_real_xam &&
       utf8::equal_case(utf8::find_name_from_guest_path(name), "xam.xex") &&
       kernel_state_->GetModule(name, true) != nullptr;
+  if (!cvars::lle_xam.empty() &&
+      utf8::equal_case(utf8::find_name_from_guest_path(name), "xam.xex")) {
+    XELOGI("LLE xam: importer {} -> {} xam", name_,
+           lle_xam_override ? "REAL" : "HLE");
+  }
 
   ExportResolver* kernel_resolver = nullptr;
   if (!lle_xam_override && kernel_state_->IsKernelModule(name)) {
