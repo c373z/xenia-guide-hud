@@ -1101,6 +1101,35 @@ X_STATUS Emulator::CreateZarchivePackage(
 }
 
 void Emulator::on_guide_button_pressed(uint8_t user_index) {
+  // Drive the Guide open sequence if hud.xex is loaded and registered. This
+  // runs the message dispatch on a guest thread - hud's handler must not be
+  // called from the host UI thread. It does not yet produce a visible Guide
+  // (hud needs to be hosted by xam to build and draw its scenes) but it is
+  // the real entry point, so this is where an open belongs once hosting
+  // exists.
+  if (guide_handler_ && guide_buf_ && guide_out_sz_ && kernel_state_) {
+    auto* ks = kernel_state_.get();
+    uint32_t handler = guide_handler_;
+    uint32_t buf = guide_buf_;
+    uint32_t osz = guide_out_sz_;
+    auto t = kernel::object_ref<kernel::XHostThread>(new kernel::XHostThread(
+        ks, 512 * 1024, 0, [ks, handler, buf, osz]() -> int {
+          auto* ts = kernel::XThread::GetCurrentThread()->thread_state();
+          uint64_t a[] = {0x80000004ull, buf, osz};
+          XELOGI("Guide button: dispatching open to {:08X}", handler);
+          uint64_t r =
+              ks->processor()->Execute(ts, handler, a, xe::countof(a));
+          XELOGI("Guide button: handler returned {:08X}",
+                 static_cast<uint32_t>(r));
+          return 0;
+        },
+        ks->GetSystemProcess()));
+    t->set_name("Guide button dispatch");
+    if (XFAILED(t->Create())) {
+      XELOGE("Guide button: failed to create dispatch thread");
+    }
+  }
+
   // Report what the Guide press can and cannot do in this build, so the
   // button is no longer silently swallowed. Opening the real Guide needs
   // hud.xex hosted by xam - see research/FINDINGS.md.
@@ -2042,7 +2071,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
     auto xam_mod_for_guide = lle_xam_module_;
     auto hud_boot =
         kernel::object_ref<kernel::XHostThread>(new kernel::XHostThread(
-            ks, 1024 * 1024, 0, [ks, hud_path, xam_mod_for_guide]() -> int {
+            ks, 1024 * 1024, 0, [this, ks, hud_path, xam_mod_for_guide]() -> int {
               // Give the title time to bring up graphics before overlaying.
               xe::threading::Sleep(std::chrono::seconds(8));
               XELOGI("Guide: loading {}", hud_path);
@@ -2084,6 +2113,13 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
               uint32_t out_sz = mem->SystemHeapAlloc(0x10, 16);
               XELOGI("Guide: buffers inner={:08X} buf={:08X} out_sz={:08X}",
                      inner, buf, out_sz);
+
+              // Publish these immediately - the XUI registration below takes
+              // a while, and a Guide button press during that window would
+              // otherwise find no handler recorded.
+              guide_handler_ = h;
+              guide_buf_ = buf;
+              guide_out_sz_ = out_sz;
               std::memset(mem->TranslateVirtual(inner), 0, 0x500);
               std::memset(mem->TranslateVirtual(buf), 0, 0x40);
               std::memset(mem->TranslateVirtual(out_sz), 0, 0x10);
@@ -2381,6 +2417,10 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                 }
                 return 0;
               }
+              // Remember these so the Guide button can re-dispatch later.
+              guide_handler_ = h;
+              guide_buf_ = buf;
+              guide_out_sz_ = out_sz;
               XELOGI("Guide: create msg=80000004 subcmd={} -> {:08X}",
                      int32_t(cvars::guide_subcommand), h);
               uint64_t cargs[] = {0x80000004ull, buf, out_sz};
