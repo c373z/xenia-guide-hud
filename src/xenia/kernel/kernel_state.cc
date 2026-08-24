@@ -664,9 +664,22 @@ X_RESULT KernelState::FinishLoadingUserModule(
 
     module->is_attached_ = true;
 
-    auto thread_state = XThread::GetCurrentThread()->thread_state();
+    auto cur_thread = XThread::GetCurrentThread();
+    if (!cur_thread) {
+      // No guest thread state on this thread (e.g. called from the UI thread
+      // during launch). Executing guest code here corrupts/deadlocks; the
+      // caller is responsible for attaching from a guest thread instead.
+      XELOGE("DllMain: no guest thread context, skipping entry for {}",
+             module->name());
+      module->is_attached_ = false;
+      return result;
+    }
+    XELOGI("DllMain: entering {} entry={:08X}", module->name(),
+           module->entry_point());
+    auto thread_state = cur_thread->thread_state();
     processor()->Execute(thread_state, module->entry_point(), args,
                          xe::countof(args));
+    XELOGI("DllMain: returned from {}", module->name());
   }
   return result;
 }

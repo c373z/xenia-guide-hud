@@ -42,6 +42,7 @@
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/title_id_utils.h"
 #include "xenia/kernel/user_module.h"
+#include "xenia/kernel/xthread.h"
 #include "xenia/kernel/xam/achievement_manager.h"
 #include "xenia/kernel/xam/xam_module.h"
 #include "xenia/kernel/xam/xdbf/spa_info.h"
@@ -1522,11 +1523,15 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
   // table instead of Xenia's HLE xam. See XexModule::SetupLibraryImports.
   if (!cvars::lle_xam.empty()) {
     XELOGI("LLE xam: loading guest xam from {}", cvars::lle_xam);
-    auto xam_module = kernel_state_->LoadUserModule(cvars::lle_xam, false);
+    lle_xam_module_ = kernel_state_->LoadUserModule(cvars::lle_xam, false);
+    auto xam_module = lle_xam_module_;
     if (!xam_module) {
       XELOGE("LLE xam: failed to load {}", cvars::lle_xam);
       return X_STATUS_NOT_FOUND;
     }
+    // call_entry=false: DllMain is run later on a real guest thread by the
+    // bootstrap below. CompleteLaunch runs on the UI thread, which has no
+    // guest thread state, so executing guest code here is not valid.
     X_RESULT xam_result =
         kernel_state_->FinishLoadingUserModule(xam_module, false);
     if (XFAILED(xam_result)) {
@@ -1762,7 +1767,51 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
         [this]() { on_shader_storage_initialization(false); });
   }
 
-  auto main_thread = kernel_state_->LaunchModule(module);
+  kernel::object_ref<kernel::XThread> main_thread;
+  if (!module->is_executable() && cvars::allow_dll_module_launch) {
+    // DLL modules have no title entry point to launch, and their DllMain must
+    // not run on the UI thread (no guest thread state there). Run the
+    // DLL_PROCESS_ATTACH sequence on a real guest thread instead.
+    auto* ks = kernel_state_.get();
+    auto xam_mod = lle_xam_module_;
+    auto dll_mod = module;
+    auto boot = kernel::object_ref<kernel::XHostThread>(new kernel::XHostThread(
+        ks, 1024 * 1024, 0, [ks, xam_mod, dll_mod]() -> int {
+          auto* ts = kernel::XThread::GetCurrentThread()->thread_state();
+          auto attach =
+              [&](const kernel::object_ref<kernel::UserModule>& m) {
+                if (!m || !m->entry_point()) {
+                  return;
+                }
+                uint64_t args[] = {m->handle(), 1 /* DLL_PROCESS_ATTACH */, 0};
+                XELOGI("Bootstrap: DllMain {} entry={:08X}", m->name(),
+                       m->entry_point());
+                ks->processor()->Execute(ts, m->entry_point(), args,
+                                         xe::countof(args));
+                XELOGI("Bootstrap: DllMain {} returned", m->name());
+              };
+          attach(xam_mod);
+          attach(dll_mod);
+          XELOGI("Bootstrap: attach sequence complete");
+          return 0;
+        }));
+    boot->set_name("Guide Bootstrap");
+    // Must happen before Create(): SetExecutableModule initializes the title
+    // X_KPROCESS, and XThread::InitializeGuestObject acquires that process's
+    // thread_list_spinlock. Creating a thread first spins on an uninitialized
+    // lock forever. This mirrors the ordering in KernelState::LaunchModule.
+    kernel_state_->SetExecutableModule(module);
+    XELOGI("Bootstrap: creating thread");
+    X_STATUS boot_status = boot->Create();
+    XELOGI("Bootstrap: Create() returned {:08X}", boot_status);
+    if (XFAILED(boot_status)) {
+      XELOGE("Failed to create Guide bootstrap thread");
+      return X_STATUS_UNSUCCESSFUL;
+    }
+    main_thread = kernel::object_ref<kernel::XThread>(boot.release());
+  } else {
+    main_thread = kernel_state_->LaunchModule(module);
+  }
   if (!main_thread) {
     return X_STATUS_UNSUCCESSFUL;
   }

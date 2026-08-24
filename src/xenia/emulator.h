@@ -364,6 +364,7 @@ class Emulator {
   size_t game_config_load_callback_loop_next_index_ = SIZE_MAX;
 
   kernel::object_ref<kernel::XThread> main_thread_;
+  kernel::object_ref<kernel::UserModule> lle_xam_module_;
   kernel::object_ref<kernel::XHostThread> plugin_loader_thread_;
   std::optional<uint32_t> title_id_;  // Currently running title ID
   std::unique_ptr<kernel::util::GameInfoDatabase> game_info_database_;
