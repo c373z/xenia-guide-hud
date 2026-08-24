@@ -2168,11 +2168,15 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                 // is absent from that table, so drive the root first and
                 // see what the table looks like afterwards.
                 if (cvars::lle_xam_sysapp_init) {
+                  // 81751428 is the outer root, but it spawns a worker and
+                  // waits on it, which never completes here. 8177FE50 is the
+                  // function that actually walks the descriptor table and
+                  // fills in the app entries, so call that directly.
                   uint64_t sa[] = {0};
-                  XELOGI("Guide: sysapp init 81751428");
-                  uint64_t sr = ks->processor()->Execute(ts, 0x81751428u, sa,
+                  XELOGI("Guide: sysapp table walk 8177FE50");
+                  uint64_t sr = ks->processor()->Execute(ts, 0x8177FE50u, sa,
                                                          xe::countof(sa));
-                  XELOGI("Guide: sysapp init returned {:08X}",
+                  XELOGI("Guide: sysapp table walk returned {:08X}",
                          static_cast<uint32_t>(sr));
                 }
                 // xam locates a system app as 0x81D4E550 - appid*192

@@ -872,6 +872,17 @@ void IoDeleteDevice_entry(pointer_t<X_DEVICE_OBJECT> device_ptr,
 
 DECLARE_XBOXKRNL_EXPORT1(IoDeleteDevice, kFileSystem, kStub);
 
+// Declared in the export table (ordinal 0x3D) but never implemented. A system
+// app started by xam's app initialiser calls this in a tight loop against
+// \Device\HdDvdRom; with no implementation the call falls through to the
+// "undefined extern" path and the app retries forever, producing ~14k calls
+// and ~197k failed ObReferenceObjectByHandle in under a minute. There is no
+// HD-DVD drive to dismount, so report success and let the caller move on.
+dword_result_t IoDismountVolumeByName_entry(lpvoid_t name) {
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XBOXKRNL_EXPORT1(IoDismountVolumeByName, kFileSystem, kStub);
+
 }  // namespace xboxkrnl
 }  // namespace kernel
 }  // namespace xe
