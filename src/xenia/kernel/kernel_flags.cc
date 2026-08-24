@@ -35,6 +35,13 @@ DEFINE_uint32(xbox_hardware_info_flags, 0x20,
               "0x200 of this word, so without that bit xam never creates a "
               "device and the Guide can never get a render context.",
               "Kernel");
+DEFINE_bool(guide_use_title_device, true,
+            "Point xam's D3D device global (81D43684) at the title's device "
+            "from VdGlobalDevice (801E6FC4) before running xam's XUI render "
+            "host, so the Guide renders into the title's back buffer and is "
+            "presented by the title's own swap. Without this the Guide "
+            "renders on a second device that nothing composites.",
+            "Kernel");
 DEFINE_bool(guide_create_scene, true,
             "Call the Guide object's vtable[27] (hud 913EB940) after its XUI "
             "init. That slot is one of hud's five XuiSceneCreate sites, and "

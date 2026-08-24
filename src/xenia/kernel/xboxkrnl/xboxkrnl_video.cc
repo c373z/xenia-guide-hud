@@ -421,12 +421,107 @@ void AppendParam(StringBuffer* string_buffer, pointer_t<BufferScaling> param) {
       uint16_t(param->fb_width), uint16_t(param->fb_height));
 }
 
+// Graphics notification routines. This is how the Guide reaches the screen:
+// xam registers a renderer, the title calls the routines during its own
+// frame, and xam's callback draws over the title's back buffer, which the
+// title then swaps. Xenia previously had no registration function at all and
+// a no-op for the call, so the title invoked the hook every frame and nothing
+// happened. See research/FINDINGS.md phase 72.
+struct GraphicsNotificationRoutine {
+  uint32_t callback;
+  uint32_t context;
+  bool is_xam;
+};
+static xe::global_critical_region graphics_notification_region_;
+static std::vector<GraphicsNotificationRoutine>* graphics_notification_routines_
+    = nullptr;
+
+static uint32_t guide_draw_fn_ = 0;
+static uint32_t guide_draw_this_ = 0;
+
+void SetGuideDrawHook(uint32_t fn, uint32_t self) {
+  guide_draw_fn_ = fn;
+  guide_draw_this_ = self;
+}
+
+static void RegisterGraphicsNotification(uint32_t callback, uint32_t context,
+                                         bool is_xam) {
+  auto global_lock = graphics_notification_region_.Acquire();
+  if (!graphics_notification_routines_) {
+    graphics_notification_routines_ =
+        new std::vector<GraphicsNotificationRoutine>();
+  }
+  if (!callback) {
+    return;
+  }
+  for (auto& r : *graphics_notification_routines_) {
+    if (r.callback == callback && r.context == context) {
+      return;
+    }
+  }
+  graphics_notification_routines_->push_back({callback, context, is_xam});
+  XELOGI("Vd{}RegisterGraphicsNotification: callback {:08X} context {:08X}",
+         is_xam ? "Xam" : "", callback, context);
+}
+
+dword_result_t VdRegisterGraphicsNotification_entry(dword_t callback,
+                                                    dword_t context,
+                                                    dword_t unk2) {
+  RegisterGraphicsNotification(callback, context, false);
+  return 0;
+}
+DECLARE_XBOXKRNL_EXPORT1(VdRegisterGraphicsNotification, kVideo, kImplemented);
+
+dword_result_t VdRegisterXamGraphicsNotification_entry(dword_t callback,
+                                                       dword_t context,
+                                                       dword_t unk2) {
+  RegisterGraphicsNotification(callback, context, true);
+  return 0;
+}
+DECLARE_XBOXKRNL_EXPORT1(VdRegisterXamGraphicsNotification, kVideo,
+                         kImplemented);
+
 dword_result_t VdCallGraphicsNotificationRoutines_entry(
     unknown_t unk0, pointer_t<BufferScaling> args_ptr) {
   assert_true(unk0 == 1);
+  {
+    static std::atomic<uint32_t> gcalls{0};
+    uint32_t n = ++gcalls;
+    if (n <= 3 || (n % 300) == 0) {
+      XELOGI("VdCallGraphicsNotificationRoutines #{} (hook={:08X})", n,
+             guide_draw_fn_);
+    }
+  }
 
-  // TODO(benvanik): what does this mean, I forget:
-  // callbacks get 0, r3, r4
+  // Callbacks get 0, r3, r4 (per the original TODO here).
+  std::vector<GraphicsNotificationRoutine> routines;
+  {
+    auto global_lock = graphics_notification_region_.Acquire();
+    if (graphics_notification_routines_) {
+      routines = *graphics_notification_routines_;
+    }
+  }
+  auto* thread = XThread::GetCurrentThread();
+  if (!thread) {
+    return 0;
+  }
+  // The Guide draws here, on the title's render thread, inside the title's
+  // frame - the only place the title's thread-affine D3D device may be used.
+  if (guide_draw_fn_ && guide_draw_this_) {
+    uint64_t gargs[] = {guide_draw_this_};
+    kernel_state()->processor()->Execute(thread->thread_state(),
+                                         guide_draw_fn_, gargs,
+                                         xe::countof(gargs));
+  }
+  if (routines.empty()) {
+    return 0;
+  }
+  for (auto& r : routines) {
+    uint64_t args[] = {0, static_cast<uint32_t>(unk0),
+                       args_ptr.guest_address()};
+    kernel_state()->processor()->Execute(thread->thread_state(), r.callback,
+                                         args, xe::countof(args));
+  }
   return 0;
 }
 DECLARE_XBOXKRNL_EXPORT2(VdCallGraphicsNotificationRoutines, kVideo,
@@ -494,6 +589,28 @@ void VdSwap_entry(
     if (n <= 3 || (n % 300) == 0) {
       auto* th = XThread::GetCurrentThread();
       XELOGI("VdSwap #{} from thread '{}'", n, th ? th->name() : "<none>");
+    }
+  }
+  // Composite the Guide here. The title's D3D device is thread-affine and
+  // this runs on the thread that owns it, inside the title's frame and just
+  // before its swap - which is where the Guide is drawn on hardware. The
+  // title calls VdCallGraphicsNotificationRoutines only once at startup, so
+  // that is not the per-frame path.
+  if (guide_draw_fn_ && guide_draw_this_) {
+    static thread_local bool in_guide_draw = false;
+    auto* gth = XThread::GetCurrentThread();
+    if (gth && !in_guide_draw) {
+      in_guide_draw = true;
+      uint64_t gargs[] = {guide_draw_this_};
+      uint64_t gr = kernel_state()->processor()->Execute(
+          gth->thread_state(), guide_draw_fn_, gargs, xe::countof(gargs));
+      static std::atomic<uint32_t> gdraws{0};
+      uint32_t gn = ++gdraws;
+      if (gn <= 3 || (gn % 300) == 0) {
+        XELOGI("Guide composite draw #{} -> {:08X}", gn,
+               static_cast<uint32_t>(gr));
+      }
+      in_guide_draw = false;
     }
   }
   // All of these parameters are REQUIRED.

@@ -47,6 +47,7 @@
 #include "xenia/kernel/xthread.h"
 #include "xenia/kernel/xam/achievement_manager.h"
 #include "xenia/kernel/xam/xam_module.h"
+#include "xenia/kernel/xboxkrnl/xboxkrnl_video.h"
 #include "xenia/kernel/xam/xdbf/spa_info.h"
 #include "xenia/kernel/xbdm/xbdm_module.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_module.h"
@@ -1195,6 +1196,8 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
               if (cvars::guide_create_xam_device) {
                 uint32_t gate_ptr = rd(0x815F048Cu);
                 uint32_t gate = gate_ptr ? rd(gate_ptr) : 0;
+                XELOGI("Guide button: VdGlobalDevice(801E6FC4) = {:08X}",
+                       rd(0x801E6FC4u));
                 XELOGI("Guide button: device gate [815F048C]={:08X} "
                        "[*]={:08X} bit200={}",
                        gate_ptr, gate, (gate & 0x200) ? "set" : "clear");
@@ -1215,6 +1218,16 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                       ks->memory()->TranslateVirtual(0x801E6FC8u), xam_dev);
                   XELOGI("Guide button: VdGlobalXamDevice = {:08X}",
                          rd(0x801E6FC8u));
+                }
+              }
+              if (cvars::guide_use_title_device) {
+                uint32_t title_dev = rd(0x801E6FC4u);
+                if (title_dev) {
+                  xe::store_and_swap<uint32_t>(
+                      ks->memory()->TranslateVirtual(0x81D43684u), title_dev);
+                  XELOGI("Guide button: xam device global -> title device "
+                         "{:08X}",
+                         title_dev);
                 }
               }
               if (cvars::guide_call_render_host) {
@@ -1275,7 +1288,14 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                      rd(obj + 16 + 20));
               XELOGI("Guide button: XUI init returned {:08X}",
                      static_cast<uint32_t>(ir));
-              for (int frame = 0; frame < 3600; ++frame) {
+              // Hand the draw to the graphics-notification path so it runs
+              // on the title's render thread. The title's D3D device is
+              // thread-affine, so drawing it from this thread is refused by
+              // the guest D3D runtime.
+              kernel::xboxkrnl::SetGuideDrawHook(hud_base + 0xAB28u, obj + 16);
+              XELOGI("Guide button: draw hook installed ({:08X}, {:08X})",
+                     hud_base + 0xAB28u, obj + 16);
+              for (int frame = 0; frame < 0; ++frame) {
                 uint64_t da[] = {obj + 16};
                 uint64_t dr = ks->processor()->Execute(
                     ts, hud_base + 0xAB28u, da, xe::countof(da));
