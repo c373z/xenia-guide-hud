@@ -1204,6 +1204,18 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                 XELOGI("Guide button: xam CreateDevice returned {:08X}, "
                        "device now {:08X}",
                        static_cast<uint32_t>(cr), rd(0x81D43684u));
+                // Publish it as VdGlobalXamDevice (kernel global 801E6FC8).
+                // Xenia stores 0 there with the comment "Pointer to the XAM
+                // D3D device, which we don't have", and KernelState has a
+                // matching TODO to run graphics notifications as
+                // X_PROCTYPE_SYSTEM when it is non-zero. We have one now.
+                uint32_t xam_dev = rd(0x81D43684u);
+                if (xam_dev) {
+                  xe::store_and_swap<uint32_t>(
+                      ks->memory()->TranslateVirtual(0x801E6FC8u), xam_dev);
+                  XELOGI("Guide button: VdGlobalXamDevice = {:08X}",
+                         rd(0x801E6FC8u));
+                }
               }
               if (cvars::guide_call_render_host) {
                 XELOGI("Guide button: D3D device global 81D43684 = {:08X}",
