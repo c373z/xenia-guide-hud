@@ -29,6 +29,15 @@ DEFINE_bool(lle_xam_app_host, false,
             "0x254, XamAppLoad 0x244). Xenia declares these but implements "
             "none of them, and they are how system apps get hosted.",
             "Kernel");
+DEFINE_bool(guide_call_render_host, false,
+            "Call xam's XUI render-host init (runtime 8178DC58) after "
+            "XuiInit. It is the only caller of xam ordinal 0x352, which is "
+            "one of the two writers of the XUI render context global at "
+            "81D6C978 that XuiRenderCreateDC requires. It takes the D3D "
+            "device from the global at 81D43684. Defaults OFF: that global "
+            "is null under this bootstrap, so the call hits xam's assert and "
+            "DbgBreakPoint and kills the dispatch thread.",
+            "Kernel");
 DEFINE_bool(guide_call_xuiinit, true,
             "Call real xam's XuiInit (81953760) before hud's XUI init. xam's "
             "XuiRenderCreateDC returns E_UNEXPECTED while xam's XUI context "

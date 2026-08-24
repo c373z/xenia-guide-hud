@@ -1191,6 +1191,16 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                 XELOGI("Guide button: XuiInit returned {:08X}, ctx now {:08X}",
                        static_cast<uint32_t>(xr), rd(0x81D6C978u));
               }
+              if (cvars::guide_call_render_host) {
+                XELOGI("Guide button: D3D device global 81D43684 = {:08X}",
+                       rd(0x81D43684u));
+                uint64_t ha[] = {0};
+                uint64_t hr = ks->processor()->Execute(ts, 0x8178DC58u, ha,
+                                                       xe::countof(ha));
+                XELOGI("Guide button: render host returned {:08X}, "
+                       "XUI ctx now {:08X}",
+                       static_cast<uint32_t>(hr), rd(0x81D6C978u));
+              }
               if (cvars::guide_force_render_gate) {
                 xe::store_and_swap<uint32_t>(
                     ks->memory()->TranslateVirtual(obj + 20), 1u);
