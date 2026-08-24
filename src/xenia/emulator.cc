@@ -2269,6 +2269,38 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                             XELOGI("Guide: registered app {:02X} @{:08X} "
                                    "handler={:08X}", id, e, handler);
                           }
+                          // 81A5F220 is not merely a dispatcher - it is
+                          // XamApp's run function. It initialises (81A63BB8,
+                          // 81A63D28, 81A64438) and the 0x1015 comparison sits
+                          // inside its message loop, so this is the pump that
+                          // would drain what XMsgStartIORequest queues. It
+                          // takes this in r3 and a 2060-byte scratch buffer in
+                          // r4 (zeroed at entry). Run it on its own thread; it
+                          // is a loop and will not return.
+                          uint32_t scratch =
+                              ks->memory()->SystemHeapAlloc(0x1000, 128);
+                          std::memset(ks->memory()->TranslateVirtual(scratch),
+                                      0, 0x1000);
+                          auto pump = kernel::object_ref<kernel::XHostThread>(
+                              new kernel::XHostThread(
+                                  ks, 1024 * 1024, 0, [ks, ctx, scratch]() -> int {
+                                    auto* pts = kernel::XThread::
+                                        GetCurrentThread()->thread_state();
+                                    uint64_t pa[] = {ctx, scratch};
+                                    XELOGI("Guide: XamApp pump 81A5F220 "
+                                           "this={:08X} buf={:08X}", ctx,
+                                           scratch);
+                                    ks->processor()->Execute(
+                                        pts, 0x81A5F220u, pa, xe::countof(pa));
+                                    XELOGI("Guide: XamApp pump returned");
+                                    return 0;
+                                  },
+                                  ks->GetSystemProcess()));
+                          pump->set_name("XamApp pump");
+                          if (XFAILED(pump->Create())) {
+                            XELOGE("Guide: failed to create pump thread");
+                          }
+                          xe::threading::Sleep(std::chrono::seconds(3));
                         }
                         return 0;
                       }, ks->GetSystemProcess()));
