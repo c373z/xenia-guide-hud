@@ -619,12 +619,33 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
 
   uint32_t render_obj = guide_bs_obj_ + 16;
   xe::store_and_swap<uint32_t>(memory->TranslateVirtual(render_obj + 20), 1u);
-  uint64_t a2[] = {render_obj, 0};
-  uint64_t ir = processor->Execute(ts, guide_bs_hud_base_ + 0xA898u, a2,
-                                   xe::countof(a2));
-  XELOGI("GuideBootstrap: hud init -> {:08X}  +8={:08X} +12={:08X}",
+  // Call the Guide object's own scene creator (vtable[27] = hud 913EB940)
+  // rather than the bare init. It takes (this, a, b), stores a at [this+28],
+  // calls the init itself with this+16, and then builds the scene via
+  // XuiSceneCreate. Calling the init directly gives a root element with no
+  // scene under it, which draws nothing.
+  uint32_t obj_vt = rd(guide_bs_obj_);
+  uint32_t scene_fn = obj_vt ? rd(obj_vt + 27 * 4) : 0;
+  uint64_t ir = 0;
+  if (scene_fn) {
+    uint64_t a2[] = {guide_bs_obj_, 0, 0};
+    ir = processor->Execute(ts, scene_fn, a2, xe::countof(a2));
+    XELOGI("GuideBootstrap: scene creator {:08X} -> {:08X}", scene_fn,
+           static_cast<uint32_t>(ir));
+  } else {
+    uint64_t a2[] = {render_obj, 0};
+    ir = processor->Execute(ts, guide_bs_hud_base_ + 0xA898u, a2,
+                            xe::countof(a2));
+  }
+  XELOGI("GuideBootstrap: after init -> {:08X}  +8={:08X} +12={:08X}",
          static_cast<uint32_t>(ir), rd(render_obj + 8), rd(render_obj + 12));
 
+  // hud's scene creator reads its skin/scene strings from these globals
+  // (XuiSceneCreate gets [91400170] as the scene file). If they are null the
+  // Guide has no content to build, which is what an empty root element means.
+  XELOGI("GuideBootstrap: hud globals 91400168={:08X} 91400170={:08X} "
+         "91400690={:08X}",
+         rd(0x91400168u), rd(0x91400170u), rd(0x91400690u));
   SetGuideDrawHook(guide_bs_hud_base_ + 0xAB28u, render_obj);
   XELOGI("GuideBootstrap: draw hook installed on title thread");
 }

@@ -2622,7 +2622,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                 if (cvars::lle_xam_trace_loader && !loader_bp) {
                   loader_bp = std::make_unique<cpu::Breakpoint>(
                       ks->processor(), cpu::Breakpoint::AddressType::kGuest,
-                      0x81949B60ull,
+                      0x913FE6D4ull,
                       [](cpu::Breakpoint* bp, cpu::ThreadDebugInfo* ti,
                          uint64_t host_pc) {
                         auto* th = kernel::XThread::GetCurrentThread();
@@ -2632,7 +2632,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                         }
                         auto* c = th->thread_state()->context();
                         XELOGI(
-                            "LoaderTrace: CSWRAP 81949B60 lr={:08X} r3={:08X} "
+                            "LoaderTrace: SCENECREATE 913FE6D4 lr={:08X} r3={:08X} "
                             "r4={:08X} r5={:08X} r6={:08X} r7={:08X} "
                             "r29={:08X} r30={:08X}",
                             static_cast<uint32_t>(c->lr),
@@ -2647,7 +2647,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                   // AddBreakpoint installs it when the processor is running.
                   ks->processor()->AddBreakpoint(loader_bp.get());
                   XELOGI(
-                      "LoaderTrace: 81949B60 exec_state={} patched={} host={:X}",
+                      "LoaderTrace: 913FE6D4 exec_state={} patched={} host={:X}",
                       static_cast<int>(ks->processor()->execution_state()),
                       loader_bp->backend_data().size(),
                       loader_bp->backend_data().empty()
