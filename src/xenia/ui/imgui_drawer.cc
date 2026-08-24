@@ -623,6 +623,12 @@ void ImGuiDrawer::Draw(UIDrawContext& ui_draw_context) {
     UpdateGamepads();
   }
 
+  // The Guide button is polled separately and unconditionally. UpdateGamepads()
+  // holds the original GUIDE test but only runs when a dialog is open, so with
+  // a title running the button was never even tested for. Poll it every frame
+  // with edge detection so a press is reported once, not held.
+  PollGuideButton();
+
   ImGui::NewFrame();
 
   assert_true(!IsDrawingDialogs());
@@ -920,6 +926,24 @@ void ImGuiDrawer::DetachIfLastWindowRemoved() {
   // which will be persistent until new events actualize individual input
   // properties.
   ClearInput();
+}
+
+void ImGuiDrawer::PollGuideButton() {
+  if (!input_system_ || !onGuidePressFunction_) {
+    return;
+  }
+  for (uint8_t i = 0; i < XUserMaxUserCount; i++) {
+    hid::X_INPUT_STATE state = {};
+    if (input_system_->GetState(i, 1, &state) != X_ERROR_SUCCESS) {
+      continue;
+    }
+    const bool down = (state.gamepad.buttons &
+                       hid::X_INPUT_GAMEPAD_BUTTON::X_INPUT_GAMEPAD_GUIDE) != 0;
+    if (down && !guide_was_down_[i]) {
+      onGuidePressFunction_(i);
+    }
+    guide_was_down_[i] = down;
+  }
 }
 
 void ImGuiDrawer::UpdateGamepads() {
