@@ -1134,15 +1134,50 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
             uint32_t obj = xe::load_and_swap<uint32_t>(
                 ks->memory()->TranslateVirtual(0x91400690u));
             if (obj) {
+              // Dump the Guide object's vtable. The draw entry points used
+              // below were guessed from static scanning; the object's own
+              // vtable is the authoritative list of its virtual methods.
+              uint32_t vt = xe::load_and_swap<uint32_t>(
+                  ks->memory()->TranslateVirtual(obj));
+              XELOGI("Guide button: obj={:08X} vtable={:08X}", obj, vt);
+              if (vt) {
+                for (int i = 0; i < 24; ++i) {
+                  uint32_t fn = xe::load_and_swap<uint32_t>(
+                      ks->memory()->TranslateVirtual(vt + i * 4));
+                  XELOGI("Guide button: vtable[{}] = {:08X}", i, fn);
+                }
+              }
+              auto rd = [&](uint32_t a) {
+                return xe::load_and_swap<uint32_t>(
+                    ks->memory()->TranslateVirtual(a));
+              };
+              XELOGI("Guide button: pre-init  +8={:08X} +12={:08X} "
+                     "+20={:08X}",
+                     rd(obj + 8), rd(obj + 12), rd(obj + 20));
+              // [obj+20] gates DC creation in the init at hud+0xA898 and is
+              // never dereferenced there (the register is reloaded from
+              // [obj+12] immediately after the test), so forcing it non-zero
+              // is safe and lets XuiRenderCreateDC run.
+              if (cvars::guide_force_render_gate) {
+                xe::store_and_swap<uint32_t>(
+                    ks->memory()->TranslateVirtual(obj + 20), 1u);
+              }
               uint64_t ia[] = {obj};
               uint64_t ir = ks->processor()->Execute(ts, hud_base + 0xA898u,
                                                      ia, xe::countof(ia));
+              XELOGI("Guide button: post-init +8={:08X} +12={:08X} "
+                     "+20={:08X}",
+                     rd(obj + 8), rd(obj + 12), rd(obj + 20));
               XELOGI("Guide button: XUI init returned {:08X}",
                      static_cast<uint32_t>(ir));
               for (int frame = 0; frame < 3600; ++frame) {
                 uint64_t da[] = {obj};
-                ks->processor()->Execute(ts, hud_base + 0xAB28u, da,
-                                         xe::countof(da));
+                uint64_t dr = ks->processor()->Execute(
+                    ts, hud_base + 0xAB28u, da, xe::countof(da));
+                if (frame < 3) {
+                  XELOGI("Guide button: draw frame {} returned {:08X}", frame,
+                         static_cast<uint32_t>(dr));
+                }
                 xe::threading::Sleep(std::chrono::milliseconds(16));
               }
               XELOGI("Guide button: draw loop ended");
@@ -2464,12 +2499,17 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                         }
                         auto* c = th->thread_state()->context();
                         XELOGI(
-                            "LoaderTrace: SCENE 913EC578 r3={:08X} r4={:08X} "
-                            "r5={:08X} r6={:08X}",
+                            "LoaderTrace: SCENE 913EC578 lr={:08X} r3={:08X} "
+                            "r4={:08X} r5={:08X} r6={:08X} r7={:08X} "
+                            "r29={:08X} r30={:08X}",
+                            static_cast<uint32_t>(c->lr),
                             static_cast<uint32_t>(c->r[3]),
                             static_cast<uint32_t>(c->r[4]),
                             static_cast<uint32_t>(c->r[5]),
-                            static_cast<uint32_t>(c->r[6]));
+                            static_cast<uint32_t>(c->r[6]),
+                            static_cast<uint32_t>(c->r[7]),
+                            static_cast<uint32_t>(c->r[29]),
+                            static_cast<uint32_t>(c->r[30]));
                       });
                   // AddBreakpoint installs it when the processor is running.
                   ks->processor()->AddBreakpoint(loader_bp.get());

@@ -29,6 +29,13 @@ DEFINE_bool(lle_xam_app_host, false,
             "0x254, XamAppLoad 0x244). Xenia declares these but implements "
             "none of them, and they are how system apps get hosted.",
             "Kernel");
+DEFINE_bool(guide_force_render_gate, true,
+            "Force [guide+20] non-zero before hud's XUI init. That field only "
+            "gates DC creation in the init at hud+0xA898 and is never "
+            "dereferenced there, so with it clear the init skips its whole "
+            "body and still returns 0, leaving the render DC null and every "
+            "draw failing with E_INVALIDARG.",
+            "Kernel");
 DEFINE_bool(lle_guide_draw, true,
             "Drive hud's own XUI init and render loop directly. hud is a "
             "system app that expects the system to create its thread and run "
