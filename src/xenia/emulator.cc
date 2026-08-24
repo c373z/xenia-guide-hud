@@ -2048,8 +2048,16 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
 
               uint32_t h = ks->sys_app_handler(0xFF);
               if (!h) {
-                XELOGW("Guide: hud did not register app 0xFF");
-                return 1;
+                // Under LLE xam, hud's XamRegisterSysApp import binds to the
+                // real guest xam export, so the handler lands in xam's own
+                // table and never reaches Xenia's HLE map. hud registers app
+                // 0xFF with a handler baked into its code as base + 0x69C0
+                // (98007960: lis r11,0x913e / addi r5,r11,27072, against a
+                // load base of 913E0000). Derive it from the module base.
+                h = hud->xex_module()->base_address() + 0x69C0;
+                XELOGW("Guide: HLE map empty (LLE xam owns the registration); "
+                       "using hud base {:08X} + 0x69C0 -> {:08X}",
+                       hud->xex_module()->base_address(), h);
               }
               auto* mem = ks->memory();
               // hud copies 0x47C bytes out of the inner struct and writes the
@@ -2077,6 +2085,12 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                                                        xe::countof(cargs));
               XELOGI("Guide: create returned {:08X}",
                      static_cast<uint32_t>(cres));
+              // hud's handler stores the Guide object at 0x91400690 and every
+              // non-create message loads it from there, so a null here means
+              // the later dispatch would fault rather than draw.
+              XELOGI("Guide: object @91400690 = {:08X}",
+                     xe::load_and_swap<uint32_t>(
+                         mem->TranslateVirtual(0x91400690u)));
 
               const uint32_t msg = static_cast<uint32_t>(cvars::guide_message);
               if (msg != 0x80000004u) {
