@@ -20,6 +20,10 @@ DEFINE_string(lle_xam, "",
               "against its real export table instead of Xenia's HLE xam. "
               "Leave blank to use the HLE xam.",
               "Kernel");
+DEFINE_bool(lle_xam_trace_loader, false,
+            "Install a guest breakpoint on xam's sys-app loader (81786788) "
+            "and log its register arguments when hit.",
+            "Kernel");
 DEFINE_bool(lle_xam_app_host, false,
             "Call real xam's app lifecycle entries (XamAppLoadPass2SysApps "
             "0x254, XamAppLoad 0x244). Xenia declares these but implements "

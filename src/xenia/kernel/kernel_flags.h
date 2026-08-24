@@ -14,6 +14,7 @@
 DECLARE_bool(headless);
 DECLARE_bool(log_high_frequency_kernel_calls);
 DECLARE_string(lle_xam);
+DECLARE_bool(lle_xam_trace_loader);
 DECLARE_bool(lle_xam_app_host);
 DECLARE_bool(lle_guide_draw);
 DECLARE_string(lle_xam_scope);

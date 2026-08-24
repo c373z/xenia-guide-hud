@@ -31,6 +31,8 @@
 #include "xenia/base/string.h"
 #include "xenia/base/system.h"
 #include "xenia/cpu/backend/code_cache.h"
+#include "xenia/cpu/breakpoint.h"
+#include "xenia/cpu/thread_debug_info.h"
 #include "xenia/cpu/backend/null_backend.h"
 #include "xenia/cpu/cpu_flags.h"
 #include "xenia/cpu/thread_state.h"
@@ -2444,6 +2446,48 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                 // entry; it takes (id, arg) and does not store through the
                 // incoming r3, so it is safe to drive. hud registers as app
                 // 0xFF, so try that and the ids in xam's descriptor table.
+                // Guest breakpoint on xam's sys-app loader (81786788). Its
+                // first argument is compared against 4, but the sys-app main
+                // appears to pass a table address - the static reading could
+                // not resolve which. A breakpoint reads the real registers.
+                static std::unique_ptr<cpu::Breakpoint> loader_bp;
+                if (cvars::lle_xam_trace_loader && !loader_bp) {
+                  loader_bp = std::make_unique<cpu::Breakpoint>(
+                      ks->processor(), cpu::Breakpoint::AddressType::kGuest,
+                      0x81786788ull,
+                      [](cpu::Breakpoint* bp, cpu::ThreadDebugInfo* ti,
+                         uint64_t host_pc) {
+                        auto* th = kernel::XThread::GetCurrentThread();
+                        if (!th) {
+                          XELOGI("LoaderTrace: hit, no thread context");
+                          return;
+                        }
+                        auto* c = th->thread_state()->context();
+                        XELOGI(
+                            "LoaderTrace: 81786788 r3={:08X} r4={:08X} "
+                            "r5={:08X} r6={:08X}",
+                            static_cast<uint32_t>(c->r[3]),
+                            static_cast<uint32_t>(c->r[4]),
+                            static_cast<uint32_t>(c->r[5]),
+                            static_cast<uint32_t>(c->r[6]));
+                      });
+                  // AddBreakpoint installs it when the processor is running.
+                  ks->processor()->AddBreakpoint(loader_bp.get());
+                  XELOGI("LoaderTrace: breakpoint installed at 81786788");
+                  // Control: the same mechanism on XamShowGuideUI's worker
+                  // (8178D730), which is definitely executed. If the control
+                  // never fires either, breakpoints are not working here and
+                  // the loader result means nothing.
+                  static std::unique_ptr<cpu::Breakpoint> ctl_bp;
+                  ctl_bp = std::make_unique<cpu::Breakpoint>(
+                      ks->processor(), cpu::Breakpoint::AddressType::kGuest,
+                      0x8178D730ull,
+                      [](cpu::Breakpoint*, cpu::ThreadDebugInfo*, uint64_t) {
+                        XELOGI("LoaderTrace: CONTROL hit at 8178D730");
+                      });
+                  ks->processor()->AddBreakpoint(ctl_bp.get());
+                  XELOGI("LoaderTrace: control breakpoint at 8178D730");
+                }
                 if (cvars::lle_xam_app_host) {
                   uint32_t load_fn =
                       xam_mod_for_guide->GetProcAddressByOrdinal(0x251);
