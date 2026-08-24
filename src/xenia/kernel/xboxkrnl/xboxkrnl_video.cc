@@ -457,8 +457,11 @@ dword_result_t VdRetrainEDRAMWorker_entry(unknown_t unk0) { return 0; }
 DECLARE_XBOXKRNL_EXPORT1(VdRetrainEDRAMWorker, kVideo, kStub);
 
 DEFINE_int32(vd_retrain_edram_result, 0,
-             "Value returned by VdRetrainEDRAM. The dashboard retries this "
-             "until it reports success; games do not care.",
+             "Value returned by VdRetrainEDRAM. Changes which loop the 17489 "
+             "dashboard spins in: 0 keeps its main loop polling input and "
+             "tiles, non-zero quiets the guest and spins the command "
+             "processor instead. Neither presents a frame. Games do not use "
+             "this path.",
              "Video");
 
 dword_result_t VdRetrainEDRAM_entry(unknown_t unk0, unknown_t unk1,
