@@ -1854,6 +1854,20 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
               ks->processor()->Execute(ts, xam_mod->entry_point(), args,
                                        xe::countof(args));
               XELOGI("LLE xam: DllMain returned");
+              // xam's heap descriptors (array at 0x81D4E1B0, 10 x 408 bytes)
+              // are still all-zero after DllMain: the "Unable to commit %d
+              // bytes for heap." path never runs, so creation is not failing,
+              // it is never attempted. 817BBD70 (runtime 817B4B70) is the
+              // routine that builds them - it calls the single-heap creator
+              // five times - and it has no callers inside xam, so on hardware
+              // something outside the module drives it. Take one argument.
+              if (cvars::lle_xam_heap_init) {
+                uint64_t hargs[] = {0};
+                XELOGI("LLE xam: calling heap init 817B4B70");
+                ks->processor()->Execute(ts, 0x817B4B70u, hargs,
+                                         xe::countof(hargs));
+                XELOGI("LLE xam: heap init returned");
+              }
               return 0;
             },
             ks->GetSystemProcess()));

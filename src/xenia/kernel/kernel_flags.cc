@@ -20,6 +20,11 @@ DEFINE_string(lle_xam, "",
               "against its real export table instead of Xenia's HLE xam. "
               "Leave blank to use the HLE xam.",
               "Kernel");
+DEFINE_bool(lle_xam_heap_init, false,
+            "After xam's DllMain, call its heap-creation routine (817B4B70) "
+            "directly. xam's heap descriptors are never built under our "
+            "bootstrap because nothing outside the module drives that call.",
+            "Kernel");
 DEFINE_bool(lle_xam_heap_patch, false,
             "Patch out the trap in xam's heap selector (817BAE38) so title "
             "threads whose app id differs from the current one still resolve "
