@@ -614,6 +614,16 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
          "provider {:08X}",
          static_cast<uint32_t>(hr), rd(0x81D6C978u), rd(0x81D6D0ACu));
 
+  {
+    // The XUI resource provider is a static xam object; its vtable[1] is the
+    // open-by-name call that is failing with 80300004.
+    uint32_t prov = rd(0x81D6D0ACu);
+    uint32_t pvt = prov ? rd(prov) : 0;
+    XELOGI("GuideBootstrap: provider {:08X} vtable {:08X} [0]={:08X} "
+           "[1]={:08X} [2]={:08X}",
+           prov, pvt, pvt ? rd(pvt) : 0, pvt ? rd(pvt + 4) : 0,
+           pvt ? rd(pvt + 8) : 0);
+  }
   uint32_t dcp = memory->SystemHeapAlloc(16, 16);
   uint64_t a1[] = {dcp};
   uint64_t dr = processor->Execute(ts, 0x818FB038u, a1, xe::countof(a1));
