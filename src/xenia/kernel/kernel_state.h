@@ -211,6 +211,16 @@ class KernelState {
   uint32_t GetTitleProcess() const {
     return kernel_guest_globals_ + offsetof(KernelGuestGlobals, title_process);
   }
+
+  // System apps loaded as guest modules (hud.xex etc.) register a message
+  // handler via XamRegisterSysApp so XMsgInProcessCall can route to them.
+  void set_sys_app_handler(uint32_t app_id, uint32_t handler) {
+    sys_app_handlers_[app_id] = handler;
+  }
+  uint32_t sys_app_handler(uint32_t app_id) const {
+    auto it = sys_app_handlers_.find(app_id);
+    return it == sys_app_handlers_.end() ? 0 : it->second;
+  }
   // also the "interrupt" process
   uint32_t GetIdleProcess() const {
     return kernel_guest_globals_ + offsetof(KernelGuestGlobals, idle_process);
@@ -363,6 +373,7 @@ class KernelState {
   // Must be guarded by the global critical region.
   util::ObjectTable object_table_;
   std::unordered_map<uint32_t, XThread*> threads_by_id_;
+  std::unordered_map<uint32_t, uint32_t> sys_app_handlers_;
   std::vector<object_ref<XNotifyListener>> notify_listeners_;
   bool has_notified_startup_ = false;
   bool has_notified_live_startup_ = false;

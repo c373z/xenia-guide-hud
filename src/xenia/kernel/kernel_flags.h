@@ -15,5 +15,6 @@ DECLARE_bool(headless);
 DECLARE_bool(log_high_frequency_kernel_calls);
 DECLARE_string(lle_xam);
 DECLARE_bool(lle_show_guide);
+DECLARE_int32(guide_subcommand);
 
 #endif  // XENIA_KERNEL_KERNEL_FLAGS_H_

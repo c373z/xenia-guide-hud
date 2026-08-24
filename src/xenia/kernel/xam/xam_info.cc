@@ -12,6 +12,7 @@
 #include "xenia/base/logging.h"
 #include "xenia/base/string_util.h"
 #include "xenia/config.h"
+#include "xenia/cpu/processor.h"
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/title_id_utils.h"
 #include "xenia/kernel/user_module.h"
@@ -49,6 +50,11 @@ DEFINE_int32(avpack, 8,
 DEFINE_bool(staging_mode, 0,
             "Enables preview mode in dashboards to render debug information.",
             "Kernel");
+
+DEFINE_int32(guide_subcommand, 1,
+             "Sub-command passed to the Guide (hud.xex) message handler when "
+             "XamShowGuideUI dispatches message 0x80000004. Valid range 1-9.",
+             "Kernel");
 
 namespace xe {
 namespace kernel {
@@ -989,14 +995,84 @@ DECLARE_XAM_EXPORT1(XdfInitialize, kNone, kStub);
 // System apps (hud.xex, signin.xex, ...) register themselves with xam so
 // XMsgInProcessCall can route messages to them. Xenia's app manager owns a
 // fixed set of HLE apps, so accept the registration and record it.
-dword_result_t XamRegisterSysApp_entry(dword_t app_id, lpvoid_t handler,
-                                       lpvoid_t context, dword_t flags) {
-  XELOGI("XamRegisterSysApp: id={:08X} handler={:08X} context={:08X} flags={:08X}",
-         uint32_t(app_id), handler.guest_address(), context.guest_address(),
-         uint32_t(flags));
+dword_result_t XamRegisterSysApp_entry(dword_t module_handle, dword_t app_id,
+                                       lpvoid_t handler, dword_t flags) {
+  XELOGI(
+      "XamRegisterSysApp: module={:08X} app_id={:02X} handler={:08X} "
+      "flags={:08X}",
+      uint32_t(module_handle), uint32_t(app_id), handler.guest_address(),
+      uint32_t(flags));
+  kernel_state()->set_sys_app_handler(app_id, handler.guest_address());
   return X_ERROR_SUCCESS;
 }
 DECLARE_XAM_EXPORT1(XamRegisterSysApp, kNone, kStub);
+
+// xam re-exports the CRT block primitives. The Guide uses these heavily
+// while building its UI state.
+dword_result_t XMemSet_entry(lpvoid_t dest, dword_t value, dword_t count) {
+  if (dest && count) {
+    std::memset(dest, static_cast<int>(value.value()), count);
+  }
+  return dest.guest_address();
+}
+DECLARE_XAM_EXPORT2(XMemSet, kMemory, kImplemented, kHighFrequency);
+
+dword_result_t XMemCpy_entry(lpvoid_t dest, lpvoid_t src, dword_t count) {
+  if (dest && src && count) {
+    std::memcpy(dest, src, count);
+  }
+  return dest.guest_address();
+}
+DECLARE_XAM_EXPORT2(XMemCpy, kMemory, kImplemented, kHighFrequency);
+
+dword_result_t XMemCpyStreaming_entry(lpvoid_t dest, lpvoid_t src,
+                                      dword_t count) {
+  return XMemCpy_entry(dest, src, count);
+}
+DECLARE_XAM_EXPORT2(XMemCpyStreaming, kMemory, kImplemented, kHighFrequency);
+
+// Opens the Xbox Guide. hud.xex registers itself as system app 0xFF with a
+// message handler; message 0x80000004 carries a sub-command selecting which
+// Guide view to show. Handler shape, from hud.xex 17489 at 913E69C0:
+//   handler(r3 = message, r4 = buffer, r5 = size)
+//   buffer[0x00] bit0 : sub-command lives at inner[0x08] (else inner[0x00])
+//   buffer[0x04]      : pointer to inner struct
+dword_result_t XamShowGuideUI_entry(dword_t user_index,
+                                    const ppc_context_t& ctx) {
+  const uint32_t handler = kernel_state()->sys_app_handler(0xFF);
+  if (!handler) {
+    XELOGW("XamShowGuideUI: no system app 0xFF registered (hud.xex not loaded)");
+    return X_ERROR_FUNCTION_FAILED;
+  }
+
+  auto* memory = kernel_state()->memory();
+  const uint32_t inner = memory->SystemHeapAlloc(0x20, 16);
+  const uint32_t buffer = memory->SystemHeapAlloc(0x20, 16);
+  if (!inner || !buffer) {
+    return X_ERROR_NOT_ENOUGH_MEMORY;
+  }
+  std::memset(memory->TranslateVirtual(inner), 0, 0x20);
+  std::memset(memory->TranslateVirtual(buffer), 0, 0x20);
+
+  auto* inner_words = memory->TranslateVirtual<xe::be<uint32_t>*>(inner);
+  inner_words[2] = cvars::guide_subcommand;  // inner[0x08]
+
+  auto* words = memory->TranslateVirtual<xe::be<uint32_t>*>(buffer);
+  words[0] = 1;          // flags: use inner[0x08]
+  words[1] = inner;      // buffer[0x04]
+  words[3] = static_cast<uint32_t>(user_index);  // buffer[0x0C]
+
+  XELOGI("XamShowGuideUI: dispatching msg 0x80000004 subcmd {} to {:08X}",
+         int32_t(cvars::guide_subcommand), handler);
+
+  uint64_t args[] = {0x80000004ull, buffer, 0x20};
+  uint64_t result = ctx->processor->Execute(ctx->thread_state, handler, args,
+                                            xe::countof(args));
+  XELOGI("XamShowGuideUI: handler returned {:08X}",
+         static_cast<uint32_t>(result));
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamShowGuideUI, kNone, kSketchy);
 
 dword_result_t XamUnregisterSysApp_entry(dword_t app_id) {
   XELOGI("XamUnregisterSysApp: id={:08X}", uint32_t(app_id));

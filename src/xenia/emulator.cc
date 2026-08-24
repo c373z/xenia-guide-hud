@@ -1851,6 +1851,33 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
           attach(dll_mod);
           XELOGI("Bootstrap: attach sequence complete");
 
+          // If a system app registered a message handler (hud.xex registers
+          // as app 0xFF), optionally dispatch the Guide open message to it.
+          if (cvars::lle_show_guide) {
+            uint32_t guide_handler = ks->sys_app_handler(0xFF);
+            if (guide_handler) {
+              auto* mem = ks->memory();
+              uint32_t inner = mem->SystemHeapAlloc(0x20, 16);
+              uint32_t buf = mem->SystemHeapAlloc(0x20, 16);
+              std::memset(mem->TranslateVirtual(inner), 0, 0x20);
+              std::memset(mem->TranslateVirtual(buf), 0, 0x20);
+              auto* iw = mem->TranslateVirtual<xe::be<uint32_t>*>(inner);
+              iw[2] = static_cast<uint32_t>(cvars::guide_subcommand);
+              auto* bw = mem->TranslateVirtual<xe::be<uint32_t>*>(buf);
+              bw[0] = 1;
+              bw[1] = inner;
+              XELOGI("Bootstrap: Guide dispatch msg=80000004 subcmd={} -> {:08X}",
+                     int32_t(cvars::guide_subcommand), guide_handler);
+              uint64_t gargs[] = {0x80000004ull, buf, 0x20};
+              uint64_t gres = ks->processor()->Execute(ts, guide_handler, gargs,
+                                                       xe::countof(gargs));
+              XELOGI("Bootstrap: Guide handler returned {:08X}",
+                     static_cast<uint32_t>(gres));
+            } else {
+              XELOGW("Bootstrap: no system app 0xFF handler registered");
+            }
+          }
+
           if (cvars::lle_show_guide && xam_mod) {
             // XamShowGuideUI == xam ordinal 0x304.
             uint32_t guide_addr = xam_mod->GetProcAddressByOrdinal(0x304);
