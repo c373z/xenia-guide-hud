@@ -1959,6 +1959,8 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
               uint32_t inner = mem->SystemHeapAlloc(0x500, 16);
               uint32_t buf = mem->SystemHeapAlloc(0x40, 16);
               uint32_t out_sz = mem->SystemHeapAlloc(0x10, 16);
+              XELOGI("Guide: buffers inner={:08X} buf={:08X} out_sz={:08X}",
+                     inner, buf, out_sz);
               std::memset(mem->TranslateVirtual(inner), 0, 0x500);
               std::memset(mem->TranslateVirtual(buf), 0, 0x40);
               std::memset(mem->TranslateVirtual(out_sz), 0, 0x10);
@@ -2066,6 +2068,8 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
               uint32_t inner = mem->SystemHeapAlloc(0x500, 16);
               uint32_t buf = mem->SystemHeapAlloc(0x40, 16);
               uint32_t out_sz = mem->SystemHeapAlloc(0x10, 16);
+              XELOGI("Guide: buffers inner={:08X} buf={:08X} out_sz={:08X}",
+                     inner, buf, out_sz);
               std::memset(mem->TranslateVirtual(inner), 0, 0x500);
               std::memset(mem->TranslateVirtual(buf), 0, 0x40);
               std::memset(mem->TranslateVirtual(out_sz), 0, 0x10);
