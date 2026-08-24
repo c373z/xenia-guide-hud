@@ -2454,7 +2454,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                 if (cvars::lle_xam_trace_loader && !loader_bp) {
                   loader_bp = std::make_unique<cpu::Breakpoint>(
                       ks->processor(), cpu::Breakpoint::AddressType::kGuest,
-                      0x81786788ull,
+                      0x8177F588ull,
                       [](cpu::Breakpoint* bp, cpu::ThreadDebugInfo* ti,
                          uint64_t host_pc) {
                         auto* th = kernel::XThread::GetCurrentThread();
@@ -2464,7 +2464,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                         }
                         auto* c = th->thread_state()->context();
                         XELOGI(
-                            "LoaderTrace: 81786788 r3={:08X} r4={:08X} "
+                            "LoaderTrace: 8177F588 r3={:08X} r4={:08X} "
                             "r5={:08X} r6={:08X}",
                             static_cast<uint32_t>(c->r[3]),
                             static_cast<uint32_t>(c->r[4]),
@@ -2473,20 +2473,56 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                       });
                   // AddBreakpoint installs it when the processor is running.
                   ks->processor()->AddBreakpoint(loader_bp.get());
-                  XELOGI("LoaderTrace: breakpoint installed at 81786788");
+                  XELOGI(
+                      "LoaderTrace: 8177F588 exec_state={} patched={} host={:X}",
+                      static_cast<int>(ks->processor()->execution_state()),
+                      loader_bp->backend_data().size(),
+                      loader_bp->backend_data().empty()
+                          ? 0ull
+                          : loader_bp->backend_data()[0].first);
                   // Control: the same mechanism on XamShowGuideUI's worker
-                  // (8178D730), which is definitely executed. If the control
+                  // (81787430), which is definitely executed. If the control
                   // never fires either, breakpoints are not working here and
                   // the loader result means nothing.
                   static std::unique_ptr<cpu::Breakpoint> ctl_bp;
                   ctl_bp = std::make_unique<cpu::Breakpoint>(
                       ks->processor(), cpu::Breakpoint::AddressType::kGuest,
-                      0x8178D730ull,
+                      0x81787430ull,
                       [](cpu::Breakpoint*, cpu::ThreadDebugInfo*, uint64_t) {
-                        XELOGI("LoaderTrace: CONTROL hit at 8178D730");
+                        XELOGI("LoaderTrace: CONTROL hit at 81787430");
                       });
-                  ks->processor()->AddBreakpoint(ctl_bp.get());
-                  XELOGI("LoaderTrace: control breakpoint at 8178D730");
+                  // Disabled: a breakpoint hit does not resume, so the entry
+                  // control kills the thread before the call site is reached.
+                  // ks->processor()->AddBreakpoint(ctl_bp.get());
+                  // XamShowGuideUI's unconditional callee: ghidra 8178D730,
+                  // runtime 8178D730 - 0x7200 = 81786530.
+                  static std::unique_ptr<cpu::Breakpoint> work_bp;
+                  work_bp = std::make_unique<cpu::Breakpoint>(
+                      ks->processor(), cpu::Breakpoint::AddressType::kGuest,
+                      0x81787470ull,
+                      [](cpu::Breakpoint*, cpu::ThreadDebugInfo*, uint64_t) {
+                        auto* th = kernel::XThread::GetCurrentThread();
+                        if (!th) {
+                          XELOGI("LoaderTrace: WORKER hit, no thread");
+                          return;
+                        }
+                        auto* c = th->thread_state()->context();
+                        XELOGI(
+                            "LoaderTrace: CALLSITE 81787470 r3={:08X} r4={:08X} "
+                            "r5={:08X}",
+                            static_cast<uint32_t>(c->r[3]),
+                            static_cast<uint32_t>(c->r[4]),
+                            static_cast<uint32_t>(c->r[5]));
+                      });
+                  // Disabled for this run: one hit per session (see below).
+                  // ks->processor()->AddBreakpoint(work_bp.get());
+                  XELOGI("LoaderTrace: 81787470 patched={}",
+                         work_bp->backend_data().size());
+                  XELOGI("LoaderTrace: 81787430 patched={} host={:X}",
+                         ctl_bp->backend_data().size(),
+                         ctl_bp->backend_data().empty()
+                             ? 0ull
+                             : ctl_bp->backend_data()[0].first);
                 }
                 if (cvars::lle_xam_app_host) {
                   uint32_t load_fn =
