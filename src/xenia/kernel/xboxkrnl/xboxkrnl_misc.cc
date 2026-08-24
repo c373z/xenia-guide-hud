@@ -176,6 +176,84 @@ dword_result_t VdReadDVERegisterUlong_entry(dword_t offset) {
 }
 DECLARE_XBOXKRNL_EXPORT1(VdReadDVERegisterUlong, kNone, kStub);
 
+// --- Event tracing (Etx) -----------------------------------------------
+// xam registers several trace producers during init. No tracing backend is
+// emulated; report success so registration does not fail the caller.
+dword_result_t EtxProducerRegister_entry(dword_t a, dword_t b, dword_t c,
+                                         dword_t d) {
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XBOXKRNL_EXPORT1(EtxProducerRegister, kNone, kStub);
+
+dword_result_t EtxProducerUnregister_entry(dword_t handle) {
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XBOXKRNL_EXPORT1(EtxProducerUnregister, kNone, kStub);
+
+dword_result_t EtxProducerLog_entry(dword_t a, dword_t b, dword_t c,
+                                    dword_t d) {
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XBOXKRNL_EXPORT2(EtxProducerLog, kNone, kStub, kHighFrequency);
+
+// --- Driver callback registration --------------------------------------
+// xam installs these callbacks so drivers can notify it of state changes.
+// Nothing drives them in Xenia; accept the registration and drop it.
+dword_result_t DrvSetAudioLatencyCallback_entry(lpvoid_t callback) {
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XBOXKRNL_EXPORT1(DrvSetAudioLatencyCallback, kNone, kStub);
+
+dword_result_t DrvSetContentStorageCallback_entry(lpvoid_t callback) {
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XBOXKRNL_EXPORT1(DrvSetContentStorageCallback, kNone, kStub);
+
+dword_result_t DrvSetDeviceConfigChangeCallback_entry(lpvoid_t callback) {
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XBOXKRNL_EXPORT1(DrvSetDeviceConfigChangeCallback, kNone, kStub);
+
+dword_result_t DrvSetMicArrayStartCallback_entry(lpvoid_t callback) {
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XBOXKRNL_EXPORT1(DrvSetMicArrayStartCallback, kNone, kStub);
+
+dword_result_t DrvSetUserBindingCallback_entry(lpvoid_t callback) {
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XBOXKRNL_EXPORT1(DrvSetUserBindingCallback, kNone, kStub);
+
+dword_result_t XInputdSetFailedConnectionOrBindCallback_entry(
+    lpvoid_t callback) {
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XBOXKRNL_EXPORT1(XInputdSetFailedConnectionOrBindCallback, kNone,
+                         kStub);
+
+// --- Misc hardware queries ---------------------------------------------
+// Reason the console powered on. 0x01 = power button.
+dword_result_t HalGetPowerUpCause_entry() { return 0x01; }
+DECLARE_XBOXKRNL_EXPORT1(HalGetPowerUpCause, kNone, kStub);
+
+dword_result_t XeKeysGetStatus_entry(lpdword_t status_out) {
+  if (status_out) {
+    *status_out = 0;
+  }
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XBOXKRNL_EXPORT1(XeKeysGetStatus, kNone, kStub);
+
+// Serializes shimmed module loads. No shim database is emulated.
+dword_result_t XexShimLock_entry() { return X_STATUS_SUCCESS; }
+DECLARE_XBOXKRNL_EXPORT1(XexShimLock, kNone, kStub);
+
+dword_result_t KeSetPriorityClassThread_entry(lpvoid_t thread_ptr,
+                                              dword_t priority_class) {
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XBOXKRNL_EXPORT1(KeSetPriorityClassThread, kNone, kStub);
+
 }  // namespace xboxkrnl
 }  // namespace kernel
 }  // namespace xe
