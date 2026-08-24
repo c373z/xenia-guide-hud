@@ -1916,6 +1916,64 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
     return X_STATUS_UNSUCCESSFUL;
   }
   main_thread_ = main_thread;
+
+  // Optionally load the Guide (hud.xex) as a system app alongside the title.
+  // It is an overlay: it needs a title running underneath for graphics, so
+  // this happens after the main thread exists.
+  if (!cvars::guide_hud_path.empty()) {
+    auto* ks = kernel_state_.get();
+    std::string hud_path = cvars::guide_hud_path;
+    auto hud_boot =
+        kernel::object_ref<kernel::XHostThread>(new kernel::XHostThread(
+            ks, 1024 * 1024, 0, [ks, hud_path]() -> int {
+              // Give the title time to bring up graphics before overlaying.
+              xe::threading::Sleep(std::chrono::seconds(8));
+              XELOGI("Guide: loading {}", hud_path);
+              auto hud = ks->LoadUserModule(hud_path, false);
+              if (!hud) {
+                XELOGE("Guide: failed to load {}", hud_path);
+                return 1;
+              }
+              if (XFAILED(ks->FinishLoadingUserModule(hud, false))) {
+                XELOGE("Guide: failed to finish loading");
+                return 1;
+              }
+              auto* ts = kernel::XThread::GetCurrentThread()->thread_state();
+              uint64_t args[] = {hud->handle(), 1 /* PROCESS_ATTACH */, 0};
+              XELOGI("Guide: DllMain entry={:08X}", hud->entry_point());
+              ks->processor()->Execute(ts, hud->entry_point(), args,
+                                       xe::countof(args));
+              XELOGI("Guide: DllMain returned");
+
+              uint32_t h = ks->sys_app_handler(0xFF);
+              if (!h) {
+                XELOGW("Guide: hud did not register app 0xFF");
+                return 1;
+              }
+              auto* mem = ks->memory();
+              uint32_t inner = mem->SystemHeapAlloc(0x20, 16);
+              uint32_t buf = mem->SystemHeapAlloc(0x20, 16);
+              std::memset(mem->TranslateVirtual(inner), 0, 0x20);
+              std::memset(mem->TranslateVirtual(buf), 0, 0x20);
+              auto* iw = mem->TranslateVirtual<xe::be<uint32_t>*>(inner);
+              iw[2] = static_cast<uint32_t>(cvars::guide_subcommand);
+              auto* bw = mem->TranslateVirtual<xe::be<uint32_t>*>(buf);
+              bw[0] = 1;
+              bw[1] = inner;
+              XELOGI("Guide: dispatch msg=80000004 subcmd={} -> {:08X}",
+                     int32_t(cvars::guide_subcommand), h);
+              uint64_t gargs[] = {0x80000004ull, buf, 0x20};
+              uint64_t r = ks->processor()->Execute(ts, h, gargs,
+                                                    xe::countof(gargs));
+              XELOGI("Guide: handler returned {:08X}",
+                     static_cast<uint32_t>(r));
+              return 0;
+            }));
+    hud_boot->set_name("Guide Loader");
+    if (XFAILED(hud_boot->Create())) {
+      XELOGE("Guide: failed to create loader thread");
+    }
+  }
   on_launch(title_id_.value(), title_name_);
 
   // Plugins must be loaded after calling LaunchModule() and

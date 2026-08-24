@@ -24,3 +24,8 @@ DEFINE_bool(lle_show_guide, false,
             "After the LLE attach sequence, call the real xam's "
             "XamShowGuideUI (ordinal 0x304) to open the Xbox Guide.",
             "Kernel");
+DEFINE_string(guide_hud_path, "",
+              "Guest path to hud.xex (e.g. \"GAME:\\hud.xex\"). When set, the "
+              "Guide is loaded as a system app alongside the running title and "
+              "the open message is dispatched to it.",
+              "Kernel");
