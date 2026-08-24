@@ -571,6 +571,64 @@ DECLARE_XBOXKRNL_EXPORT2(VdRetrainEDRAM, kVideo, kStub, kHighFrequency);
 dword_result_t VdSetStudioRGBMode_entry(dword_t mode) { return 0; }
 DECLARE_XBOXKRNL_EXPORT1(VdSetStudioRGBMode, kVideo, kStub);
 
+static uint32_t guide_bs_hud_base_ = 0;
+static uint32_t guide_bs_obj_ = 0;
+static bool guide_bs_use_title_device_ = false;
+static std::atomic<bool> guide_bs_pending_{false};
+
+void QueueGuideBootstrap(uint32_t hud_base, uint32_t guide_obj,
+                         bool use_title_device) {
+  guide_bs_hud_base_ = hud_base;
+  guide_bs_obj_ = guide_obj;
+  guide_bs_use_title_device_ = use_title_device;
+  guide_bs_pending_ = true;
+}
+
+// Runs the XUI bootstrap on the title's render thread. Everything that touches
+// the device must happen here: doing it from the Guide's own thread makes the
+// guest D3D runtime refuse with "trying to use a D3D device object that is
+// owned by a different thread".
+static void RunGuideBootstrapOnTitleThread(XThread* thread) {
+  auto* memory = kernel_state()->memory();
+  auto rd = [&](uint32_t a) {
+    return xe::load_and_swap<uint32_t>(memory->TranslateVirtual(a));
+  };
+  auto* processor = kernel_state()->processor();
+  auto* ts = thread->thread_state();
+
+  if (guide_bs_use_title_device_) {
+    uint32_t title_dev = rd(0x801E6FC4u);
+    if (title_dev) {
+      xe::store_and_swap<uint32_t>(memory->TranslateVirtual(0x81D43684u),
+                                   title_dev);
+      XELOGI("GuideBootstrap: xam device global -> title device {:08X}",
+             title_dev);
+    }
+  }
+
+  uint64_t a0[] = {0};
+  uint64_t hr = processor->Execute(ts, 0x8178DC58u, a0, xe::countof(a0));
+  XELOGI("GuideBootstrap: render host -> {:08X}, XUI ctx {:08X}",
+         static_cast<uint32_t>(hr), rd(0x81D6C978u));
+
+  uint32_t dcp = memory->SystemHeapAlloc(16, 16);
+  uint64_t a1[] = {dcp};
+  uint64_t dr = processor->Execute(ts, 0x818FB038u, a1, xe::countof(a1));
+  XELOGI("GuideBootstrap: XuiRenderCreateDC -> {:08X} dc={:08X}",
+         static_cast<uint32_t>(dr), rd(dcp));
+
+  uint32_t render_obj = guide_bs_obj_ + 16;
+  xe::store_and_swap<uint32_t>(memory->TranslateVirtual(render_obj + 20), 1u);
+  uint64_t a2[] = {render_obj, 0};
+  uint64_t ir = processor->Execute(ts, guide_bs_hud_base_ + 0xA898u, a2,
+                                   xe::countof(a2));
+  XELOGI("GuideBootstrap: hud init -> {:08X}  +8={:08X} +12={:08X}",
+         static_cast<uint32_t>(ir), rd(render_obj + 8), rd(render_obj + 12));
+
+  SetGuideDrawHook(guide_bs_hud_base_ + 0xAB28u, render_obj);
+  XELOGI("GuideBootstrap: draw hook installed on title thread");
+}
+
 void VdSwap_entry(
     lpvoid_t buffer_ptr,        // ptr into primary ringbuffer
     lpvoid_t fetch_ptr,         // frontbuffer Direct3D 9 texture header fetch
@@ -596,6 +654,12 @@ void VdSwap_entry(
   // before its swap - which is where the Guide is drawn on hardware. The
   // title calls VdCallGraphicsNotificationRoutines only once at startup, so
   // that is not the per-frame path.
+  if (guide_bs_pending_.exchange(false)) {
+    auto* bth = XThread::GetCurrentThread();
+    if (bth) {
+      RunGuideBootstrapOnTitleThread(bth);
+    }
+  }
   if (guide_draw_fn_ && guide_draw_this_) {
     static thread_local bool in_guide_draw = false;
     auto* gth = XThread::GetCurrentThread();

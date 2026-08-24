@@ -35,6 +35,12 @@ DEFINE_uint32(xbox_hardware_info_flags, 0x20,
               "0x200 of this word, so without that bit xam never creates a "
               "device and the Guide can never get a render context.",
               "Kernel");
+DEFINE_bool(guide_bootstrap_on_title_thread, true,
+            "Run the whole XUI bootstrap (render host, CreateDC, hud init) "
+            "from inside the title's swap, on the title's render thread. The "
+            "title's D3D device is thread-affine, so doing any of it from the "
+            "Guide's own thread is refused by the guest D3D runtime.",
+            "Kernel");
 DEFINE_bool(guide_use_title_device, true,
             "Point xam's D3D device global (81D43684) at the title's device "
             "from VdGlobalDevice (801E6FC4) before running xam's XUI render "

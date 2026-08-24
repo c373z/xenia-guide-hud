@@ -25,6 +25,12 @@ void VdQueryVideoMode(X_VIDEO_MODE* video_mode, bool is_internal_resolution);
 // from there. Pass fn = 0 to clear.
 void SetGuideDrawHook(uint32_t fn, uint32_t self);
 
+// Queue the whole XUI bootstrap to run on the title's render thread. The
+// title's D3D device is thread-affine, so every XUI call that touches it -
+// render host, CreateDC, hud's init - has to happen there, not just the draw.
+void QueueGuideBootstrap(uint32_t hud_base, uint32_t guide_obj,
+                         bool use_title_device);
+
 }  // namespace xboxkrnl
 }  // namespace kernel
 }  // namespace xe

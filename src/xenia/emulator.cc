@@ -1220,6 +1220,14 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                          rd(0x801E6FC8u));
                 }
               }
+              if (cvars::guide_bootstrap_on_title_thread) {
+                kernel::xboxkrnl::QueueGuideBootstrap(
+                    hud_base, obj, cvars::guide_use_title_device);
+                XELOGI("Guide button: queued XUI bootstrap for the title "
+                       "thread (hud {:08X}, obj {:08X})",
+                       hud_base, obj);
+                return 0;
+              }
               if (cvars::guide_use_title_device) {
                 uint32_t title_dev = rd(0x801E6FC4u);
                 if (title_dev) {
