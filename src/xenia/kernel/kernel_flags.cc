@@ -20,3 +20,7 @@ DEFINE_string(lle_xam, "",
               "against its real export table instead of Xenia's HLE xam. "
               "Leave blank to use the HLE xam.",
               "Kernel");
+DEFINE_bool(lle_show_guide, false,
+            "After the LLE attach sequence, call the real xam's "
+            "XamShowGuideUI (ordinal 0x304) to open the Xbox Guide.",
+            "Kernel");

@@ -1793,6 +1793,22 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
           attach(xam_mod);
           attach(dll_mod);
           XELOGI("Bootstrap: attach sequence complete");
+
+          if (cvars::lle_show_guide && xam_mod) {
+            // XamShowGuideUI == xam ordinal 0x304.
+            uint32_t guide_addr = xam_mod->GetProcAddressByOrdinal(0x304);
+            XELOGI("Bootstrap: XamShowGuideUI (ord 0x304) -> {:08X}",
+                   guide_addr);
+            if (guide_addr) {
+              uint64_t guide_args[] = {0};
+              uint64_t guide_ret = ks->processor()->Execute(
+                  ts, guide_addr, guide_args, xe::countof(guide_args));
+              XELOGI("Bootstrap: XamShowGuideUI returned {:08X}",
+                     static_cast<uint32_t>(guide_ret));
+            } else {
+              XELOGE("Bootstrap: could not resolve XamShowGuideUI");
+            }
+          }
           return 0;
         }));
     boot->set_name("Guide Bootstrap");
