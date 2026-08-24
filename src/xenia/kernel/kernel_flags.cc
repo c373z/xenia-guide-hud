@@ -20,6 +20,11 @@ DEFINE_string(lle_xam, "",
               "against its real export table instead of Xenia's HLE xam. "
               "Leave blank to use the HLE xam.",
               "Kernel");
+DEFINE_bool(lle_xam_xui_init, false,
+            "Call xam's XUI class registrars (8199BE08, 817503E8, 8176B2C8) "
+            "before opening the Guide. They register the built-in XUI classes "
+            "and have no callers inside xam, so nothing drives them here.",
+            "Kernel");
 DEFINE_bool(lle_xam_heap0_alias, false,
             "Copy xam heap[1]'s descriptor over heap[0], which is left as the "
             "0xCCCC placeholder. Requests in the 0x10000000 class map to index "

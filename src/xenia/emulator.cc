@@ -2078,6 +2078,23 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
               // 91400690. Every other message loads that object and would
               // dereference null if it does not exist yet, so always create
               // first.
+              // hud's scenes derive from XUI built-ins ("BaseScene" has parent
+              // "XuiScene"), and CBaseScene::Register fails with 0x80300006
+              // because the parent is not in xam's class registry. The
+              // registrars that populate it have no callers anywhere inside
+              // xam - something outside the module drives them on hardware,
+              // the same shape as the heap-init routine. Drive them here.
+              if (cvars::lle_xam_xui_init) {
+                for (uint32_t reg : {0x81AA7320u, 0x8174FF38u, 0x81750350u,
+                                      0x817503E8u, 0x8199BE08u, 0x8176B2C8u}) {
+                  uint64_t rargs[] = {0};
+                  XELOGI("Guide: XUI registrar {:08X}", reg);
+                  uint64_t rr = ks->processor()->Execute(ts, reg, rargs,
+                                                         xe::countof(rargs));
+                  XELOGI("Guide: registrar {:08X} returned {:08X}", reg,
+                         static_cast<uint32_t>(rr));
+                }
+              }
               XELOGI("Guide: create msg=80000004 subcmd={} -> {:08X}",
                      int32_t(cvars::guide_subcommand), h);
               uint64_t cargs[] = {0x80000004ull, buf, out_sz};
