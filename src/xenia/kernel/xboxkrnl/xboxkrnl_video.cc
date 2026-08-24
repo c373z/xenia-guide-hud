@@ -7,6 +7,7 @@
  ******************************************************************************
  */
 
+#include "xenia/kernel/kernel_flags.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_video.h"
 
 #include "xenia/base/logging.h"
@@ -623,6 +624,19 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
            "[1]={:08X} [2]={:08X}",
            prov, pvt, pvt ? rd(pvt) : 0, pvt ? rd(pvt + 4) : 0,
            pvt ? rd(pvt + 8) : 0);
+  }
+  // Run xam's extra XUI class registrars here, AFTER the host has called
+  // XuiInit. Running them before (lle_xam_xui_init) made XuiInit fail on the
+  // duplicate "XuiElement" - see phase 67. Classes and cached resources share
+  // the registry at 81D6D508, and a scene cannot instantiate a class that is
+  // not in it.
+  if (::cvars::guide_register_classes) {
+    for (uint32_t reg : {0x817503E8u, 0x8199BE08u, 0x8176B2C8u}) {
+      uint64_t rargs[] = {0};
+      uint64_t rr = processor->Execute(ts, reg, rargs, xe::countof(rargs));
+      XELOGI("GuideBootstrap: registrar {:08X} -> {:08X}", reg,
+             static_cast<uint32_t>(rr));
+    }
   }
   uint32_t dcp = memory->SystemHeapAlloc(16, 16);
   uint64_t a1[] = {dcp};

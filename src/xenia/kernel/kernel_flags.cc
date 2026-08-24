@@ -35,6 +35,14 @@ DEFINE_uint32(xbox_hardware_info_flags, 0x20,
               "0x200 of this word, so without that bit xam never creates a "
               "device and the Guide can never get a render context.",
               "Kernel");
+DEFINE_bool(guide_register_classes, false,
+            "Run xam's extra XUI class registrars (817503E8, 8199BE08, "
+            "8176B2C8) from the title thread AFTER XuiInit. All three return 0 "
+            "there, unlike lle_xam_xui_init which runs them before XuiInit and "
+            "makes it fail on the duplicate XuiElement. Defaults OFF: with the "
+            "classes registered the scene creator gets further and then hangs "
+            "the title thread, freezing the dashboard.",
+            "Kernel");
 DEFINE_string(guide_skin_path, "",
               "Guest path to hud's XUI skin package. hud builds its resource "
               "locators with XamBuildResourceLocator(module, \"hud\", "
