@@ -1812,10 +1812,25 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
     // This must happen before DllMain runs, or the JIT may already have cached
     // the untranslated block.
     if (cvars::lle_xam_heap_patch) {
-      auto* p = memory()->TranslateVirtual(0x817BAE38u - 0x7200u);
-      XELOGI("LLE xam: heap trap was {:08X}, patching to b +4",
-             xe::load_and_swap<uint32_t>(p));
-      xe::store_and_swap<uint32_t>(p, 0x48000004u);
+      const uint32_t trap_addr = 0x817BAE38u - 0x7200u;
+      auto* p = memory()->TranslateVirtual(trap_addr);
+      // Guest code pages are mapped read-only, so the store faults unless the
+      // page is temporarily made writable first.
+      auto* heap = memory()->LookupHeap(trap_addr);
+      uint32_t old_protect = 0;
+      bool unprotected =
+          heap && heap->Protect(trap_addr, 4,
+                                kMemoryProtectRead | kMemoryProtectWrite,
+                                &old_protect);
+      XELOGI("LLE xam: heap trap was {:08X}, unprotect={} old_protect={:X}",
+             xe::load_and_swap<uint32_t>(p), unprotected, old_protect);
+      if (unprotected) {
+        xe::store_and_swap<uint32_t>(p, 0x48000004u);
+        XELOGI("LLE xam: heap trap now {:08X}", xe::load_and_swap<uint32_t>(p));
+        heap->Protect(trap_addr, 4, old_protect, nullptr);
+      } else {
+        XELOGE("LLE xam: could not unprotect trap page, leaving it intact");
+      }
     }
     // xam selects its heap from the "current app id", which its getter
     // derives from KeGetCurrentProcessType when there is no per-thread app

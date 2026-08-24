@@ -20,7 +20,7 @@ DEFINE_string(lle_xam, "",
               "against its real export table instead of Xenia's HLE xam. "
               "Leave blank to use the HLE xam.",
               "Kernel");
-DEFINE_bool(lle_xam_heap_patch, true,
+DEFINE_bool(lle_xam_heap_patch, false,
             "Patch out the trap in xam's heap selector (817BAE38) so title "
             "threads whose app id differs from the current one still resolve "
             "a real heap instead of the zero-sized placeholder.",
