@@ -35,6 +35,13 @@ DEFINE_uint32(xbox_hardware_info_flags, 0x20,
               "0x200 of this word, so without that bit xam never creates a "
               "device and the Guide can never get a render context.",
               "Kernel");
+DEFINE_bool(guide_create_scene, true,
+            "Call the Guide object's vtable[27] (hud 913EB940) after its XUI "
+            "init. That slot is one of hud's five XuiSceneCreate sites, and "
+            "the root XUI element at [guide+8] - which the draw hands to "
+            "XuiElementLayoutTree - is null without it, so the draw succeeds "
+            "while laying out nothing.",
+            "Kernel");
 DEFINE_bool(guide_create_xam_device, false,
             "Call xam's D3D device creation (runtime 8178F748). It is the "
             "only site that takes the address of xam's device global "

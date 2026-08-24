@@ -17,6 +17,7 @@ DECLARE_string(lle_xam);
 DECLARE_bool(lle_xam_trace_loader);
 DECLARE_bool(lle_xam_app_host);
 DECLARE_uint32(xbox_hardware_info_flags);
+DECLARE_bool(guide_create_scene);
 DECLARE_bool(guide_create_xam_device);
 DECLARE_bool(guide_call_render_host);
 DECLARE_bool(guide_call_xuiinit);

@@ -1141,7 +1141,7 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                   ks->memory()->TranslateVirtual(obj));
               XELOGI("Guide button: obj={:08X} vtable={:08X}", obj, vt);
               if (vt) {
-                for (int i = 0; i < 24; ++i) {
+                for (int i = 0; i < 48; ++i) {
                   uint32_t fn = xe::load_and_swap<uint32_t>(
                       ks->memory()->TranslateVirtual(vt + i * 4));
                   XELOGI("Guide button: vtable[{}] = {:08X}", i, fn);
@@ -1161,7 +1161,8 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
               }
               XELOGI("Guide button: pre-init  +8={:08X} +12={:08X} "
                      "+20={:08X}",
-                     rd(obj + 8), rd(obj + 12), rd(obj + 20));
+                     rd(obj + 16 + 8), rd(obj + 16 + 12),
+                     rd(obj + 16 + 20));
               // [obj+20] gates DC creation in the init at hud+0xA898 and is
               // never dereferenced there (the register is reloaded from
               // [obj+12] immediately after the test), so forcing it non-zero
@@ -1238,18 +1239,32 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
               }
               if (cvars::guide_force_render_gate) {
                 xe::store_and_swap<uint32_t>(
-                    ks->memory()->TranslateVirtual(obj + 20), 1u);
+                    ks->memory()->TranslateVirtual(obj + 16 + 20), 1u);
               }
-              uint64_t ia[] = {obj};
+              uint64_t ia[] = {obj + 16, 0};
               uint64_t ir = ks->processor()->Execute(ts, hud_base + 0xA898u,
                                                      ia, xe::countof(ia));
+              if (cvars::guide_create_scene) {
+                uint32_t cvt2 = rd(obj);
+                uint32_t scene_fn = cvt2 ? rd(cvt2 + 27 * 4) : 0;
+                XELOGI("Guide button: scene fn (vtable[27]) = {:08X}",
+                       scene_fn);
+                if (scene_fn) {
+                  uint64_t sa[] = {obj};
+                  uint64_t sr = ks->processor()->Execute(ts, scene_fn, sa,
+                                                         xe::countof(sa));
+                  XELOGI("Guide button: scene create -> {:08X}, +8 now {:08X}",
+                         static_cast<uint32_t>(sr), rd(obj + 16 + 8));
+                }
+              }
               XELOGI("Guide button: post-init +8={:08X} +12={:08X} "
                      "+20={:08X}",
-                     rd(obj + 8), rd(obj + 12), rd(obj + 20));
+                     rd(obj + 16 + 8), rd(obj + 16 + 12),
+                     rd(obj + 16 + 20));
               XELOGI("Guide button: XUI init returned {:08X}",
                      static_cast<uint32_t>(ir));
               for (int frame = 0; frame < 3600; ++frame) {
-                uint64_t da[] = {obj};
+                uint64_t da[] = {obj + 16};
                 uint64_t dr = ks->processor()->Execute(
                     ts, hud_base + 0xAB28u, da, xe::countof(da));
                 if (frame < 3) {
