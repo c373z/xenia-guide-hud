@@ -986,6 +986,24 @@ DECLARE_XAM_EXPORT1(XamFitnessClearBodyProfileRecords, kNone, kStub);
 dword_result_t XdfInitialize_entry(lpvoid_t param) { return X_ERROR_SUCCESS; }
 DECLARE_XAM_EXPORT1(XdfInitialize, kNone, kStub);
 
+// System apps (hud.xex, signin.xex, ...) register themselves with xam so
+// XMsgInProcessCall can route messages to them. Xenia's app manager owns a
+// fixed set of HLE apps, so accept the registration and record it.
+dword_result_t XamRegisterSysApp_entry(dword_t app_id, lpvoid_t handler,
+                                       lpvoid_t context, dword_t flags) {
+  XELOGI("XamRegisterSysApp: id={:08X} handler={:08X} context={:08X} flags={:08X}",
+         uint32_t(app_id), handler.guest_address(), context.guest_address(),
+         uint32_t(flags));
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamRegisterSysApp, kNone, kStub);
+
+dword_result_t XamUnregisterSysApp_entry(dword_t app_id) {
+  XELOGI("XamUnregisterSysApp: id={:08X}", uint32_t(app_id));
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamUnregisterSysApp, kNone, kStub);
+
 }  // namespace xam
 }  // namespace kernel
 }  // namespace xe
