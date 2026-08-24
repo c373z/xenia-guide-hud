@@ -1992,6 +1992,36 @@ void ExTerminateTitleProcess_entry(dword_t exit_code, dword_t unk,
       break;
     }
     XELOGE("  frame[{}] lr={:08X}  (xam ghidra {:08X})", i, lr, lr + 0x7200u);
+    // 81780EE0 virtual-calls [r31+48]; r31 is saved in its frame by
+    // __savegprs. Dump the words just below the frame so the saved
+    // registers (and the object pointer) are visible.
+    if (i <= 1) {
+      std::string dump;
+      for (int k = 1; k <= 10; ++k) {
+        dump += fmt::format("{:08X} ", xe::load_and_swap<uint32_t>(
+            mem->TranslateVirtual(next - k * 4)));
+      }
+      XELOGE("    saved below frame[{}]: {}", i, dump);
+      // 81780EE0 receives obj = [ctx+12] and calls [obj+48]. The saved
+      // word 3 slots below the frame is that object; dump it so the
+      // function pointer in slot 48 is visible.
+      if (i == 0) {
+        uint32_t obj = xe::load_and_swap<uint32_t>(
+            mem->TranslateVirtual(next - 12));
+        if (obj >= 0x40000000u && obj < 0x50000000u) {
+          std::string od;
+          for (int k = 0; k < 16; ++k) {
+            od += fmt::format("{:08X} ", xe::load_and_swap<uint32_t>(
+                mem->TranslateVirtual(obj + k * 4)));
+          }
+          uint32_t fn = xe::load_and_swap<uint32_t>(
+              mem->TranslateVirtual(obj + 48));
+          XELOGE("    obj @{:08X}: {}", obj, od);
+          XELOGE("    [obj+48] = {:08X}  (xam ghidra {:08X})", fn,
+                 fn + 0x7200u);
+        }
+      }
+    }
     sp = next;
   }
 }
