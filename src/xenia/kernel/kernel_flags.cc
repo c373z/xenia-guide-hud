@@ -309,6 +309,14 @@ DEFINE_bool(guide_fake_front_buffer, false,
             "and would have its own memory.",
             "Kernel");
 
+DEFINE_bool(guide_bootstrap_create_dc, true,
+            "Have the bootstrap call XuiRenderCreateDC itself. hud creates its "
+            "own device context during scene creation and the composite draw "
+            "uses that one, not this one - the bootstrap's DC has a different "
+            "address and is never drawn with. Off tests whether the call is "
+            "load-bearing or leftover scaffolding.",
+            "Kernel");
+
 DEFINE_bool(guide_watch_null_render, false,
             "Poll the XUI context global 81D6C978 and, once it is set, the "
             "null-render flag at [ctx+1C], logging every transition from a "

@@ -3225,3 +3225,33 @@ It also removes the last cheap filter. Without the global as an anchor, there
 is no static property that distinguishes the right `+0x1C` store from the other
 134, and no runtime opportunity because the code never executes. That is the
 end of what can be established about this field from the material available.
+
+## One bootstrap step is not load-bearing
+
+The bootstrap calls `XuiRenderCreateDC` itself, and hud separately creates its
+own device context during scene creation - the composite draw uses hud's, not
+ours. `guide_bootstrap_create_dc` makes our call optional. With it off:
+
+```
+GuideBootstrap: skipping our own XuiRenderCreateDC
+GuideBootstrap: scene creator 913EB940 -> 00000000, scene=00010000
+GuideBootstrap: draw hook installed on title thread
+Guide composite draw #1 -> 00000000; draw dc=40896490 [134]=00000001
+```
+
+Everything still works: scene created, hook installed, draw returns, no
+crashes. The draw's DC is now `40896490` - the address our spurious DC used to
+occupy, since the allocator reuses it.
+
+So that call was **leftover scaffolding**, not a requirement. It created a
+device context nothing ever drew with.
+
+This does not change the blocker - `[134]` is still `1`, as it must be, since
+the flag comes from the context rather than the DC. What it does is remove one
+invented step from the sequence, which matters for a bootstrap assembled by
+hand: every step that is not load-bearing is a step that could have been
+introducing its own behaviour.
+
+The cvar defaults on, so the documented signature in CONFIG.md is unchanged.
+Anyone building on this can turn it off and have one less thing to reason
+about.

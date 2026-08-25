@@ -848,8 +848,13 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
     }
   }
   uint32_t dcp = memory->SystemHeapAlloc(16, 16);
-  uint64_t a1[] = {dcp};
-  uint64_t dr = processor->Execute(ts, 0x818FB038u, a1, xe::countof(a1));
+  uint64_t dr = 0;
+  if (::cvars::guide_bootstrap_create_dc) {
+    uint64_t a1[] = {dcp};
+    dr = processor->Execute(ts, 0x818FB038u, a1, xe::countof(a1));
+  } else {
+    XELOGI("GuideBootstrap: skipping our own XuiRenderCreateDC");
+  }
   XELOGI("GuideBootstrap: XuiRenderCreateDC -> {:08X} dc={:08X}",
          static_cast<uint32_t>(dr), rd(dcp));
 
