@@ -2462,3 +2462,40 @@ elements go on screen.
 What it never does is issue a draw packet to rasterise any of it. That is a
 narrower and better-supported statement than the one this file started with,
 and it rules out the alternative explanation rather than leaving it open.
+
+## Locating the draw emitter
+
+A `DRAW_INDX` packet carries opcode `0x22` in bits 8-14 of its header, so code
+that builds one has `0x2200` as an immediate. Scanning xam for that finds 19
+sites in 17 functions, and one of them is already familiar:
+
+```
+fn 819F5D18  x2      <- the function that faulted on the null r14 descriptor
+```
+
+`819F5D18` is the **draw emitter**. That identifies the crash from several
+sections ago as happening inside the code that would have issued the Guide's
+draw calls, which is a much more specific thing than "somewhere in xam's D3D".
+
+Whether it runs at all differs by configuration:
+
+| configuration | composite draws | `819F5D18` reached |
+|---|---|---|
+| stable (`[dc+134]=1`) | 14+ | **no** |
+| deep (`[dc+134]=0`) | 1 | **yes**, then faults |
+
+Both halves are consistent with everything else here. In the stable
+configuration the null-render flag makes `XuiRenderBegin` skip its device call
+and `XuiRenderPresent` return without presenting, so the emitter is never
+reached and zero draws is the correct outcome, not a symptom. In the deep
+configuration the path is live, the emitter *is* reached, and it dies on a
+missing resource descriptor before emitting anything.
+
+So the earlier draw-count measurements were right but were measuring two
+different situations. The one that matters is the deep configuration, where
+exactly one thing stands between the Guide and real draw packets: the null
+sixth argument to `819F5D18`, the six-dword fetch constant traced earlier to
+`[device+3F74]`.
+
+That is the narrowest the problem has been. It is one pointer, in one call, in
+a function now known to be the thing that emits draws.
