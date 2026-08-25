@@ -309,6 +309,16 @@ DEFINE_bool(guide_fake_front_buffer, false,
             "and would have its own memory.",
             "Kernel");
 
+DEFINE_bool(guide_watch_null_render, false,
+            "Poll the XUI context global 81D6C978 and, once it is set, the "
+            "null-render flag at [ctx+1C], logging every transition from a "
+            "host thread. The flag is 1 by the time the render host returns "
+            "and no constant 1 is stored to that offset anywhere in the XUI "
+            "code, so the value is computed - watching when it appears "
+            "narrows which of the five candidate writers that actually "
+            "execute is responsible.",
+            "Kernel");
+
 DEFINE_bool(guide_watch_front_buffer, false,
             "Poll [device+3F74] - the front buffer - from a host thread and "
             "log every transition, for both xam device globals. A code "

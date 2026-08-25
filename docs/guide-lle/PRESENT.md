@@ -2700,3 +2700,34 @@ of dataflow away the whole time.
 What remains true and unexplained: `[xui_ctx+0x1C]` is `1` by the time the
 render host returns, no constant `1` is stored to that offset anywhere in the
 XUI range, and nothing observed clears it.
+
+## The flag is set before the context is published
+
+Of the 22 functions in the XUI range that store to a `+0x1C` field, five
+actually execute: `818F5288`, `818F5488`, `818FCE38`, `818FD0E8`, `81903580`.
+Rather than read all five, watch the value appear.
+
+`guide_watch_null_render` polls the context global every 250us from a host
+thread and logs every transition:
+
+```
+NullRenderWatch: ctx 00000000 -> 4088A0A0
+NullRenderWatch: [ctx+1C] FFFFFFFF -> 00000001
+```
+
+`FFFFFFFF` is the watcher's "not yet sampled" marker, so that second line is
+the **first** read of the field, not a transition. There is no `0 -> 1` at all:
+the flag already reads `1` the moment the context pointer becomes visible.
+
+So the value is written during construction, before the object is published to
+`81D6C978`. That is consistent with `818FF140` - the function that publishes
+the pointer - containing no store to `+0x1C`: by the time it stores the
+pointer, the field is already set by whatever built the object.
+
+It also means this particular instrument cannot go further. A host-side watch
+can only see a field once something tells it where the object is, and here the
+write happens strictly before that. Narrowing to which of the five wrote it
+needs the construction path read directly, not sampled.
+
+Small negative result, but it removes an approach: the flag cannot be caught in
+the act by polling, however fast.

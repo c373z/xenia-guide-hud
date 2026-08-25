@@ -1314,6 +1314,41 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                   XELOGI("CmdBufComplete: armed, {}s", delay);
                 }
               }
+              if (cvars::guide_watch_null_render) {
+                static bool nr_started = false;
+                if (!nr_started) {
+                  nr_started = true;
+                  auto* nm = ks->memory();
+                  std::thread([nm]() {
+                    xe::threading::set_name("NullRenderWatch");
+                    auto rd5 = [nm](uint32_t a) {
+                      return a ? xe::load_and_swap<uint32_t>(
+                                     nm->TranslateVirtual(a)) : 0u;
+                    };
+                    uint32_t last_ctx = 0, last_flag = 0xFFFFFFFF;
+                    for (int i = 0; i < 120000; ++i) {
+                      uint32_t ctx = rd5(0x81D6C978u);
+                      if (ctx != last_ctx) {
+                        XELOGI("NullRenderWatch: ctx {:08X} -> {:08X}",
+                               last_ctx, ctx);
+                        last_ctx = ctx;
+                        last_flag = 0xFFFFFFFF;
+                      }
+                      if (ctx) {
+                        uint32_t f = rd5(ctx + 0x1Cu);
+                        if (f != last_flag) {
+                          XELOGI("NullRenderWatch: [ctx+1C] {:08X} -> {:08X}",
+                                 last_flag, f);
+                          last_flag = f;
+                        }
+                      }
+                      std::this_thread::sleep_for(
+                          std::chrono::microseconds(250));
+                    }
+                  }).detach();
+                  XELOGI("NullRenderWatch: armed");
+                }
+              }
               if (cvars::guide_watch_front_buffer) {
                 static bool watch_started = false;
                 if (!watch_started) {

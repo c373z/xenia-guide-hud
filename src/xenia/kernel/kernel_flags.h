@@ -46,6 +46,7 @@ DECLARE_bool(guide_diff_draw_writes);
 DECLARE_int32(guide_syscmdbuf_buffer_kb);
 DECLARE_bool(guide_syscmdbuf_fields);
 DECLARE_bool(guide_fake_front_buffer);
+DECLARE_bool(guide_watch_null_render);
 DECLARE_bool(guide_watch_front_buffer);
 DECLARE_bool(guide_bind_depth_copy);
 DECLARE_bool(guide_use_bound_device);
