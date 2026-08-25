@@ -2540,3 +2540,42 @@ stand-ins.
 
 That is a limit worth naming clearly, because several sections here have leaned
 on deep-configuration measurements without it.
+
+## Re-checking the geometry finding without fabricated state
+
+The previous section warned that deep-configuration results measure my
+stand-ins rather than xam. The geometry evidence was one of those - the floats
+came from `GuideExec` logs in the deep configuration. Worth re-establishing
+where nothing is faked.
+
+Stable configuration, every fabrication cvar off (`create_primary_device`,
+`clear_null_render`, `use_bound_device`, `fake_front_buffer`,
+`syscmdbuf_fields` all false), diffing the composite draw and decoding the
+changed blocks as floats:
+
+```
+dump_408B0000 @+0x285C:  0.00  4.35  0.00  4.32  287.00  350.00  1.00  425.00
+dump_40950000 @+0x0058:  5.16 22.88  4.66  576.00  640.00  768.00  0.00  0.00
+dump_40880000 @+0x21FC:  3.41 68.73  4.25  4.25   4.25   4.29    0.00  0.00
+```
+
+`287`, `350`, `425` are screen coordinates. `576`, `640`, `768` are resolution
+values. The small clustered numbers around 4.2-4.8 look like per-element
+metrics repeated across a list.
+
+So the finding holds in the clean configuration: **the Guide lays out real UI
+geometry every frame, with no fabricated state involved.** The scene is
+populated, the layout runs, and coordinates are computed - all of that is
+genuine xam behaviour, not an artefact of the stand-ins.
+
+This is worth having separated. Of the major claims in this file:
+
+- **Stable configuration, nothing faked**: the software runs end to end; the
+  scene is created; a full XUI frame executes per swap; real geometry is laid
+  out; the Guide contributes exactly zero GPU draws; the draw emitter is never
+  reached because the null-render flag disables the path.
+- **Deep configuration, three pieces of fabricated state**: the present path
+  executes; the emitter is reached; it emits nothing.
+
+The first group stands on its own. The second describes what happens to a
+system I have partly assembled by hand, and should be read that way.
