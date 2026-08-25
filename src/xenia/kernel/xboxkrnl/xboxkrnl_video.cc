@@ -12,6 +12,7 @@
 
 #include "xenia/base/logging.h"
 #include "xenia/emulator.h"
+#include "xenia/gpu/command_processor.h"
 #include "xenia/gpu/graphics_system.h"
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/util/shim_utils.h"
@@ -1248,6 +1249,49 @@ void VdSwap_entry(
         XELOGI("DrawDiff: {} of {} blocks changed across the draw", changed,
                pre_sums.size());
         pre_sums.clear();
+      }
+      if (::cvars::guide_execute_command_stream) {
+        static bool ran = false;
+        if (!ran) {
+          ran = true;
+          auto* em = kernel_state()->memory();
+          auto rdc = [em](uint32_t a) {
+            return xe::load_and_swap<uint32_t>(em->TranslateVirtual(a));
+          };
+          // Walk from a block base to the first plausible type-3 header, then
+          // follow the chain while it stays self-consistent. Opcode 0x45
+          // COND_WRITE and 0x22 DRAW_INDX dominate what the Guide writes.
+          for (uint32_t base : {0xFE030000u, 0xFE040000u}) {
+            uint32_t start = 0, words = 0;
+            for (uint32_t i = 0; i < 0x4000; ++i) {
+              uint32_t w = rdc(base + i * 4);
+              if ((w >> 30) == 3) {
+                uint32_t cnt = ((w >> 16) & 0x3FFF) + 1;
+                if (cnt <= 64) { start = base + i * 4; break; }
+              }
+            }
+            if (!start) continue;
+            uint32_t i = (start - base) / 4;
+            while (i < 0x4000) {
+              uint32_t w = rdc(base + i * 4);
+              if (w == 0x80000000u) { i++; words++; continue; }
+              if ((w >> 30) != 3) break;
+              uint32_t cnt = ((w >> 16) & 0x3FFF) + 1;
+              if (cnt > 64 || i + 1 + cnt > 0x4000) break;
+              i += 1 + cnt;
+              words += 1 + cnt;
+            }
+            XELOGI("GuideExec: {:08X} chain starts {:08X}, {} words",
+                   base, start, words);
+            if (words > 8) {
+              auto* gs = kernel_state()->emulator()->graphics_system();
+              if (gs && gs->command_processor()) {
+                gs->command_processor()->ExecuteGuestBufferUnsafe(start, words);
+                XELOGI("GuideExec: submitted {:08X} +{} words", start, words);
+              }
+            }
+          }
+        }
       }
       static std::atomic<uint32_t> gdraws{0};
       uint32_t gn = ++gdraws;

@@ -224,6 +224,18 @@ DEFINE_bool(guide_system_process_type, false,
             "mode-1 device path is one place it matters. Restored afterwards.",
             "Kernel");
 
+DEFINE_bool(guide_execute_command_stream, false,
+            "After the Guide's composite draw, walk the PM4 stream it wrote "
+            "into FE03xxxx/FE04xxxx and run it through the command processor. "
+            "The Guide builds real draw calls every frame and nothing executes "
+            "them; this is the direct test of whether executing them puts "
+            "anything on screen. NOT thread safe - it drives the command "
+            "processor from the title thread - and is an experiment, not a "
+            "mechanism. The real path inserts an indirect buffer into the "
+            "title's stream, which is what xam's own InsertAsyncCommandBufferCall "
+            "diagnostic refers to.",
+            "Kernel");
+
 DEFINE_bool(guide_diff_draw_writes, false,
             "Checksum guest memory in 64KB blocks either side of the Guide's "
             "composite draw and report which blocks changed, flagging any that "

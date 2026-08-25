@@ -438,6 +438,19 @@ class CommandProcessor {
 
 #include "pm4_command_processor_declare.h"
 
+ public:
+  // Experimental entry point for running a command buffer the guest built but
+  // never submitted - the Guide's case, where xam writes a real PM4 stream
+  // into its own buffers and nothing consumes them. ExecuteIndirectBuffer is
+  // protected and normally only reached from packet dispatch on the command
+  // processor thread; calling this from elsewhere is NOT thread safe and is
+  // for investigation only.
+  void ExecuteGuestBufferUnsafe(uint32_t ptr, uint32_t count) {
+    ExecuteIndirectBuffer(ptr, count);
+  }
+
+ protected:
+
   virtual Shader* LoadShader(xenos::ShaderType shader_type,
                              uint32_t guest_address,
                              const uint32_t* host_address,

@@ -1426,3 +1426,43 @@ write"; it is "who executes what it wrote".
 
 Next step, and it is now a concrete one: point `ExecuteIndirectBuffer` at these
 buffers and see what reaches the screen.
+
+## Executing the stream: mechanism works, test inconclusive
+
+`ExecuteIndirectBuffer` is `protected` on `CommandProcessor`, reachable only
+from packet dispatch on the command processor thread. `ExecuteGuestBufferUnsafe`
+is a public wrapper added for this experiment, named to make its status
+obvious: driving the command processor from the title thread is not thread
+safe, and this is investigation code.
+
+`guide_execute_command_stream` walks the Guide's buffers after the draw and
+submits what it finds:
+
+```
+GuideExec: FE030000 chain starts FE038000, 41 words
+GuideExec: submitted FE038000 +41 words
+GuideExec: FE040000 chain starts FE040144, 12 words
+GuideExec: submitted FE040144 +12 words
+```
+
+Nothing crashes - the command processor accepts the packets - and the screen is
+unchanged.
+
+**That result is inconclusive, not negative.** The offline analysis found 370
+plausible type-3 headers in `FE040000` and 86 in `FE030000`; the runtime walker
+submitted **53 words in total**. It starts at the first plausible header and
+stops at the first inconsistency, and the packets are scattered between long
+runs of `0x80000000` NOP padding, so it captures a fragment and stops. Fifty-
+three words of a several-hundred-packet stream rendering nothing says nothing
+about the stream.
+
+What this actually exposes is that locating the stream's true start and extent
+is the problem. A command buffer's bounds are not discoverable by pattern
+matching - they come from the ring buffer's base, size and write pointer, which
+is precisely what `VdInitializeRingBuffer` would have established and what mode
+1 never reaches before it stalls.
+
+So the same missing bring-up that leaves xam's device without a ring buffer
+also leaves the stream it writes without discoverable bounds. Guessing the
+extent by walking headers is not a substitute, and the fragment submitted here
+should not be read as evidence either way.
