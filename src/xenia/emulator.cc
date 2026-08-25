@@ -1305,6 +1305,20 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                           if (!nh) {
                             continue;
                           }
+                          // Is the thread blocked, or dead? A terminated
+                          // thread also shows flat CPU, no kernel calls, no
+                          // waits and no faults - and would leave xam's XUI
+                          // critical section held forever, which is what the
+                          // title thread then blocks on.
+                          DWORD exit_code = 0;
+                          if (GetExitCodeThread(reinterpret_cast<HANDLE>(nh),
+                                                &exit_code)) {
+                            XELOGI("ThreadState {}: {}", i,
+                                   exit_code == STILL_ACTIVE
+                                       ? "STILL_ACTIVE"
+                                       : fmt::format("EXITED code={}",
+                                                     exit_code));
+                          }
                           FILETIME c0, e0, k0, u0;
                           if (GetThreadTimes(reinterpret_cast<HANDLE>(nh), &c0,
                                              &e0, &k0, &u0)) {
