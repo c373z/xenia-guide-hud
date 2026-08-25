@@ -2967,3 +2967,51 @@ destructor that requires one of them to be 0 by then, and nothing in this
 emulator's run that ever clears either. Isolating the code that should needs
 something static analysis cannot give - the offset is too common - and runtime
 polling has already answered the only question it can.
+
+## The class has no method that clears the flag
+
+The vtable at `8163E200` has nine slots:
+
+```
+[0] 818F7EB8   runs        [5] 818F7F60   never
+[1] 818FCDA8   never       [6] 81CB8E10   never
+[2] 818FCE38   runs        [7] 818F7FA8   never
+[3] 81903128   runs        [8] 818FD270   runs
+[4] 818F7F10   never
+```
+
+Four of the nine are exercised. Checking every slot for a store to `+0x1C`,
+including the five that never run:
+
+- Only **slot 2** touches it, and it is a **copy**: `[dst+0x1C] = r25`
+  alongside `[dst+0x0C]`, `[dst+0x14]` and `[dst+0x24]` taken from a source
+  object. It propagates the field rather than changing it.
+- No other slot, running or not, writes `+0x1C` at all.
+
+So the class provides no operation that clears its own flag. Combined with the
+destructor asserting `[+0x04] == 0`, which the constructor sets to 1 and no
+method clears either, the conclusion is that **these two fields are written by
+code outside the class** - an owner reaching in directly rather than calling a
+method.
+
+That is consistent with the 136 unrelated `+0x1C` literal-zero stores scattered
+across xam, and it is why isolating the right one statically is hopeless: the
+writer is not in the class, not in the XUI range, and shares an offset with a
+hundred other structures.
+
+### Closing this line
+
+The field is now characterised as completely as static analysis allows:
+
+- 44-byte object, vtable `8163E200`, one constructor, one destructor.
+- Constructed with `[+0x04] = 1` and `[+0x1C] = 1`.
+- `[+0x1C]` is copied into `[dc+0x134]`, which disables the render path.
+- No class method clears either field; the copy method propagates `+0x1C`.
+- The destructor requires `[+0x04] = 0`, so external code is expected to clear
+  at least that one.
+- In this emulator, neither is ever cleared; the field holds `1` from
+  construction to the end of the session.
+
+What remains unknown is which external code clears them on hardware. That is
+not reachable by pattern matching, and the runtime never executes it, so there
+is nothing to observe either. This line is exhausted rather than abandoned.
