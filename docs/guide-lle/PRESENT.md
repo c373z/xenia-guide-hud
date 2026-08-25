@@ -1918,3 +1918,60 @@ the button thread, but the enclosing loop is not the one at `8178EE08`.
 This is the same error as several before it: a back-edge that spans a call site
 shows a loop *exists*, not that it is the loop *running*. The counts were
 available the whole time and settle it in one measurement.
+
+## Retracting that retraction: it was my own rate limit
+
+The previous section claimed the three-object wait runs 36 times and therefore
+cannot drive 606,117 acquisitions. That comparison was invalid. **36 was the
+number of log lines**, emitted under `if (wn <= 6 || (wn % 20000) == 0)`, and
+it was compared against an unlimited count. The highest sequence number in
+those lines is:
+
+```
+Wait3 #600000
+```
+
+So the wait ran 600,000 times, matching the 606,117 acquisitions almost
+exactly. The loop identified from the back-edges was right all along.
+
+Asking the caller directly settles it independently. Logging the return address
+at the shim gives `lr 819FE604 x598576` - inside `819FE138` - and unwinding the
+guest stack from there gives one frame:
+
+```
+SysCmdBufCaller #200000: unwind 8178EDD8
+```
+
+`8178EDD8` is the return address from `8178EDD4`, the call site inside mode-1
+`CreateDevice`. Three independent measurements - the sequence number, the LR
+histogram and the unwind - agree.
+
+### So what the bring-up is actually waiting for
+
+```
+8178ECBC  <- loop head
+8178EDD4  bl 819FE138                              ; acquire system command buffer
+8178EE08  bl KeWaitForMultipleObjects(3, &objs, ...)
+8178EE10  bne -> 8178ECBC
+```
+
+with
+
+```
+Wait3: 81D433C8(type 0) 81D43398(type 0) 81D433A8(type 0)
+```
+
+Three **notification events**, which resolve without trouble - they are not the
+type-9 timer that fails elsewhere. They are simply never signalled, so the wait
+times out and the loop runs forever.
+
+That is the most specific statement of the blocker this investigation has
+produced: **mode-1 device bring-up waits on three notification events at
+`81D433C8`, `81D43398` and `81D433A8`, and nothing in Xenia ever signals them.**
+
+### The lesson, since it is the third of its kind
+
+I misread my own rate-limited log as a count. The earlier failures were tests
+that could not return a negative; this one is a number that did not mean what
+it appeared to. Both come from not asking what an instrument is actually
+reporting before reasoning from it.

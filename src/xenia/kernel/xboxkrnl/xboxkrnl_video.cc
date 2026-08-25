@@ -7,6 +7,8 @@
  ******************************************************************************
  */
 
+#include <map>
+#include <mutex>
 #include "xenia/kernel/kernel_flags.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_video.h"
 
@@ -363,7 +365,47 @@ void VdEnableRingBufferRPtrWriteBack_entry(lpvoid_t ptr,
 }
 DECLARE_XBOXKRNL_EXPORT1(VdEnableRingBufferRPtrWriteBack, kVideo, kImplemented);
 
-void VdGetSystemCommandBuffer_entry(lpunknown_t p0_ptr, lpunknown_t p1_ptr) {
+void VdGetSystemCommandBuffer_entry(lpunknown_t p0_ptr, lpunknown_t p1_ptr,
+                                    const ppc_context_t& context) {
+  {
+    // Who is actually calling this 600,000 times? A back-edge analysis
+    // named a loop that runs 36 times, so ask the caller directly
+    // instead of reasoning about control flow.
+    static std::atomic<uint32_t> lrn{0};
+    static std::mutex lrmtx;
+    static std::map<uint32_t, uint32_t> lrs;
+    uint32_t n = ++lrn;
+    uint32_t lr = static_cast<uint32_t>(context->lr);
+    {
+      std::lock_guard<std::mutex> g(lrmtx);
+      lrs[lr]++;
+      if (n == 1 || n == 200000) {
+        // Walk the guest back chain, as the crash reporter does: [sp] is the
+        // caller's frame and its return address is [caller_sp - 8]. The LR
+        // alone only names the innermost caller, and that one turned out to
+        // be called from somewhere else in a loop.
+        auto* um = kernel_state()->memory();
+        uint32_t sp = static_cast<uint32_t>(context->r[1]);
+        std::string bt;
+        for (int f = 0; f < 10 && sp; ++f) {
+          uint32_t caller_sp =
+              xe::load_and_swap<uint32_t>(um->TranslateVirtual(sp));
+          if (caller_sp <= sp || caller_sp - sp > 0x10000) break;
+          uint32_t ra =
+              xe::load_and_swap<uint32_t>(um->TranslateVirtual(caller_sp - 8));
+          if (ra < 0x81000000u || ra >= 0x93000000u) break;
+          bt += fmt::format("{:08X} ", ra);
+          sp = caller_sp;
+        }
+        XELOGI("SysCmdBufCaller #{}: unwind {}", n, bt);
+      }
+      if (n == 200000 || n == 600000) {
+        for (auto& kv : lrs) {
+          XELOGI("SysCmdBufCaller: lr {:08X} x{}", kv.first, kv.second);
+        }
+      }
+    }
+  }
   {
     // Is this mechanism used at all? The Guide's drawing is expected to reach
     // the GPU through the system command buffer, and this stub hands back two
