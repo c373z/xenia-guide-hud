@@ -52,6 +52,12 @@ DEFINE_bool(guide_spoof_ui_thread, false,
             "satisfies the check without making the call legitimate."
             ,
             "Kernel");
+// Note: 8174FDE0 cannot usefully be called directly. Its only caller is a XUI
+// command dispatcher at ghidra 817571D0, which reaches it by tail-branching on
+// command type 0x13 with arguments unpacked from a command block (r5 = cmd+8,
+// r4 = [cmd+16]). The global is set by a command that was never issued here,
+// not by a function nothing calls - so the remaining gap is the XUI command
+// pump itself, not another entry point to invoke.
 DEFINE_uint32(guide_xui_anim_init, 0x8174FDE0,
               "Runtime address of xam's initialiser for the XUI animation "
               "global at 81D3F924 (0 disables). Without it that global is null, "
