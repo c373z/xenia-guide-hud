@@ -53,6 +53,15 @@ DEFINE_bool(guide_skip_bkgnd_transition, true,
             "background transition."
             ,
             "Kernel");
+DEFINE_bool(guest_native_timers, false,
+            "Adopt guest-created KTIMERs so they can be waited on, and "
+            "implement KeSetTimer/KeSetTimerEx/KeCancelTimer. Fixes a "
+            "permanent retry loop in real xam, but the DPC a timer carries "
+            "is not dispatched yet, so guest code that depends on the "
+            "callback proceeds further and then fails. Off until DPC "
+            "dispatch exists."
+            ,
+            "Kernel");
 DEFINE_bool(system_root_early, true,
             "Register the SystemRoot symlink before the title starts "
             "rather than after CompleteLaunch returns. Xenia registers it "

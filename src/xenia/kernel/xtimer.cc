@@ -36,6 +36,23 @@ void XTimer::Initialize(uint32_t timer_type) {
   assert_not_null(timer_);
 }
 
+void XTimer::InitializeNative(void* native_ptr,
+                             const X_DISPATCH_HEADER* header) {
+  assert_false(timer_);
+  switch (header->type) {
+    case X_OBJECT_TYPES::TimerNotificationObject:
+      timer_ = xe::threading::Timer::CreateManualResetTimer();
+      break;
+    case X_OBJECT_TYPES::TimerSynchronizationObject:
+      timer_ = xe::threading::Timer::CreateSynchronizationTimer();
+      break;
+    default:
+      assert_always();
+      return;
+  }
+  assert_not_null(timer_);
+}
+
 X_STATUS XTimer::SetTimer(int64_t due_time, uint32_t period_ms,
                           uint32_t routine, uint32_t routine_arg, bool resume) {
   using xe::chrono::WinSystemClock;

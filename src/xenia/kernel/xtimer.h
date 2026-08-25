@@ -30,6 +30,11 @@ class XTimer : public XObject {
 
   void Initialize(uint32_t timer_type);
 
+  // Wraps a guest-created KTIMER. KeInitializeTimerEx writes the guest
+  // structure and creates no host object, so a timer the guest made cannot be
+  // waited on until it is adopted here - mirrors XEvent::InitializeNative.
+  void InitializeNative(void* native_ptr, const X_DISPATCH_HEADER* header);
+
   X_STATUS SetTimer(int64_t due_time, uint32_t period_ms, uint32_t routine,
                     uint32_t routine_arg, bool resume);
   X_STATUS Cancel();

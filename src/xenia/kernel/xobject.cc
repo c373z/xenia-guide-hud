@@ -22,6 +22,8 @@
 #include "xenia/kernel/xsemaphore.h"
 #include "xenia/kernel/xsymboliclink.h"
 #include "xenia/kernel/xthread.h"
+#include "xenia/kernel/kernel_flags.h"
+#include "xenia/kernel/xtimer.h"
 #include "xenia/xbox.h"
 
 namespace xe {
@@ -450,12 +452,20 @@ object_ref<XObject> XObject::GetNativeObject(KernelState* kernel_state,
         assert_true(success);
         result = sem;
       } break;
+      case X_OBJECT_TYPES::TimerNotificationObject:
+      case X_OBJECT_TYPES::TimerSynchronizationObject: {
+        if (!cvars::guest_native_timers) {
+          result = nullptr;
+          break;
+        }
+        auto timer = new XTimer(kernel_state);
+        timer->InitializeNative(native_ptr, header);
+        result = timer;
+      } break;
       case X_OBJECT_TYPES::ProcessObject:
       case X_OBJECT_TYPES::QueueObject:
       case X_OBJECT_TYPES::ThreadObject:
       case X_OBJECT_TYPES::Spare1Object:
-      case X_OBJECT_TYPES::TimerNotificationObject:
-      case X_OBJECT_TYPES::TimerSynchronizationObject:
       case X_OBJECT_TYPES::ApcObject:
       case X_OBJECT_TYPES::DpcObject:
       case X_OBJECT_TYPES::DeviceQueueObject:

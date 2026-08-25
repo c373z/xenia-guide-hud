@@ -939,37 +939,51 @@ dword_result_t NtCreateTimer_entry(
 }
 DECLARE_XBOXKRNL_EXPORT1(NtCreateTimer, kThreading, kImplemented);
 
-// KeSetTimer / KeSetTimerEx were declared in the export table with no
-// implementation, so calls fell through as "undefined extern call". These are
-// observation stubs: they record the arguments and return 0 (timer was not
-// already set) without arming anything. Implementing them properly also
-// requires XTimer::InitializeNative so the guest KTIMER can be wrapped - see
-// research/FINDINGS.md phase 130. Landing only one half would turn xam's
-// visible retry loop into a silent permanent wait.
+// KeSetTimer / KeSetTimerEx / KeCancelTimer were declared in the export table
+// with no implementation. They operate on a guest KTIMER pointer rather than a
+// handle, so they resolve it through GetNativeObject, which now adopts guest
+// timers (see XTimer::InitializeNative). Arming reuses XTimer::SetTimer, the
+// same path NtSetTimerEx uses. The DPC argument is not dispatched yet - the
+// timer still signals, which is what waiters need.
+static object_ref<XTimer> GetGuestTimer(uint32_t timer_guest_ptr) {
+  if (!timer_guest_ptr) {
+    return object_ref<XTimer>();
+  }
+  auto* native = kernel_memory()->TranslateVirtual(timer_guest_ptr);
+  return XObject::GetNativeObject<XTimer>(kernel_state(), native);
+}
+
 dword_result_t KeSetTimer_entry(lpvoid_t timer_ptr, qword_t due_time,
                                 lpvoid_t dpc_ptr) {
-  static std::atomic<uint32_t> n{0};
-  if (++n <= 5) {
-    XELOGW("KeSetTimer(timer={:08X}, due={}, dpc={:08X}) - stub, not armed",
-           timer_ptr.guest_address(), static_cast<int64_t>(due_time),
-           dpc_ptr.guest_address());
+  auto timer = GetGuestTimer(timer_ptr.guest_address());
+  if (!timer) {
+    return 0;
   }
+  timer->SetTimer(due_time, 0, 0, 0, false);
   return 0;
 }
-DECLARE_XBOXKRNL_EXPORT1(KeSetTimer, kThreading, kStub);
+DECLARE_XBOXKRNL_EXPORT1(KeSetTimer, kThreading, kImplemented);
 
 dword_result_t KeSetTimerEx_entry(lpvoid_t timer_ptr, qword_t due_time,
                                   dword_t period_ms, lpvoid_t dpc_ptr) {
-  static std::atomic<uint32_t> n{0};
-  if (++n <= 5) {
-    XELOGW("KeSetTimerEx(timer={:08X}, due={}, period={}, dpc={:08X}) - stub, "
-           "not armed",
-           timer_ptr.guest_address(), static_cast<int64_t>(due_time),
-           static_cast<uint32_t>(period_ms), dpc_ptr.guest_address());
+  auto timer = GetGuestTimer(timer_ptr.guest_address());
+  if (!timer) {
+    return 0;
   }
+  timer->SetTimer(due_time, period_ms, 0, 0, false);
   return 0;
 }
-DECLARE_XBOXKRNL_EXPORT1(KeSetTimerEx, kThreading, kStub);
+DECLARE_XBOXKRNL_EXPORT1(KeSetTimerEx, kThreading, kImplemented);
+
+dword_result_t KeCancelTimer_entry(lpvoid_t timer_ptr) {
+  auto timer = GetGuestTimer(timer_ptr.guest_address());
+  if (!timer) {
+    return 0;
+  }
+  timer->Cancel();
+  return 0;
+}
+DECLARE_XBOXKRNL_EXPORT1(KeCancelTimer, kThreading, kImplemented);
 
 dword_result_t NtSetTimerEx_entry(dword_t timer_handle, lpqword_t due_time_ptr,
                                   lpvoid_t routine_ptr /*PTIMERAPCROUTINE*/,
