@@ -108,3 +108,64 @@ Xenia stubs VdGetSystemCommandBuffer.
 
 Regression test: if any change makes the Guide render, the dashboard's draw
 rate stops being exactly 5800 per 200 swaps.
+
+## Second update: what is solid, what is scaffolding
+
+The GPU question is settled and the file has grown a lot. Read this before
+PRESENT.md, which is chronological and contains several claims that later
+sections retract.
+
+### Established with nothing fabricated
+
+Measured in the stable six-cvar configuration from CONFIG.md:
+
+- The Guide's software runs end to end: button, handler, Guide object, xam
+  device, XUI render context, device context, scene (`scene=00010000`), and a
+  full XUI frame per swap.
+- **It lays out real UI geometry every frame** - screen coordinates and
+  resolution values decode straight out of the memory the draw writes.
+- **It dispatches exactly zero GPU draws.** The dashboard's rate holds at
+  29.0 draws per swap across the press and thousands of composite draws; one
+  extra draw would break the constant.
+- The draw emitter `819F5D18` is never reached, because `[dc+0x134] = 1` makes
+  `XuiRenderBegin` skip its device call and `XuiRenderPresent` return without
+  presenting. Zero draws is the correct consequence, not a separate fault.
+
+### Scaffolding, not findings
+
+The deep configuration adds `create_primary_device`, `bootstrap_before_device`,
+`use_bound_device`, `clear_null_render`, `fake_front_buffer` and
+`syscmdbuf_fields`. Three of those hand the guest state the system would have
+built: a different device, a front buffer that is a clone of the colour
+surface, and display-mode fields. Anything measured there - including "the
+emitter is reached and emits nothing" - describes a system partly assembled by
+hand. Do not treat those numbers as facts about xam.
+
+### The open question, in its cleanest form
+
+`[xui_ctx+0x1C]` is `1`, and the DC copies it to `[dc+0x134]`. That single
+field disables the entire render path. Known about it:
+
+- No constant `1` is stored to that offset anywhere in the XUI range, so the
+  value is computed.
+- It is already `1` when the context pointer is published, so it is written
+  during construction, inside `8178DC58`'s call tree.
+- A host-side memory watch cannot catch it - the write precedes the moment the
+  object's address becomes discoverable.
+- Five of the 22 XUI functions that store to a `+0x1C` field actually execute:
+  `818F5288`, `818F5488`, `818FCE38`, `818FD0E8`, `81903580`.
+
+### Tools
+
+`refs.py` finds direct, data and register-formed references and is the one to
+use - `callers.py` sees only direct calls and produced three wrong conclusions
+in this investigation. `cfg.py` for reachability; window-reading disassembly
+has misled repeatedly. `fnlookup.py`, `ppcdis.py` (ghidra addresses: runtime +
+0x7200 for xam, no shift for dash/hud).
+
+### Two fixes worth upstreaming independently
+
+`KeDebugMonitorData` and `KeCertMonitorData` were written into the block they
+point at, then memset away, so both cvars had no guest-visible effect. Four
+lines, unrelated to the Guide, and any title probing those variables is
+affected.
