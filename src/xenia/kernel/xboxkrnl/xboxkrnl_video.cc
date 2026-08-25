@@ -681,6 +681,20 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
              saved_ui_thread, current);
     }
   }
+  if (::cvars::guide_use_bound_device) {
+    uint32_t bound = rd(0x801E6FC8u);
+    uint32_t cur = rd(0x81D43684u);
+    if (bound && bound != cur) {
+      xe::store_and_swap<uint32_t>(memory->TranslateVirtual(0x81D43684u),
+                                   bound);
+      XELOGI("GuideBootstrap: xam device global {:08X} (RT0={:08X}) -> "
+             "{:08X} (RT0={:08X})",
+             cur, cur ? rd(cur + 0x32A0u) : 0, bound, rd(bound + 0x32A0u));
+    } else {
+      XELOGI("GuideBootstrap: device global unchanged ({:08X}, bound={:08X})",
+             cur, bound);
+    }
+  }
   uint64_t a0[] = {0};
   uint64_t hr = processor->Execute(ts, 0x8178DC58u, a0, xe::countof(a0));
   if (spoofed) {
@@ -970,6 +984,23 @@ void VdSwap_entry(
           // system boot would have filled in, without having to guess at D3D
           // internals. Only report offsets where they differ and at least one
           // side is non-zero.
+          // Name every device object in play, with its render-target slots,
+          // in THIS run - so the crash dump's r31 can be matched to one of
+          // them. Comparing addresses across runs is worthless: the guest heap
+          // is not stable between sessions.
+          for (auto& e : {std::pair<const char*, uint32_t>{"xam dev [81D43684]",
+                                                           prd(0x81D43684u)},
+                          {"VdGlobalXamDevice [801E6FC8]", prd(0x801E6FC8u)},
+                          {"VdGlobalDevice [801E6FC4]", prd(0x801E6FC4u)},
+                          {"dc wrapper [dc+1CC]", pdev}}) {
+            if (!e.second) {
+              XELOGI("  device {}: <null>", e.first);
+              continue;
+            }
+            XELOGI("  device {} = {:08X}  RT0={:08X} RT1={:08X} depth={:08X}",
+                   e.first, e.second, prd(e.second + 0x32A0u),
+                   prd(e.second + 0x32A4u), prd(e.second + 0x32B0u));
+          }
           uint32_t tdev = prd(0x801E6FC4u);
           uint32_t xdev = prd(0x801E6FC8u);
           XELOGI("Device diff: title={:08X} xam={:08X}", tdev, xdev);

@@ -224,6 +224,16 @@ DEFINE_bool(guide_system_process_type, false,
             "mode-1 device path is one place it matters. Restored afterwards.",
             "Kernel");
 
+DEFINE_bool(guide_use_bound_device, false,
+            "Before the Guide bootstrap runs, point xam's device global "
+            "(81D43684) at whatever VdGlobalXamDevice (801E6FC8) holds, when "
+            "the two differ. Under mode 1 two xam devices exist and only one "
+            "has a render target: measured in a single run, 81D43684 held "
+            "40870D00 with RT0 null - the object the faulting present used - "
+            "while 801E6FC8 held 40883A80 with RT0 bound to a real surface. "
+            "The DC is built from the global, so it inherits the wrong one.",
+            "Kernel");
+
 DEFINE_bool(guide_trace_setrendertarget, false,
             "Break on xam's SetRenderTarget (819F31A8) and log its arguments: "
             "device, index, surface. Counting DemandFunction entries only says "

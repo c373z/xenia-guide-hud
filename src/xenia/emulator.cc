@@ -2085,11 +2085,22 @@ bool Emulator::ExceptionCallback(Exception* ex) {
       // already clobbered. Without these it is not possible to tell which
       // object a faulting "lwz rX,off(rY)" was reading from - which is
       // exactly the question a null deref raises.
-      XELOGE("GUEST CRASH: r27={:08X} r28={:08X} r29={:08X} r30={:08X} "
-             "r31={:08X} r1={:08X}",
-             static_cast<uint32_t>(ectx->r[27]), static_cast<uint32_t>(ectx->r[28]),
-             static_cast<uint32_t>(ectx->r[29]), static_cast<uint32_t>(ectx->r[30]),
-             static_cast<uint32_t>(ectx->r[31]), static_cast<uint32_t>(ectx->r[1]));
+      // All 32 GPRs. Picking a subset means the one register the faulting
+      // instruction actually used is the one that is missing - which is
+      // exactly what happened with an "lwz r11,32(r14)" fault when only
+      // r27-r31 were dumped.
+      for (int base = 0; base < 32; base += 8) {
+        XELOGE("GUEST CRASH: r{:<2}-r{:<2} {:08X} {:08X} {:08X} {:08X} "
+               "{:08X} {:08X} {:08X} {:08X}",
+               base, base + 7, static_cast<uint32_t>(ectx->r[base + 0]),
+               static_cast<uint32_t>(ectx->r[base + 1]),
+               static_cast<uint32_t>(ectx->r[base + 2]),
+               static_cast<uint32_t>(ectx->r[base + 3]),
+               static_cast<uint32_t>(ectx->r[base + 4]),
+               static_cast<uint32_t>(ectx->r[base + 5]),
+               static_cast<uint32_t>(ectx->r[base + 6]),
+               static_cast<uint32_t>(ectx->r[base + 7]));
+      }
       // LR here is the function's own __savegprlr return, not the caller.
       // That helper stores the real LR at [r1-8] of the caller's frame before
       // the stwu, so with a 0xC0 frame it is at r1+0xB8. Scan a window in case

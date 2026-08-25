@@ -38,6 +38,7 @@ DECLARE_bool(guide_fake_gpu_writeback);
 DECLARE_int32(guide_stall_probe_seconds);
 DECLARE_bool(guide_create_primary_device);
 DECLARE_bool(guide_system_process_type);
+DECLARE_bool(guide_use_bound_device);
 DECLARE_bool(guide_trace_setrendertarget);
 DECLARE_bool(guide_bootstrap_before_device);
 DECLARE_bool(guide_clear_null_render);

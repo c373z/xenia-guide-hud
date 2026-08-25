@@ -658,3 +658,57 @@ Confirming or killing that idea needs one run that logs both the bind and the
 faulting `r31`. The breakpoint perturbs execution enough that the run which
 produced the bind never reached a `VdSwap`, so the bootstrap was never consumed
 and no draw happened - the two events have not yet been observed together.
+
+## Two xam devices, and only one has a render target
+
+The previous section flagged a cross-run address comparison as inadmissible.
+Here is the same question answered inside one run, by logging every device
+object in play with its render-target slots at pre-draw time:
+
+```
+device xam dev [81D43684]           = 40870D00  RT0=00000000 RT1=00000000 depth=00000000
+device VdGlobalXamDevice [801E6FC8] = 40883A80  RT0=4088D130 RT1=00000000 depth=00000000
+device VdGlobalDevice [801E6FC4]    = 40952400  RT0=00000000 RT1=00000000 depth=00000000
+device dc wrapper [dc+1CC]          = 4088A000  RT0=00000000 RT1=00000000 depth=00000000
+GUEST CRASH: ... r31=40870D00
+```
+
+Under mode 1 there are **two** xam devices. `801E6FC8` holds the one with a
+real surface bound to RT0. `81D43684` - the global the DC is built from, and
+the object the faulting present used, `r31=40870D00` - has nothing bound. The
+Guide was presenting to the wrong device. The suspicion from the previous
+section was right, and this is the evidence it lacked.
+
+### Redirecting the global moves the crash
+
+`guide_use_bound_device` points `81D43684` at whatever `801E6FC8` holds, before
+the bootstrap builds the DC:
+
+```
+GuideBootstrap: xam device global 40870D00 (RT0=00000000) -> 40883A80 (RT0=4088B3E0)
+GuideBootstrap: scene creator 913EB940 -> 00000000, scene=00010000
+device xam dev [81D43684] = 40883A80  RT0=4088B3E0
+```
+
+The frame then gets **past** the null render target. The fault moves from
+`819DE94C` / `fault_addr 0x24` - where it had sat for this entire
+investigation - to `819F5EC4` / `fault_addr 0x20`, inside `819F5D18`.
+
+### All 32 GPRs on a crash
+
+The new fault is `lwz r11,32(r14)` with `r14` null, and the dump only covered
+r27-r31 - so the one register that mattered was the one missing. The crash
+reporter now prints every GPR, which immediately showed:
+
+```
+r8 -r15  00000000 00000000 00000001 4088B3E0 03FF1C88 301BC000 00000000 00000000
+r24-r31  00000000 00000000 00000000 00000000 00000000 00000000 00000000 40883A80
+```
+
+`r11 = 4088B3E0` is the bound surface, loaded successfully out of
+`device[idx]` two instructions earlier and passing its non-null assert - so the
+render target is now genuinely reaching the code that wants it. `r14`, and
+every register from r15 to r30, is zero, and `lr` is only `+0x54` into a
+function that runs to `+0x2208`; `r14` was simply never assigned on this path.
+
+This is forward progress, not a fix. The Guide still does not draw.
