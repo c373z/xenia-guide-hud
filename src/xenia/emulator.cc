@@ -1395,12 +1395,22 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                          "creation", saved_pt);
                 }
                 if (cvars::guide_call_boot_entry) {
-                  XELOGI("Guide button: calling boot entry 81751428");
-                  uint64_t ba[] = {0};
-                  uint64_t br = ks->processor()->Execute(ts, 0x81751428u, ba,
-                                                         xe::countof(ba));
-                  XELOGI("Guide button: boot entry returned {:08X}",
-                         static_cast<uint32_t>(br));
+                  // 81751428 crashed on a null global at 81D3C8E8. The only
+                  // code that takes that global's address is 81727500, which
+                  // hands it to an initialiser - and 81727500 is reached only
+                  // from 81750FA8, another entry point with no caller inside
+                  // xam. So the dependency is derived, not guessed: run the
+                  // initialiser first.
+                  for (uint32_t entry : {0x81750FA8u, 0x81751428u}) {
+                    uint64_t ba[] = {0};
+                    uint64_t br = ks->processor()->Execute(ts, entry, ba,
+                                                           xe::countof(ba));
+                    XELOGI("Guide button: boot entry {:08X} returned {:08X}; "
+                           "[81D3C8E8]={:08X}",
+                           entry, static_cast<uint32_t>(br),
+                           xe::load_and_swap<uint32_t>(
+                               ks->memory()->TranslateVirtual(0x81D3C8E8u)));
+                  }
                 }
                 XELOGI("Guide button: calling device creator {:08X}", create_fn);
                 if (cvars::guide_stall_probe_seconds > 0 && cur) {

@@ -2064,3 +2064,47 @@ somewhere different: the question is not how to call this function but what has
 to have happened before it. Which is the same answer the rest of this file
 keeps arriving at from other directions - there is a system boot, Xenia does
 not run it, and its individual pieces do not work when lifted out of it.
+
+## The boot entries form a chain, and it does not terminate anywhere useful
+
+`81751428` crashed on a null global at `81D3C8E8`. That global lives in the
+zero-filled part of `.data`, so it starts null and must be written at runtime.
+
+Searching for writers by the obvious pattern - `lis 0x81D4` then `stw` at that
+displacement - finds **only reads**. That would have been the wrong answer: the
+same pattern-limited search failed earlier for `device+0x32A0`, which turned out
+to be written through a taken address. Searching for the address-taken form
+instead finds one site:
+
+```
+81727530  addi r31,r11,-14104     ; r31 = &81D3C8E8
+81727534  or   r3,r31,r31
+81727538  bl   8177C9E8           ; hands it to an initialiser
+```
+
+`81727500` is reached only from `81750FA8`, which - like `81751428` and
+`8178E9F0` - has **no caller anywhere inside xam**. So the dependency is
+derived rather than guessed: `81750FA8` initialises what `81751428` needs.
+
+Running them in that order:
+
+```
+GUEST CRASH: access violation at guest PC 81747DE8, fault_addr F4
+```
+
+`81750FA8` now crashes too, before it returns, and `817915A0` still never runs.
+The initialiser has its own predecessors.
+
+### What that settles
+
+These are not a handful of entry points that can be called in the right order
+to stand the system up. They are a sequence whose dependencies keep receding:
+`8178E9F0` needs events signalled by `817915A0`, reachable only from
+`81751428`, which needs a global initialised by `81750FA8`, which needs
+something earlier still. Each attempt moves the crash one level back rather
+than closer to working.
+
+So the approach of lifting individual entry points out of the boot and calling
+them is not a way in, and this is the evidence for that rather than an opinion
+about it. Anyone tempted to try the same thing should read this section first -
+it costs a build and a run to rediscover.
