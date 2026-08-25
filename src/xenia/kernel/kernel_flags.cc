@@ -224,6 +224,16 @@ DEFINE_bool(guide_system_process_type, false,
             "mode-1 device path is one place it matters. Restored afterwards.",
             "Kernel");
 
+DEFINE_bool(guide_diff_draw_writes, false,
+            "Checksum guest memory in 64KB blocks either side of the Guide's "
+            "composite draw and report which blocks changed, flagging any that "
+            "contain PM4 type-3 headers. Every attempt to guess where xam "
+            "writes its command stream from the descriptor has failed, so stop "
+            "guessing and observe the writes directly. One draw completes in "
+            "the deep configuration, which makes a single before/after diff "
+            "meaningful.",
+            "Kernel");
+
 DEFINE_int32(guide_syscmdbuf_buffer_kb, 0,
              "If non-zero, allocate a buffer of this many KB once and hand it "
              "to the guest in VdGetSystemCommandBuffer's descriptor as "

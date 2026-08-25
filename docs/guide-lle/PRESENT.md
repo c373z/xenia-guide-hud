@@ -1287,3 +1287,51 @@ What survives from this and the previous section:
   and `+0x34`.
 - Filling the display mode lets the present complete.
 - Filling `+0x04` and `+0x08` with a buffer and its size produces no writes.
+
+## Observing the writes instead of guessing at them
+
+Every attempt to locate xam's command stream through the descriptor has
+failed, so `guide_diff_draw_writes` checksums guest memory in 64KB blocks
+either side of the composite draw and reports which blocks changed.
+
+Two false starts worth recording, because both look like the instrument
+working when it is not:
+
+- The range was first `0x30000000-0x50000000`. Hashing 512MB forces commit of
+  a great deal of untouched guest address space; the run died inside the
+  snapshot, before it could log that it had started. The symptom was "zero
+  draws" in a configuration that normally produces hundreds, which reads as a
+  broken draw path rather than a broken probe.
+- The deep configuration is a poor host for this. It produces **0 or 1** draws
+  non-deterministically - three runs installed the draw hook and only one drew
+  - so an instrument that fires once per draw may never fire at all. The
+  stable six-cvar configuration draws continuously and is the right place.
+
+Narrowed to `0x40800000-0x40A00000`, in the stable configuration:
+
+```
+DrawDiff: snapshot of 32 blocks taken
+DrawDiff: block 40880000 changed, 141 type-3-looking words
+DrawDiff: block 40890000 changed, 265
+DrawDiff: block 408A0000 changed, 358
+DrawDiff: block 408B0000 changed, 5800
+DrawDiff: block 40950000 changed, 234
+DrawDiff: block 40970000 changed, 56
+DrawDiff: 6 of 32 blocks changed across the draw
+```
+
+and on the following draw, one block changes rather than six.
+
+So the Guide's frame **does** write to guest memory, heavily on its first draw
+and lightly thereafter - and this is the *stable* configuration, where
+`[dc+134]` is 1 and `XuiRenderPresent` returns without presenting. The XUI
+scene is doing real work regardless of whether the present goes anywhere.
+
+### Do not read the packet counts as packet counts
+
+The "type-3-looking words" figure tests `(word & 0xC0000000) == 0xC0000000`,
+which matches **a quarter of all random data**. 5800 of 16384 words is 35%,
+which is above chance but nowhere near evidence of a PM4 stream. The column is
+a hint about where to look next, not a finding. Identifying whether any of
+these blocks holds a command stream needs the packet headers decoded - type,
+opcode and count checked for self-consistency - not a bitmask.

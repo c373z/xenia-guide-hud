@@ -1174,10 +1174,59 @@ void VdSwap_entry(
           xe::store_and_swap<uint32_t>(fm->TranslateVirtual(fdc + 0x134u), 0);
         }
       }
+      static std::vector<uint32_t> pre_sums;
+      // 0x30000000-0x50000000 was 512MB and hashing it forced commit of a
+      // vast amount of untouched guest address space - the run died in the
+      // snapshot before logging it. Cover the two ranges the Guide's objects
+      // are actually observed in instead: xam's heap allocations around
+      // 0x3018xxxx and the device/DC objects around 0x4088xxxx-0x409Bxxxx.
+      const uint32_t kDiffLo = 0x40800000u, kDiffHi = 0x40A00000u;
+      const uint32_t kBlk = 0x10000u;
+      if (::cvars::guide_diff_draw_writes && pre_sums.empty()) {
+        auto* mmv = kernel_state()->memory();
+        pre_sums.reserve((kDiffHi - kDiffLo) / kBlk);
+        for (uint32_t a = kDiffLo; a < kDiffHi; a += kBlk) {
+          uint32_t sum = 0;
+          auto* hp = mmv->TranslateVirtual(a);
+          if (hp) {
+            auto* w = reinterpret_cast<const uint32_t*>(hp);
+            for (uint32_t i = 0; i < kBlk / 4; ++i) sum += w[i];
+          }
+          pre_sums.push_back(sum);
+        }
+        XELOGI("DrawDiff: snapshot of {} blocks taken", pre_sums.size());
+      }
       in_guide_draw_scope = true;
       uint64_t gr = kernel_state()->processor()->Execute(
           gth->thread_state(), guide_draw_fn_, gargs, xe::countof(gargs));
       in_guide_draw_scope = false;
+      if (::cvars::guide_diff_draw_writes && !pre_sums.empty()) {
+        auto* mmv = kernel_state()->memory();
+        uint32_t changed = 0, idx = 0, shown = 0;
+        for (uint32_t a = kDiffLo; a < kDiffHi; a += kBlk, ++idx) {
+          uint32_t sum = 0, pm4 = 0;
+          auto* hp = mmv->TranslateVirtual(a);
+          if (hp) {
+            auto* w = reinterpret_cast<const uint32_t*>(hp);
+            for (uint32_t i = 0; i < kBlk / 4; ++i) {
+              sum += w[i];
+              uint32_t v = xe::byte_swap(w[i]);
+              if ((v & 0xC0000000u) == 0xC0000000u) ++pm4;
+            }
+          }
+          if (sum != pre_sums[idx]) {
+            ++changed;
+            if (shown < 16) {
+              XELOGI("DrawDiff: block {:08X} changed, {} type-3-looking words",
+                     a, pm4);
+              ++shown;
+            }
+          }
+        }
+        XELOGI("DrawDiff: {} of {} blocks changed across the draw", changed,
+               pre_sums.size());
+        pre_sums.clear();
+      }
       static std::atomic<uint32_t> gdraws{0};
       uint32_t gn = ++gdraws;
       if (gn <= 3 || (gn % 300) == 0) {
