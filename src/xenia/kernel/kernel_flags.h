@@ -38,6 +38,7 @@ DECLARE_bool(guide_fake_gpu_writeback);
 DECLARE_int32(guide_stall_probe_seconds);
 DECLARE_bool(guide_create_primary_device);
 DECLARE_bool(guide_system_process_type);
+DECLARE_bool(guide_call_boot_entry);
 DECLARE_int32(guide_force_cmdbuf_complete);
 DECLARE_bool(guide_word_diff);
 DECLARE_bool(guide_execute_command_stream);

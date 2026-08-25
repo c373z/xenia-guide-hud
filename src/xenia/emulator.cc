@@ -1394,6 +1394,14 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                   XELOGI("Guide button: process type {} -> SYSTEM for device "
                          "creation", saved_pt);
                 }
+                if (cvars::guide_call_boot_entry) {
+                  XELOGI("Guide button: calling boot entry 81751428");
+                  uint64_t ba[] = {0};
+                  uint64_t br = ks->processor()->Execute(ts, 0x81751428u, ba,
+                                                         xe::countof(ba));
+                  XELOGI("Guide button: boot entry returned {:08X}",
+                         static_cast<uint32_t>(br));
+                }
                 XELOGI("Guide button: calling device creator {:08X}", create_fn);
                 if (cvars::guide_stall_probe_seconds > 0 && cur) {
                   // CreateDevice may never return, so the probe has to live on

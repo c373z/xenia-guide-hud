@@ -1975,3 +1975,49 @@ I misread my own rate-limited log as a count. The earlier failures were tests
 that could not return a negative; this one is a number that did not mean what
 it appeared to. Both come from not asking what an instrument is actually
 reporting before reasoning from it.
+
+## Who is supposed to signal the three events
+
+Scanning xam for code that forms the addresses `81D433C8`, `81D43398` and
+`81D433A8` finds nine sites in four functions. Three of them build the wait
+array in `8178E9F0` itself. Of the rest:
+
+| function | references | `KeSetEvent` calls | ran? |
+|---|---|---|---|
+| `817915A0` | all three | **2** | no |
+| `81795548` | two | 0 | no |
+| `8178E8C0` | one | 0 | no |
+
+So `817915A0` is the signaller, and it never executes. Following its callers:
+
+```
+81751428  ->  81792880  ->  817915A0  ->  KeSetEvent on the three events
+```
+
+`81792880` has exactly one caller, `81751428`, and **`81751428` has no caller
+anywhere inside xam**. It is an entry point invoked from outside the module -
+the same shape as `8178E9F0`, the mode-1 device creator, which also has no
+in-module caller. Both are things the system boot calls and Xenia does not.
+
+That is the chain, end to end: mode-1 bring-up waits on three notification
+events; the only code that signals them is reachable only from an entry point
+nothing in the emulator ever calls.
+
+### Calling it directly does not work
+
+`guide_call_boot_entry` invokes `81751428` with no arguments, as
+`8178E9F0` is invoked:
+
+```
+Guide button: calling boot entry 81751428
+GUEST CRASH: access violation at guest PC 81778508, fault_addr 4
+```
+
+It faults immediately on a null dereference, and `817915A0` still never runs.
+The entry point takes arguments, and nothing here says what they are. Guessing
+them would be the same mistake as guessing `p0+0x08`, so the experiment stops
+at a recorded negative rather than a search.
+
+What it establishes is still worth having: the events are not signalled because
+a specific, named function is never called, and that function is the system
+boot's job.

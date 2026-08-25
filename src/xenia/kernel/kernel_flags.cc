@@ -224,6 +224,17 @@ DEFINE_bool(guide_system_process_type, false,
             "mode-1 device path is one place it matters. Restored afterwards.",
             "Kernel");
 
+DEFINE_bool(guide_call_boot_entry, false,
+            "Call xam's 81751428 before the device creator. Mode-1 bring-up "
+            "waits on three notification events (81D433C8, 81D43398, "
+            "81D433A8); the only function that signals them is 817915A0, "
+            "reached only from 81792880, reached only from 81751428 - which "
+            "has no caller anywhere inside xam and never runs. Like the "
+            "mode-1 device creator it is an entry point the system boot "
+            "invokes and Xenia does not. Its arguments are unknown; it is "
+            "called with none, as 8178E9F0 is.",
+            "Kernel");
+
 DEFINE_int32(guide_force_cmdbuf_complete, 0,
              "Seconds after the button press to start setting bit 1 of "
              "[device+2B3D] from a host thread. That bit is the ONLY exit "
