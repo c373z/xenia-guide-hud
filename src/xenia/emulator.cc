@@ -1210,8 +1210,10 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                        "[*]={:08X} bit200={}",
                        gate_ptr, gate, (gate & 0x200) ? "set" : "clear");
                 uint64_t ca[] = {0};
+                kernel::xboxkrnl::in_xam_createdevice_scope = true;
                 uint64_t cr = ks->processor()->Execute(ts, 0x8178F748u, ca,
                                                        xe::countof(ca));
+                kernel::xboxkrnl::in_xam_createdevice_scope = false;
                 XELOGI("Guide button: xam CreateDevice returned {:08X}, "
                        "device now {:08X}",
                        static_cast<uint32_t>(cr), rd(0x81D43684u));

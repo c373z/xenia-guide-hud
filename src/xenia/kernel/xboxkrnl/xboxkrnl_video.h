@@ -23,6 +23,8 @@ void VdQueryVideoMode(X_VIDEO_MODE* video_mode, bool is_internal_resolution);
 // ("the current thread is trying to use a D3D device object that is owned by
 // a different thread"), so the Guide can only draw into the title's frame
 // from there. Pass fn = 0 to clear.
+extern thread_local bool in_xam_createdevice_scope;
+
 void SetGuideDrawHook(uint32_t fn, uint32_t self);
 
 // Queue the whole XUI bootstrap to run on the title's render thread. The
