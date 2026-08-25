@@ -712,3 +712,62 @@ every register from r15 to r30, is zero, and `lr` is only `+0x54` into a
 function that runs to `+0x2208`; `r14` was simply never assigned on this path.
 
 This is forward progress, not a fix. The Guide still does not draw.
+
+## Chasing the new fault, and two instrument limits
+
+The fault after the device redirect is `lwz r11,32(r14)` with `r14` null. Only
+three instructions in `819F5D18` write r14, and the one that matters is the
+third instruction of the function:
+
+```
+819F5D50  or r14,r8,r8
+```
+
+So `r14` is the function's sixth argument, and it arrived null. The log
+ordering places the fault firmly inside the Guide's draw, not inside device
+creation - `pre-draw` is emitted immediately before the draw is invoked:
+
+```
+GuideBootstrap: draw hook installed on title thread
+Guide pre-draw: dc=4089B400 [134]=00000000 ...
+GUEST CRASH: access violation at guest PC 819F5EC4 ... fault_addr 0x20
+```
+
+### Breakpoints cannot observe this path
+
+`819F7F20` looked like the answer - `callers.py` reported it as the only caller
+of `819F5D18`, and it passes `or r8,r31,r31`, its own fourth argument. A
+breakpoint there would have confirmed it.
+
+It cannot. Installing any breakpoint changes scheduling enough that mode 1's
+`VdSwap` never happens, so the queued bootstrap is never consumed, no draw runs
+and no crash occurs. Two runs confirmed this: the breakpoint installs, reports
+`SetRenderTarget ... BIND`, and then the session goes into the mode-1 spin
+having never drawn. Argument capture and the crash path are mutually exclusive
+observations here.
+
+### A backtrace that does not perturb
+
+The crash reporter now scans the guest stack for words in xam's `.text` range.
+On this fault:
+
+```
+stack code refs: 819F2CB0(+8) 81D70000(+44) 81957740(+48) 81A020DC(+A8)
+                 81A03588(+D8) 819541C0(+E8)
+```
+
+Resolved, outermost first: `81954190` -> `81A03168` -> `81A02058` ->
+`81957598` -> `819F2A40` -> the crashing function. (`81D70000` is a data
+address that fell inside the range - the scan is a heuristic, not a real
+unwinder.)
+
+### Which corrects the caller analysis
+
+`819F7F20` does not appear in that chain. So the call into `819F5D18` on this
+path is **indirect**, and the "single caller" result was an artifact of
+`callers.py` following only direct `bl` - a limitation its own docstring
+states and that I did not apply when reading its output. Everything derived
+from that reading - that the null originates as `819F7F20`'s fourth argument -
+is unsupported. What survives is narrower: the sixth argument to `819F5D18` is
+null, and the real caller is reached through a function pointer from somewhere
+in the chain above.

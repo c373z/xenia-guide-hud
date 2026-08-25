@@ -1226,6 +1226,36 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                   ks->processor()->AddBreakpoint(srt_bp.get());
                   XELOGI("SetRenderTarget trace installed at 819F31A8");
                 }
+                // 819F7F20 passes its 4th argument (r6) down to 819F5D18 as
+                // r8, which becomes r14 there and is dereferenced at +32
+                // without a guard. 819F7F20 itself guards the same read. Log
+                // r6 and lr to see which caller supplies the null.
+                static std::unique_ptr<cpu::Breakpoint> r6_bp;
+                if (cvars::guide_trace_setrendertarget && !r6_bp) {
+                  r6_bp = std::make_unique<cpu::Breakpoint>(
+                      ks->processor(), cpu::Breakpoint::AddressType::kGuest,
+                      0x819F7F20ull,
+                      [](cpu::Breakpoint* bp, cpu::ThreadDebugInfo* ti,
+                         uint64_t host_pc) {
+                        auto* th = kernel::XThread::GetCurrentThread();
+                        if (!th) return;
+                        auto* c = th->thread_state()->context();
+                        static std::atomic<uint32_t> n{0};
+                        uint32_t k = ++n;
+                        if (k > 30) return;
+                        XELOGI("819F7F20 #{}: r3={:08X} r4={:08X} r5={:08X} "
+                               "r6={:08X} r7={:08X} lr={:08X} {}",
+                               k, static_cast<uint32_t>(c->r[3]),
+                               static_cast<uint32_t>(c->r[4]),
+                               static_cast<uint32_t>(c->r[5]),
+                               static_cast<uint32_t>(c->r[6]),
+                               static_cast<uint32_t>(c->r[7]),
+                               static_cast<uint32_t>(c->lr),
+                               c->r[6] ? "" : "  <-- r6 NULL");
+                      });
+                  ks->processor()->AddBreakpoint(r6_bp.get());
+                  XELOGI("819F7F20 trace installed");
+                }
               if (cvars::guide_bootstrap_before_device &&
                   cvars::guide_bootstrap_on_title_thread) {
                 // The mode-1 creator below never returns, so anything after it
@@ -2085,6 +2115,30 @@ bool Emulator::ExceptionCallback(Exception* ex) {
       // already clobbered. Without these it is not possible to tell which
       // object a faulting "lwz rX,off(rY)" was reading from - which is
       // exactly the question a null deref raises.
+      // Poor-man's backtrace: scan the guest stack for words that look like
+      // xam .text addresses. Breakpoints would give an exact caller, but
+      // installing one changes scheduling enough that the code path under
+      // investigation stops being taken - so the crash path can only be
+      // observed without them.
+      {
+        auto* mm = kernel_state() ? kernel_state()->memory() : nullptr;
+        uint32_t sp = static_cast<uint32_t>(ectx->r[1]);
+        if (mm && sp) {
+          std::string line;
+          int shown = 0;
+          for (uint32_t i = 0; i < 96 && shown < 12; ++i) {
+            uint32_t v = xe::load_and_swap<uint32_t>(
+                mm->TranslateVirtual(sp + i * 4));
+            if (v >= 0x81700000u && v < 0x81E00000u) {
+              line += fmt::format("{:08X}(+{:X}) ", v, i * 4);
+              ++shown;
+            }
+          }
+          if (!line.empty()) {
+            XELOGE("GUEST CRASH: stack code refs: {}", line);
+          }
+        }
+      }
       // All 32 GPRs. Picking a subset means the one register the faulting
       // instruction actually used is the one that is missing - which is
       // exactly what happened with an "lwz r11,32(r14)" fault when only
