@@ -2085,6 +2085,19 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
   // Allow xam to request module loads.
   auto xam = kernel_state()->GetKernelModule<kernel::xam::XamModule>("xam.xex");
 
+  // Register \SystemRoot before the title runs. LaunchXexFile registers it
+  // only after CompleteLaunch returns, by which time the guest has already
+  // queried it - the dashboard looks for \SystemRoot\systemupdate.xex during
+  // startup and gets "device not found". Doing it here makes the link exist
+  // when the title first asks.
+  if (cvars::system_root_early && !module_path.empty()) {
+    std::string base(utf8::find_base_guest_path(module_path));
+    if (!base.empty()) {
+      file_system_->RegisterSymbolicLink("\\SystemRoot", base);
+      XELOGI("Early SystemRoot -> '{}'", base);
+    }
+  }
+
   // LLE xam bootstrap: load the real xam.xex as a guest module before the main
   // module, so the main module's xam imports bind against xam's real export
   // table instead of Xenia's HLE xam. See XexModule::SetupLibraryImports.

@@ -53,6 +53,14 @@ DEFINE_bool(guide_skip_bkgnd_transition, true,
             "background transition."
             ,
             "Kernel");
+DEFINE_bool(system_root_early, true,
+            "Register the SystemRoot symlink before the title starts "
+            "rather than after CompleteLaunch returns. Xenia registers it "
+            "too late, so a system title querying it during startup - the "
+            "dashboard looking for systemupdate.xex - gets device not "
+            "found."
+            ,
+            "Kernel");
 DEFINE_bool(guide_spoof_ui_thread, false,
             "Temporarily point xam's recorded UI thread (81D42520) at the "
             "calling thread across the render-host call, then restore it. "
