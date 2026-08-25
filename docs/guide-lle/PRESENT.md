@@ -2815,3 +2815,43 @@ question than "what computes this value", and it makes the earlier candidate -
 `8190F7A0`, the one function that stores a constant `0` to a `+0x1C` field -
 worth another look: it takes its object from `81944A70`, the same allocator
 this constructor uses, so the two plausibly operate on the same class.
+
+## 8190F7A0 is a different class, and stays closed
+
+The previous section reopened `8190F7A0` on the grounds that it takes its
+object from `81944A70`, the same allocator the XUI context constructor uses,
+so the two might operate on the same class. Reading what it initialises closes
+it again:
+
+```
+819169D4  stw r30,28(r31)     ; +0x1C = 0
+819169DC  stw r30,32(r31)     ; +0x20
+819169E4  stw r30,4(r31)      ; +0x04
+819169EC  stw r30,12(r31)     ; +0x0C
+819169F0  stw r30,16(r31)     ; +0x10
+819169F4  stw r30,20(r31)     ; +0x14
+819169FC  stw r30,68(r31)     ; +0x44
+        ... and stores at +0x48, +0x50
+```
+
+The XUI context is **44 bytes** - `addi r3,r0,44` before its allocation. An
+object with fields at `+0x44`, `+0x48` and `+0x50` does not fit in 44 bytes, so
+this is a larger, different class that happens to share a general-purpose
+allocator.
+
+"Same allocator, therefore possibly the same class" was too loose, and the
+object size settles it in one line. The lead is closed for the second time, now
+on evidence rather than on the weaker argument that dismissed it the first
+time.
+
+### Where that leaves it
+
+The XUI context is 44 bytes, constructed with `[+0x04] = 1` and `[+0x1C] = 1`,
+and nothing anywhere in xam's XUI range stores a constant `0` to `+0x1C` of an
+object that size. So either the flag is cleared by a computed value somewhere,
+or the Guide's context is built by the wrong constructor and a different path
+would produce one with rendering enabled from the start.
+
+Nothing here distinguishes those. What is now solid is the shape of the
+question: a 44-byte object, born with two fields set to 1, one of which
+disables the entire render path, and no observed code that turns it off.
