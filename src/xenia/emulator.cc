@@ -11,6 +11,8 @@
 
 #include <thread>
 
+#include "xenia/base/mutex.h"
+
 #include "xenia/emulator.h"
 
 #include "config.h"
@@ -1310,6 +1312,16 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                           // waits and no faults - and would leave xam's XUI
                           // critical section held forever, which is what the
                           // title thread then blocks on.
+                          // Is Xenia's global critical region held while the
+                          // Guide thread is stuck? If TryAcquire succeeds the
+                          // thread is not blocked on it, which rules out the
+                          // most likely host lock.
+                          {
+                            auto probe =
+                                xe::global_critical_region::TryAcquire();
+                            XELOGI("GlobalLock {}: {}", i,
+                                   probe.owns_lock() ? "FREE" : "HELD");
+                          }
                           DWORD exit_code = 0;
                           if (GetExitCodeThread(reinterpret_cast<HANDLE>(nh),
                                                 &exit_code)) {
