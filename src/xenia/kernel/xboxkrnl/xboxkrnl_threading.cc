@@ -996,9 +996,16 @@ uint32_t xeKeWaitForSingleObject(void* object_ptr, uint32_t wait_reason,
     // through the KeWaitForSingleObject export, so instrument here. Only the
     // Guide thread, to stay out of the hot path.
     auto* wth = XThread::GetCurrentThread();
-    if (wth && wth->name().find("Guide") != std::string::npos) {
-      XELOGI("GuideWait: wait obj_host={} reason={} alertable={} timeout={}",
-             object_ptr, wait_reason, alertable,
+    static std::atomic<uint32_t> wait_count{0};
+    uint32_t wn = ++wait_count;
+    const bool is_guide =
+        wth && wth->name().find("Guide") != std::string::npos;
+    // Control: log every 500th wait from ANY thread too, so the absence of
+    // Guide-thread lines is evidence rather than a silent instrument.
+    if (is_guide || (wn % 500) == 0) {
+      XELOGI("WaitProbe #{}{}: thread='{}' reason={} alertable={} timeout={}",
+             wn, is_guide ? " GUIDE" : "",
+             wth ? wth->name() : std::string("<none>"), wait_reason, alertable,
              timeout_ptr ? static_cast<int64_t>(*timeout_ptr) : -1);
     }
   }
