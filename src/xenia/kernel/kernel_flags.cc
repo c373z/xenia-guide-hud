@@ -35,6 +35,11 @@ DEFINE_uint32(xbox_hardware_info_flags, 0x20,
               "0x200 of this word, so without that bit xam never creates a "
               "device and the Guide can never get a render context.",
               "Kernel");
+DEFINE_bool(guide_step_scene, false,
+            "With guide_scene_off_thread, drive hud's scene-creator sequence "
+            "one call at a time from the Guide thread to identify which one "
+            "blocks.",
+            "Kernel");
 DEFINE_bool(guide_scene_off_thread, false,
             "Run hud's scene creator from the Guide's own thread instead of "
             "from inside the title's swap. Scene loading appears to be "

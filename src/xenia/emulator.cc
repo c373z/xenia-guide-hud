@@ -1249,6 +1249,58 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                       ovt ? xe::load_and_swap<uint32_t>(
                                 ks->memory()->TranslateVirtual(ovt + 27 * 4))
                           : 0;
+                  // Step the scene creator's own sequence instead of calling
+                  // it whole, so the blocking sub-call is identifiable:
+                  // init -> XamEnableSystemAppInput -> ... -> XuiSceneCreate.
+                  auto rdm = [&](uint32_t addr) {
+                    return xe::load_and_swap<uint32_t>(
+                        ks->memory()->TranslateVirtual(addr));
+                  };
+                  if (cvars::guide_step_scene) {
+                    XELOGI("Guide button: step 1 init(render_obj,0)");
+                    uint64_t ia2[] = {obj + 16, 0};
+                    uint64_t ir2 = ks->processor()->Execute(
+                        ts, hud_base + 0xA898u, ia2, xe::countof(ia2));
+                    XELOGI("Guide button: step 1 init -> {:08X}",
+                           static_cast<uint32_t>(ir2));
+                    uint32_t inp = rdm(obj + 72);
+                    XELOGI("Guide button: step 2 XamEnableSystemAppInput({:08X}"
+                           ", 1)",
+                           inp);
+                    uint64_t ea[] = {inp, 1};
+                    uint64_t er = ks->processor()->Execute(
+                        ts, 0x913FE724u, ea, xe::countof(ea));
+                    XELOGI("Guide button: step 2 -> {:08X}",
+                           static_cast<uint32_t>(er));
+                    // Step 3: build the resource locator exactly as hud
+                    // does - XamBuildResourceLocator([guide+4], "hud",
+                    // [91400168] = "strings.xus", buf, 128).
+                    uint32_t pbuf = ks->memory()->SystemHeapAlloc(256, 16);
+                    uint32_t outh = ks->memory()->SystemHeapAlloc(16, 16);
+                    uint64_t ba[] = {rdm(obj + 4), 0x913E1B24u,
+                                     rdm(0x91400168u), pbuf, 128};
+                    uint64_t br = ks->processor()->Execute(
+                        ts, 0x913FE8C4u, ba, xe::countof(ba));
+                    std::string loc;
+                    for (int i = 0; i < 80; ++i) {
+                      uint16_t ch = xe::load_and_swap<uint16_t>(
+                          ks->memory()->TranslateVirtual(pbuf + i * 2));
+                      if (!ch) break;
+                      loc.push_back(static_cast<char>(ch & 0x7F));
+                    }
+                    XELOGI("Guide button: step 3 locator -> {:08X} '{}'",
+                           static_cast<uint32_t>(br), loc);
+                    // Step 4: XuiSceneCreate(basePath, sceneFile, 0, &out)
+                    XELOGI("Guide button: step 4 XuiSceneCreate calling");
+                    uint64_t sca[] = {pbuf, rdm(0x91400170u), 0, outh};
+                    uint64_t scr = ks->processor()->Execute(
+                        ts, 0x913FE6D4u, sca, xe::countof(sca));
+                    XELOGI("Guide button: step 4 XuiSceneCreate -> {:08X} "
+                           "scene={:08X}",
+                           static_cast<uint32_t>(scr), rdm(outh));
+                    XELOGI("Guide button: steps done");
+                    return 0;
+                  }
                   XELOGI("Guide button: scene creator {:08X} off-thread", sfn);
                   if (sfn) {
                     uint64_t sa[] = {obj, 0, 0};
