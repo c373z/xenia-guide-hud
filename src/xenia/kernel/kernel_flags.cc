@@ -180,6 +180,16 @@ DEFINE_bool(guide_create_scene, true,
             "XuiElementLayoutTree - is null without it, so the draw succeeds "
             "while laying out nothing.",
             "Kernel");
+DEFINE_bool(guide_fake_gpu_writeback, false,
+            "After the stall probe locates the word xam polls - the system "
+            "writeback at [device+2B10] - advance it from the host and watch "
+            "whether the guest leaves its wait. This is an EXPERIMENT, not an "
+            "implementation: the real fix is a working system command buffer, "
+            "since VdGetSystemCommandBuffer hands back two magic constants and "
+            "nothing consumes what xam submits. It answers one question only - "
+            "whether that word is what the wait is actually gated on.",
+            "Kernel");
+
 DEFINE_int32(guide_stall_probe_seconds, 0,
              "If non-zero, sample the guest PC of the thread that runs the "
              "Guide's device creation, starting this many seconds after the "

@@ -449,3 +449,46 @@ That is a specific, named gap in Xenia, reached by the guest's own diagnostic
 text rather than by inference. Implementing those two exports so that the
 writeback word advances as the system command buffer is consumed is the next
 piece of work, and it is a Xenia change, not a Guide one.
+
+## The obvious fix does not work
+
+The previous section ended by naming the next piece of work: make the system
+writeback word advance. That has now been tried, and it does not release the
+wait.
+
+`guide_fake_gpu_writeback` locates the polled word through the stall probe and
+then advances it from the host, re-sampling the guest PC after each write:
+
+```
+StallProbe: polled word [FE474000] = 00000003 then 00000003 (UNCHANGED)
+FakeWriteback[0]:  wrote 00000004, guest PC 819F4000 (still spinning)
+FakeWriteback[6]:  wrote 0000000A, guest PC 819F3FF0 (still spinning)
+FakeWriteback[12]: wrote 00000010, guest PC 819F4000 (still spinning)
+FakeWriteback[18]: wrote 00000016, guest PC 819F3FF0 (still spinning)
+```
+
+24 writes over 2.4s, and the thread never leaves `819F3FC8..819F4004`.
+
+Re-reading `819F4488` with that result in hand, the word is not the exit
+condition at all. It is a *change* tracker feeding the timeout heuristic:
+`[r31+8]` holds the last-seen value and `[r31+12]` when it last moved, and if
+nothing moves for `[81D31D60]` the InsertAsyncCommandBufferCall deadlock
+message prints. The only path that returns 0 - done - is the flag test at the
+top of the function, on bit 1 of `[device+2B3D]`.
+
+So a working writeback would silence the deadlock diagnostic without ending
+the wait. Anyone implementing `VdSetSystemCommandBufferGpuIdentifierAddress`
+expecting that to unblock the Guide should read this first.
+
+### Where the completion actually comes from is still open
+
+Exactly one instruction in xam sets that bit - `81A03E68`, inside `81A03D40` -
+found by scanning for a `stb` to `2B3D` preceded by `ori rX,rY,2`. That sounds
+decisive and is not: `81A03D40` has 19 callers across roughly 150 call sites
+and is plainly a shared state helper, not a GPU completion handler. Naming it
+does not name the path.
+
+Also measured: no `VdSetGraphicsInterruptCallback` call occurs anywhere in the
+mode-1 run, by xam or by the title. Whatever sets the bit in a real system is
+not reached through an interrupt callback that xam has registered by this
+point.

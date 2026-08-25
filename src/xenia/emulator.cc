@@ -1310,6 +1310,44 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                                  "then {:08X} ({})",
                                  idp, a, b,
                                  a == b ? "UNCHANGED" : "advanced");
+                          if (cvars::guide_fake_gpu_writeback) {
+                            auto wr = [m](uint32_t addr, uint32_t v) {
+                              xe::store_and_swap<uint32_t>(
+                                  m->TranslateVirtual(addr), v);
+                            };
+                            uint32_t v = b;
+                            for (int k = 0; k < 24; ++k) {
+                              wr(idp, ++v);
+                              std::this_thread::sleep_for(
+                                  std::chrono::milliseconds(100));
+                              CONTEXT c2 = {};
+                              c2.ContextFlags = CONTEXT_CONTROL;
+                              uint32_t g2 = 0;
+                              if (SuspendThread(reinterpret_cast<HANDLE>(nh)) !=
+                                  static_cast<DWORD>(-1)) {
+                                if (GetThreadContext(
+                                        reinterpret_cast<HANDLE>(nh), &c2)) {
+                                  auto* f2 =
+                                      proc->backend()->code_cache()
+                                          ->LookupFunction(c2.Rip);
+                                  g2 = f2 ? f2->MapMachineCodeToGuestAddress(
+                                                c2.Rip)
+                                          : 0;
+                                }
+                                ResumeThread(reinterpret_cast<HANDLE>(nh));
+                              }
+                              bool in_spin =
+                                  g2 >= 0x819F3FC8u && g2 <= 0x819F4004u;
+                              if (k % 6 == 0 || !in_spin) {
+                                XELOGI("FakeWriteback[{}]: wrote {:08X}, guest "
+                                       "PC {:08X} {}",
+                                       k, v, g2,
+                                       in_spin ? "(still spinning)"
+                                               : "<-- LEFT THE SPIN");
+                              }
+                              if (!in_spin) break;
+                            }
+                          }
                         }
                       }
                       auto* cc = proc->backend()->code_cache();
