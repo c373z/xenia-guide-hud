@@ -35,6 +35,14 @@ DEFINE_uint32(xbox_hardware_info_flags, 0x20,
               "0x200 of this word, so without that bit xam never creates a "
               "device and the Guide can never get a render context.",
               "Kernel");
+DEFINE_uint32(guide_xui_anim_init, 0x8174FDE0,
+              "Runtime address of xam's initialiser for the XUI animation "
+              "global at 81D3F924 (0 disables). Without it that global is null, "
+              "xam's own twi assert at 81756060 catches it, Xenia's "
+              "ignore_trap_instructions discards the assert, and four "
+              "instructions later the null is dereferenced at 8174E22C - the "
+              "crash that stops Guide scene creation.",
+              "Kernel");
 DEFINE_bool(guide_install_draw_hook, true,
             "Install the per-swap Guide draw hook. Turn off to test whether "
             "the hook - which runs guest code from inside VdSwap on the title "
