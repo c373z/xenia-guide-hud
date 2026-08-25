@@ -48,9 +48,11 @@ DEFINE_bool(guide_step_scene, false,
 DEFINE_bool(guide_scene_off_thread, false,
             "Run hud's scene creator from the Guide's own thread instead of "
             "from inside the title's swap. Scene loading appears to be "
-            "asynchronous (XUI keeps an AsyncTaskManager), so calling it while "
-            "holding the title's render thread deadlocks. Device-touching work "
-            "stays in the swap.",
+            "asynchronous, so calling it while holding the title's render "
+            "thread might deadlock. It does not help: the scene creator hangs "
+            "on either thread, and the title thread then blocks too - almost "
+            "certainly on xam's XUI critical section, which the stuck Guide "
+            "thread is holding. Both threads end up wedged either way.",
             "Kernel");
 DEFINE_bool(guide_preset_fields, false,
             "With guide_init_only, also set [guide+28/32/64] the way hud's "
