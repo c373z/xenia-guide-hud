@@ -1795,3 +1795,39 @@ something about the descriptor it already has to change.
 Which is consistent with the rest: xam writes to its own buffers in
 `FE03xxxx`/`FE04xxxx`, and what it wants from `VdGetSystemCommandBuffer` is
 something else entirely, still unidentified.
+
+## The retry loop is a kernel wait on three objects
+
+The livelock's `VdGetSystemCommandBuffer` storm is not a tight poll inside
+`819FE138` - none of that function's back-edges span the call. The loop is one
+level up, in mode-1 `CreateDevice` itself:
+
+```
+8178ECBC  <- loop head
+  ...
+8178EDD4  bl 819FE138            ; acquires the system command buffer
+  ...
+8178EE08  bl KeWaitForMultipleObjects(3, &objects, 1, 3, 1, 0, 0, &timeout)
+8178EE0C  cmpwi cr0,r3,0
+8178EE10  bne  -> 8178ECBC       ; loop while the wait does not succeed
+```
+
+`81D0FF3C` is `KeWaitForMultipleObjects` in xam's import table. The first
+argument is **3**, and `r4` points at an array of three objects on the stack.
+
+So the shape of mode 1's stall is different from what the inner spin suggested.
+At the inner level, `819F4488` polls a flag and never leaves - that part is
+established, and forcing the flag does release it. But the outer level is a
+proper kernel wait on three dispatcher objects, retried indefinitely because
+the wait keeps failing.
+
+That reframes the blocker usefully. It is not "xam is busy-waiting on memory
+Xenia never writes". It is "xam is waiting on three kernel objects that nothing
+ever signals", which is a far more tractable thing to chase: the objects have
+identities, and whatever signals them on hardware is a specific piece of the
+system that Xenia either stubs or never runs.
+
+The next step is to identify the three. Xenia implements
+`KeWaitForMultipleObjects`, so logging the handles when the call arrives from
+this site names them, and from there the question becomes which code is
+supposed to signal each one.
