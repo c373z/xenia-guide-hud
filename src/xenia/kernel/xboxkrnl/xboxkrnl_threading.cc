@@ -953,13 +953,33 @@ static object_ref<XTimer> GetGuestTimer(uint32_t timer_guest_ptr) {
   return XObject::GetNativeObject<XTimer>(kernel_state(), native);
 }
 
+// A KDPC carries the routine to run when the timer expires. Xenia dispatches
+// DPCs inline on the calling thread (KeInsertQueueDpc), and XTimer already
+// enqueues its routine as an APC on the thread that set the timer, so passing
+// the DPC's routine through gives the callback a thread with a valid KPCR.
+// This is looser than real DPC semantics - a DPC runs at DISPATCH_IRQL, not as
+// a thread APC - but it is the same approximation Xenia already makes.
+static void ReadDpc(uint32_t dpc_guest_ptr, uint32_t* out_routine,
+                    uint32_t* out_context) {
+  *out_routine = 0;
+  *out_context = 0;
+  if (!dpc_guest_ptr) {
+    return;
+  }
+  auto* dpc = kernel_memory()->TranslateVirtual<XDPC*>(dpc_guest_ptr);
+  *out_routine = dpc->routine;
+  *out_context = dpc->context;
+}
+
 dword_result_t KeSetTimer_entry(lpvoid_t timer_ptr, qword_t due_time,
                                 lpvoid_t dpc_ptr) {
   auto timer = GetGuestTimer(timer_ptr.guest_address());
   if (!timer) {
     return 0;
   }
-  timer->SetTimer(due_time, 0, 0, 0, false);
+  uint32_t routine, context;
+  ReadDpc(dpc_ptr.guest_address(), &routine, &context);
+  timer->SetTimer(due_time, 0, routine, context, false);
   return 0;
 }
 DECLARE_XBOXKRNL_EXPORT1(KeSetTimer, kThreading, kImplemented);
@@ -970,7 +990,9 @@ dword_result_t KeSetTimerEx_entry(lpvoid_t timer_ptr, qword_t due_time,
   if (!timer) {
     return 0;
   }
-  timer->SetTimer(due_time, period_ms, 0, 0, false);
+  uint32_t routine, context;
+  ReadDpc(dpc_ptr.guest_address(), &routine, &context);
+  timer->SetTimer(due_time, period_ms, routine, context, false);
   return 0;
 }
 DECLARE_XBOXKRNL_EXPORT1(KeSetTimerEx, kThreading, kImplemented);
