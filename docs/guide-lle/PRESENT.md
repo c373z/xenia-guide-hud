@@ -3283,3 +3283,44 @@ So the bootstrap is now three steps of scaffolding, two of which are required
 to get a scene at all. That is a smaller invented surface than it looked, and
 the two that remain fail loudly when removed rather than silently changing
 behaviour - which is the property one wants from scaffolding that has to stay.
+
+## A dead cvar, wired up, and why it does not help
+
+The `CHUDBkgndScene` stub is the second required fabrication, so it is worth
+asking what should create that singleton properly. The slot at `81D3F924` has
+eighteen accessors and exactly one writer:
+
+```
+8174FF1C  stw ...,0xF924(...)   in fn 8174FDE0
+```
+
+`8174FDE0` is already the default value of an existing cvar,
+`guide_xui_anim_init`, whose description accurately describes this exact
+mechanism. But:
+
+- `refs.py` finds `8174FDE0` referenced **nowhere** in xam - no direct call, no
+  stored pointer, no register-formed address. It is invoked from outside the
+  module.
+- `grep` finds `guide_xui_anim_init` **used nowhere** in Xenia's source. The
+  cvar was defined, documented, and never wired to anything.
+
+So it was wired up, and calling the real initialiser instead of installing a
+stub faults immediately:
+
+```
+GUEST CRASH: access violation at guest PC 8174F8D4, fault_addr 8
+GUEST CRASH: unwind (back chain): 8174FDFC
+```
+
+`8174FDFC` is four instructions into `8174FDE0`, so it dies in its first call,
+on a null at `+8` - the same shape as every other xam entry point invoked
+without the state its predecessors would have established.
+
+**The cvar's default was changed to 0.** It shipped defaulting to the address,
+which meant wiring it up made it fire by default and crash the stable
+configuration. Verified after the change: zero crashes, `scene=00010000`,
+composite draw as documented.
+
+So this is not progress toward the Guide - the stub stays. What it is: a cvar
+that has been dead since it was written, now connected, with its default made
+safe and its description extended to say what happens if you enable it.

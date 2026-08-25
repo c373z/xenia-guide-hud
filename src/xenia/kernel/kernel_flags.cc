@@ -94,7 +94,7 @@ DEFINE_bool(guide_spoof_ui_thread, false,
 // r4 = [cmd+16]). The global is set by a command that was never issued here,
 // not by a function nothing calls - so the remaining gap is the XUI command
 // pump itself, not another entry point to invoke.
-DEFINE_uint32(guide_xui_anim_init, 0x8174FDE0,
+DEFINE_uint32(guide_xui_anim_init, 0,
               "Runtime address of xam's initialiser for the XUI animation "
               "global at 81D3F924 (0 disables). Without it that global is null, "
               "xam's own twi assert at 81756060 catches it, Xenia's "

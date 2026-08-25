@@ -745,6 +745,23 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
            "(r13={:08X})",
            recorded, current, r13);
   }
+  if (::cvars::guide_xui_anim_init) {
+    // 8174FDE0 is the only writer of the CHUDBkgndScene singleton slot at
+    // 81D3F924, and refs.py finds it referenced nowhere in xam at all - no
+    // direct call, no stored pointer, no register-formed address - so it is
+    // invoked from outside the module. The cvar naming it has existed all
+    // along with an accurate description and was never wired to anything.
+    // Calling the real initialiser is strictly better than the zeroed stub
+    // guide_skip_bkgnd_transition installs.
+    uint32_t before = rd(0x81D3F924u);
+    uint64_t ia[] = {0};
+    uint64_t ir = processor->Execute(ts, ::cvars::guide_xui_anim_init, ia,
+                                     xe::countof(ia));
+    XELOGI("GuideBootstrap: XUI anim init {:08X} -> {:08X}; [81D3F924] "
+           "{:08X} -> {:08X}",
+           static_cast<uint32_t>(::cvars::guide_xui_anim_init),
+           static_cast<uint32_t>(ir), before, rd(0x81D3F924u));
+  }
   if (::cvars::guide_skip_bkgnd_transition) {
     // Do NOT patch guest code here - writing to a code page faults the host.
     // Instead give the CHUDBkgndScene singleton slot a zeroed object so
