@@ -394,3 +394,58 @@ this kind finish are stubs. **Which** word it polls is unresolved, and the
 `2B10` reading is specifically disproven for this run. Pinning it down needs
 the guest registers at spin time; the probe currently captures `CONTEXT_CONTROL`
 only, so it has RIP and nothing else.
+
+## What the Xbox button does, end to end
+
+Retracting the previous section's retraction. It said the `2B10` reading was
+"specifically disproven". That was wrong, and wrong for an avoidable reason:
+the probe read `[81D43684]`, the device global, when the poll loop holds its
+object in `r29`. They are different objects. Reading the field off the wrong
+one produced `[2B10]=00000000` and I treated a measurement error as a
+disproof.
+
+Extending the probe to capture guest registers - the x64 backend keeps the
+`PPCContext` pointer in `rsi`, so the GPRs can be read straight out of host
+memory while the thread is held - gives the real values:
+
+```
+StallProbe: poll arg r31=709DEC70  [r31+8]=00000003
+StallProbe: device=40883A80  [2B10]=FE474000
+StallProbe: polled word [FE474000] = 00000003 then 00000003 (UNCHANGED)
+```
+
+`[dev+2B10] + 8` is `FE474008`, which is exactly the third argument Xenia logs
+in `VdSwap(FE03E284, 709DEF60, FE474008, ...)` - the system writeback pointer.
+Xenia's own stub comment, `// r3 = 0x2B10(d3d?) + 8`, was correct all along.
+
+`819F4488` is a timeout-guarded wait: it reads a tick, tracks when the polled
+word last changed, and once the elapsed time passes `[81D31D60]` it prints two
+strings. They are xam's own words:
+
+```
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+A deadlock has occurred in InsertAsyncCommandBufferCall,
+because 64 Async Command Buffer Call objects have been inserted,
+```
+
+So the whole sequence, measured rather than argued:
+
+1. The button dispatches to hud, which is loaded and creates its Guide object.
+2. Under mode 1 the device creator `8178E9F0` asks `819F4D28` for a mode-1
+   device, which takes the GPU bring-up branch.
+3. xam acquires the system command buffer and presents two 640x480 frames -
+   real `VdSwap` calls that Xenia's hardware scaler processes.
+4. xam then waits for the GPU to acknowledge that work, by polling the system
+   writeback word at `FE474000`.
+5. That word holds 3 and never advances. Nothing consumes xam's command
+   buffer: `VdGetSystemCommandBuffer` is a stub returning `0xBEEF0000` /
+   `0xBEEF0001`, and `VdSetSystemCommandBufferGpuIdentifierAddress` - the call
+   by which the guest registers exactly this writeback address - has an empty
+   body. Both are `kStub`.
+6. So xam spins in its async-command-buffer wait, `CreateDevice` never
+   returns, and the rest of the Guide bootstrap never runs.
+
+That is a specific, named gap in Xenia, reached by the guest's own diagnostic
+text rather than by inference. Implementing those two exports so that the
+writeback word advances as the system command buffer is consumed is the next
+piece of work, and it is a Xenia change, not a Guide one.

@@ -1249,14 +1249,29 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                       xe::threading::set_name("GuideStallProbe");
                       std::this_thread::sleep_for(std::chrono::seconds(delay));
                       uint64_t rips[8] = {};
+                      uint32_t gr[8][4] = {};
                       for (int i = 0; i < 8; ++i) {
                         CONTEXT ctx = {};
-                        ctx.ContextFlags = CONTEXT_CONTROL;
+                        ctx.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
                         if (SuspendThread(reinterpret_cast<HANDLE>(nh)) !=
                             static_cast<DWORD>(-1)) {
                           if (GetThreadContext(reinterpret_cast<HANDLE>(nh),
                                                &ctx)) {
                             rips[i] = ctx.Rip;
+                            // The x64 backend keeps the PPCContext pointer in
+                            // rsi (X64Emitter::GetContextReg) and the guest
+                            // membase in rdi. PPCContext is host memory, so
+                            // the guest GPRs can be read straight out of it
+                            // while the thread is held.
+                            auto* gc =
+                                reinterpret_cast<cpu::ppc::PPCContext*>(
+                                    ctx.Rsi);
+                            if (gc) {
+                              gr[i][0] = static_cast<uint32_t>(gc->r[3]);
+                              gr[i][1] = static_cast<uint32_t>(gc->r[11]);
+                              gr[i][2] = static_cast<uint32_t>(gc->r[29]);
+                              gr[i][3] = static_cast<uint32_t>(gc->r[31]);
+                            }
                           }
                           ResumeThread(reinterpret_cast<HANDLE>(nh));
                         }
@@ -1273,7 +1288,16 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                           return xe::load_and_swap<uint32_t>(
                               m->TranslateVirtual(a));
                         };
-                        uint32_t dv = rdp(0x81D43684u);
+                        // Use the object the poll actually holds in r29,
+                        // not the device global - they are different objects,
+                        // and reading the global is what made an earlier pass
+                        // report [2B10]=0 and reject a correct guess.
+                        uint32_t dv = gr[0][2] ? gr[0][2] : rdp(0x81D43684u);
+                        uint32_t frame = gr[0][3];
+                        if (frame) {
+                          XELOGI("StallProbe: poll arg r31={:08X} [r31+8]={:08X}",
+                                 frame, rdp(frame + 8));
+                        }
                         uint32_t idp = dv ? rdp(dv + 0x2B10u) : 0;
                         XELOGI("StallProbe: device={:08X} [2B10]={:08X}", dv,
                                idp);
@@ -1297,8 +1321,10 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                         auto* f = cc->LookupFunction(rips[i]);
                         uint32_t g =
                             f ? f->MapMachineCodeToGuestAddress(rips[i]) : 0;
-                        XELOGI("StallProbe[{}]: host {:X} -> guest {:08X}{}", i,
-                               rips[i], g, f ? "" : "  (not guest code)");
+                        XELOGI("StallProbe[{}]: guest {:08X}  r3={:08X} "
+                               "r11={:08X} r29={:08X} r31={:08X}{}",
+                               i, g, gr[i][0], gr[i][1], gr[i][2], gr[i][3],
+                               f ? "" : "  (not guest code)");
                       }
                     }).detach();
                   }
