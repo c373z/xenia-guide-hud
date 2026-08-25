@@ -352,6 +352,19 @@ void VdEnableRingBufferRPtrWriteBack_entry(lpvoid_t ptr,
 DECLARE_XBOXKRNL_EXPORT1(VdEnableRingBufferRPtrWriteBack, kVideo, kImplemented);
 
 void VdGetSystemCommandBuffer_entry(lpunknown_t p0_ptr, lpunknown_t p1_ptr) {
+  {
+    // Is this mechanism used at all? The Guide's drawing is expected to reach
+    // the GPU through the system command buffer, and this stub hands back two
+    // magic constants instead of one.
+    static std::atomic<uint32_t> n{0};
+    uint32_t c = ++n;
+    if (c <= 5 || (c % 2000) == 0) {
+      auto* th = XThread::GetCurrentThread();
+      XELOGI("VdGetSystemCommandBuffer #{} from '{}' p0={:08X} p1={:08X}", c,
+             th ? th->name() : std::string("<none>"), p0_ptr.guest_address(),
+             p1_ptr.guest_address());
+    }
+  }
   p0_ptr.Zero(0x94);
   xe::store_and_swap<uint32_t>(p0_ptr, 0xBEEF0000);
   xe::store_and_swap<uint32_t>(p1_ptr, 0xBEEF0001);
