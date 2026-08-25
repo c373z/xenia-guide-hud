@@ -821,3 +821,58 @@ bound resource - is not established, and the depth guess is a warning against
 picking the nearest plausible candidate. What is established: it is a
 surface-shaped object, it is the sixth argument, it arrives null, and the
 device having both colour and depth bound does not supply it.
+
+## The Guide is genuinely presenting
+
+### Retracting the retraction
+
+The previous section withdrew the `819F7F20` caller analysis because that
+function did not appear in the stack scan. That withdrawal was wrong, and for a
+measurable reason: `819F5D18`'s prologue is `stwu r1,-0x1A0(r1)`, a 416-byte
+frame, so its caller's return address sits at `[r1+0x198]` - word 102 - and the
+scan covered 96 words. It missed by eight words. Widened, the address is
+exactly where the ABI says it should be:
+
+```
+stack code refs: ... 819F7FB4(+198) ...
+```
+
+`819F7F20` is the direct caller after all. Absence from a truncated window is
+not absence.
+
+### A real unwinder
+
+The scan was the wrong instrument anyway - it cannot distinguish a live frame
+from a stale word left by an earlier, deeper call, and it had duly produced
+`XuiRenderEnd` frames that are not on the live chain. These prologues save LR
+with `stw r12,-8(r1)` before the `stwu`, and PPC keeps a back chain at `[sp]`,
+so a frame's return address is exactly `[caller_sp - 8]`. The crash reporter
+now walks that:
+
+```
+GUEST CRASH: unwind (back chain): 819F7FB4 819FEC68 8191B438 818F930C 818FB020 913EABC4
+```
+
+Six frames, resolved innermost to outermost:
+
+| return address | function | what it is |
+|---|---|---|
+| `819F7FB4` | `819F7F20` | direct caller of the faulting function |
+| `819FEC68` | `819FEB78` | |
+| `8191B438` | `8191B418` | |
+| `818F930C` | `818F9290` | the DC's `vtable[21]` - Present's implementation |
+| `818FB020` | `818FAFC8` | `XuiRenderPresent`, the export |
+| `913EABC4` | hud's draw | the instruction after `bl XuiRenderPresent` |
+
+### What that establishes
+
+The outermost frame is hud, returning from `XuiRenderPresent`. So the Guide's
+per-frame draw is now running `XuiRenderPresent` for real, dispatching through
+`vtable[21]` exactly as the static reading predicted, and reaching six frames
+into xam's actual presentation code before it dies.
+
+That is the whole chain of this investigation validated from the inside:
+Present no longer short-circuits to S_OK (`guide_clear_null_render`), it no
+longer faults on a missing render target (`guide_use_bound_device`), and it is
+now executing real D3D work. What stops it is one null resource descriptor -
+six dwords of fetch constant at `+0x1C` - passed as the sixth argument.

@@ -2124,9 +2124,35 @@ bool Emulator::ExceptionCallback(Exception* ex) {
         auto* mm = kernel_state() ? kernel_state()->memory() : nullptr;
         uint32_t sp = static_cast<uint32_t>(ectx->r[1]);
         if (mm && sp) {
+          // Proper unwind first. PPC keeps a back chain at [sp], and these
+          // prologues save LR with "stw r12,-8(r1)" before the stwu, so a
+          // frame's return address sits at [caller_sp - 8]. Walking that is
+          // exact, unlike the scan below, which cannot tell a live frame from
+          // a stale word left by an earlier deeper call.
+          {
+            std::string bt;
+            uint32_t cur = sp;
+            for (int f = 0; f < 12 && cur; ++f) {
+              uint32_t caller_sp =
+                  xe::load_and_swap<uint32_t>(mm->TranslateVirtual(cur));
+              if (caller_sp <= cur || caller_sp - cur > 0x10000) break;
+              uint32_t ra = xe::load_and_swap<uint32_t>(
+                  mm->TranslateVirtual(caller_sp - 8));
+              if (ra < 0x81000000u || ra >= 0x92000000u) break;
+              bt += fmt::format("{:08X} ", ra);
+              cur = caller_sp;
+            }
+            if (!bt.empty()) {
+              XELOGE("GUEST CRASH: unwind (back chain): {}", bt);
+            }
+          }
           std::string line;
           int shown = 0;
-          for (uint32_t i = 0; i < 96 && shown < 12; ++i) {
+          // Cover several frames. 96 words was too short by eight for
+          // 819F5D18 alone, whose prologue is stwu r1,-0x1A0(r1) - 104 words -
+          // so the direct caller's return address fell outside the window and
+          // its absence was misread as proof the call was indirect.
+          for (uint32_t i = 0; i < 400 && shown < 24; ++i) {
             uint32_t v = xe::load_and_swap<uint32_t>(
                 mm->TranslateVirtual(sp + i * 4));
             if (v >= 0x81700000u && v < 0x81E00000u) {
