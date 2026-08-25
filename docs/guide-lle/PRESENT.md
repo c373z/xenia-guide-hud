@@ -3015,3 +3015,52 @@ The field is now characterised as completely as static analysis allows:
 What remains unknown is which external code clears them on hardware. That is
 not reachable by pattern matching, and the runtime never executes it, so there
 is nothing to observe either. This line is exhausted rather than abandoned.
+
+## The DC is born correct and inherits the fault
+
+`[dc+0x134]` has two writers, and both execute. Their order settles how the
+device context ends up disabled.
+
+`81900E70` bulk-initialises the DC, zeroing a run of fields:
+
+```
+819083A4  addi r11,r0,0
+81908408  stw r11,280(r31)     ; +0x118
+8190841C  stw r11,300(r31)     ; +0x12C
+81908424  stw r11,308(r31)     ; +0x134 = 0
+81908428  stw r11,312(r31)     ; +0x138
+        ... through +0x144
+```
+
+`818FDE98` then copies from the creation parameter:
+
+```
+818FDE98+58  lwz r11,[param+1C]
+818FDE98+7C  stw r11,[dc+134]
+```
+
+From the trace, in order:
+
+```
+18120  DemandFunction: enter 81900E70     <- zeroes [dc+134]
+18126  DemandFunction: enter 818FDE98     <- copies 1 over it
+```
+
+So the device context is constructed with rendering **enabled** and then has
+the context's flag copied over it six log lines later. The DC is not at fault
+and neither is its initialiser; it faithfully inherits a value that was wrong
+before it existed.
+
+That rules out the last place the fault could have been introduced. Every step
+from the button press to the disabled present is now accounted for:
+
+1. `818FD0E8` constructs the XUI context with `[+0x1C] = 1`.
+2. Nothing clears it - no class method can, and no external code does here.
+3. `81900E70` builds a device context with `[+0x134] = 0`.
+4. `818FDE98` copies `[ctx+0x1C]` into `[dc+0x134]`, making it 1.
+5. `XuiRenderBegin` skips its device call and `XuiRenderPresent` returns
+   without presenting, so `819F5D18` - the draw emitter - is never reached.
+6. Zero GPU draws, and the screen never changes.
+
+Every link is measured. The only unknown left is step 2's counterpart on real
+hardware: what clears the flag there.
