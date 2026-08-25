@@ -62,3 +62,29 @@ Default configuration, dashboard running, press the Guide key (0x08 by default).
 `TRACE.md` has the expected log. If scene creation stops returning
 `scene=00010000`, compare against that trace before assuming a regression
 elsewhere.
+
+
+## Update: the GPU side, resolved as far as the guest can take it
+
+PRESENT.md now carries the full path from the button press to a running draw.
+Summary of where it ends:
+
+- The Guide's frame runs. XuiRenderPresent executes for real, six frames deep
+  into xam's presentation code, verified by a back-chain unwind whose outermost
+  frame is hud's own draw.
+- Every null dereference on that path is cleared: the null-render flag
+  (guide_clear_null_render), the wrong device (guide_use_bound_device), and the
+  missing front buffer (guide_fake_front_buffer). Zero guest crashes.
+- The screen is still byte-identical to a no-press control.
+
+The single remaining blocker is VdGetSystemCommandBuffer, which Xenia stubs.
+The guest contract for it is written out at the end of PRESENT.md, derived from
+the only caller in xam. That is a Xenia GPU feature, not a Guide problem.
+
+Two cautions carried forward:
+
+- Any breakpoint changes scheduling enough that the draw path is never taken.
+  Use host-side memory polling instead; see guide_watch_front_buffer.
+- The device redirect was originally racy and some run-to-run differences
+  recorded in PRESENT.md are that race, not the cvars. It is now applied per
+  frame to [wrapper+12].

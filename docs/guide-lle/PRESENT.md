@@ -988,3 +988,53 @@ sections ago: xam's device submits through the system command buffer, and
 `0xBEEF0001`. Whatever the Guide is now drawing goes into a buffer nothing
 executes. Removing the null dereferences got the software to run; it did not
 connect it to the GPU, and no amount of further work on this side will.
+
+## What VdGetSystemCommandBuffer has to return
+
+The system command buffer is the terminal blocker: the Guide's present now
+runs without faulting and submits, and nothing executes what it submits. Xenia
+stubs the export - zero `0x94` bytes, write `0xBEEF0000` to p0 and
+`0xBEEF0001` to p1. Anyone implementing it needs the guest's expectations, so
+here is what the only caller does with the result.
+
+Exactly one function in xam calls it: `819FE138`, at `819FE600`, as
+`VdGetSystemCommandBuffer(p0 = r1+304, p1 = r1+156)`. Immediately after:
+
+```
+81A05804  lwz    r11,[r31+59A8]
+81A0580C  beq    -> 81A05858          ; branch on [device+59A8]
+          ; --- taken when [device+59A8] is non-zero ---
+81A05810  lwz    r11,[r1+156]         ; the p1 value
+81A05818  lwz    r10,[r31+2B10]       ; the writeback block (FE474000)
+81A0581C  stw    r11,8(r10)           ; [writeback+8] = p1
+81A05820  bl     81A0B3F0             ; result -> [r1+128]
+81A0583C  bl     81A088E0  (r3=device, r4=&[r1+128])
+81A0584C  bl     81A08990  (r3=device, r4=&[r1+128], r5=0)
+          ; --- otherwise ---
+81A0585C  lwz    r10,[r1+352]         ; p0 + 0x30
+81A05864  cmplwi r10,0x500
+81A05870  lwz    r11,[r1+356]         ; p0 + 0x34
+81A05874  cmplwi r11,0x5BE
+```
+
+So the contract has two halves:
+
+- **p1 is a GPU identifier value.** The guest stores it at `[device+2B10] + 8`
+  - which is `FE474008`, precisely the "system writeback ptr" argument Xenia
+  already logs in `VdSwap`, and precisely the address Xenia's own stub comment
+  for `VdSetSystemCommandBufferGpuIdentifierAddress` names as `0x2B10(d3d?) + 8`.
+  Three independent things agree on that address.
+- **p0 is a 0x94-byte descriptor**, not a scalar. The guest reads `+0x30` and
+  `+0x34` and compares them against `0x500` and `0x5BE`. Xenia zeroes the whole
+  block, so both comparisons fail and the guest takes a path built for a
+  descriptor it did not get.
+
+What `0x500` and `0x5BE` mean is **not** established - they are the right
+magnitude for Xenos register indices, but that is a guess and is written here
+as one. The rest of the `0x94` bytes are likewise unmapped; only `+0x30` and
+`+0x34` have observed readers.
+
+This is where the work stops being about the Guide. Everything from the button
+press to the draw is now understood and runs; what remains is a GPU-side
+feature of Xenia that no title has ever needed, because only system software
+uses this path.
