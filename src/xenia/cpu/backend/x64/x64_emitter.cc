@@ -7,6 +7,9 @@
  ******************************************************************************
  */
 
+#include <map>
+#include <mutex>
+
 #include "xenia/cpu/backend/x64/x64_emitter.h"
 
 #include <stddef.h>
@@ -39,6 +42,13 @@
 #include "xenia/cpu/symbol.h"
 #include "xenia/cpu/thread_state.h"
 
+DEFINE_bool(log_guest_asserts, false,
+            "Report guest twi type-25 assertion traps. Xenia otherwise "
+            "drops these silently, so a guest module reporting its own "
+            "failed invariant is invisible and execution continues into "
+            "whatever the check was guarding. Rate-limited per call site."
+            ,
+            "CPU");
 DEFINE_bool(debugprint_trap_log, false,
             "Log debugprint traps to the active debugger", "CPU");
 DEFINE_bool(ignore_undefined_externs, true,
@@ -428,6 +438,40 @@ uint64_t TrapDebugPrint(void* raw_context, uint64_t address) {
   return 0;
 }
 
+// Trap type 25 (twi 31,r0,0x19) is the assertion form used throughout xam and
+// other system modules: the guest checks an invariant and traps when it fails.
+// This case used to emit nothing at all, so those assertions were invisible and
+// execution ran on into whatever the failed invariant was guarding - typically
+// a null dereference a few instructions later, which then looks like an
+// unexplained crash. Report it instead; the guest is usually right.
+uint64_t TrapAssert(void* raw_context, uint64_t address) {
+  if (!cvars::log_guest_asserts) {
+    return 0;
+  }
+  // These are far more common than "assertion" suggests: a single failing
+  // guest loop can hit one millions of times in a session (3.8M in one
+  // measured run, all from the same lr with STATUS_INVALID_PARAMETER). Log the
+  // first few of each distinct call site, then go quiet, so the signal is
+  // usable.
+  auto* ctx = reinterpret_cast<ppc::PPCContext_s*>(raw_context);
+  uint32_t lr = static_cast<uint32_t>(ctx->lr);
+  static std::mutex mtx;
+  static std::map<uint32_t, uint32_t> seen;
+  uint32_t n;
+  {
+    std::lock_guard<std::mutex> guard(mtx);
+    n = ++seen[lr];
+  }
+  if (n <= 3) {
+    XELOGE("GUEST ASSERT (twi 25) #{} at lr={:08X}: r3={:016X} r4={:016X} "
+           "r5={:016X}",
+           n, lr, ctx->r[3], ctx->r[4], ctx->r[5]);
+  } else if (n == 4) {
+    XELOGE("GUEST ASSERT (twi 25) at lr={:08X}: further hits suppressed", lr);
+  }
+  return 0;
+}
+
 uint64_t TrapDebugBreak(void* raw_context, uint64_t address) {
   auto thread_state =
       reinterpret_cast<ppc::PPCContext_s*>(raw_context)->thread_state;
@@ -452,7 +496,8 @@ void X64Emitter::Trap(uint16_t trap_type) {
       CallNative(TrapDebugBreak, 0);
       break;
     case 25:
-      // ?
+      // xam's assertion form - report rather than silently continue.
+      CallNative(TrapAssert, 0);
       break;
     default:
       XELOGW("Unknown trap type {}", trap_type);
