@@ -91,3 +91,31 @@ built for itself. They are probes that establish what is missing, not fixes.
 The real gap is in PRESENT.md: `VdGetSystemCommandBuffer` returns a descriptor
 with no command buffer in it, and `VdSwap` throws away the one the guest hands
 back.
+
+## Regression check after the tooling and fix work
+
+Verified on a clean tree, after the `KeDebugMonitorData`/`KeCertMonitorData`
+fixes and the diagnostic cvars were added:
+
+- clean rebuild: **936/936 targets, 186s, no errors or warnings**
+- stable configuration reproduces its documented signature exactly:
+
+```
+GuideBootstrap: render host -> 00000000, XUI ctx <ptr>, provider 81D22A54
+GuideBootstrap: scene creator 913EB940 -> 00000000, scene=00010000
+GuideBootstrap: draw hook installed on title thread
+Guide composite draw #1 -> 00000000; ... [134]=00000001 ...
+```
+
+- guest crashes: **0**
+- dashboard framebuffer: **2EF6B4B7**, the same hash as the no-press control
+  and as every earlier capture
+
+Every diagnostic cvar added during this work defaults off, so a fresh config
+gets the stable behaviour. The list, all `false`/`0` by default:
+`guide_stall_probe_seconds`, `guide_fake_gpu_writeback`,
+`guide_force_cmdbuf_complete`, `guide_watch_front_buffer`,
+`guide_watch_null_render`, `guide_diff_draw_writes`, `guide_word_diff`,
+`guide_execute_command_stream`, `guide_syscmdbuf_buffer_kb`,
+`guide_trace_setrendertarget`, `guide_call_boot_entry`,
+`guide_bind_depth_copy`.
