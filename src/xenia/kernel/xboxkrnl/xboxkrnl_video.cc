@@ -951,6 +951,22 @@ void VdSwap_entry(
   // before its swap - which is where the Guide is drawn on hardware. The
   // title calls VdCallGraphicsNotificationRoutines only once at startup, so
   // that is not the per-frame path.
+  {
+    // Draws dispatched per swap, sampled. The Guide's XUI writes GPU state but
+    // dispatches no draws through the buffers we submit; if it draws at all it
+    // must be through the title's own ring buffer, which this counter also
+    // sees. Comparing a run with the button pressed against one without is the
+    // test.
+    static std::atomic<uint32_t> swaps{0};
+    uint32_t sn = ++swaps;
+    if ((sn % 200) == 0) {
+      auto* gsd = kernel_state()->emulator()->graphics_system();
+      if (gsd && gsd->command_processor()) {
+        XELOGI("SwapDraws: swap #{} cumulative draws {}", sn,
+               gsd->command_processor()->guide_draw_count_);
+      }
+    }
+  }
   if (guide_bs_pending_.exchange(false)) {
     auto* bth = XThread::GetCurrentThread();
     if (bth) {

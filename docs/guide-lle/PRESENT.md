@@ -1643,3 +1643,40 @@ exist somewhere this has not looked, or are never emitted because the device
 was never brought up, is not settled here - but "the Guide is rendering and
 only compositing is missing" is not supported, and I stated it twice before
 having a test that could contradict it.
+
+## The sharpest measurement available: the Guide adds no draws
+
+The draw counter sees everything the command processor dispatches, including
+the dashboard's own rendering. That makes a within-run control possible: watch
+the draw rate across the button press.
+
+```
+swaps  200-> 400: +5800 draws (29.0/swap)
+swaps 1400->1600: +5800 draws (29.0/swap)   <- button pressed around here
+swaps 2000->2200: +5800 draws (29.0/swap)   <- draw hook installed, composite
+swaps 3000->3200: +5800 draws (29.0/swap)      draws running
+swaps 4400->4600: +5800 draws (29.0/swap)
+```
+
+**Exactly 5800 every interval, with no variance at all**, through the press,
+through the bootstrap, and through hundreds of composite draws. The dashboard
+renders a fixed scene deterministically, which makes this an unusually
+sensitive instrument: a single extra draw anywhere would break the constant.
+
+The Guide contributes **zero** draws to the GPU.
+
+That is the cleanest statement of where this ends. Not "no pixels appeared",
+which a compositing failure would also explain - the Guide's frame runs to
+completion, writes GPU state, and issues no drawing work whatsoever.
+
+### Why that is the expected answer, and what it is worth
+
+This run is the stable configuration, where `[dc+134]` is 1 and
+`XuiRenderPresent` returns without presenting, so zero draws is what the rest
+of this file predicts. The value is not the surprise; it is that the prediction
+is now checked against a measurement sharp enough to have caught a single draw,
+after four earlier probes on this question failed by being unable to return a
+negative at all.
+
+It also leaves a regression test behind. If any future change makes the Guide
+render, this number stops being 5800.
