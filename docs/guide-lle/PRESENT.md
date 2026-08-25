@@ -1831,3 +1831,56 @@ The next step is to identify the three. Xenia implements
 `KeWaitForMultipleObjects`, so logging the handles when the call arrives from
 this site names them, and from there the question becomes which code is
 supposed to signal each one.
+
+## A failing wait, and why it fails
+
+Xenia's `KeWaitForMultipleObjects` returns `X_STATUS_INVALID_PARAMETER`
+**immediately** when any object will not resolve - it does not wait. So a
+caller that loops on the result spins at full speed, which is what tens of
+thousands of `VdGetSystemCommandBuffer` calls a second look like from the
+outside.
+
+Logging the object that fails:
+
+```
+KeWaitForMultipleObjects #1: object 0 of 2 at 81D424A8 will not resolve;
+  dispatch type 9 -> returning INVALID_PARAMETER without waiting
+```
+
+Dispatch type **9** is a synchronisation timer. Xenia's `GetNativeObject`
+handles timers only when `guest_native_timers` is set, and it defaults off:
+
+```
+if (!cvars::guest_native_timers) { result = nullptr; break; }
+```
+
+So the object is a timer the emulator declines to resolve, the wait fails
+instantly rather than waiting, and the caller busy-loops.
+
+Enabling the cvar confirms it causally: **wait failures drop from thousands to
+zero**.
+
+### What that costs
+
+It immediately crashes elsewhere:
+
+```
+GUEST CRASH: access violation at guest PC 817286C0, fault_addr 0
+GUEST CRASH: lr=81728678 r3=FFFFFECC
+GUEST CRASH: unwind: 81731538 81731760 817319F8 81779D54 8177AA9C 8177AE48
+```
+
+`r3 = 0xFFFFFECC` is -308 - a negative value being used where a pointer or
+index is expected. This is in xam code unrelated to the Guide, reached through
+six frames that have nothing to do with device bring-up, and it is presumably
+why the cvar defaults off in the first place.
+
+### Scope, stated carefully
+
+The wait that was instrumented is a **2-object** wait. The retry loop in mode-1
+`CreateDevice` is a **3-object** wait at `8178EE08`. They are different call
+sites, and nothing here shows the 3-object wait fails for the same reason - or
+at all. What is established is narrower and still worth having: at least one
+wait in this run fails instantly because a guest timer will not resolve, that
+failure mode makes any looping caller spin, and the emulator's timer support is
+the reason.

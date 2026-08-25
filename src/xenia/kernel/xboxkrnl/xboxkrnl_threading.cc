@@ -1137,6 +1137,24 @@ dword_result_t KeWaitForMultipleObjects_entry(
       auto object_ref = XObject::GetNativeObject<XObject>(
           kernel_state(), object_ptr, UndefinedObject, true);
       if (!object_ref) {
+        // This returns immediately - it does not wait - so a caller that
+        // loops on the result spins at full speed. xam's mode-1 device
+        // bring-up does exactly that, retrying a 3-object wait tens of
+        // thousands of times a second. Name the object that will not resolve
+        // and its dispatcher type; a type Xenia does not implement lands here
+        // and is indistinguishable from a real failure at the call site.
+        static std::atomic<uint32_t> bad{0};
+        uint32_t bn = ++bad;
+        if (bn <= 8 || (bn % 100000) == 0) {
+          auto* hdr = reinterpret_cast<uint8_t*>(object_ptr);
+          XELOGW(
+              "KeWaitForMultipleObjects #{}: object {} of {} at {:08X} will "
+              "not resolve; dispatch type {} -> returning INVALID_PARAMETER "
+              "without waiting",
+              bn, n, static_cast<uint32_t>(count),
+              static_cast<uint32_t>(objects_ptr[n]),
+              hdr ? hdr[0] : 0xFF);
+        }
         return X_STATUS_INVALID_PARAMETER;
       }
 
