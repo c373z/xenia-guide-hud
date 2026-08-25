@@ -157,3 +157,69 @@ time because it falls between frames - and the differing struct layouts mean
 the title sample may not even be reading the same fields. Do not build on
 either reading until a surface has actually been bound and the result
 observed.
+
+## Why there is nothing for a surface to be bound to
+
+Both of the device's own default surfaces are null:
+
+```
+default surface [3F70] = 00000000
+default surface [3F78] = 00000000
+```
+
+So there is no ready-made surface to borrow, and xam's device has no
+ringbuffer either - nothing in the run ever calls `VdInitializeRingBuffer`.
+The device was created but never brought up. Binding a render target on its
+own could not produce pixels while that is true.
+
+`81A04570` is the only function in xam that calls `VdInitializeRingBuffer`
+(also `VdEnableRingBufferRPtrWriteBack` and the GPU-identifier setup). It
+never ran. `callers.py` (added in this commit) gives its reverse call graph.
+
+### What CreateDevice actually does
+
+`8178F748`, the function the Guide button calls, opens with the hardware gate:
+
+```
+r11 = [[815F048C]]              ; XboxHardwareInfo flags
+if ((r11 & 0x200) == 0) { r3 = 0; return; }    ; S_OK, having done nothing
+```
+
+That is the `xbox_hardware_info_flags = 0x220` requirement from CONFIG.md,
+seen from xam's side. It then calls `819F4D28(0, 2, 0, 0, 0, out)` and, on
+success, allocates and stores the device pointer.
+
+### What is established, and what is not
+
+Measured, from `DemandFunction` coverage (7911 functions compiled on call in
+that run, so absence is meaningful):
+
+- `8178F748` ran; `819F4D28` ran.
+- `819F4A00`, `81A0FE48` and `81A04570` never ran.
+
+Read from the disassembly:
+
+- `819F4A00` is reached from `8178F748` only at `81796A4C`, which is inside
+  CreateDevice's error path (after `r26 = 0x8007000E`), and from `819F4D28`
+  only at a site guarded by a failed call. It is teardown, not setup.
+- `81A0FE48` is called at `819FC08C`, and that site *is* on a success path -
+  its non-zero result leads to storing the device and returning 0.
+- `81A16968`, called just before at `819FC054`, is straight-line with no
+  branches and ends `addi r3,r0,1`: it always returns 1. The test at
+  `819FC05C` branches when that is non-zero, straight to "store device,
+  return 0" - skipping the bring-up.
+
+**Not established:** that the bring-up is therefore unreachable. The block
+containing the `81A0FE48` call has a loop-back at `819FC094` into `819FC060`,
+so it has at least one entry that has not been traced, somewhere at or above
+`819FC008`. Reading 20-instruction windows is not sufficient to settle this;
+it needs a real CFG of `819F4D28`. Do not write "xam can never bring up its
+device" until that exists.
+
+### A correction to the previous section
+
+An earlier note here said the path from CreateDevice to the bring-up "exists
+but bails somewhere". That was wrong twice over: one of the two edges is a
+teardown call on an error path, and a reverse call graph cannot tell a setup
+edge from a teardown edge at all. `callers.py` carries that caveat in its
+docstring.

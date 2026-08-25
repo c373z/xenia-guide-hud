@@ -894,6 +894,24 @@ void VdSwap_entry(
       RunGuideBootstrapOnTitleThread(bth);
     }
   }
+  {
+    // VdSwap's second argument is the frontbuffer D3D9 texture header fetch -
+    // a descriptor for the buffer already on screen, and the only surface-like
+    // thing the Guide path is handed for free.
+    static bool fetch_once = false;
+    if (!fetch_once && guide_draw_fn_) {
+      fetch_once = true;
+      auto* fm = kernel_state()->memory();
+      uint32_t fp = fetch_ptr.guest_address();
+      XELOGI("VdSwap fetch_ptr={:08X}", fp);
+      if (fp) {
+        for (uint32_t i = 0; i < 8; ++i) {
+          XELOGI("  fetch[{:02X}] = {:08X}", i * 4,
+                 xe::load_and_swap<uint32_t>(fm->TranslateVirtual(fp + i * 4)));
+        }
+      }
+    }
+  }
   if (guide_draw_fn_ && guide_draw_this_) {
     static thread_local bool in_guide_draw = false;
     auto* gth = XThread::GetCurrentThread();
@@ -936,9 +954,19 @@ void VdSwap_entry(
               XELOGI("  +{:04X}: title={:08X} xam={:08X}", off, prd(tdev + off),
                      prd(xdev + off));
             }
-            XELOGI("  -- title at xam_offset-0x80 --");
-            for (uint32_t off = 0x3200; off <= 0x3240; off += 4) {
-              XELOGI("  +{:04X}: title={:08X}", off, prd(tdev + off));
+            // 819F4C00 compares each RT slot against [dev+3F78] and the
+            // depth slot against [dev+3F70] - those are the device's own
+            // "default" surfaces. If they are real objects they are the
+            // cheapest thing to bind, and SetRenderTarget's validation says
+            // exactly what "real" means: bit 30 set in word 0.
+            for (uint32_t off : {0x3F70u, 0x3F78u}) {
+              uint32_t sp = prd(xdev + off);
+              XELOGI("  default surface [{:04X}] = {:08X}", off, sp);
+              if (sp) {
+                XELOGI("    w0={:08X} (bit30={}) +24={:08X}", prd(sp),
+                       (prd(sp) & 0x40000000u) ? "set" : "CLEAR",
+                       prd(sp + 0x24u));
+              }
             }
           }
         }
