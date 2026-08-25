@@ -906,6 +906,29 @@ void VdSwap_entry(
       in_guide_draw_scope = false;
       static std::atomic<uint32_t> gdraws{0};
       uint32_t gn = ++gdraws;
+      // Does the Guide's drawing actually produce command data? Sample xam's
+      // device around +0x2B00, the region its own code indexes, on the first
+      // draw and again later. If write pointers advance, real GPU commands are
+      // being generated and only the submission is missing.
+      if (gn == 1 || gn == 200) {
+        auto* mem2 = kernel_state()->memory();
+        uint32_t dev = xe::load_and_swap<uint32_t>(
+            mem2->TranslateVirtual(0x81D43684u));
+        if (dev) {
+          for (uint32_t off = 0x2B00; off <= 0x2B30; off += 16) {
+            XELOGI("DevSample draw{} dev+{:X}: {:08X} {:08X} {:08X} {:08X}", gn,
+                   off,
+                   xe::load_and_swap<uint32_t>(
+                       mem2->TranslateVirtual(dev + off)),
+                   xe::load_and_swap<uint32_t>(
+                       mem2->TranslateVirtual(dev + off + 4)),
+                   xe::load_and_swap<uint32_t>(
+                       mem2->TranslateVirtual(dev + off + 8)),
+                   xe::load_and_swap<uint32_t>(
+                       mem2->TranslateVirtual(dev + off + 12)));
+          }
+        }
+      }
       if (gn <= 3 || (gn % 300) == 0) {
         XELOGI("Guide composite draw #{} -> {:08X}", gn,
                static_cast<uint32_t>(gr));
