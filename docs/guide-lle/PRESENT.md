@@ -3198,3 +3198,30 @@ device.
 `hud_overlay.xex` is **byte-identical** to `hud.xex` (0 differing bytes of
 118,784), so it is not an alternative Guide build to try. Eliminated without
 needing a run.
+
+## One more filter, and it comes up empty
+
+If some function in xam clears `[ctx+0x1C]`, a reasonable guess is that it
+obtains the context the same way everything else does - from the global at
+`81D6C978`. That gives a filter: intersect the functions that touch that global
+with the functions containing a literal-zero store to a `+0x1C` field.
+
+```
+functions touching the XUI context global:      11
+functions with a literal-zero store to +0x1C:  135
+intersection:                                    0
+```
+
+Empty. No function that reads or writes the context global also stores a
+literal zero into a `+0x1C` field.
+
+So if a clearer exists in xam, it does not fetch the context from the global -
+it receives it as a parameter. That is consistent with everything else about
+these two fields: the class cannot clear them, the destructor expects someone
+else to have done it, and the writer is outside both the class and the XUI
+code.
+
+It also removes the last cheap filter. Without the global as an anchor, there
+is no static property that distinguishes the right `+0x1C` store from the other
+134, and no runtime opportunity because the code never executes. That is the
+end of what can be established about this field from the material available.
