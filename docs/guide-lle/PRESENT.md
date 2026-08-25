@@ -3064,3 +3064,36 @@ from the button press to the disabled present is now accounted for:
 
 Every link is measured. The only unknown left is step 2's counterpart on real
 hardware: what clears the flag there.
+
+## hud is not the one failing to do something
+
+The missing step has to be somewhere, and hud.xex - the Guide itself - is a
+candidate: perhaps it never calls an API that would enable rendering. Checking
+every XUI and render-related import hud has, against whether it is called:
+
+```
+XuiInit                     used
+XuiRenderCreateDC           used
+XuiRenderBegin              used
+XuiRenderEnd                used
+XuiRenderPresent            used
+XuiRenderGetBackBufferSize  used
+XuiSendMessage              used
+XuiRenderDestroyDC          not used   (teardown)
+XuiRenderUninit             not used   (teardown)
+XuiUninit                   not used   (teardown)
+```
+
+**Every import on the render path is exercised.** The three that are not are
+teardown calls, which is correct for a Guide that is open rather than closing.
+The remaining unused imports are element manipulation and unrelated Xam APIs,
+which an undriven Guide would not touch.
+
+So hud does its part completely. There is no missing call on the application
+side - no "enable rendering" API sitting unused in its import table. The gap is
+entirely inside xam and the system state it expects, not in the Guide
+application.
+
+That is worth having as an elimination. It means no amount of driving hud
+differently - more messages, different bootstrap order, simulated input - can
+reach the missing step, because hud has no API for it.
