@@ -1203,3 +1203,49 @@ the mode it was looking for - not because anything about command submission had
 been satisfied. It also means the two fields say nothing about where a command
 buffer lives, so they are no help with `p0+0x04` and `p0+0x08`, which remain
 the open question.
+
+## The descriptor is opaque to titles
+
+dash.xex is an independent user of this export, and it maps cleanly: its image
+base is `92000000` and, unlike xam, its runtime addresses are the PE addresses
+with **no shift** (derived from its entry point, `92196660`, matching the
+header exactly).
+
+It calls `VdGetSystemCommandBuffer` exactly once, at `922810C0` in function
+`92281058`, with `p0 = r1+416`. Scanning that whole function for reads of the
+`0x94`-byte block finds **none**. What it does instead is:
+
+```
+922810C0  bl   -> 9293BA64          ; VdGetSystemCommandBuffer
+922810C4  addi r9,r1,416            ; the descriptor
+922810D0  stw  r9,188(r1)
+922810E8  stw  r9,164(r1)
+9228110C  stw  r9,140(r1)
+```
+
+It stashes the pointer into argument slots and hands it on - which is why
+`VdSwap`'s fourth argument is that same address. **The title treats the
+descriptor as an opaque handle.** Only xam, the system software, reads fields
+out of it.
+
+### Which simplifies the implementation
+
+The plan earlier in this file said the open question was "which fields carry
+the pointer and size". That framing is wrong, or at least unnecessary. Since
+titles never inspect the block, the command buffer's address and length **do
+not have to be in it at all**. Xenia can allocate the buffer, remember it
+host-side, hand back a descriptor as a key, and execute the buffer when
+`VdSwap` presents that key back:
+
+```
+VdGetSystemCommandBuffer(p0, p1)  ->  fill p0, record {p0 -> buffer}
+VdSwap(..., p0, p1, ...)          ->  ExecuteIndirectBuffer(buffer, used)
+```
+
+What still has to be right is the subset of fields xam reads, because xam is
+not a title: `+0x04`, `+0x08`, `+0x1C`, `+0x30` and `+0x34` (display width and
+height, now known), and `+0x90`. Those five plus the mode pair are the real
+specification, and three of them still have no observed meaning.
+
+That is a smaller and better-shaped problem than "reverse a 0x94-byte kernel
+structure".
