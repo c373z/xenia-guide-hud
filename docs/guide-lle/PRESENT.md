@@ -876,3 +876,64 @@ Present no longer short-circuits to S_OK (`guide_clear_null_render`), it no
 longer faults on a missing render target (`guide_use_bound_device`), and it is
 now executing real D3D work. What stops it is one null resource descriptor -
 six dwords of fetch constant at `+0x1C` - passed as the sixth argument.
+
+## The null resource is the front buffer
+
+Following the verified unwind down, the null sixth argument comes from one
+load:
+
+```
+819FEC24  lwz r6,0x3F74(r31)      ; r31 is the device (it calls the same
+                                  ; (device,1) helper SetRenderTarget does)
+```
+
+Two functions write `[device+3F74]`, and one of them, `81A0FA80`, is the same
+function whose `SetRenderTarget` call binds RT0. Its store is preceded by:
+
+```
+81A16EB0  bl 819E7310             ; allocate
+81A16EB4  cmplwi cr0,r3,0
+81A16EB8  bne  -> 81A16ED4        ; success: store it
+81A16EC0  addi r3,r11,13264       ; -> "Couldn't allocate front buffer.\n"
+81A16EC4  bl 81A0C2A8
+81A16ED0  b    -> 81A17040        ; return 0
+81A16ED4  stw r3,0x3F74(r29)
+```
+
+xam names it itself: **`[device+3F74]` is the front buffer**. The Guide's
+present dereferences it six frames down and faults because it is null.
+
+### The device is the right one
+
+`8191B418` does `lwz r3,12(r31)` and passes that to `819FEB78`, so the present
+path takes its device from `[wrapper+12]`, not from the `81D43684` global that
+`guide_use_bound_device` rewrites. Measured, they agree:
+
+```
+device xam dev [81D43684]        = 40883A80  RT0=4088B3E0 ... [3F74]=00000000
+device PRESENT PATH [wrapper+12] = 40883A80  RT0=4088B3E0 ... [3F74]=00000000
+```
+
+So the redirect is correct and the wrapper points at the device that has a
+render target. That device simply has no front buffer.
+
+### A mid-analysis inference of mine that was wrong
+
+I reasoned: the failure path returns before the `SetRenderTarget` call, the
+bind is observed, therefore the store must have executed and `r29` must be some
+third object. A breakpoint on the store address settles it - **it never fires**,
+while `SetRenderTarget` from `lr=81A0FD2C` does. The bind is reachable without
+the store, so "bind happened therefore store happened" was invalid.
+
+What is measured, and what is not:
+
+- No run prints `Couldn't allocate front buffer`, so the failure path is not
+  taken either.
+- The allocator `819E7310` *is* entered in the run where the draw happens
+  (`DemandFunction` count 1), and not entered in breakpoint runs.
+- `[device+3F74]` is null on every device object visible: both xam devices,
+  the displaced pre-redirect one, and the present path's own.
+
+Those do not yet form a consistent story, and I am not going to invent one to
+join them. The obstacle is methodological: the store can only be observed with
+a breakpoint, and any breakpoint stops the draw path from being taken at all.

@@ -462,6 +462,7 @@ static xe::global_critical_region graphics_notification_region_;
 static std::vector<GraphicsNotificationRoutine>* graphics_notification_routines_
     = nullptr;
 
+uint32_t guide_prev_device_ = 0;
 static uint32_t guide_draw_fn_ = 0;
 static uint32_t guide_draw_this_ = 0;
 
@@ -687,6 +688,7 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
     if (bound && bound != cur) {
       xe::store_and_swap<uint32_t>(memory->TranslateVirtual(0x81D43684u),
                                    bound);
+      guide_prev_device_ = cur;  // keep the displaced device visible
       XELOGI("GuideBootstrap: xam device global {:08X} (RT0={:08X}) -> "
              "{:08X} (RT0={:08X})",
              cur, cur ? rd(cur + 0x32A0u) : 0, bound, rd(bound + 0x32A0u));
@@ -992,14 +994,28 @@ void VdSwap_entry(
                                                            prd(0x81D43684u)},
                           {"VdGlobalXamDevice [801E6FC8]", prd(0x801E6FC8u)},
                           {"VdGlobalDevice [801E6FC4]", prd(0x801E6FC4u)},
-                          {"dc wrapper [dc+1CC]", pdev}}) {
+                          {"dc wrapper [dc+1CC]", pdev},
+                          {"displaced device (pre-redirect)",
+                           guide_prev_device_},
+                          // 8191B418 does "lwz r3,12(r31)" and hands THAT to
+                          // 819FEB78, so the device the present path actually
+                          // uses is [wrapper+12] - not the 81D43684 global the
+                          // redirect changes.
+                          {"PRESENT PATH [wrapper+12]",
+                           pdev ? prd(pdev + 12u) : 0}}) {
             if (!e.second) {
               XELOGI("  device {}: <null>", e.first);
               continue;
             }
-            XELOGI("  device {} = {:08X}  RT0={:08X} RT1={:08X} depth={:08X}",
+            // +3F74 is the resource the present path loads into r6 at
+            // 819FEC24 and passes down as the sixth argument that faults.
+            // 81A0FA80 writes it, and that is the same function whose
+            // SetRenderTarget call binds RT0.
+            XELOGI("  device {} = {:08X}  RT0={:08X} RT1={:08X} depth={:08X} "
+                   "[3F74]={:08X}",
                    e.first, e.second, prd(e.second + 0x32A0u),
-                   prd(e.second + 0x32A4u), prd(e.second + 0x32B0u));
+                   prd(e.second + 0x32A4u), prd(e.second + 0x32B0u),
+                   prd(e.second + 0x3F74u));
           }
           uint32_t tdev = prd(0x801E6FC4u);
           uint32_t xdev = prd(0x801E6FC8u);

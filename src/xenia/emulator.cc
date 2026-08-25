@@ -1230,6 +1230,33 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                 // r8, which becomes r14 there and is dereferenced at +32
                 // without a guard. 819F7F20 itself guards the same read. Log
                 // r6 and lr to see which caller supplies the null.
+                // 81A0FA80 allocates the front buffer (819E7310) and stores
+                // it at [r29+3F74] at 81A0FCD4, then binds RT0 further down.
+                // The bind is observed to happen but no device ends up with a
+                // front buffer, so either the store runs against a third
+                // object or the bind is reachable without it. Break on both.
+                static std::unique_ptr<cpu::Breakpoint> fb_bp;
+                if (cvars::guide_trace_setrendertarget && !fb_bp) {
+                  fb_bp = std::make_unique<cpu::Breakpoint>(
+                      ks->processor(), cpu::Breakpoint::AddressType::kGuest,
+                      0x81A0FCD4ull,
+                      [](cpu::Breakpoint* bp, cpu::ThreadDebugInfo* ti,
+                         uint64_t host_pc) {
+                        auto* th = kernel::XThread::GetCurrentThread();
+                        if (!th) return;
+                        auto* c = th->thread_state()->context();
+                        static std::atomic<uint32_t> n{0};
+                        if (++n > 10) return;
+                        XELOGI("FrontBufferStore: [r29={:08X} +3F74] = r3={:08X}"
+                               "  r31={:08X} lr={:08X}",
+                               static_cast<uint32_t>(c->r[29]),
+                               static_cast<uint32_t>(c->r[3]),
+                               static_cast<uint32_t>(c->r[31]),
+                               static_cast<uint32_t>(c->lr));
+                      });
+                  ks->processor()->AddBreakpoint(fb_bp.get());
+                  XELOGI("FrontBufferStore trace installed at 81A0FCD4");
+                }
                 static std::unique_ptr<cpu::Breakpoint> r6_bp;
                 if (cvars::guide_trace_setrendertarget && !r6_bp) {
                   r6_bp = std::make_unique<cpu::Breakpoint>(
