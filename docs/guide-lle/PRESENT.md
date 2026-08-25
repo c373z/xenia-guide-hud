@@ -3097,3 +3097,35 @@ application.
 That is worth having as an elimination. It means no amount of driving hud
 differently - more messages, different bootstrap order, simulated input - can
 reach the missing step, because hud has no API for it.
+
+## There is no working XUI client to compare against
+
+The dashboard renders its interface perfectly in the same session, so if it
+used xam's XUI it would be a working reference - its context would have the
+flag clear, and diffing the two would show what clears it.
+
+It does not. Counting XUI imports by module:
+
+```
+hud.xex    77 Xui* imports
+dash.xex    0 Xui* imports
+```
+
+The only apparent matches on the dash side are `XamUserGetXUID`,
+`XamUserGetIndexFromXUID` and `XamUserGetUserFlagsFromXUID`, which contain the
+substring "XUID" and are not XUI functions at all. The dashboard draws its
+interface with its own code.
+
+**hud is the sole client of xam's XUI library in this session.** So there is no
+working instance to compare against, and that avenue is closed.
+
+It also carries a broader implication. If no title uses xam's XUI, then this
+render path has probably never been exercised in Xenia by anything before this
+work - which is consistent with the state it depends on never having been set
+up, and with `VdGetSystemCommandBuffer`, `KeDebugMonitorData` and the mode-1
+device bring-up all being stubs or inert. Nothing has ever needed them.
+
+That reframes the remaining unknown slightly. It is not that Xenia gets one
+detail wrong on a well-trodden path; it is that the path has no other users, so
+every piece of system state it expects is missing at once, and the null-render
+flag is simply the first gate that stops it.
