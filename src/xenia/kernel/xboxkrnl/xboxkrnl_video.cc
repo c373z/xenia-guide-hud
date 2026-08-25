@@ -612,8 +612,39 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
     }
   }
 
+  {
+    // xam's render host first checks that the caller is the thread recorded at
+    // 0x81D42520, comparing it against [r13+256]. Log both: if the recorded
+    // slot is zero, xam never registered a UI thread and the check can never
+    // pass no matter which thread we use.
+    uint32_t recorded = rd(0x81D42520u);
+    uint32_t r13 = static_cast<uint32_t>(ts->context()->r[13]);
+    uint32_t current = r13 ? rd(r13 + 256) : 0;
+    XELOGI("GuideBootstrap: xam UI thread recorded={:08X} current={:08X} "
+           "(r13={:08X})",
+           recorded, current, r13);
+  }
+  uint32_t saved_ui_thread = 0;
+  bool spoofed = false;
+  if (::cvars::guide_spoof_ui_thread) {
+    uint32_t r13 = static_cast<uint32_t>(ts->context()->r[13]);
+    uint32_t current = r13 ? rd(r13 + 256) : 0;
+    if (current) {
+      saved_ui_thread = rd(0x81D42520u);
+      xe::store_and_swap<uint32_t>(memory->TranslateVirtual(0x81D42520u),
+                                   current);
+      spoofed = true;
+      XELOGI("GuideBootstrap: spoofing xam UI thread {:08X} -> {:08X}",
+             saved_ui_thread, current);
+    }
+  }
   uint64_t a0[] = {0};
   uint64_t hr = processor->Execute(ts, 0x8178DC58u, a0, xe::countof(a0));
+  if (spoofed) {
+    xe::store_and_swap<uint32_t>(memory->TranslateVirtual(0x81D42520u),
+                                 saved_ui_thread);
+    XELOGI("GuideBootstrap: restored xam UI thread {:08X}", saved_ui_thread);
+  }
   XELOGI("GuideBootstrap: render host -> {:08X}, XUI ctx {:08X}, "
          "provider {:08X}",
          static_cast<uint32_t>(hr), rd(0x81D6C978u), rd(0x81D6D0ACu));

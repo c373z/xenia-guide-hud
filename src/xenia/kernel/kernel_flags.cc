@@ -44,6 +44,14 @@ DEFINE_uint32(xbox_hardware_info_flags, 0x20,
 // Everything downstream (XUI context, DC, class registration, scene creation)
 // therefore runs from a thread xam does not consider legitimate, which is the
 // most likely reason state it would normally set up is missing.
+DEFINE_bool(guide_spoof_ui_thread, false,
+            "Temporarily point xam's recorded UI thread (81D42520) at the "
+            "calling thread across the render-host call, then restore it. "
+            "xam checks that slot against [r13+256] and traps when they "
+            "differ, which this bootstrap always does. Diagnostic only: it "
+            "satisfies the check without making the call legitimate."
+            ,
+            "Kernel");
 DEFINE_uint32(guide_xui_anim_init, 0x8174FDE0,
               "Runtime address of xam's initialiser for the XUI animation "
               "global at 81D3F924 (0 disables). Without it that global is null, "
