@@ -119,7 +119,10 @@ DEFINE_bool(guide_scene_off_thread, false,
             "thread might deadlock. It does not help: the scene creator hangs "
             "on either thread, and the title thread then blocks too - almost "
             "certainly on xam's XUI critical section, which the stuck Guide "
-            "thread is holding. Both threads end up wedged either way.",
+            "thread is holding. Defaults OFF - with it on, xam asserts an "
+            "out-of-range index three times and then faults, and the dashboard "
+            "stops rendering. Only the config file was set to false during "
+            "development, so the source default was left dangerously wrong.",
             "Kernel");
 DEFINE_bool(guide_preset_fields, false,
             "With guide_init_only, also set [guide+28/32/64] the way hud's "
@@ -163,7 +166,7 @@ DEFINE_bool(guide_bootstrap_on_title_thread, true,
             "The two paths were never merged; see research/FINDINGS.md phase "
             "148.",
             "Kernel");
-DEFINE_bool(guide_use_title_device, true,
+DEFINE_bool(guide_use_title_device, false,
             "Point xam's D3D device global (81D43684) at the title's device "
             "from VdGlobalDevice (801E6FC4) before running xam's XUI render "
             "host, so the Guide renders into the title's back buffer and is "
