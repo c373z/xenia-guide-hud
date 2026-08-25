@@ -1288,23 +1288,44 @@ void VdSwap_entry(
               // consume it? If the packets execute, the register file moves.
               // A screenshot cannot answer that - it shows scanout, not what
               // the GPU did.
+              // Checksum the WHOLE register file. An earlier version sampled
+              // eight registers picked by hand and reported "UNCHANGED" for
+              // runs whose very first words are type-0 writes to register
+              // 0x0A31 - which was not among the eight. A probe that cannot
+              // see the writes it is looking for reports absence either way.
               auto* rf = gs2->register_file();
-              uint32_t before = 0;
-              const uint32_t kProbeRegs[] = {0x2000, 0x2100, 0x2200, 0x1925,
-                                             0x1922, 0x2001, 0x2010, 0x2280};
+              uint32_t before = 0, changed_regs = 0;
+              static std::vector<uint32_t> reg_snap;
               if (rf) {
-                for (uint32_t r : kProbeRegs) before += rf->values[r];
+                reg_snap.assign(rf->values,
+                                rf->values + gpu::RegisterFile::kRegisterCount);
+                for (uint32_t v : reg_snap) before += v;
               }
               gs2->command_processor()->ExecuteGuestBufferUnsafe(
                   kWdLo + start * 4, len);
               uint32_t after = 0;
               if (rf) {
-                for (uint32_t r : kProbeRegs) after += rf->values[r];
+                for (uint32_t i = 0; i < gpu::RegisterFile::kRegisterCount;
+                     ++i) {
+                  after += rf->values[i];
+                  if (rf->values[i] != reg_snap[i]) ++changed_regs;
+                }
               }
-              XELOGI("GuideExec: run {:08X} +{} words; register checksum "
-                     "{:08X} -> {:08X} ({})",
-                     kWdLo + start * 4, len, before, after,
-                     before == after ? "UNCHANGED" : "changed");
+              // Log the head of each run next to its result. If the runs are
+              // real packets that merely start at the wrong offset, the one
+              // the processor reacts to should look structurally different
+              // from the ones it ignores.
+              auto* hm = kernel_state()->memory();
+              std::string head;
+              for (uint32_t k = 0; k < 6 && k < len; ++k) {
+                head += fmt::format("{:08X} ",
+                                    xe::load_and_swap<uint32_t>(
+                                        hm->TranslateVirtual(kWdLo +
+                                                             (start + k) * 4)));
+              }
+              XELOGI("GuideExec: run {:08X} +{} words; {} registers written "
+                     "| head {}",
+                     kWdLo + start * 4, len, changed_regs, head);
             }
           }
           if (runs < 12) {

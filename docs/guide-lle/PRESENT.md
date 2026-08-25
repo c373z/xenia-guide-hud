@@ -1557,3 +1557,47 @@ The honest position is that "the Guide is rendering" is not established. What
 is established: it writes ~4200 words per frame into the region its `VdSwap`
 pointer names, one 48-word run of that is something the command processor acts
 on, and the rest is inert to it.
+
+## Correcting the correction: the stream does execute
+
+The previous section used a register probe to argue that the command processor
+consumed 4000 words and changed no state, and concluded that "the Guide is
+rendering" was not established. **That probe was broken**, and the conclusion
+with it.
+
+It checksummed eight registers chosen by hand: `0x2000`, `0x2100`, `0x2200`,
+`0x1925`, `0x1922`, `0x2001`, `0x2010`, `0x2280`. Logging the head of each run
+next to its verdict exposed the problem immediately - runs begin
+`00000A31 01000000 ...`, a type-0 write to register **`0x0A31`**, which is not
+among the eight. A probe that cannot see the writes it is looking for reports
+absence whatever happens.
+
+Checksumming the whole register file (`kRegisterCount` = `0x5003`) instead:
+
+```
+run FE03E284 +269  words; 0  registers written
+run FE040A00 +268  words; 0  registers written
+run FE041248 +498  words; 1  register  written
+run FE041B48 +332  words; 58 registers written
+run FE0424A0 +2388 words; 0  registers written
+run FE0451C0 +48   words; 2  registers written
+```
+
+**58 registers changed by a single run.** The command processor is executing
+these buffers. The "real command stream" reading from two sections ago stands;
+the retraction of it was itself the error.
+
+### The metric still under-reports
+
+It counts registers whose *value* differs, not registers *written*. A packet
+that writes a register the value it already holds is invisible, which is
+exactly what repeated identical state-setting between frames looks like - so
+the zeros are ambiguous and should not be read as "nothing executed here".
+`FE040A00` and `FE0451C0` share a byte-identical head yet report 0 and 2, which
+is only explicable that way.
+
+Three probes in a row on this one question have been wrong in different
+directions: a bitmask that accepted noise, a walker that accepted zeros, and a
+register sample too narrow to see its target. The pattern is the same each
+time - a test that cannot fail is not evidence - and it is worth more caution
+than the result currently deserves.
