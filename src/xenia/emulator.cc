@@ -1258,7 +1258,32 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                     return xe::load_and_swap<uint32_t>(
                         ks->memory()->TranslateVirtual(addr));
                   };
+                  // Synchronous CPU readings bracket the known-good steps,
+                  // so the probe has a control: if the thread accrues time
+                  // across steps 1-3 the instrument detects work, and a flat
+                  // reading during step 4 then means something.
+                  auto cpu_ms = [](void* nh) -> std::pair<uint64_t, uint64_t> {
+                    FILETIME c0, e0, k0, u0;
+                    if (!nh || !GetThreadTimes(reinterpret_cast<HANDLE>(nh),
+                                               &c0, &e0, &k0, &u0)) {
+                      return {0, 0};
+                    }
+                    uint64_t k =
+                        (uint64_t(k0.dwHighDateTime) << 32) | k0.dwLowDateTime;
+                    uint64_t u =
+                        (uint64_t(u0.dwHighDateTime) << 32) | u0.dwLowDateTime;
+                    return {k / 10000, u / 10000};
+                  };
+                  void* nh_self =
+                      kernel::XThread::GetCurrentThread()->thread()
+                          ? kernel::XThread::GetCurrentThread()
+                                ->thread()
+                                ->native_handle()
+                          : nullptr;
                   if (cvars::guide_step_scene) {
+                    auto t0 = cpu_ms(nh_self);
+                    XELOGI("CpuMark before steps: kernel={}ms user={}ms",
+                           t0.first, t0.second);
                     // CONTROL: start the watchdog before the known-good steps.
                     // Xenia keeps guest registers in host registers while
                     // running, so a "frozen" context may only mean the context
@@ -1266,14 +1291,30 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                     // steps 1-3, which demonstrably complete, then sampling it
                     // proves nothing about whether the thread is executing.
                     {
+                      // Per-thread CPU time. Unlike sampling the PPC context
+                      // (stale during JIT execution) this distinguishes a
+                      // spinning thread from a blocked one, and the samples
+                      // during steps 1-3 act as the control: they must show
+                      // time accruing while work is demonstrably happening.
                       auto* wt0 = kernel::XThread::GetCurrentThread();
-                      std::thread([wt0]() {
+                      void* nh = wt0->thread() ? wt0->thread()->native_handle()
+                                               : nullptr;
+                      std::thread([nh]() {
                         for (int i = 0; i < 30; ++i) {
-                          xe::threading::Sleep(std::chrono::milliseconds(300));
-                          auto* c = wt0->thread_state()->context();
-                          XELOGI("Control {}: lr={:08X} r1={:08X}", i,
-                                 static_cast<uint32_t>(c->lr),
-                                 static_cast<uint32_t>(c->r[1]));
+                          xe::threading::Sleep(std::chrono::milliseconds(500));
+                          if (!nh) {
+                            continue;
+                          }
+                          FILETIME c0, e0, k0, u0;
+                          if (GetThreadTimes(reinterpret_cast<HANDLE>(nh), &c0,
+                                             &e0, &k0, &u0)) {
+                            uint64_t k = (uint64_t(k0.dwHighDateTime) << 32) |
+                                         k0.dwLowDateTime;
+                            uint64_t u = (uint64_t(u0.dwHighDateTime) << 32) |
+                                         u0.dwLowDateTime;
+                            XELOGI("CpuProbe {}: kernel={}ms user={}ms", i,
+                                   k / 10000, u / 10000);
+                          }
                         }
                       }).detach();
                     }
@@ -1311,6 +1352,9 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                     XELOGI("Guide button: step 3 locator -> {:08X} '{}'",
                            static_cast<uint32_t>(br), loc);
                     // Step 4: XuiSceneCreate(basePath, sceneFile, 0, &out)
+                    auto t3 = cpu_ms(nh_self);
+                    XELOGI("CpuMark after steps 1-3: kernel={}ms user={}ms",
+                           t3.first, t3.second);
                     XELOGI("Guide button: step 4 XuiSceneCreate calling");
                     // Watchdog: sample this thread's guest context from a host
                     // thread. If lr/r1 move, guest code is still executing (a
