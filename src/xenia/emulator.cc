@@ -1259,6 +1259,24 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                         ks->memory()->TranslateVirtual(addr));
                   };
                   if (cvars::guide_step_scene) {
+                    // CONTROL: start the watchdog before the known-good steps.
+                    // Xenia keeps guest registers in host registers while
+                    // running, so a "frozen" context may only mean the context
+                    // is not written back. If it also looks frozen during
+                    // steps 1-3, which demonstrably complete, then sampling it
+                    // proves nothing about whether the thread is executing.
+                    {
+                      auto* wt0 = kernel::XThread::GetCurrentThread();
+                      std::thread([wt0]() {
+                        for (int i = 0; i < 30; ++i) {
+                          xe::threading::Sleep(std::chrono::milliseconds(300));
+                          auto* c = wt0->thread_state()->context();
+                          XELOGI("Control {}: lr={:08X} r1={:08X}", i,
+                                 static_cast<uint32_t>(c->lr),
+                                 static_cast<uint32_t>(c->r[1]));
+                        }
+                      }).detach();
+                    }
                     XELOGI("Guide button: step 1 init(render_obj,0)");
                     uint64_t ia2[] = {obj + 16, 0};
                     uint64_t ir2 = ks->processor()->Execute(

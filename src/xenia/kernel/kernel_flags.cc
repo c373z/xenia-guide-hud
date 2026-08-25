@@ -35,6 +35,11 @@ DEFINE_uint32(xbox_hardware_info_flags, 0x20,
               "0x200 of this word, so without that bit xam never creates a "
               "device and the Guide can never get a render context.",
               "Kernel");
+DEFINE_bool(guide_install_draw_hook, true,
+            "Install the per-swap Guide draw hook. Turn off to test whether "
+            "the hook - which runs guest code from inside VdSwap on the title "
+            "thread - is what blocks the Guide thread in host code.",
+            "Kernel");
 DEFINE_bool(guide_step_scene, false,
             "With guide_scene_off_thread, drive hud's scene-creator sequence "
             "one call at a time from the Guide thread to identify which one "

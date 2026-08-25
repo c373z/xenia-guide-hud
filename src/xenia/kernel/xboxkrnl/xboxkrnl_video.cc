@@ -714,7 +714,11 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
     // Leave scene creation to the Guide's own thread; install the draw hook
     // and hand off. Holding the render thread through an async scene load
     // deadlocks it.
-    SetGuideDrawHook(guide_bs_hud_base_ + 0xAB28u, render_obj);
+    if (::cvars::guide_install_draw_hook) {
+      SetGuideDrawHook(guide_bs_hud_base_ + 0xAB28u, render_obj);
+    } else {
+      XELOGI("GuideBootstrap: draw hook NOT installed (test)");
+    }
     guide_bs_ready_ = true;
     XELOGI("GuideBootstrap: device work done; scene creation handed off");
     return;

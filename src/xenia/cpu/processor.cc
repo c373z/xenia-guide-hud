@@ -338,6 +338,10 @@ Function* Processor::LookupFunction(Module* module, uint32_t address) {
 bool Processor::DemandFunction(Function* function) {
   // Lock function for generation. If it's already being generated
   // by another thread this will block and return DECLARED.
+  // Log entry and exit: a guest thread whose PPC context is frozen at a call
+  // boundary is often sitting in here, either compiling a pathological
+  // function or blocked on DefineFunction's per-symbol lock.
+  XELOGI("DemandFunction: enter {:08X}", function->address());
   auto module = function->module();
   auto symbol_status = module->DefineFunction(function);
   if (symbol_status == Symbol::Status::kNew) {
@@ -346,8 +350,10 @@ bool Processor::DemandFunction(Function* function) {
     if (!frontend_->DefineFunction(static_cast<GuestFunction*>(function),
                                    debug_info_flags_)) {
       function->set_status(Symbol::Status::kFailed);
+      XELOGI("DemandFunction: FAILED {:08X}", function->address());
       return false;
     }
+    XELOGI("DemandFunction: defined {:08X}", function->address());
 
     // Before we give the symbol back to the rest, let the debugger know.
     OnFunctionDefined(function);
