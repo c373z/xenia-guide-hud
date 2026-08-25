@@ -3129,3 +3129,33 @@ That reframes the remaining unknown slightly. It is not that Xenia gets one
 detail wrong on a well-trodden path; it is that the path has no other users, so
 every piece of system state it expects is missing at once, and the null-render
 flag is simply the first gate that stops it.
+
+## The other system apps cannot be launched as titles either
+
+If no title uses xam's XUI, the next idea is to make one: `dashroot` holds a
+dozen system apps - `signin.xex`, `createprofile.xex`, `minimediaplayer.xex`
+and others - and if any of them loads as a title and renders, it is the working
+XUI client this investigation lacks.
+
+They do not load:
+
+```
+Loading module GAME:\signin.xex
+Failed to load user module ...\signin.xex
+Failed to launch target: C00000BB
+```
+
+`C00000BB` is `STATUS_NOT_SUPPORTED`, and `minimediaplayer.xex` fails
+identically. These are the same shape as hud, which was established long ago
+to be a DLL rather than a title - system apps that xam loads and hosts, not
+executables the loader will start.
+
+So the avenue closes completely: no title uses xam's XUI, and no XUI-using
+module here can be turned into a title. There is no way to obtain a working
+instance of that render path to compare against within this material.
+
+That is worth recording as a bounded negative. The comparison approach - find
+something that works, diff it against something that does not - is usually the
+strongest tool available, and here it is simply unavailable. What remains has
+to be established from the disassembly and from what a single non-working
+instance reveals, which is the position the rest of this file already occupies.
