@@ -224,6 +224,20 @@ DEFINE_bool(guide_system_process_type, false,
             "mode-1 device path is one place it matters. Restored afterwards.",
             "Kernel");
 
+DEFINE_bool(guide_bind_depth_copy, false,
+            "Before the first Guide draw, if the device has a colour surface "
+            "on RT0 but nothing on the depth slot, clone the colour surface "
+            "and bind the clone with SetDepthStencilSurface (819F38C8). This "
+            "is a TEST of one reading, not a fix: the post-redirect fault is "
+            "an unguarded read of [r14+20], the low 6 bits of which are "
+            "compared against 0x3D by a caller - the shape of a surface format "
+            "field - and the device never gets a depth surface because "
+            "819F38C8 is never called in any run. Cloning the colour surface "
+            "is used rather than fabricating one because it is already "
+            "structurally valid. If r14 is not the depth surface this will "
+            "change nothing, which is the point.",
+            "Kernel");
+
 DEFINE_bool(guide_use_bound_device, false,
             "Before the Guide bootstrap runs, point xam's device global "
             "(81D43684) at whatever VdGlobalXamDevice (801E6FC8) holds, when "

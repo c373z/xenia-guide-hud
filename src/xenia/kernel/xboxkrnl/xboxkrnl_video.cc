@@ -1031,6 +1031,38 @@ void VdSwap_entry(
           }
         }
       }
+      if (::cvars::guide_bind_depth_copy) {
+        static bool depth_done = false;
+        if (!depth_done) {
+          depth_done = true;
+          auto* dm = kernel_state()->memory();
+          auto drd = [dm](uint32_t a) {
+            return xe::load_and_swap<uint32_t>(dm->TranslateVirtual(a));
+          };
+          uint32_t ddev = drd(0x81D43684u);
+          uint32_t rt0 = ddev ? drd(ddev + 0x32A0u) : 0;
+          uint32_t dep = ddev ? drd(ddev + 0x32B0u) : 0;
+          if (ddev && rt0 && !dep) {
+            uint32_t clone = dm->SystemHeapAlloc(0x100, 16);
+            if (clone) {
+              std::memcpy(dm->TranslateVirtual(clone),
+                          dm->TranslateVirtual(rt0), 0x100);
+              uint64_t dargs[] = {ddev, clone};
+              uint64_t dr = kernel_state()->processor()->Execute(
+                  gth->thread_state(), 0x819F38C8u, dargs,
+                  xe::countof(dargs));
+              XELOGI("Guide: SetDepthStencilSurface(dev {:08X}, clone {:08X} "
+                     "of RT0 {:08X}) -> {:08X}; depth now {:08X}",
+                     ddev, clone, rt0, static_cast<uint32_t>(dr),
+                     drd(ddev + 0x32B0u));
+            }
+          } else {
+            XELOGI("Guide: depth bind skipped (dev={:08X} RT0={:08X} "
+                   "depth={:08X})",
+                   ddev, rt0, dep);
+          }
+        }
+      }
       if (::cvars::guide_force_real_present) {
         auto* fm = kernel_state()->memory();
         uint32_t fdc = xe::load_and_swap<uint32_t>(

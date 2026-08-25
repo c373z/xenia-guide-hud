@@ -771,3 +771,53 @@ from that reading - that the null originates as `819F7F20`'s fourth argument -
 is unsupported. What survives is narrower: the sixth argument to `819F5D18` is
 null, and the real caller is reached through a function pointer from somewhere
 in the chain above.
+
+## What the null sixth argument is not, and what it looks like
+
+### It is not the depth-stencil surface
+
+The reading was: the faulting `lwz r11,32(r14)` takes the low 6 bits of
+`[r14+20]`, a caller compares that same field against `0x3D`, and `0x3D` in the
+low bits of a surface word reads like a format enum. The device has a colour
+surface on RT0 and nothing on depth in every run, and `SetDepthStencilSurface`
+(`819F38C8`) is never called in any run. So `r14` looked like the depth
+surface.
+
+`guide_bind_depth_copy` tests it. Before the first draw it clones the bound
+colour surface - a structurally valid object, rather than a fabricated one -
+and binds the clone:
+
+```
+Guide: SetDepthStencilSurface(dev 40883A80, clone 301C1000 of RT0 4088B3E0)
+       -> 40883A80; depth now 301C1000
+GUEST CRASH: access violation at guest PC 819F5EC4 ... fault_addr 0x20
+```
+
+The bind succeeds and the device now has a depth surface. The crash is
+byte-identical - same PC, same fault address. **`r14` is not the depth
+surface.** The reading is disproven, not merely unconfirmed.
+
+### What r14 does look like
+
+Every access through `r14` in `819F5D18` is a read, at exactly six consecutive
+word offsets and nowhere else:
+
+```
++0x01C  lwz  x1
++0x020  lwz  x10
++0x024  lwz  x3
++0x028  lwz  x3
++0x02C  lwz  x1
++0x030  lwz  x6
+```
+
+`0x1C` through `0x30` inclusive is 24 bytes - six dwords, the exact footprint
+of a Xenos fetch constant. So `r14` points at a texture or surface descriptor
+with its fetch constant at `+0x1C`, which is consistent with the earlier fault
+at `819DE94C` reading width and height out of `[surface+0x24]`.
+
+What that descriptor *is* - a source texture for the composite, some other
+bound resource - is not established, and the depth guess is a warning against
+picking the nearest plausible candidate. What is established: it is a
+surface-shaped object, it is the sixth argument, it arrives null, and the
+device having both colour and depth bound does not supply it.
