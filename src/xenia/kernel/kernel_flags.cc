@@ -155,9 +155,13 @@ DEFINE_string(guide_skin_path, "",
               "Kernel");
 DEFINE_bool(guide_bootstrap_on_title_thread, true,
             "Run the whole XUI bootstrap (render host, CreateDC, hud init) "
-            "from inside the title's swap, on the title's render thread. The "
-            "title's D3D device is thread-affine, so doing any of it from the "
-            "Guide's own thread is refused by the guest D3D runtime.",
+            "from inside the title's swap, on the title's render thread. Keep "
+            "this ON. Turning it off does NOT run the same bootstrap on another "
+            "thread - it falls back to an older sequence in emulator.cc that "
+            "predates the class registrars, the skin module and the scene "
+            "creator's out-pointer, so it gets an XUI init and nothing else. "
+            "The two paths were never merged; see research/FINDINGS.md phase "
+            "148.",
             "Kernel");
 DEFINE_bool(guide_use_title_device, true,
             "Point xam's D3D device global (81D43684) at the title's device "
