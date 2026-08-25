@@ -1515,3 +1515,45 @@ the target: diff the memory behind the RT0 surface across the execution. If it
 changes, the Guide has been drawn and the remaining problem is purely
 composition. If it does not, the commands are being executed without effect and
 the state they depend on is missing.
+
+## A functional test that undercuts the command-stream reading
+
+A screenshot cannot say whether the command processor interpreted the packets -
+it shows scanout, not GPU work. The register file can: if packets execute,
+registers move. `guide_execute_command_stream` now checksums a set of registers
+either side of each submission.
+
+```
+run FE03E284 +269  words; register checksum 540A0866 -> 540A0866 (UNCHANGED)
+run FE040A00 +268  words; 540A0866 -> 540A0866 (UNCHANGED)
+run FE041248 +498  words; 540A0866 -> 540A0866 (UNCHANGED)
+run FE0424A0 +2388 words; 540A0866 -> 540A0866 (UNCHANGED)
+run FE0451C0 +48   words; 540A0866 -> 140A0838 (changed)
+run FE04E064 +78   words; 140A0838 -> 140A0838 (UNCHANGED)
+```
+
+Eight of nine runs move nothing. One 48-word run does - which is the control
+that matters, because it shows the mechanism works: the command processor
+reacts to packets when it is given packets.
+
+**This weakens the previous section's conclusion.** I wrote that the Guide
+"builds a real GPU command stream containing real draw calls", on the strength
+of a decoded opcode histogram - DRAW_INDX, COND_WRITE, IM_LOAD_IMMEDIATE in
+plausible proportions. That was a statistical argument about byte patterns. The
+register probe is a functional one, and it disagrees: the command processor
+consumes those 4000 words and changes no state.
+
+Two readings survive, and nothing here separates them:
+
+1. The runs are real packets but do not begin on packet boundaries. The
+   word-diff bounds where the draw *wrote*, which need not be where a packet
+   *starts* - and the 48-word run that did work may simply have been aligned by
+   luck.
+2. The bytes are largely data - vertex or constant buffers - whose scattered
+   type-3-looking headers decoded into a plausible-looking histogram without
+   being a command stream at all.
+
+The honest position is that "the Guide is rendering" is not established. What
+is established: it writes ~4200 words per frame into the region its `VdSwap`
+pointer names, one 48-word run of that is something the command processor acts
+on, and the rest is inert to it.

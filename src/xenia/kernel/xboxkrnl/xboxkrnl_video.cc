@@ -13,6 +13,7 @@
 #include "xenia/base/logging.h"
 #include "xenia/emulator.h"
 #include "xenia/gpu/command_processor.h"
+#include "xenia/gpu/register_file.h"
 #include "xenia/gpu/graphics_system.h"
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/util/shim_utils.h"
@@ -1283,10 +1284,27 @@ void VdSwap_entry(
           if (::cvars::guide_execute_command_stream && len >= 32) {
             auto* gs2 = kernel_state()->emulator()->graphics_system();
             if (gs2 && gs2->command_processor()) {
+              // Did the command processor actually interpret this, or merely
+              // consume it? If the packets execute, the register file moves.
+              // A screenshot cannot answer that - it shows scanout, not what
+              // the GPU did.
+              auto* rf = gs2->register_file();
+              uint32_t before = 0;
+              const uint32_t kProbeRegs[] = {0x2000, 0x2100, 0x2200, 0x1925,
+                                             0x1922, 0x2001, 0x2010, 0x2280};
+              if (rf) {
+                for (uint32_t r : kProbeRegs) before += rf->values[r];
+              }
               gs2->command_processor()->ExecuteGuestBufferUnsafe(
                   kWdLo + start * 4, len);
-              XELOGI("GuideExec: submitted measured run {:08X} +{} words",
-                     kWdLo + start * 4, len);
+              uint32_t after = 0;
+              if (rf) {
+                for (uint32_t r : kProbeRegs) after += rf->values[r];
+              }
+              XELOGI("GuideExec: run {:08X} +{} words; register checksum "
+                     "{:08X} -> {:08X} ({})",
+                     kWdLo + start * 4, len, before, after,
+                     before == after ? "UNCHANGED" : "changed");
             }
           }
           if (runs < 12) {
