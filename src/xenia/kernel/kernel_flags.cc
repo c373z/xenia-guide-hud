@@ -35,6 +35,11 @@ DEFINE_uint32(xbox_hardware_info_flags, 0x20,
               "0x200 of this word, so without that bit xam never creates a "
               "device and the Guide can never get a render context.",
               "Kernel");
+DEFINE_bool(guide_init_only, false,
+            "Call hud's XUI init (hud+0xA898) directly instead of its scene "
+            "creator, to separate the init from the vtable[7] registration "
+            "tail-call when diagnosing the hang.",
+            "Kernel");
 DEFINE_bool(guide_step_registrations, false,
             "Drive the 56 calls in hud's registration routine (913F0DB0) one "
             "at a time with logging instead of calling hud's scene creator, "

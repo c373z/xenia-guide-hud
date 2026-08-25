@@ -704,6 +704,9 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   }
   uint32_t obj_vt = rd(guide_bs_obj_);
   uint32_t scene_fn = obj_vt ? rd(obj_vt + 27 * 4) : 0;
+  if (::cvars::guide_init_only) {
+    scene_fn = 0;  // fall through to the bare-init path below
+  }
   uint64_t ir = 0;
   if (scene_fn) {
     uint64_t a2[] = {guide_bs_obj_, 0, 0};

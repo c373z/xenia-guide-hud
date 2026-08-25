@@ -23,7 +23,19 @@ namespace xe {
 namespace kernel {
 namespace xboxkrnl {
 
-void DbgBreakPoint_entry() { xe::debugging::Break(); }
+void DbgBreakPoint_entry() {
+  // Guest asserts call this on failure paths. Breaking unconditionally raises
+  // EXCEPTION_BREAKPOINT with no debugger attached, which silently kills the
+  // calling guest thread - and when that thread is the title's renderer, the
+  // whole emulator appears to hang with no diagnostic. Only break when a
+  // debugger is actually attached; otherwise log and let the guest continue,
+  // which is what lets its own ERR[] reporting reach us.
+  if (xe::debugging::IsDebuggerAttached()) {
+    xe::debugging::Break();
+    return;
+  }
+  XELOGW("DbgBreakPoint() ignored - no debugger attached");
+}
 DECLARE_XBOXKRNL_EXPORT2(DbgBreakPoint, kDebug, kStub, kImportant);
 
 // https://msdn.microsoft.com/en-us/library/xcb2z8hs.aspx
