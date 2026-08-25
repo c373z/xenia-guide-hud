@@ -1839,6 +1839,8 @@ bool Emulator::ExceptionCallback(Exception* ex) {
         : ex->code() == Exception::Code::kIllegalInstruction
             ? "illegal instruction"
             : "other";
+    auto* ectx =
+        early_thread ? early_thread->thread_state()->context() : nullptr;
     XELOGE(
         "GUEST CRASH: {} at guest PC {:08X} (host {:X}), thread '{}', "
         "fault_addr {:016X}",
@@ -1846,6 +1848,29 @@ bool Emulator::ExceptionCallback(Exception* ex) {
         early_thread ? early_thread->name() : std::string("<none>"),
         ex->code() == Exception::Code::kAccessViolation ? ex->fault_address()
                                                         : 0);
+    if (ectx) {
+      // LR identifies the caller, which matters when several call sites reach
+      // the same function - picking one by "it was compiled just before" is
+      // not evidence.
+      XELOGE("GUEST CRASH: lr={:08X} r3={:016X} r4={:016X} r5={:016X}",
+             static_cast<uint32_t>(ectx->lr), ectx->r[3], ectx->r[4],
+             ectx->r[5]);
+      // LR here is the function's own __savegprlr return, not the caller.
+      // That helper stores the real LR at [r1-8] of the caller's frame before
+      // the stwu, so with a 0xC0 frame it is at r1+0xB8. Scan a window in case
+      // the frame size differs.
+      XELOGE("GUEST CRASH: [81D3F924] = {:08X}",
+             xe::load_and_swap<uint32_t>(
+                 memory()->TranslateVirtual(0x81D3F924u)));
+      uint32_t sp = static_cast<uint32_t>(ectx->r[1]);
+      for (uint32_t off = 0xA0; off <= 0xE0; off += 8) {
+        uint32_t v = xe::load_and_swap<uint32_t>(
+            memory()->TranslateVirtual(sp + off));
+        if (v >= 0x81000000 && v < 0x82000000) {
+          XELOGE("GUEST CRASH: saved lr candidate [r1+{:X}] = {:08X}", off, v);
+        }
+      }
+    }
   }
 
   // Within range. Pause the emulator and eat the exception.
