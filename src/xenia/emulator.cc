@@ -1211,10 +1211,38 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                        "[*]={:08X} bit200={}",
                        gate_ptr, gate, (gate & 0x200) ? "set" : "clear");
                 uint64_t ca[] = {0};
+                // 8178F748 asks 819F4D28 for a mode-2 device, which skips the
+                // ring buffer bring-up by design. 8178E9F0 asks for mode 1,
+                // which takes it - and which nothing inside xam ever calls, so
+                // on hardware it comes from the system boot.
+                uint32_t create_fn =
+                    cvars::guide_create_primary_device ? 0x8178E9F0u
+                                                       : 0x8178F748u;
+                // Mode 1 calls KeGetCurrentProcessType and asserts unless the
+                // matching device global is still empty. As SYSTEM it looks at
+                // VdGlobalXamDevice (empty); as anything else at VdGlobalDevice
+                // (the title's, already set).
+                uint8_t saved_pt = 0, saved_ptd = 0;
+                kernel::XThread* cur = kernel::XThread::GetCurrentThread();
+                if (cvars::guide_system_process_type && cur) {
+                  auto* kt = cur->guest_object<kernel::X_KTHREAD>();
+                  saved_pt = kt->process_type;
+                  saved_ptd = kt->process_type_dup;
+                  kt->process_type = kernel::X_PROCTYPE_SYSTEM;
+                  kt->process_type_dup = kernel::X_PROCTYPE_SYSTEM;
+                  XELOGI("Guide button: process type {} -> SYSTEM for device "
+                         "creation", saved_pt);
+                }
+                XELOGI("Guide button: calling device creator {:08X}", create_fn);
                 kernel::xboxkrnl::in_xam_createdevice_scope = true;
-                uint64_t cr = ks->processor()->Execute(ts, 0x8178F748u, ca,
+                uint64_t cr = ks->processor()->Execute(ts, create_fn, ca,
                                                        xe::countof(ca));
                 kernel::xboxkrnl::in_xam_createdevice_scope = false;
+                if (cvars::guide_system_process_type && cur) {
+                  auto* kt = cur->guest_object<kernel::X_KTHREAD>();
+                  kt->process_type = saved_pt;
+                  kt->process_type_dup = saved_ptd;
+                }
                 XELOGI("Guide button: xam CreateDevice returned {:08X}, "
                        "device now {:08X}",
                        static_cast<uint32_t>(cr), rd(0x81D43684u));

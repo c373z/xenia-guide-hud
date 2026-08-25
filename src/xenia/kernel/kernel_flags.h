@@ -34,6 +34,8 @@ DECLARE_string(guide_skin_path);
 DECLARE_bool(guide_bootstrap_on_title_thread);
 DECLARE_bool(guide_use_title_device);
 DECLARE_bool(guide_create_scene);
+DECLARE_bool(guide_create_primary_device);
+DECLARE_bool(guide_system_process_type);
 DECLARE_bool(guide_force_real_present);
 DECLARE_bool(guide_create_xam_device);
 DECLARE_bool(guide_call_render_host);

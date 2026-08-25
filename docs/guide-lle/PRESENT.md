@@ -223,3 +223,65 @@ but bails somewhere". That was wrong twice over: one of the two edges is a
 teardown call on an error path, and a reverse call graph cannot tell a setup
 edge from a teardown edge at all. `callers.py` carries that caveat in its
 docstring.
+
+## The missing ring buffer is deliberate: xam has two device modes
+
+The previous section left open whether the GPU bring-up was reachable at all.
+`cfg.py` (added in this commit) settles it: all 102 instructions of `819F4D28`
+are reachable, and the call to `81A0FE48` at `819F4E8C` sits on a normal path.
+Reading 20-instruction windows had missed the branch that gets there.
+
+The deciding test is:
+
+```
+819F4D34  cmpwi cr6, r29, 2
+819F4D38  bne cr6 -> 819F4D6C       ; mode != 2: take the GPU bring-up path
+                                     ; mode == 2: set a flag bit, skip it
+```
+
+`r29` is `819F4D28`'s second argument, and the function asserts unless it is 1
+or 2. Both of xam's device creators funnel into it:
+
+| creator | mode | result |
+|---|---|---|
+| `8178F748` - what the Guide button calls | 2 | no ring buffer, by design |
+| `8178E9F0` | 1 | takes the bring-up: `81A0FE48` -> `81A04570` -> `VdInitializeRingBuffer` |
+
+So **the device the Guide creates is not a failed bring-up. It is a mode-2
+device, and mode 2 exists precisely to skip owning the GPU.** The previous
+section's "the device was created but never brought up" was the wrong reading
+of a deliberate design.
+
+`8178E9F0` has no callers anywhere inside xam, which fits: on hardware the
+mode-1 device is created by the system boot, from outside the module.
+
+### Trying mode 1
+
+`guide_create_primary_device` calls `8178E9F0` instead. Mode 1 first calls
+`KeGetCurrentProcessType` and asserts unless the matching device global is
+still empty - SYSTEM (2) checks `VdGlobalXamDevice`, anything else checks
+`VdGlobalDevice`, which the title has already filled in. `guide_system_process_type`
+was added to force the former, but it turned out to be unnecessary: the thread
+the Guide handler runs on **already reports process type 2**. That check was
+never the obstacle, and the cvar is kept only because it makes the property
+explicit and testable.
+
+With mode 1, `81A0FE48` and `81A04570` are entered for the first time - the
+bring-up genuinely runs. xam also starts enumerating hardware
+(`WRN[XAM]: Found Unknown in HD DVD drive`), so mode 1 is a much fuller
+initialisation than anything reached before.
+
+It then **hangs**. Two runs, 50s and 100s, both stop at exactly the same place:
+the last function entered is `8177C328`, and nothing executes afterwards -
+`VdInitializeRingBuffer` is never actually reached. `8177C328` is small (30
+instructions, ends before `8177C3A0`) and calls `817815D0` and `81780710`,
+both already compiled, so the block is at or below one of those.
+
+This is a hang, not a crash: no exception, no assert. The likely shape is a
+wait on something the system boot would satisfy, or a lock the title also
+needs - but which of those it is has NOT been determined, and there is no
+evidence here to choose between them. Diagnosing it needs guest thread/wait
+state at the moment of the hang, which Xenia does not currently dump.
+
+Both cvars default off. With them off the known-good configuration in
+CONFIG.md is unchanged.

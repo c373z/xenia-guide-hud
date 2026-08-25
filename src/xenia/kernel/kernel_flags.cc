@@ -180,6 +180,28 @@ DEFINE_bool(guide_create_scene, true,
             "XuiElementLayoutTree - is null without it, so the draw succeeds "
             "while laying out nothing.",
             "Kernel");
+DEFINE_bool(guide_create_primary_device, false,
+            "Call xam's OTHER device creator, 8178E9F0, instead of 8178F748. "
+            "Both funnel into 819F4D28, whose second argument selects a mode: "
+            "8178F748 passes 2 and 8178E9F0 passes 1, and 819F4D28 asserts on "
+            "anything else. Mode 2 sets a flag bit and skips the branch that "
+            "reaches VdInitializeRingBuffer, which is why the device the Guide "
+            "button creates has no ring buffer - that is deliberate, not a "
+            "failed bring-up. Mode 1 takes the bring-up path, but first calls "
+            "KeGetCurrentProcessType and asserts if a device is already "
+            "registered: type 2 (SYSTEM) checks VdGlobalXamDevice, anything "
+            "else checks VdGlobalDevice, which the title has already filled "
+            "in. See guide_system_process_type.",
+            "Kernel");
+
+DEFINE_bool(guide_system_process_type, false,
+            "Report X_PROCTYPE_SYSTEM from KeGetCurrentProcessType for the "
+            "duration of the Guide's device creation, by setting the calling "
+            "thread's X_KTHREAD process_type. Xenia's kernel_state.h carries a "
+            "system_process with the comment \"no idea when this runs\"; xam's "
+            "mode-1 device path is one place it matters. Restored afterwards.",
+            "Kernel");
+
 DEFINE_bool(guide_force_real_present, false,
             "Zero [dc+134] on the Guide's XUI device context before each "
             "composite draw. XuiRenderPresent (dc->vtable[21], runtime "
