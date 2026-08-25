@@ -2260,3 +2260,53 @@ The static finding stands on its own and is the useful part: the path to
 to zero. What decides that argument, in whatever calls `81750FA8` normally, is
 the next thing to find - and it is a question about the caller, not about
 re-invoking the callee.
+
+## What actually calls it, and what that corrects
+
+`81750FA8` runs on thread `F80000E0`, immediately after `LLE xam: DllMain
+returned`. It is a **thread start routine**, and that explains everything the
+static scans could not: nothing calls it with `bl` and nothing stores its
+address, because the address is formed in a register and handed to a thread
+creator.
+
+Scanning for that form - `lis` then `addi` producing the address - finds it:
+
+```
+81758ADC  addi r4,r0,0            ; the thread parameter: zero, hardcoded
+81758AE8  addi r3,r10,4008        ; r3 = 81750FA8
+81758AEC  bl   8177C8E0           ; thread creation
+```
+
+in function `81751718`. So the answer to "what decides that argument" is: it is
+a compile-time constant `0` at the only site that creates the thread. `r29` is
+zero because it is passed zero, deliberately, and the `81D3C8E8` initialisation
+this chain leads to is simply not on the path that runs - on hardware either.
+
+### The classification was wrong for two of three
+
+The same scan finds `81751428`'s address formed at `81751534`, inside
+`81751500`. So:
+
+| function | direct call | stored as data | formed in a register |
+|---|---|---|---|
+| `81750FA8` | no | no | **yes** - thread routine |
+| `81751428` | no | no | **yes** |
+| `8178E9F0` | no | no | no |
+
+Two of the three are ordinary function pointers, not entry points. The
+"unreachable from inside xam" test had a caveat written into it - "an address
+computed at runtime rather than stored would not show up here, though for a
+function that is also never directly called that is a stretch" - and the
+stretch is exactly what happened, twice.
+
+`8178E9F0` survives all three tests and remains genuinely unreferenced, which
+is now a much narrower and better-supported claim than the one made for all
+three together.
+
+### And the chain it was built on
+
+Since `81750FA8` is called with zero by design, `81727500` never runs on
+hardware either, so `81D3C8E8` must be initialised by something else entirely.
+The chain from the three notification events back through this function was
+real as disassembly and useless as an explanation: it traced a path that does
+not execute.
