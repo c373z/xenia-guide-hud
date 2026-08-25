@@ -2928,3 +2928,42 @@ matching offsets were coincidence, and the vtable settles it in one
 instruction. What survives is narrower - `818FD0E8` builds a vtable-bearing
 44-byte object with `[+0x04]` and `[+0x1C]` both set to 1, and nothing observed
 clears either.
+
+## The XUI context class, and where static analysis stops
+
+Using the vtable as a class identifier rather than object size, `refs.py` finds
+`8163E200` referenced exactly twice:
+
+- `818FD0E8` - the constructor. Allocates 44 bytes, installs the vtable, sets
+  `[+0x04] = 1` and `[+0x1C] = 1`.
+- `818F7E40` - the destructor. Reinstalls the vtable and **asserts
+  `[+0x04] == 0`** before tearing down.
+
+So there is exactly one constructor of this class, and it always sets the flag.
+The "alternative constructor" idea is dead in both forms it was raised.
+
+The destructor's assert is the useful part: `[+0x04]` is 1 when constructed and
+must be 0 when destroyed, so these fields are expected to be cleared during
+normal life. They are "in use" markers, not permanent settings.
+
+### What cannot be found statically
+
+- No read-modify-write of a `+0x1C` field anywhere in the XUI range, so it is
+  not incremented or decremented there.
+- Across all of xam, **136 sites** store a literal `0` into some `+0x1C`
+  field. The offset is far too common to isolate by pattern; without knowing
+  which of those operate on this class, the list says nothing.
+
+### What is known from runtime
+
+`guide_watch_null_render` polls the field for a whole session. After the
+context is published, `[ctx+0x1C]` **never changes** - it is `1` from first
+observation to last. So whatever clears it in normal operation does not happen
+here at all, rather than happening at the wrong time.
+
+That is the state of the clean-configuration blocker: a 44-byte
+vtable-identified object, one constructor that sets two "in use" fields to 1, a
+destructor that requires one of them to be 0 by then, and nothing in this
+emulator's run that ever clears either. Isolating the code that should needs
+something static analysis cannot give - the offset is too common - and runtime
+polling has already answered the only question it can.
