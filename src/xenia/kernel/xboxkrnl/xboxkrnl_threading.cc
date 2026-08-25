@@ -1161,6 +1161,27 @@ dword_result_t KeWaitForMultipleObjects_entry(
       objects[n] = std::move(object_ref);
     }
   }
+  // The retry loop in xam's mode-1 device bring-up (8178EE08) waits on three
+  // objects. A previous pass instrumented only the failure path and saw a
+  // two-object wait, which says nothing about this one. Log three-object waits
+  // whether they succeed or not.
+  if (count == 3) {
+    static std::atomic<uint32_t> w3{0};
+    uint32_t wn = ++w3;
+    if (wn <= 6 || (wn % 20000) == 0) {
+      auto* m = kernel_memory();
+      uint8_t t0 = *reinterpret_cast<uint8_t*>(
+          m->TranslateVirtual(objects_ptr[0]));
+      uint8_t t1 = *reinterpret_cast<uint8_t*>(
+          m->TranslateVirtual(objects_ptr[1]));
+      uint8_t t2 = *reinterpret_cast<uint8_t*>(
+          m->TranslateVirtual(objects_ptr[2]));
+      XELOGI("Wait3 #{}: {:08X}(type {}) {:08X}(type {}) {:08X}(type {})", wn,
+             static_cast<uint32_t>(objects_ptr[0]), t0,
+             static_cast<uint32_t>(objects_ptr[1]), t1,
+             static_cast<uint32_t>(objects_ptr[2]), t2);
+    }
+  }
   uint64_t timeout = timeout_ptr ? static_cast<uint64_t>(*timeout_ptr) : 0u;
   X_STATUS result = XObject::WaitMultiple(
       uint32_t(count), reinterpret_cast<XObject**>(&objects[0]), wait_type,

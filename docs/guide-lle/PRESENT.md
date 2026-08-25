@@ -1884,3 +1884,37 @@ at all. What is established is narrower and still worth having: at least one
 wait in this run fails instantly because a guest timer will not resolve, that
 failure mode makes any looping caller spin, and the emulator's timer support is
 the reason.
+
+## The three-object wait is not the retry loop
+
+The previous section identified the `KeWaitForMultipleObjects` at `8178EE08` as
+the loop driving the `VdGetSystemCommandBuffer` storm, from a static reading of
+the back-edges in mode-1 `CreateDevice`. Instrumenting that specific wait -
+logging three-object waits whether they succeed or fail - shows it is not.
+
+In one run:
+
+| | count |
+|---|---|
+| three-object waits | **36** |
+| two-object waits failing on a timer | 1,983 |
+| `VdGetSystemCommandBuffer` calls | **606,117** |
+
+Thirty-six iterations cannot produce six hundred thousand acquisitions. And the
+three objects resolve without trouble:
+
+```
+Wait3 #1: 81D433C8(type 0) 81D43398(type 0) 81D433A8(type 0)
+```
+
+Type 0 is a notification event; none of them is the type-9 timer that fails
+elsewhere, and none of them appears in the failure log at all.
+
+So the loop identified from the back-edge analysis runs 36 times and is not the
+source of the storm. Where the 606,117 calls come from is unidentified. They
+are tagged `[XAM CREATEDEVICE]`, so they are inside the `CreateDevice` call on
+the button thread, but the enclosing loop is not the one at `8178EE08`.
+
+This is the same error as several before it: a back-edge that spans a call site
+shows a loop *exists*, not that it is the loop *running*. The counts were
+available the whole time and settle it in one measurement.
