@@ -149,3 +149,33 @@ instruction.
 Also verified in the same pass: no cvar on this branch is defined but unused.
 `guide_xui_anim_init` was the only one, and it is now wired up and defaulted to
 0.
+
+## Verified from scratch
+
+The reconstruction procedure in this file has now been tested the hard way:
+
+1. Deleted `xenia-canary.config.toml` entirely.
+2. Ran once to let Xenia write a fresh file from source defaults (85,268
+   bytes).
+3. Set exactly the five values listed above - nothing else.
+4. Ran.
+
+Result:
+
+```
+GuideBootstrap: render host -> 00000000, XUI ctx 4088A0A0, provider 81D22A54
+GuideBootstrap: scene creator 913EB940 -> 00000000, scene=00010000
+GuideBootstrap: draw hook installed on title thread
+Guide composite draw #1 -> 00000000; ... [134]=00000001 ...
+```
+
+Zero guest crashes, signature identical to the one documented at the top.
+
+That is the check this file exists for. The original configuration was lost
+once because it existed only in an untracked TOML, and reconstructing it took a
+session and turned up `lle_xam_heap0_alias`, which no document mentioned. This
+procedure now demonstrably works from nothing but the five lines above.
+
+The config in the tree is that freshly generated one, so it carries every cvar
+this branch added at its default rather than whatever state a long series of
+experiments left behind.
