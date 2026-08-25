@@ -2499,3 +2499,44 @@ sixth argument to `819F5D18`, the six-dword fetch constant traced earlier to
 
 That is the narrowest the problem has been. It is one pointer, in one call, in
 a function now known to be the thing that emits draws.
+
+## The emitter is reached and emits nothing - and why that proves less than it looks
+
+With the full deep configuration and `guide_create_xam_device` restored (it
+gates the whole device-creation block, and turning it off during unrelated work
+had been silently disabling mode 1):
+
+```
+device global 40870D00 (RT0=00000000) -> 40883A80 (RT0=4088B3E0)
+front buffer [dev 40883A80 +3F74] = clone 301C1000 of RT0 4088B3E0
+GuideDrawGPU: the guest draw dispatched 0 GPU draws
+composite draw #1 -> 00000000
+```
+
+No crashes, `819F5D18` reached, zero draws. The emitter runs and returns
+without emitting, so it bails on an internal condition - the read of
+`[r14+0x20]`, whose low six bits it extracts as a format and passes to
+`819FC1E0`, is the obvious candidate.
+
+**But this configuration cannot bear that weight.** Reaching the emitter at all
+required three pieces of hand-fabricated state:
+
+- `guide_use_bound_device` - repointing the DC at a different device
+- `guide_fake_front_buffer` - a **clone of the colour surface** standing in for
+  a front buffer that nothing allocates
+- `guide_syscmdbuf_fields` - display-mode values written into a descriptor
+  Xenia otherwise zeroes
+
+The front buffer in particular is a colour surface wearing a front buffer's
+hat. If `819F5D18` inspects its format and decides there is nothing to do, that
+is a perfectly reasonable response to the object it was handed - and says
+nothing about what the real system would do.
+
+So "the emitter emits zero draws" is a measurement of **my configuration**, not
+of xam. The honest reading is that the deep configuration gets far enough to
+reach the code that would draw, and that everything past that point is being
+fed fabricated inputs. Diagnosing the bail condition would be diagnosing my own
+stand-ins.
+
+That is a limit worth naming clearly, because several sections here have leaned
+on deep-configuration measurements without it.
