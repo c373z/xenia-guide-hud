@@ -2221,3 +2221,42 @@ not reach `81727500`, and why is now the open question.
 
 That is a better question than the one I was chasing, and I only reached it by
 checking a claim I had already written down as fact.
+
+## Why the initialiser is skipped
+
+`81750FA8` runs every session and `81727500`, which initialises `81D3C8E8`,
+never does. The call to it sits at `81751294`, and a linear read of the code
+before it suggests it is unreachable - it follows a `twi` and an unconditional
+branch. `cfg.py` disagrees, and is right: the block is entered by a jump.
+
+```
+8175125C  cmpwi cr6,r29,0
+81751260  bne   cr6 -> 81751294      ; only when r29 is non-zero
+81751294  bl    81727500             ; initialises 81D3C8E8
+```
+
+and the single write to `r29` in the whole function is its third instruction:
+
+```
+81750FC8  or r29,r3,r3               ; r29 = the first argument
+```
+
+So **the initialiser runs only when `81750FA8` is called with a non-zero first
+argument**, and since it never runs, the natural caller passes zero.
+
+That also indicts the earlier experiment twice over. It called `81750FA8` a
+second time - the function already runs - and passed `0`, which is exactly the
+argument that skips the initialiser it was trying to reach.
+
+### Testing the other argument does not work either
+
+Calling it with `1` produces the same crash as before, at `81747DE8`, and
+`81727500` still never runs. The fault happens early in the function, before
+the `r29` test, so this says nothing about the argument: re-entering an
+already-completed initialiser fails regardless of what it is passed.
+
+The static finding stands on its own and is the useful part: the path to
+`81D3C8E8`'s initialisation is gated on an argument that the real caller sets
+to zero. What decides that argument, in whatever calls `81750FA8` normally, is
+the next thing to find - and it is a question about the caller, not about
+re-invoking the callee.

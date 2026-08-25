@@ -1401,8 +1401,14 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                   // from 81750FA8, another entry point with no caller inside
                   // xam. So the dependency is derived, not guessed: run the
                   // initialiser first.
+                  // 81750FA8 already runs every session, but with its first
+                  // argument zero - and that argument is r29, which gates the
+                  // call to 81727500 that initialises 81D3C8E8
+                  // ("cmpwi cr6,r29,0 / bne -> 81751294"). Calling it with 0,
+                  // as the previous attempt did, takes the same path that
+                  // skips the initialiser. Pass 1.
                   for (uint32_t entry : {0x81750FA8u, 0x81751428u}) {
-                    uint64_t ba[] = {0};
+                    uint64_t ba[] = {entry == 0x81750FA8u ? 1u : 0u};
                     uint64_t br = ks->processor()->Execute(ts, entry, ba,
                                                            xe::countof(ba));
                     XELOGI("Guide button: boot entry {:08X} returned {:08X}; "
