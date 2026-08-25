@@ -2731,3 +2731,36 @@ needs the construction path read directly, not sampled.
 
 Small negative result, but it removes an approach: the flag cannot be caught in
 the act by polling, however fast.
+
+## What the null-render flag does not depend on
+
+The flag is computed, so the useful question is what it is computed *from*.
+Two inputs can be varied cheaply, and neither moves it.
+
+**The hardware-info word.** Logging `[ctx+1C]` read-only while varying
+`xbox_hardware_info_flags`:
+
+| `XboxHardwareInfo` | `[ctx+1C]` |
+|---|---|
+| `0x220` (documented) | `1` |
+| `0x2A0` | `1` |
+| `0x620` | `1` |
+| `0x20` (Xenia default) | no context at all |
+
+At `0x20` there is no XUI context to read - xam gates device creation on bit
+`0x200`, so the render host has nothing to build on, which is the already
+documented reason `0x220` is required. Above that threshold, adding bits
+`0x80` or `0x400` changes nothing.
+
+**The device.** In the deep configuration the flag is also `1`, and that
+configuration has a mode-1 device with a render target actually bound. So the
+presence, mode and readiness of a device do not decide it either.
+
+So two plausible inputs are ruled out by measurement rather than argument. That
+matters mainly because the reading offered earlier - that the flag is a
+renderer's response to finding no usable device - now has evidence against it:
+the flag is `1` whether the device is a ring-buffer-less mode-2 device or a
+mode-1 device with a bound colour surface.
+
+That reading should be treated as weakened, not merely unproven. Whatever the
+flag is computed from, it is something neither of those levers touches.

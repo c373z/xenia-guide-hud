@@ -803,6 +803,16 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
          "provider {:08X}",
          static_cast<uint32_t>(hr), rd(0x81D6C978u), rd(0x81D6D0ACu));
 
+  {
+    // Read-only: the null-render flag as the render host left it. It is
+    // computed, not a constant, so what it depends on is worth probing - the
+    // hardware-info word is the cheapest input to vary.
+    uint32_t c0 = rd(0x81D6C978u);
+    XELOGI("GuideBootstrap: null-render flag [ctx+1C] = {:08X} "
+           "(hw info word = {:08X})",
+           c0 ? rd(c0 + 0x1Cu) : 0xFFFFFFFFu,
+           rd(rd(0x815F048Cu)));
+  }
   if (::cvars::guide_clear_null_render) {
     uint32_t ctx = rd(0x81D6C978u);
     if (ctx) {
