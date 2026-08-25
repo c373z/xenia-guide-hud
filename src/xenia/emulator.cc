@@ -52,6 +52,9 @@
 #include "xenia/kernel/xam/achievement_manager.h"
 #include "xenia/kernel/xam/xam_module.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_video.h"
+
+#include <dbghelp.h>
+#pragma comment(lib, "dbghelp.lib")
 #include "xenia/kernel/xam/xdbf/spa_info.h"
 #include "xenia/kernel/xbdm/xbdm_module.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_module.h"
@@ -1312,6 +1315,85 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                           // waits and no faults - and would leave xam's XUI
                           // critical section held forever, which is what the
                           // title thread then blocks on.
+                          // Host instruction pointer of the stuck thread.
+                          // Suspending briefly to read RIP is safe here (the
+                          // thread is making no progress) and gives a direct
+                          // answer instead of probing candidate locks one at a
+                          // time. Symbolize offline as RIP - module_base
+                          // against the PDB.
+                          {
+                            HANDLE hh = reinterpret_cast<HANDLE>(nh);
+                            if (SuspendThread(hh) != (DWORD)-1) {
+                              CONTEXT ctx;
+                              ctx.ContextFlags = CONTEXT_CONTROL;
+                              if (GetThreadContext(hh, &ctx)) {
+                                auto base = reinterpret_cast<uint64_t>(
+                                    GetModuleHandleW(nullptr));
+                                // Which module is RIP in?
+                                wchar_t modname[MAX_PATH] = {};
+                                HMODULE hm = nullptr;
+                                if (GetModuleHandleExW(
+                                        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                        reinterpret_cast<LPCWSTR>(ctx.Rip),
+                                        &hm)) {
+                                  GetModuleFileNameW(hm, modname, MAX_PATH);
+                                }
+                                XELOGI("HostRip {}: rip={:X} in '{}' +{:X} "
+                                       "rsp={:X}",
+                                       i, ctx.Rip,
+                                       xe::to_utf8(std::u16string(
+                                           reinterpret_cast<const char16_t*>(
+                                               modname))),
+                                       hm ? ctx.Rip -
+                                                reinterpret_cast<uint64_t>(hm)
+                                          : 0,
+                                       ctx.Rsp);
+                                // Poor man's stack walk: scan the stack for
+                                // return addresses inside the exe, which names
+                                // the Xenia code that called into the DLL.
+                                if (i == 0) {
+                                  // Symbolize with dbghelp so the frames are
+                                  // names rather than offsets.
+                                  static bool sym_ready = false;
+                                  if (!sym_ready) {
+                                    SymSetOptions(SYMOPT_UNDNAME |
+                                                  SYMOPT_DEFERRED_LOADS);
+                                    sym_ready = SymInitialize(
+                                                    GetCurrentProcess(),
+                                                    nullptr, TRUE) != FALSE;
+                                  }
+                                  auto sym_name = [](uint64_t addr) {
+                                    char buf[sizeof(SYMBOL_INFO) + 512] = {};
+                                    auto* si =
+                                        reinterpret_cast<SYMBOL_INFO*>(buf);
+                                    si->SizeOfStruct = sizeof(SYMBOL_INFO);
+                                    si->MaxNameLen = 500;
+                                    DWORD64 disp = 0;
+                                    if (SymFromAddr(GetCurrentProcess(), addr,
+                                                    &disp, si)) {
+                                      return std::string(si->Name) + "+" +
+                                             std::to_string(disp);
+                                    }
+                                    return std::string("<no symbol>");
+                                  };
+                                  XELOGI("  rip sym: {}", sym_name(ctx.Rip));
+                                  auto* sp = reinterpret_cast<uint64_t*>(
+                                      ctx.Rsp);
+                                  int found = 0;
+                                  for (int w = 0; w < 96 && found < 6; ++w) {
+                                    uint64_t v = sp[w];
+                                    if (v > base && v < base + 0x4000000) {
+                                      XELOGI("  stack[{}] exe+{:X}  {}", w,
+                                             v - base, sym_name(v));
+                                      ++found;
+                                    }
+                                  }
+                                }
+                              }
+                              ResumeThread(hh);
+                            }
+                          }
                           // Is Xenia's global critical region held while the
                           // Guide thread is stuck? If TryAcquire succeeds the
                           // thread is not blocked on it, which rules out the
