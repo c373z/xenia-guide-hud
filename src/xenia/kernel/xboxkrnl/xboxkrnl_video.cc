@@ -78,6 +78,11 @@ namespace xe {
 namespace kernel {
 namespace xboxkrnl {
 
+// Set while the Guide draw is executing, so kernel entries can tell
+// whether a call came from the Guide or from the title.
+thread_local bool in_guide_draw_scope = false;
+
+
 bool IsWidescreen(KernelState* kernel_state, Resolution res) {
   if (res.is_widescreen()) {
     return true;
@@ -358,9 +363,10 @@ void VdGetSystemCommandBuffer_entry(lpunknown_t p0_ptr, lpunknown_t p1_ptr) {
     // magic constants instead of one.
     static std::atomic<uint32_t> n{0};
     uint32_t c = ++n;
-    if (c <= 5 || (c % 2000) == 0) {
+    if (in_guide_draw_scope || c <= 5 || (c % 2000) == 0) {
       auto* th = XThread::GetCurrentThread();
-      XELOGI("VdGetSystemCommandBuffer #{} from '{}' p0={:08X} p1={:08X}", c,
+      XELOGI("VdGetSystemCommandBuffer #{}{} from '{}' p0={:08X} p1={:08X}", c,
+             in_guide_draw_scope ? " [GUIDE DRAW]" : "",
              th ? th->name() : std::string("<none>"), p0_ptr.guest_address(),
              p1_ptr.guest_address());
     }
@@ -877,8 +883,10 @@ void VdSwap_entry(
     if (gth && !in_guide_draw) {
       in_guide_draw = true;
       uint64_t gargs[] = {guide_draw_this_};
+      in_guide_draw_scope = true;
       uint64_t gr = kernel_state()->processor()->Execute(
           gth->thread_state(), guide_draw_fn_, gargs, xe::countof(gargs));
+      in_guide_draw_scope = false;
       static std::atomic<uint32_t> gdraws{0};
       uint32_t gn = ++gdraws;
       if (gn <= 3 || (gn % 300) == 0) {
