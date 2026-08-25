@@ -2855,3 +2855,40 @@ would produce one with rendering enabled from the start.
 Nothing here distinguishes those. What is now solid is the shape of the
 question: a 44-byte object, born with two fields set to 1, one of which
 disables the entire render path, and no observed code that turns it off.
+
+## Two constructors: one disables rendering, one does not
+
+Five sites in xam allocate exactly 44 bytes from the allocator the XUI context
+uses. Comparing what each writes to the two fields the context is born with:
+
+| constructor | `[+0x04]` | `[+0x1C]` | runs? |
+|---|---|---|---|
+| `818FD0E8` | **1** | **1** | **yes** - this is the Guide's |
+| `819108B0` | computed | computed | no |
+| `819441D0` | **0** | **0** | **no** |
+| `81951658` | 0 | - | no |
+| `81943E38` | - | - | no |
+
+`819441D0` builds the same size of object from the same allocator and sets the
+same two fields to **zero**. If `[+0x1C] = 1` is what disables rendering, then
+this is a constructor that produces a context with rendering **enabled** - and
+it never executes. `refs.py` finds it referenced once, as a register-formed
+address in `81951218`, so it is a function pointer rather than a called
+function.
+
+So the Guide's context is not a correct context that lost its flag. It is
+built by a constructor that sets the flag, while a sibling constructor that
+does not set it exists and is never reached.
+
+### The caveat that matters
+
+Same size and same two offsets is good evidence for same class, not proof. 44
+bytes is not a distinctive size, and two constructors of unrelated classes
+could coincide on it. What raises it above coincidence is the pairing: both
+write exactly `+0x04` and `+0x1C`, in that order, immediately after allocating,
+and nothing else in that window.
+
+Confirming it needs the class identity - a shared vtable pointer, or the same
+consumer accepting objects from both. That has not been checked, and until it
+is, "the Guide gets the wrong constructor" is the best-supported reading rather
+than an established fact.
