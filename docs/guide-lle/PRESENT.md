@@ -3359,3 +3359,40 @@ with or without a patched format field.
 So the one remaining fabrication is weak in a way that is now measured rather
 than suspected, and the deep configuration's "zero draws" is correspondingly
 weaker evidence about xam than even the previous caveat implied.
+
+## The stand-in's contents are not what stops the draw
+
+Dumping the bound colour surface shows where its fetch constant actually sits:
+
+```
++00: 80101004  +04: 00000001  +14: FFFF0000  +18: 0A000280
++24: 09FC0EF8  +28: 28280186  +2C: 0012C000  +30: 00340004  +34: 00011C00  +38: 260080FE
+```
+
+Six plausible fetch-constant words starting at **`+0x24`** - while the draw
+emitter reads six words from **`+0x1C`**. Eight bytes out of step, which is
+structural evidence that `r14` is a different object type from a colour
+surface, not merely a differently-filled one. (`+0x18` reads `0A000280`, and
+`0x280` is 640 - a width, consistent with this being a real surface
+descriptor.)
+
+Two evidence-based attempts to improve the stand-in:
+
+| change | basis | result |
+|---|---|---|
+| force `[+0x20]` low bits to `0x3D` | the value `819F7F20` compares against | 0 draws, no change |
+| clone from `RT0+8` so the fetch constant lands at `+0x1C` | the 8-byte structural mismatch above | 0 draws, no change |
+
+Neither moves it.
+
+### Which slightly strengthens the deep-configuration result
+
+The caveat on the deep configuration has been that "zero draws" might be an
+artefact of the fake front buffer - the emitter inspecting a bad object and
+reasonably declining. Two independent variations of that object, each motivated
+by measured evidence rather than guesswork, produce byte-identical outcomes.
+
+That does not make the fabrication harmless, but it does show the result is
+**insensitive to the stand-in's contents** across the two dimensions that could
+be varied on evidence. Whatever makes `819F5D18` decline to emit, it is not
+reading a format or a misaligned fetch constant and giving up on that basis.

@@ -1230,10 +1230,32 @@ void VdSwap_entry(
           uint32_t rt = dv2 ? f2(dv2 + 0x32A0u) : 0;
           if (dv2 && rt && !f2(dv2 + 0x3F74u)) {
             fb_done = true;
+            // Dump the template before cloning it. The emitter reads six
+            // consecutive words from +0x1C - a fetch constant - so whether the
+            // colour surface even carries one there decides if it can stand in
+            // for a front buffer at all.
+            {
+              std::string row;
+              for (uint32_t k = 0; k < 8; ++k) {
+                row += fmt::format("{:08X} ", f2(rt + 0x1Cu + k * 4));
+              }
+              XELOGI("Guide: RT0 surface {:08X} words +1C..+38: {}", rt, row);
+              std::string row0;
+              for (uint32_t k = 0; k < 8; ++k) {
+                row0 += fmt::format("{:08X} ", f2(rt + k * 4));
+              }
+              XELOGI("Guide: RT0 surface {:08X} words +00..+1C: {}", rt, row0);
+            }
             uint32_t clone = fm2->SystemHeapAlloc(0x100, 16);
             if (clone) {
+              uint32_t shift =
+                  static_cast<uint32_t>(::cvars::guide_front_buffer_shift);
               std::memcpy(fm2->TranslateVirtual(clone),
-                          fm2->TranslateVirtual(rt), 0x100);
+                          fm2->TranslateVirtual(rt + shift), 0x100 - shift);
+              if (shift) {
+                XELOGI("Guide: front buffer cloned from RT0+{} so the fetch "
+                       "constant lands at +0x1C", shift);
+              }
               if (::cvars::guide_front_buffer_format >= 0) {
                 uint32_t f = f2(clone + 0x20u);
                 uint32_t nf = (f & ~0x3Fu) |

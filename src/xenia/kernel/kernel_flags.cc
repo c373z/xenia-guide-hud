@@ -299,6 +299,16 @@ DEFINE_bool(guide_syscmdbuf_fields, false,
             "implementation of the system command buffer.",
             "Kernel");
 
+DEFINE_int32(guide_front_buffer_shift, 0,
+             "Bytes to shift the front-buffer clone's source by. The bound "
+             "colour surface carries what looks like a fetch constant at "
+             "+0x24, while the draw emitter 819F5D18 reads six consecutive "
+             "words from +0x1C - the two are 8 bytes out of step, which is "
+             "structural evidence that r14 is a different object type. "
+             "Setting 8 copies from source+8 so the constants line up. A "
+             "probe of that mismatch, not a fix.",
+             "Kernel");
+
 DEFINE_int32(guide_front_buffer_format, -1,
              "If >= 0, force the low 6 bits of [front_buffer+0x20] to this "
              "value after cloning. 819F7F20 compares exactly those bits "

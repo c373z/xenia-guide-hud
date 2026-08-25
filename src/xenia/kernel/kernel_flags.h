@@ -45,6 +45,7 @@ DECLARE_bool(guide_execute_command_stream);
 DECLARE_bool(guide_diff_draw_writes);
 DECLARE_int32(guide_syscmdbuf_buffer_kb);
 DECLARE_bool(guide_syscmdbuf_fields);
+DECLARE_int32(guide_front_buffer_shift);
 DECLARE_int32(guide_front_buffer_format);
 DECLARE_bool(guide_fake_front_buffer);
 DECLARE_bool(guide_bootstrap_create_dc);
