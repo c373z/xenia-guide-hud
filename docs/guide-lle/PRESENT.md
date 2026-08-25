@@ -2186,3 +2186,38 @@ class rather than singling these three out - much of that class is likely dead
 code. And an address computed at runtime rather than stored would not show up
 here, though for a function that is also never directly called that is a
 stretch.
+
+## Correction: 81750FA8 already runs
+
+Cross-referencing the 2,200 unreachable-from-inside functions against what
+actually executed in a session shows 238 of them running - xam's entry point
+`817519D8` among them, and most of the rest simply exports the title calls
+through the import table. That is the mundane explanation for the class, and it
+is worth stating.
+
+It also turned up something I had asserted without measuring. `81750FA8` is in
+the list, and checking it directly across three traces:
+
+| trace | `81750FA8` | `81751428` | `817915A0` |
+|---|---|---|---|
+| stable config | **1** | 0 | 0 |
+| mode 1 | **1** | 0 | 0 |
+| boot-entry experiment | **1** | 1 | 0 |
+
+**It runs in every session, including a plain one.** The section above
+described it as an entry point "the system boot invokes and Xenia does not",
+and built an experiment on calling it. That premise was false: something
+already calls it, every time, and my experiment called it a *second* time.
+
+So the crash that experiment produced says nothing about boot ordering - it is
+what re-entering an already-completed initialiser does. The "receding chain"
+conclusion drawn from it is not supported by that evidence.
+
+What survives, still measured: `81751428` and `817915A0` genuinely never run,
+the three notification events are never signalled, and `[81D3C8E8]` is null
+when `81751428` reads it - which is the interesting part, because `81750FA8`
+*did* run and the global is still empty. So `81750FA8` takes a path that does
+not reach `81727500`, and why is now the open question.
+
+That is a better question than the one I was chasing, and I only reached it by
+checking a claim I had already written down as fact.
