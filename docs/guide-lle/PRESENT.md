@@ -285,3 +285,65 @@ state at the moment of the hang, which Xenia does not currently dump.
 
 Both cvars default off. With them off the known-good configuration in
 CONFIG.md is unchanged.
+
+## Mode 1 reaches the GPU, and the trade it forces
+
+Correcting the previous section: mode 1 does not hang at `8177C328`. That
+reasoning was an invalid instrument. `DemandFunction` logs only the FIRST
+compilation of a function, so a thread looping in already-compiled code
+produces no further lines. `8177C328` was merely the last thing newly
+compiled, and it is on a different thread (`F80000E8`) than the Guide's
+(`01000028`). For the record, the last function newly compiled on the Guide
+thread, `819F3FC8`, is a delay loop - `mtctr 4`, eight `or rX,rX,rX` nops,
+`bdnz`, `blr` - which plainly returns.
+
+What mode 1 actually does, with `log_high_frequency_kernel_calls` on so that
+`Vd` calls are visible, is reach the GPU:
+
+```
+VdGetSystemCommandBuffer #1442 [XAM CREATEDEVICE] from ''
+VdSwap(FE03E284, ..., 709DEF48(00000280), 709DEF44(000001E0))
+Hardware scaler: width ratio 1:1, height ratio 1:1, final aspect ratio 16:9
+VdGetSystemCommandBuffer #1443 [XAM CREATEDEVICE] from ''
+VdSwap(FE041FA4, ...)
+```
+
+Those tags are trustworthy: `in_xam_createdevice_scope` is `thread_local`, so
+they mean thread `01000028` was genuinely inside the CreateDevice call. This
+is the first time in this investigation that anything belonging to xam has
+reached Xenia's display path.
+
+It is exactly **two** swaps, at 640x480, against 1441 from the title's render
+thread in the same run - so it is not a loop, it is an initialisation that
+presents two frames and then stops. The complete set of kernel calls that
+thread makes is: `VdGetSystemCommandBuffer` twice, `VdGlobalDevice` once,
+`VdCallGraphicsNotificationRoutines` once. `VdInitializeRingBuffer` is never
+reached, and `CreateDevice` never returns - in a 50s, a 70s and a 100s run.
+
+That is the trade mode 1 forces:
+
+| | mode 2 (`8178F748`) | mode 1 (`8178E9F0`) |
+|---|---|---|
+| bootstrap completes | yes | no - CreateDevice never returns |
+| device can present | no | yes, demonstrably |
+
+Under mode 1 the rest of the Guide bootstrap - render host, DC, scene, draw
+hook - never runs, so the Guide has no opportunity to draw. The two frames
+presented are xam's own, not the Guide's.
+
+Where it stops has NOT been established. The shape of `819F3FC8` (a spin
+delay) and the fact that the two swaps precede the stall are *consistent* with
+polling for a swap completion that Xenia never signals for a second device,
+but no test here distinguishes that from any other wait. Do not write it down
+as the cause.
+
+### A screenshot that proves nothing
+
+A capture taken 20s after the button press under mode 1 shows a fully rendered
+"sign in or out" profile screen. It is tempting to read that as the Guide.
+
+It is not. Running the identical harness with the Guide press removed produces
+a **byte-identical** file (`2EF6B4B7`). That screen is the dashboard's own
+sign-in UI at that point in its boot, and has nothing to do with the Guide.
+`work/noguideshot.ps1` is that control; run it before believing any screenshot
+in this project.
