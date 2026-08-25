@@ -2432,3 +2432,33 @@ upstreaming. They are not Guide-specific and not LLE-specific: any title that
 probes `KeDebugMonitorData` or `KeCertMonitorData` sees null today regardless
 of the cvar, and silently takes its "no monitor present" path. The fixes are
 four lines and independent of everything else on this branch.
+
+## The scene is not empty: it is laying out real geometry
+
+A draw count of zero has two possible explanations, and only one of them has
+been examined. Either the Guide cannot submit its drawing, or **it has nothing
+to draw** - an empty scene issues no draws quite legitimately, and every
+conclusion in this file would read differently if that were the case.
+
+The words the frame writes settle it. Decoding the heads of the runs the word
+diff found, as IEEE floats:
+
+```
+BF000000 BF000000 3F7F0001  ->  -0.50  -0.50   1.00
+43800000 00000000 43800000 4279C190  ->  256.00  0.00  256.00  62.44
+42280000 00000000 42280000 42280000  ->   42.00  0.00   42.00  42.00
+```
+
+`-0.5, -0.5` is the Direct3D 9 half-pixel offset, the correction every 2D UI
+renderer applies to align texels to pixels. The others are rectangles: one
+256 x 62.44, one 42 x 42. These are laid-out UI elements in screen
+coordinates.
+
+So the scene has content, the layout runs, the transforms are applied and the
+geometry is computed - every frame, into the buffers the `VdSwap` pointer
+names. The Guide is doing everything up to and including working out where its
+elements go on screen.
+
+What it never does is issue a draw packet to rasterise any of it. That is a
+narrower and better-supported statement than the one this file started with,
+and it rules out the alternative explanation rather than leaving it open.
