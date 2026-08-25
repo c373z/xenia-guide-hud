@@ -939,6 +939,38 @@ dword_result_t NtCreateTimer_entry(
 }
 DECLARE_XBOXKRNL_EXPORT1(NtCreateTimer, kThreading, kImplemented);
 
+// KeSetTimer / KeSetTimerEx were declared in the export table with no
+// implementation, so calls fell through as "undefined extern call". These are
+// observation stubs: they record the arguments and return 0 (timer was not
+// already set) without arming anything. Implementing them properly also
+// requires XTimer::InitializeNative so the guest KTIMER can be wrapped - see
+// research/FINDINGS.md phase 130. Landing only one half would turn xam's
+// visible retry loop into a silent permanent wait.
+dword_result_t KeSetTimer_entry(lpvoid_t timer_ptr, qword_t due_time,
+                                lpvoid_t dpc_ptr) {
+  static std::atomic<uint32_t> n{0};
+  if (++n <= 5) {
+    XELOGW("KeSetTimer(timer={:08X}, due={}, dpc={:08X}) - stub, not armed",
+           timer_ptr.guest_address(), static_cast<int64_t>(due_time),
+           dpc_ptr.guest_address());
+  }
+  return 0;
+}
+DECLARE_XBOXKRNL_EXPORT1(KeSetTimer, kThreading, kStub);
+
+dword_result_t KeSetTimerEx_entry(lpvoid_t timer_ptr, qword_t due_time,
+                                  dword_t period_ms, lpvoid_t dpc_ptr) {
+  static std::atomic<uint32_t> n{0};
+  if (++n <= 5) {
+    XELOGW("KeSetTimerEx(timer={:08X}, due={}, period={}, dpc={:08X}) - stub, "
+           "not armed",
+           timer_ptr.guest_address(), static_cast<int64_t>(due_time),
+           static_cast<uint32_t>(period_ms), dpc_ptr.guest_address());
+  }
+  return 0;
+}
+DECLARE_XBOXKRNL_EXPORT1(KeSetTimerEx, kThreading, kStub);
+
 dword_result_t NtSetTimerEx_entry(dword_t timer_handle, lpqword_t due_time_ptr,
                                   lpvoid_t routine_ptr /*PTIMERAPCROUTINE*/,
                                   dword_t mode, lpvoid_t routine_arg,
