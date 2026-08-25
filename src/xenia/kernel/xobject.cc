@@ -463,6 +463,21 @@ object_ref<XObject> XObject::GetNativeObject(KernelState* kernel_state,
       case X_OBJECT_TYPES::InterruptObject:
       case X_OBJECT_TYPES::ProfileObject:
       default:
+        // Only Event, Mutant and Semaphore are wrapped above; every other
+        // dispatcher type lands here and the caller sees a null, which for
+        // KeWaitForMultipleObjects becomes STATUS_INVALID_PARAMETER. Guest
+        // modules that create their own timers or queues - real xam does -
+        // then fail every wait, with assert_always() compiled out in release
+        // so nothing is reported. Log it once per type.
+        {
+          static std::atomic<uint32_t> seen_mask{0};
+          uint32_t bit = 1u << (static_cast<uint32_t>(type) & 31);
+          if (!(seen_mask.fetch_or(bit) & bit)) {
+            XELOGE("GetNativeObject: unsupported dispatcher type {} at {:08X}",
+                   static_cast<uint32_t>(type),
+                   kernel_state->memory()->HostToGuestVirtual(native_ptr));
+          }
+        }
         assert_always();
         result = nullptr;
     }
