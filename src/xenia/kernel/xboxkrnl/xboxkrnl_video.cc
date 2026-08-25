@@ -402,6 +402,23 @@ void VdGetSystemCommandBuffer_entry(lpunknown_t p0_ptr, lpunknown_t p1_ptr) {
       xe::store_and_swap<uint32_t>(b + 0x08, buf_size);
       guide_syscmdbuf_ptr_ = buf;
       guide_syscmdbuf_size_ = buf_size;
+      // Under the forced-wait livelock the guest asks for this buffer tens of
+      // thousands of times a second. Sample rarely: has it ever written into
+      // what we handed it? The earlier answer was no, but that was measured in
+      // the stable configuration where the guest was not retrying at all.
+      static std::atomic<uint32_t> acq{0};
+      uint32_t an = ++acq;
+      if (an == 1 || (an % 50000) == 0) {
+        auto* w = reinterpret_cast<const uint32_t*>(
+            kernel_state()->memory()->TranslateVirtual(buf));
+        uint32_t nz = 0;
+        for (uint32_t i = 0; i < buf_size / 4; ++i) {
+          if (w[i]) ++nz;
+        }
+        XELOGI("SysCmdBufAcq #{}: guest has written {} non-zero words into "
+               "the buffer we handed it",
+               an, nz);
+      }
     }
   }
   if (::cvars::guide_syscmdbuf_fields) {

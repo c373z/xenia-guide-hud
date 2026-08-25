@@ -1761,3 +1761,37 @@ So forcing the exit converts a deadlock into a livelock, which is what you
 would expect when the thing being waited for is real work that never happens.
 It is not a step toward the device coming up; it is a demonstration that the
 wait is not what stands in the way - the missing command buffer is.
+
+## Re-testing the buffer hypothesis where the guest is desperate for one
+
+The disproof of `p0+0x04` / `p0+0x08` as a command buffer pointer and size was
+measured in the stable configuration, where the guest asks for the buffer once
+and is not retrying. That is a weak place to test it: a guest that has what it
+needs has no reason to write.
+
+The forced-wait livelock is the opposite condition. There xam asks for the
+system command buffer roughly 20,000 times a second, having just been released
+from a wait it could not otherwise leave. If the descriptor were how it learns
+where to write, that is where it would show.
+
+Handing it a real 64KB buffer in those fields and sampling every 50,000
+acquisitions:
+
+```
+SysCmdBufAcq #1:      guest has written 0 non-zero words
+SysCmdBufAcq #50000:  guest has written 0 non-zero words
+SysCmdBufAcq #100000: guest has written 0 non-zero words
+...
+SysCmdBufAcq #300000: guest has written 0 non-zero words
+```
+
+Three hundred thousand acquisitions, not one word written.
+
+So the disproof holds in the strongest condition available, not just the
+convenient one. `p0+0x04` and `p0+0x08` are not where xam learns about a
+command buffer, and the retry loop is not a search for one - it is waiting for
+something about the descriptor it already has to change.
+
+Which is consistent with the rest: xam writes to its own buffers in
+`FE03xxxx`/`FE04xxxx`, and what it wants from `VdGetSystemCommandBuffer` is
+something else entirely, still unidentified.
