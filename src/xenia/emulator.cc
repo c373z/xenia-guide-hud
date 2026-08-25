@@ -1885,6 +1885,16 @@ bool Emulator::ExceptionCallback(Exception* ex) {
       XELOGE("GUEST CRASH: lr={:08X} r3={:016X} r4={:016X} r5={:016X}",
              static_cast<uint32_t>(ectx->lr), ectx->r[3], ectx->r[4],
              ectx->r[5]);
+      // Xenon MSVC keeps "this" and the other long-lived pointers in the
+      // callee-saved range, and by the time a load faults r3-r5 are usually
+      // already clobbered. Without these it is not possible to tell which
+      // object a faulting "lwz rX,off(rY)" was reading from - which is
+      // exactly the question a null deref raises.
+      XELOGE("GUEST CRASH: r27={:08X} r28={:08X} r29={:08X} r30={:08X} "
+             "r31={:08X} r1={:08X}",
+             static_cast<uint32_t>(ectx->r[27]), static_cast<uint32_t>(ectx->r[28]),
+             static_cast<uint32_t>(ectx->r[29]), static_cast<uint32_t>(ectx->r[30]),
+             static_cast<uint32_t>(ectx->r[31]), static_cast<uint32_t>(ectx->r[1]));
       // LR here is the function's own __savegprlr return, not the caller.
       // That helper stores the real LR at [r1-8] of the caller's frame before
       // the stwu, so with a 0xC0 frame it is at r1+0xB8. Scan a window in case

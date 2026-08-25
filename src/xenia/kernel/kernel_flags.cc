@@ -180,6 +180,18 @@ DEFINE_bool(guide_create_scene, true,
             "XuiElementLayoutTree - is null without it, so the draw succeeds "
             "while laying out nothing.",
             "Kernel");
+DEFINE_bool(guide_force_real_present, false,
+            "Zero [dc+134] on the Guide's XUI device context before each "
+            "composite draw. XuiRenderPresent (dc->vtable[21], runtime "
+            "818F9290) returns S_OK without presenting anything whenever that "
+            "field is non-zero, and XuiRenderBegin likewise skips its call to "
+            "dc->vtable[20]. Ours is 1, so the whole XUI frame runs in a "
+            "null-rendering mode that reports success. hud discards Present's "
+            "HRESULT (its draw ends in li r3,0), which is why the composite "
+            "draw has always logged 00000000. Clearing the field forces the "
+            "real path, which tail-calls [dc+1CC]->vtable[24].",
+            "Kernel");
+
 DEFINE_bool(guide_create_xam_device, false,
             "Call xam's D3D device creation (runtime 8178F748). It is the "
             "only site that takes the address of xam's device global "

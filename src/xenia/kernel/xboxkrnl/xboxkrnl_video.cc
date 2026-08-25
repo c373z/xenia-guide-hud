@@ -858,6 +858,17 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
              rd(dc + i * 16), rd(dc + i * 16 + 4), rd(dc + i * 16 + 8),
              rd(dc + i * 16 + 12));
     }
+    // XuiRenderPresent tail-calls dc->vtable[21] (runtime 818F9290), which
+    // reads three fields before it will present anything:
+    //   [dc+11C] == 0        -> bail out with E_UNEXPECTED
+    //   [dc+1CC] == 0        -> assert (twi 31,r0,19)
+    //   [dc+134] != 0        -> return S_OK having presented NOTHING
+    // Only [dc+134] == 0 reaches the real present, which tail-calls
+    // [dc+1CC]->vtable[24]. A 00000000 return from the composite draw is
+    // therefore NOT evidence that anything was presented.
+    XELOGI("GuideBootstrap: DC present gates: [11C]={:08X} [134]={:08X} "
+           "[1CC]={:08X}",
+           rd(dc + 0x11Cu), rd(dc + 0x134u), rd(dc + 0x1CCu));
   }
   SetGuideDrawHook(guide_bs_hud_base_ + 0xAB28u, render_obj);
   XELOGI("GuideBootstrap: draw hook installed on title thread");
@@ -889,6 +900,34 @@ void VdSwap_entry(
     if (gth && !in_guide_draw) {
       in_guide_draw = true;
       uint64_t gargs[] = {guide_draw_this_};
+      {
+        // Log BEFORE the draw: with guide_force_real_present the draw faults,
+        // so anything logged after Execute never appears.
+        static bool once = false;
+        if (!once) {
+          once = true;
+          auto* pm = kernel_state()->memory();
+          auto prd = [pm](uint32_t a) {
+            return xe::load_and_swap<uint32_t>(pm->TranslateVirtual(a));
+          };
+          uint32_t pdc = prd(guide_draw_this_ + 12);
+          uint32_t pdev = pdc ? prd(pdc + 0x1CCu) : 0;
+          XELOGI("Guide pre-draw: dc={:08X} [134]={:08X} dev={:08X}", pdc,
+                 pdc ? prd(pdc + 0x134u) : 0, pdev);
+          if (pdev) {
+            XELOGI("Guide pre-draw: dev [32A0]={:08X} [32B0]={:08X}",
+                   prd(pdev + 0x32A0u), prd(pdev + 0x32B0u));
+          }
+        }
+      }
+      if (::cvars::guide_force_real_present) {
+        auto* fm = kernel_state()->memory();
+        uint32_t fdc = xe::load_and_swap<uint32_t>(
+            fm->TranslateVirtual(guide_draw_this_ + 12));
+        if (fdc) {
+          xe::store_and_swap<uint32_t>(fm->TranslateVirtual(fdc + 0x134u), 0);
+        }
+      }
       in_guide_draw_scope = true;
       uint64_t gr = kernel_state()->processor()->Execute(
           gth->thread_state(), guide_draw_fn_, gargs, xe::countof(gargs));
@@ -896,8 +935,29 @@ void VdSwap_entry(
       static std::atomic<uint32_t> gdraws{0};
       uint32_t gn = ++gdraws;
       if (gn <= 3 || (gn % 300) == 0) {
-        XELOGI("Guide composite draw #{} -> {:08X}", gn,
-               static_cast<uint32_t>(gr));
+        // hud's draw (913EAB28) ends with "li r3,0" AFTER the call to
+        // XuiRenderPresent, so it discards Present's HRESULT - this return
+        // value is 0 whether or not anything was presented. The DC the draw
+        // uses is render_obj+12, which is NOT the pointer XuiRenderCreateDC
+        // handed back. Read the present gates off the right object.
+        auto* mem = kernel_state()->memory();
+        auto rdw = [mem](uint32_t a) {
+          return xe::load_and_swap<uint32_t>(mem->TranslateVirtual(a));
+        };
+        uint32_t ddc = rdw(guide_draw_this_ + 12);
+        uint32_t dev = ddc ? rdw(ddc + 0x1CCu) : 0;
+        XELOGI("Guide composite draw #{} -> {:08X}; draw dc={:08X} "
+               "[11C]={:08X} [134]={:08X} [1CC]={:08X}",
+               gn, static_cast<uint32_t>(gr), ddc, ddc ? rdw(ddc + 0x11Cu) : 0,
+               ddc ? rdw(ddc + 0x134u) : 0, dev);
+        // The real present path (819DE94C) picks a surface as
+        //   r11 = [dev+32A0] ? [dev+32A0] : [dev+32B0]
+        // and immediately does lwz r9,36(r11). Both null => null deref at
+        // guest 0x24, which is the crash seen with guide_force_real_present.
+        if (dev) {
+          XELOGI("Guide device {:08X}: [32A0]={:08X} [32B0]={:08X}", dev,
+                 rdw(dev + 0x32A0u), rdw(dev + 0x32B0u));
+        }
       }
       in_guide_draw = false;
     }

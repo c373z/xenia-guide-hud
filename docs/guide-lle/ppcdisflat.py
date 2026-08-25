@@ -9,8 +9,8 @@ def dec(w):
     if op==34: return f"lbz r{rt},{s}(r{ra})"
     if op==14: return f"addi r{rt},r{ra},{s}"
     if op==15: return f"lis r{rt},0x{si:04x}"
-    if op==11: return f"cmpwi r{ra},{s}"
-    if op==10: return f"cmplwi r{ra},0x{si:x}"
+    if op==11: return f"cmpwi cr{(w>>23)&7},r{ra},{s}"
+    if op==10: return f"cmplwi cr{(w>>23)&7},r{ra},0x{si:x}"
     if op==21:
         mb=(w>>6)&31; me=(w>>1)&31; sh=(w>>11)&31
         return f"rlwinm r{ra},r{rt},{sh},{mb},{me}"
@@ -32,7 +32,16 @@ def dec(w):
         return f"op31 xo={xo} r{rt},r{ra},r{rb}"
     if op==16:
         bd=w&0xfffc; bd=bd-0x10000 if bd&0x8000 else bd
-        return f"bc {rt},{ra},{bd:#x}"
+        # BO/BI are meaningless as bare numbers: BI names a CR FIELD and bit,
+        # so "bc 12,26" tests cr6.EQ, not anything in cr0. Spell it out - a
+        # branch read against the wrong CR field inverts the logic silently.
+        bo,bi=rt,ra
+        cond=['lt','gt','eq','so'][bi&3]
+        cr=bi>>2
+        if bo&4:
+            kind=('b'+cond) if (bo&8) else ('bn'+cond if cond!='so' else 'bns')
+            return f"{kind} cr{cr},{bd:#x}"
+        return f"bc {bo},{bi}(cr{cr}.{cond}),{bd:#x}"
     if op==18:
         li=w&0x3fffffc; li=li-0x4000000 if li&0x2000000 else li
         return ("bl " if w&1 else "b ")+f"{li:#x}"
