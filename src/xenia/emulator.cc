@@ -1202,6 +1202,39 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                 XELOGI("Guide button: XuiInit returned {:08X}, ctx now {:08X}",
                        static_cast<uint32_t>(xr), rd(0x81D6C978u));
               }
+                static std::unique_ptr<cpu::Breakpoint> srt_bp;
+                if (cvars::guide_trace_setrendertarget && !srt_bp) {
+                  srt_bp = std::make_unique<cpu::Breakpoint>(
+                      ks->processor(), cpu::Breakpoint::AddressType::kGuest,
+                      0x819F31A8ull,
+                      [](cpu::Breakpoint* bp, cpu::ThreadDebugInfo* ti,
+                         uint64_t host_pc) {
+                        auto* th = kernel::XThread::GetCurrentThread();
+                        if (!th) return;
+                        auto* c = th->thread_state()->context();
+                        static std::atomic<uint32_t> n{0};
+                        uint32_t k = ++n;
+                        if (k > 40) return;
+                        XELOGI("SetRenderTarget #{}: dev={:08X} index={} "
+                               "surface={:08X} lr={:08X}  <- {}",
+                               k, static_cast<uint32_t>(c->r[3]),
+                               static_cast<uint32_t>(c->r[4]),
+                               static_cast<uint32_t>(c->r[5]),
+                               static_cast<uint32_t>(c->lr),
+                               c->r[5] ? "BIND" : "unbind");
+                      });
+                  ks->processor()->AddBreakpoint(srt_bp.get());
+                  XELOGI("SetRenderTarget trace installed at 819F31A8");
+                }
+              if (cvars::guide_bootstrap_before_device &&
+                  cvars::guide_bootstrap_on_title_thread) {
+                // The mode-1 creator below never returns, so anything after it
+                // is dead code in that configuration - including the queue
+                // call that starts the Guide bootstrap.
+                XELOGI("Guide button: queueing bootstrap BEFORE device creation");
+                kernel::xboxkrnl::QueueGuideBootstrap(
+                    hud_base, obj, cvars::guide_use_title_device, skin_mod);
+              }
               if (cvars::guide_create_xam_device) {
                 uint32_t gate_ptr = rd(0x815F048Cu);
                 uint32_t gate = gate_ptr ? rd(gate_ptr) : 0;
@@ -1392,7 +1425,8 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                          rd(0x801E6FC8u));
                 }
               }
-              if (cvars::guide_bootstrap_on_title_thread) {
+              if (cvars::guide_bootstrap_on_title_thread &&
+                  !cvars::guide_bootstrap_before_device) {
                 kernel::xboxkrnl::QueueGuideBootstrap(
                     hud_base, obj, cvars::guide_use_title_device,
                     skin_mod);

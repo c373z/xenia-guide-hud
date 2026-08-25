@@ -224,6 +224,24 @@ DEFINE_bool(guide_system_process_type, false,
             "mode-1 device path is one place it matters. Restored afterwards.",
             "Kernel");
 
+DEFINE_bool(guide_trace_setrendertarget, false,
+            "Break on xam's SetRenderTarget (819F31A8) and log its arguments: "
+            "device, index, surface. Counting DemandFunction entries only says "
+            "the function ran, and the reset loop 819F4C00 calls it with a null "
+            "surface to UNBIND - so a call count cannot distinguish binding "
+            "from unbinding. This reads the surface argument.",
+            "Kernel");
+
+DEFINE_bool(guide_bootstrap_before_device, false,
+            "Queue the Guide bootstrap onto the title thread BEFORE calling "
+            "xam's device creator, instead of after. Only matters with "
+            "guide_create_primary_device: the mode-1 creator never returns, so "
+            "in the normal order the queue call is never reached and the "
+            "bootstrap never runs at all. Reversing it lets the mode-1 device "
+            "come up - it does bind render targets, which mode 2 never does - "
+            "while the bootstrap proceeds on the title thread.",
+            "Kernel");
+
 DEFINE_bool(guide_clear_null_render, false,
             "Clear [xui_ctx+1C] after xam's XUI render host runs, before hud "
             "creates its device context. The DC initialiser 818FDE98 copies "

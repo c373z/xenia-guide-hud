@@ -601,3 +601,60 @@ Neither is a bug in the other. They are two halves of one system that, on
 hardware, is brought up by the boot code Xenia does not have. Making the Guide
 draw means supplying that: a device that owns the GPU *and* a bootstrap that
 returns.
+
+## Running both modes at once
+
+### An ordering bug hid the whole experiment
+
+Under `guide_create_primary_device` the Guide bootstrap was never running at
+all, for a dull reason: the mode-1 creator never returns, and
+`QueueGuideBootstrap` is called *after* it in the button handler. Everything
+below the device call was dead code in that configuration.
+
+`guide_bootstrap_before_device` queues it first. With that, mode 1 and the
+bootstrap both run:
+
+```
+Guide button: queueing bootstrap BEFORE device creation
+Guide button: calling device creator 8178E9F0
+GuideBootstrap: render host -> 00000000, XUI ctx 4088B760, provider 81D22A54
+GuideBootstrap: scene creator 913EB940 -> 00000000, scene=00010000
+Guide composite draw #1 -> 00000000; draw dc=4089B400 ... [1CC]=4088B7A0
+```
+
+The bootstrap is consumed inside the `VdSwap` that mode 1's own initialisation
+performs, so it runs on the button thread rather than the title thread.
+
+Adding `guide_clear_null_render` on top makes the present take the real path,
+and the crash register dump shows `r31=40870D00` - the mode-1, GPU-owning
+device. So with all three, the Guide's frame does reach the right device. It
+still faults at `819DE94C` on a null render target.
+
+### SetRenderTarget really does bind, measured
+
+A call count could not settle whether mode 1 binds or unbinds, since the reset
+loop `819F4C00` calls `SetRenderTarget(dev, i, 0)`. `guide_trace_setrendertarget`
+puts a breakpoint on `819F31A8` and reads the arguments:
+
+```
+SetRenderTarget #1: dev=40883A80 index=0 surface=4088B3E0 lr=81A0FD2C  <- BIND
+```
+
+A real surface, index 0, from `81A0FA80`. So mode 1 genuinely binds a render
+target, and the earlier claim - made from a call count - happens to hold.
+
+### What this does NOT show
+
+The bind above is `dev=40883A80`; the present in the combined run dispatched to
+`40870D00`. That looks like the Guide presenting to a different device than the
+one that got the target, which would be exactly the missing link.
+
+It is not evidence. Those two numbers come from **different runs**, and guest
+heap addresses are not stable between runs - the same object has appeared at
+`40883A80` in one session and `40870D00` in another. Nothing here compares them
+within a single session.
+
+Confirming or killing that idea needs one run that logs both the bind and the
+faulting `r31`. The breakpoint perturbs execution enough that the run which
+produced the bind never reached a `VdSwap`, so the bootstrap was never consumed
+and no draw happened - the two events have not yet been observed together.
