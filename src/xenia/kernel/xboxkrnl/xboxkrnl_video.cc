@@ -714,6 +714,19 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
     XELOGI("GuideBootstrap: scene creator {:08X} -> {:08X}", scene_fn,
            static_cast<uint32_t>(ir));
   } else {
+    // Mirror what hud's scene creator sets before it calls the init:
+    // [obj+28] = second arg, [obj+32] = 1 (render_obj+16),
+    // [obj+64] = 1 (render_obj+48). If the hang follows these fields rather
+    // than the call site, this direct call will hang too.
+    if (::cvars::guide_preset_fields) {
+      xe::store_and_swap<uint32_t>(
+          memory->TranslateVirtual(guide_bs_obj_ + 28), 0u);
+      xe::store_and_swap<uint32_t>(
+          memory->TranslateVirtual(guide_bs_obj_ + 32), 1u);
+      xe::store_and_swap<uint32_t>(
+          memory->TranslateVirtual(guide_bs_obj_ + 64), 1u);
+      XELOGI("GuideBootstrap: preset [obj+28,32,64] as the scene creator does");
+    }
     uint64_t a2[] = {render_obj, 0};
     ir = processor->Execute(ts, guide_bs_hud_base_ + 0xA898u, a2,
                             xe::countof(a2));

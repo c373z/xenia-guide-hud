@@ -2650,7 +2650,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                 if (cvars::lle_xam_trace_loader && !loader_bp) {
                   loader_bp = std::make_unique<cpu::Breakpoint>(
                       ks->processor(), cpu::Breakpoint::AddressType::kGuest,
-                      0x913FEA04ull,
+                      0x913FE724ull,
                       [](cpu::Breakpoint* bp, cpu::ThreadDebugInfo* ti,
                          uint64_t host_pc) {
                         auto* th = kernel::XThread::GetCurrentThread();
@@ -2674,7 +2674,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                           XELOGI("LoaderTrace: FindClass name '{}'", nm);
                         }
                         XELOGI(
-                            "LoaderTrace: GAMERCARD 913FEA04 lr={:08X} r3={:08X} "
+                            "LoaderTrace: SYSAPPINPUT 913FE724 lr={:08X} r3={:08X} "
                             "r4={:08X} r5={:08X} r6={:08X} r7={:08X} "
                             "r29={:08X} r30={:08X}",
                             static_cast<uint32_t>(c->lr),
