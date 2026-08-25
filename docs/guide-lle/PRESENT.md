@@ -2764,3 +2764,54 @@ mode-1 device with a bound colour surface.
 
 That reading should be treated as weakened, not merely unproven. Whatever the
 flag is computed from, it is something neither of those levers touches.
+
+## The flag is a constructor default, not a computed value
+
+`818FF140` passes `&slot` to `818FD0E8`, which builds the XUI context:
+
+```
+81904318  addi r3,r0,44          ; 44 bytes
+8190431C  bl   81944A70          ; allocate
+81904320  addi r28,r0,1          ; r28 = 1, a literal
+81904324  cmplwi cr0,r3,0
+8190432C  beq   cr0,+0x40        ; skip on allocation failure
+81904334  stw  r28,4(r3)         ; [obj+04] = 1
+81904338  stw  r28,28(r3)        ; [obj+1C] = 1     <- the null-render flag
+```
+
+`[ctx+0x1C] = 1` is written unconditionally, from a literal, immediately after
+the allocation succeeds. **It is a constructor default.**
+
+### Correcting several sections above
+
+This file has said repeatedly that the flag is "computed, not a constant",
+that "no constant 1 is stored to that offset anywhere in the XUI range", and
+built on those - including ruling out inputs it might be computed from. All of
+that was wrong.
+
+The cause was a bug in the scan that produced it. It walked back from each
+store looking for `addi rS,r0,imm`, but broke early on any intervening store
+*from* the same register:
+
+```
+81904334  stw r28,4(r3)     <- scan stopped here
+81904338  stw r28,28(r3)    <- the store it was examining
+```
+
+`r28` is stored twice in a row, so the search for its constant terminated one
+instruction short of the answer. The instruction it wanted was four words
+further back.
+
+So the input-varying experiments above were answering the wrong question:
+nothing is computed, so of course neither the hardware-info word nor the device
+moved it. Those measurements are still valid as facts, but their framing was
+mistaken.
+
+### What the question actually is
+
+The context is born with rendering disabled, and something is supposed to
+enable it. Nothing observed does. That is a different and more tractable
+question than "what computes this value", and it makes the earlier candidate -
+`8190F7A0`, the one function that stores a constant `0` to a `+0x1C` field -
+worth another look: it takes its object from `81944A70`, the same allocator
+this constructor uses, so the two plausibly operate on the same class.
