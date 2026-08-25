@@ -1,0 +1,42 @@
+--- a/src/xenia/kernel/xboxkrnl/xboxkrnl_module.cc
++++ b/src/xenia/kernel/xboxkrnl/xboxkrnl_module.cc
+@@ -100,13 +100,17 @@
+   } else {
+     uint32_t pKeDebugMonitorData =
+         memory_->SystemHeapAlloc(sizeof(X_KEDEBUGMONITORDATA));
+-    xe::store_and_swap<uint32_t>(memory_->TranslateVirtual(pKeDebugMonitorData),
+-                                 pKeDebugMonitorData);
+     auto lpKeDebugMonitorData =
+         memory_->TranslateVirtual<X_KEDEBUGMONITORDATA*>(pKeDebugMonitorData);
+     std::memset(lpKeDebugMonitorData, 0, sizeof(X_KEDEBUGMONITORDATA));
+     lpKeDebugMonitorData->callback_fn =
+         GenerateTrampoline("KeDebugMonitorCallback", KeDebugMonitorCallback);
++    // The pointer must go into the exported variable itself. It was
++    // written into the freshly allocated block instead, and the memset
++    // above then erased even that, so KeDebugMonitorData stayed zero
++    // and the cvar had no guest-visible effect at all.
++    xe::store_and_swap<uint32_t>(memory_->TranslateVirtual(KeDebugMonitorData),
++                                 pKeDebugMonitorData);
+   }
+   export_resolver_->SetVariableMapping(
+       "xboxkrnl.exe", ordinals::KeDebugMonitorData, KeDebugMonitorData);
+@@ -120,13 +124,17 @@
+   } else {
+     uint32_t pKeCertMonitorData =
+         memory_->SystemHeapAlloc(sizeof(X_KECERTMONITORDATA));
+-    xe::store_and_swap<uint32_t>(memory_->TranslateVirtual(pKeCertMonitorData),
+-                                 pKeCertMonitorData);
+     auto lpKeCertMonitorData =
+         memory_->TranslateVirtual<X_KECERTMONITORDATA*>(pKeCertMonitorData);
+     std::memset(lpKeCertMonitorData, 0, sizeof(X_KECERTMONITORDATA));
+     lpKeCertMonitorData->callback_fn =
+         GenerateTrampoline("KeCertMonitorCallback", KeCertMonitorCallback);
++    // The pointer must go into the exported variable itself. It was
++    // written into the freshly allocated block instead, and the memset
++    // above then erased even that, so KeCertMonitorData stayed zero
++    // and the cvar had no guest-visible effect at all.
++    xe::store_and_swap<uint32_t>(memory_->TranslateVirtual(KeCertMonitorData),
++                                 pKeCertMonitorData);
+   }
+   export_resolver_->SetVariableMapping(
+       "xboxkrnl.exe", ordinals::KeCertMonitorData, KeCertMonitorData);

@@ -203,3 +203,25 @@ Things already ruled out by measurement, so nobody repeats them: the
 hardware-info word does not influence it; the device does not either (the flag
 is `1` even with a mode-1 device and a bound render target); `819441D0` and
 `8190F7A0` are unrelated classes despite matching size and offsets.
+
+## Ready to upstream: upstream-monitor-fix.patch
+
+`docs/guide-lle/upstream-monitor-fix.patch` contains the two kernel fixes on
+their own, cut against `origin/canary_experimental` and verified to apply
+cleanly to it (12 insertions, 4 deletions, one file).
+
+They are not part of the Guide work and do not depend on anything else on this
+branch. `KeDebugMonitorData` and `KeCertMonitorData` were each written into the
+block they point at rather than into the exported variable, and the `memset`
+immediately afterwards erased even that - so both `kernel_debug_monitor` and
+`kernel_cert_monitor` had no guest-visible effect at all, presumably since they
+were written.
+
+Verified: with the fix and the cvars on, `KeDebugMonitorCallback` is invoked
+21,411 times in a session where it was previously unreachable, and
+`KeCertMonitorCallback` once. Dashboard framebuffer unchanged (`2EF6B4B7`), no
+guest crashes, and both cvars still default off.
+
+Note the branch's own copy of that file also changes `XboxHardwareInfo` to read
+from `xbox_hardware_info_flags`, which is Guide-specific and deliberately
+excluded from the patch.
