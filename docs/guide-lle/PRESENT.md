@@ -1375,3 +1375,54 @@ What it does establish is that the memory the draw demonstrably touches holds
 scene data, not commands - which is consistent with everything else here: xam's
 device has no command buffer to write into, because `VdGetSystemCommandBuffer`
 never gave it one.
+
+## The Guide does emit a command stream - it is in FE03xxxx/FE04xxxx
+
+The previous section reported no PM4 in the memory the draw writes, and
+carefully scoped that to `0x40800000-0x40A00000`, noting a buffer could sit in
+the `FE4xxxxx` region xam's `VdSwap` arguments reference. Extending the diff to
+`0xFE000000-0xFE500000` finds exactly that.
+
+Three more blocks change across the draw: `FE030000`, `FE040000` and
+`FE460000`. The first two are where xam's own `VdSwap` front-buffer pointers
+point (`FE03E284`, `FE041FA4`).
+
+Raw contents of `FE040000`, repeating:
+
+```
+C0054500 00000007 00001925 00000000 FFFFFFFF 00001922 00000002 00001925 ...
+```
+
+`C0054500` is a type-3 header, count 6, opcode `0x45` - `COND_WRITE` in Xenia's
+own table - and `0x1925` / `0x1922` are Xenos register indices. `0x80000000`,
+the type-2 NOP filler, appears 290 times in 263 contiguous runs, which is what
+padding in a real command buffer looks like.
+
+Opcode histograms:
+
+| `FE040000` | | `FE030000` | |
+|---|---|---|---|
+| COND_WRITE | 256 | DRAW_INDX_2 | 25 |
+| INDIRECT_BUFFER | 28 | DRAW_INDX | 15 |
+| EVENT_WRITE_SHD | 22 | WAIT_REG_MEM | 10 |
+| WAIT_REG_MEM | 19 | EVENT_WRITE_SHD | 9 |
+| INVALIDATE_STATE | 11 | INVALIDATE_STATE | 7 |
+| **DRAW_INDX** | **5** | IM_LOAD_IMMEDIATE | 5 |
+
+Draws, shader loads, state invalidation, event writes and conditional register
+writes, in sensible proportions. Random data does not produce that - the
+earlier bitmask "5800 type-3-looking words" produced no such structure when
+decoded, and this does.
+
+**So the Guide is rendering.** It builds a real GPU command stream containing
+real draw calls, every frame, into buffers of its own. What it never gets is
+anything that executes them.
+
+That also settles the question the descriptor investigation kept failing to
+answer. xam does not learn where to write from `VdGetSystemCommandBuffer` at
+all - it already has its buffers, which is why handing it one at `p0+0x04` /
+`p0+0x08` produced no writes. The missing piece was never "where does it
+write"; it is "who executes what it wrote".
+
+Next step, and it is now a concrete one: point `ExecuteIndirectBuffer` at these
+buffers and see what reaches the screen.

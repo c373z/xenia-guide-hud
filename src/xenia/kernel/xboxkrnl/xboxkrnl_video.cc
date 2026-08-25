@@ -1180,19 +1180,29 @@ void VdSwap_entry(
       // snapshot before logging it. Cover the two ranges the Guide's objects
       // are actually observed in instead: xam's heap allocations around
       // 0x3018xxxx and the device/DC objects around 0x4088xxxx-0x409Bxxxx.
-      const uint32_t kDiffLo = 0x40800000u, kDiffHi = 0x40A00000u;
+      // Two windows. The 408xxxxx one is where the Guide's device, DC and
+      // wrapper objects live. The FE4xxxxx one is where xam's own VdSwap
+      // arguments point - its front buffer (FE03E284) and its writeback
+      // (FE474008) - and was the gap left by the previous scan.
+      struct DiffRange { uint32_t lo, hi; };
+      static const DiffRange kRanges[] = {{0x40800000u, 0x40A00000u},
+                                          {0xFE000000u, 0xFE500000u}};
       const uint32_t kBlk = 0x10000u;
+      uint32_t kTotalBlocks = 0;
+      for (auto& r : kRanges) kTotalBlocks += (r.hi - r.lo) / kBlk;
       if (::cvars::guide_diff_draw_writes && pre_sums.empty()) {
         auto* mmv = kernel_state()->memory();
-        pre_sums.reserve((kDiffHi - kDiffLo) / kBlk);
-        for (uint32_t a = kDiffLo; a < kDiffHi; a += kBlk) {
-          uint32_t sum = 0;
-          auto* hp = mmv->TranslateVirtual(a);
-          if (hp) {
-            auto* w = reinterpret_cast<const uint32_t*>(hp);
-            for (uint32_t i = 0; i < kBlk / 4; ++i) sum += w[i];
+        pre_sums.reserve(kTotalBlocks);
+        for (auto& r : kRanges) {
+          for (uint32_t a = r.lo; a < r.hi; a += kBlk) {
+            uint32_t sum = 0;
+            auto* hp = mmv->TranslateVirtual(a);
+            if (hp) {
+              auto* w = reinterpret_cast<const uint32_t*>(hp);
+              for (uint32_t i = 0; i < kBlk / 4; ++i) sum += w[i];
+            }
+            pre_sums.push_back(sum);
           }
-          pre_sums.push_back(sum);
         }
         XELOGI("DrawDiff: snapshot of {} blocks taken", pre_sums.size());
       }
@@ -1203,7 +1213,7 @@ void VdSwap_entry(
       if (::cvars::guide_diff_draw_writes && !pre_sums.empty()) {
         auto* mmv = kernel_state()->memory();
         uint32_t changed = 0, idx = 0, shown = 0;
-        for (uint32_t a = kDiffLo; a < kDiffHi; a += kBlk, ++idx) {
+        for (auto& r : kRanges) for (uint32_t a = r.lo; a < r.hi; a += kBlk, ++idx) {
           uint32_t sum = 0, pm4 = 0;
           auto* hp = mmv->TranslateVirtual(a);
           if (hp) {
