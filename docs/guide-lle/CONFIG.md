@@ -119,3 +119,33 @@ gets the stable behaviour. The list, all `false`/`0` by default:
 `guide_execute_command_stream`, `guide_syscmdbuf_buffer_kb`,
 `guide_trace_setrendertarget`, `guide_call_boot_entry`,
 `guide_bind_depth_copy`.
+
+## Correction: five values, not six
+
+The table at the top lists six settings, but one of them -
+`guide_use_title_device = false` - **is now the source default**, changed early
+in this work precisely because defaulting it on was dangerous. It does not need
+setting; it needs leaving alone.
+
+Comparing the working config against every source default programmatically, the
+values that genuinely differ are five:
+
+```
+lle_xam                  = "GAME:\xam.xex"
+guide_hud_path           = "GAME:\hud.xex"
+xbox_hardware_info_flags = 0x220
+guide_create_xam_device  = true
+lle_xam_heap0_alias      = true
+```
+
+Nothing else in the config differs from its default. `guide_message` shows up in
+a naive comparison because the file stores `2147483652` where the source writes
+`0x80000004` - the same number.
+
+So: **set those five, leave everything else alone.** The entry for
+`guide_use_title_device` stays in the table above as a warning, not as an
+instruction.
+
+Also verified in the same pass: no cvar on this branch is defined but unused.
+`guide_xui_anim_init` was the only one, and it is now wired up and defaulted to
+0.
