@@ -169,3 +169,37 @@ has misled repeatedly. `fnlookup.py`, `ppcdis.py` (ghidra addresses: runtime +
 point at, then memset away, so both cvars had no guest-visible effect. Four
 lines, unrelated to the Guide, and any title probing those variables is
 affected.
+
+## Third update: the null-render flag is characterised and exhausted
+
+The second update named `[xui_ctx+0x1C]` as the open question and listed five
+candidate writers to check. That framing is superseded - do not start there.
+
+What the field is, established statically and confirmed at runtime:
+
+- The XUI context is a 44-byte object identified by vtable `8163E200`.
+- `refs.py` finds that vtable referenced exactly twice: constructor `818FD0E8`
+  and destructor `818F7E40`. There is no second constructor.
+- The constructor sets `[+0x04] = 1` and `[+0x1C] = 1` from literals,
+  unconditionally.
+- `[+0x1C]` is copied verbatim into `[dc+0x134]` when a device context is
+  built, and that is what makes `XuiRenderPresent` return without presenting
+  and `XuiRenderBegin` skip its device call.
+- Of the nine vtable slots, only slot 2 touches `+0x1C`, and it is a copy
+  constructor propagating it. **No method of the class clears either field.**
+- The destructor asserts `[+0x04] == 0`, so external code is expected to clear
+  at least that field. Neither is ever cleared in this emulator.
+
+Why it cannot be pushed further from here:
+
+- The writer is not in the class and not in the XUI range. Across xam, 136
+  sites store a literal zero to some `+0x1C`; the offset is too common to
+  isolate without class information the binary does not carry.
+- Runtime observation cannot help: the code that would clear it never executes,
+  so there is nothing to watch. Host-side polling confirms the field holds `1`
+  from first observation to the end of a session.
+
+Things already ruled out by measurement, so nobody repeats them: the
+hardware-info word does not influence it; the device does not either (the flag
+is `1` even with a mode-1 device and a bound render target); `819441D0` and
+`8190F7A0` are unrelated classes despite matching size and offsets.
