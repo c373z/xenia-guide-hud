@@ -3255,3 +3255,31 @@ introducing its own behaviour.
 The cvar defaults on, so the documented signature in CONFIG.md is unchanged.
 Anyone building on this can turn it off and have one less thing to reason
 about.
+
+## Auditing the rest of the bootstrap
+
+Having found one invented step that does nothing, the others deserve the same
+test. Turning each off in turn:
+
+| step | result with it off | verdict |
+|---|---|---|
+| `guide_bootstrap_create_dc` - our own `XuiRenderCreateDC` | scene created, hook installed, draw returns, no crash | **not needed** |
+| `guide_skip_bkgnd_transition` - the zeroed `CHUDBkgndScene` stub | **guest crash**, no scene | required |
+| `guide_register_classes` - three class registrars | no crash, but `scene creator -> 80300004, scene=00000000` | required |
+
+So of the three invented steps that can be switched off, one was superfluous
+and two are genuinely load-bearing. `80300004` from the scene creator is the
+resource-not-found shape: without the registrars, the classes the scene
+references do not exist, so it cannot be built.
+
+The `register_classes=false` run is worth one further note. It still logs 12
+composite draws with `scene=00000000` - the draw hook runs and hud's draw
+returns success against a scene that was never created. That is another
+instance of the pattern this file keeps hitting: **the composite draw returning
+`00000000` means nothing**, because hud hardcodes that return. It does so
+even with no scene at all.
+
+So the bootstrap is now three steps of scaffolding, two of which are required
+to get a scene at all. That is a smaller invented surface than it looked, and
+the two that remain fail loudly when removed rather than silently changing
+behaviour - which is the property one wants from scaffolding that has to stay.
