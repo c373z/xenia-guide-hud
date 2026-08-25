@@ -641,6 +641,7 @@ X_STATUS Emulator::LaunchXexFile(const std::filesystem::path& path) {
 
   // System related symlinks. This should point to dashboard location in the
   // future.
+  XELOGI("System title: registering SystemRoot -> '{}' (exe '{}')", mount_path, kernel_state_->GetExecutableModule()->path());
   file_system_->RegisterSymbolicLink("\\SystemRoot", mount_path);
 
   auto module = kernel_state_->LoadUserModule("xam.xex");
