@@ -692,6 +692,17 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
          "provider {:08X}",
          static_cast<uint32_t>(hr), rd(0x81D6C978u), rd(0x81D6D0ACu));
 
+  if (::cvars::guide_clear_null_render) {
+    uint32_t ctx = rd(0x81D6C978u);
+    if (ctx) {
+      uint32_t before = rd(ctx + 0x1Cu);
+      xe::store_and_swap<uint32_t>(memory->TranslateVirtual(ctx + 0x1Cu), 0);
+      XELOGI("GuideBootstrap: XUI ctx {:08X} [1C] {:08X} -> 00000000 "
+             "(null-render flag cleared at source)",
+             ctx, before);
+    }
+  }
+
   {
     // The XUI resource provider is a static xam object; its vtable[1] is the
     // open-by-name call that is failing with 80300004.
@@ -930,8 +941,15 @@ void VdSwap_entry(
           };
           uint32_t pdc = prd(guide_draw_this_ + 12);
           uint32_t pdev = pdc ? prd(pdc + 0x1CCu) : 0;
-          XELOGI("Guide pre-draw: dc={:08X} [134]={:08X} dev={:08X}", pdc,
-                 pdc ? prd(pdc + 0x134u) : 0, pdev);
+          // 818FDE98 sets [dc+134] = [param+1C] and [dc+1CC] = [param+8],
+          // and stores the parameter object itself at [dc+1C8]. Read it back
+          // so the inheritance is measured rather than assumed.
+          uint32_t pparam = pdc ? prd(pdc + 0x1C8u) : 0;
+          XELOGI("Guide pre-draw: dc={:08X} [134]={:08X} dev={:08X} "
+                 "param=[1C8]={:08X} [param+1C]={:08X} [param+8]={:08X}",
+                 pdc, pdc ? prd(pdc + 0x134u) : 0, pdev, pparam,
+                 pparam ? prd(pparam + 0x1Cu) : 0,
+                 pparam ? prd(pparam + 8u) : 0);
           if (pdev) {
             XELOGI("Guide pre-draw: dev [32A0]={:08X} [32B0]={:08X}",
                    prd(pdev + 0x32A0u), prd(pdev + 0x32B0u));

@@ -539,3 +539,65 @@ for "valid surfaces" on the inverted test returned twelve hits, including
 `819E9750`, whose first word is `7D8802A6` - the `mfspr r12,8` of a function
 prologue. Any surface has to be recognised by the packed fetch constant at
 `+0x24`, not by the type bit.
+
+## The two modes need each other
+
+### Clearing the flag at its source changes nothing
+
+`[dc+134]` is inherited from `[param+1C]`, and the parameter object turns out
+to be the XUI render context itself - the singleton at `81D6C978`. Measured:
+
+```
+pre-draw: dc=40899D40 [134]=00000001 dev=4088A0E0
+          param=[1C8]=4088A0A0 [param+1C]=00000001 [param+8]=4088A0E0
+```
+
+`4088A0A0` is the same value the bootstrap already logs as "XUI ctx". So the
+flag can be cleared at the source, before hud builds its DC, rather than
+patched per-frame afterwards. `guide_clear_null_render` does that, and it
+works mechanically - the DC is then constructed with `[134]=00000000` and the
+scene still creates:
+
+```
+XUI ctx 4088A0A0 [1C] 00000001 -> 00000000 (null-render flag cleared at source)
+scene creator 913EB940 -> 00000000, scene=00010000
+pre-draw: dc=40899D40 [134]=00000000 ... [param+1C]=00000000
+```
+
+The reason for doing it at the source was that `XuiRenderBegin` skips its call
+to `dc->vtable[20]` when the flag is set, and a DC built non-null would run
+that call - which looked like where render-target setup would happen. It is
+not. The frame faults at `819DE94C` with `fault_addr 0x24`, byte for byte the
+same crash as clearing `[dc+134]` per frame. That expectation is disproven.
+
+### Nothing on the mode-2 path ever binds a render target
+
+Counting `DemandFunction` entries for `SetRenderTarget` (`819F31A8`) and all
+eleven of its callers across a mode-2 session: **every one is zero**.
+`SetRenderTarget` is never so much as compiled. So the Guide's frame is not
+failing to bind a target, it never attempts to.
+
+The same count over the mode-1 run:
+
+| function | mode 2 | mode 1 |
+|---|---|---|
+| `819F31A8` SetRenderTarget | 0 | 1 |
+| `819FCE78` (caller) | 0 | 1 |
+| `81A0FA80` (caller) | 0 | 1 |
+
+So render-target setup belongs to the mode-1 side - the device that owns the
+GPU - and the Guide's drawing belongs to the mode-2 side, which is the only
+side whose bootstrap completes.
+
+That is the shape of the problem, stated from both ends and measured on both:
+
+- **mode 1** brings the GPU up, binds render targets, and presents two frames,
+  then blocks forever in the async command buffer wait, because the system
+  command buffer is stubbed.
+- **mode 2** completes the Guide bootstrap, creates the scene, and runs a full
+  XUI frame, but never binds a render target, so the present dereferences null.
+
+Neither is a bug in the other. They are two halves of one system that, on
+hardware, is brought up by the boot code Xenia does not have. Making the Guide
+draw means supplying that: a device that owns the GPU *and* a bootstrap that
+returns.

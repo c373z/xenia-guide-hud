@@ -224,6 +224,18 @@ DEFINE_bool(guide_system_process_type, false,
             "mode-1 device path is one place it matters. Restored afterwards.",
             "Kernel");
 
+DEFINE_bool(guide_clear_null_render, false,
+            "Clear [xui_ctx+1C] after xam's XUI render host runs, before hud "
+            "creates its device context. The DC initialiser 818FDE98 copies "
+            "that word into [dc+134], which is the flag that makes "
+            "XuiRenderPresent return S_OK without presenting and makes "
+            "XuiRenderBegin skip its call to dc->vtable[20]. Clearing it at "
+            "the source is not the same as guide_force_real_present clearing "
+            "[dc+134] per frame: the DC is then BUILT non-null, so Begin runs "
+            "vtable[20] too, which is where any render-target setup would "
+            "happen. The context is the singleton at 81D6C978.",
+            "Kernel");
+
 DEFINE_bool(guide_force_real_present, false,
             "Zero [dc+134] on the Guide's XUI device context before each "
             "composite draw. XuiRenderPresent (dc->vtable[21], runtime "
