@@ -1117,3 +1117,52 @@ That is worth stating plainly because it cuts against the obvious story. The
 guest is not limping past a series of checks it should have failed. On the path
 it actually takes, everything it inspects is acceptable to it. What is missing
 is not validation the guest performs - it is execution that Xenia does not do.
+
+## How the system command buffer would be implemented
+
+The loop is closed by an argument correspondence that is easy to miss. In one
+run:
+
+```
+VdGetSystemCommandBuffer #1 from '' p0=7042FA40 p1=7042F9E4
+VdSwap(BF9D06E8, 7042F9F0, FFBE2008, 7042FA40, BEEF0001, ...)
+                                     ^^^^^^^^  ^^^^^^^^
+```
+
+`VdSwap`'s fourth argument **is** the descriptor `VdGetSystemCommandBuffer`
+filled, and its fifth is the `p1` identifier value. Xenia's own signature
+comments already say as much - "buffer from VdGetSystemCommandBuffer",
+"from VdGetSystemCommandBuffer (0xBEEF0001)" - and the code then ignores both.
+
+So the mechanism is: the kernel hands the guest a command buffer, the guest
+writes into it, and the guest hands it back at swap time for the GPU to
+execute. Xenia stubs the first half and discards the second.
+
+The primitive for the missing half already exists:
+
+```
+void ExecuteIndirectBuffer(uint32_t ptr, uint32_t count)   // pm4_command_processor_declare.h
+```
+
+That executes an arbitrary PM4 buffer, which is exactly what a system command
+buffer is. So an implementation is:
+
+1. `VdGetSystemCommandBuffer` allocates (once) a guest-visible PM4 buffer and
+   describes it in the `0x94`-byte block, rather than zeroing it. Which fields
+   carry the pointer and size is the open question - `p0+0x04` is stored by the
+   guest into `[device+0x60C0]`, and `p0+0x08` gates roughly `0xE0` bytes of
+   processing that is skipped entirely while it is zero, so those two are the
+   candidates.
+2. `VdSwap` executes the buffer named by its fourth argument with
+   `ExecuteIndirectBuffer`.
+3. The identifier written to `[device+2B10]+8` advances as the buffer is
+   consumed, which is what the `InsertAsyncCommandBufferCall` wait in mode 1 is
+   watching.
+
+Two cautions for whoever does it. This path is not Guide-specific - the title's
+own `VdSwap` carries the same pair (`7042FA40` / `BEEF0001`), so changing these
+exports affects every title, and the stub's current constants are load-bearing
+in the sense that everything today is built around them being inert. And
+`p0+0x08` should not be filled with a guessed value: unlike `0x500` and
+`0x5BE`, which were read out of the guest's own comparisons, nothing observed
+says what belongs there.
