@@ -3324,3 +3324,38 @@ composite draw as documented.
 So this is not progress toward the Guide - the stub stays. What it is: a cvar
 that has been dead since it was written, now connected, with its default made
 safe and its description extended to say what happens if you enable it.
+
+## Giving the fake front buffer the format the guest expects
+
+With the fabricated surface reduced to one invented object, that object is
+worth improving. `819F7F20` compares the low 6 bits of `[front_buffer+0x20]`
+against `0x3D`, and the draw emitter reads the same field and passes the masked
+value to `819FC1E0`. So `0x3D` is a value taken from the guest's own
+comparison, not invented.
+
+`guide_front_buffer_format` forces it. The result:
+
+```
+Guide: front buffer format [+20] 00000000 -> 0000003D
+GuideDrawGPU: the guest draw dispatched 0 GPU draws
+Guide composite draw #1 -> 00000000; ... [134]=00000000 ...
+```
+
+No change: still zero draws, still no crash. The emitter bails for some reason
+other than this field.
+
+### The incidental measurement is the more interesting one
+
+The clone's `[+0x20]` was **`00000000`** before the override. The object at
+`[device+0x32A0]` - the bound colour surface, the best available template -
+has nothing in the field the front buffer path reads as a format.
+
+That says the clone is a worse stand-in than assumed. It was chosen because it
+is "already structurally valid", but a surface with a zero where a format
+belongs is not structurally valid for this purpose; it merely avoids the null
+dereference. Whatever `819F5D18` needs, a colour surface does not carry it,
+with or without a patched format field.
+
+So the one remaining fabrication is weak in a way that is now measured rather
+than suspected, and the deep configuration's "zero draws" is correspondingly
+weaker evidence about xam than even the previous caveat implied.

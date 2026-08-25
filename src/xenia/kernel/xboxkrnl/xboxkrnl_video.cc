@@ -1234,6 +1234,16 @@ void VdSwap_entry(
             if (clone) {
               std::memcpy(fm2->TranslateVirtual(clone),
                           fm2->TranslateVirtual(rt), 0x100);
+              if (::cvars::guide_front_buffer_format >= 0) {
+                uint32_t f = f2(clone + 0x20u);
+                uint32_t nf = (f & ~0x3Fu) |
+                              (static_cast<uint32_t>(
+                                   ::cvars::guide_front_buffer_format) & 0x3Fu);
+                xe::store_and_swap<uint32_t>(
+                    fm2->TranslateVirtual(clone + 0x20u), nf);
+                XELOGI("Guide: front buffer format [+20] {:08X} -> {:08X}", f,
+                       nf);
+              }
               xe::store_and_swap<uint32_t>(
                   fm2->TranslateVirtual(dv2 + 0x3F74u), clone);
               XELOGI("Guide: front buffer [dev {:08X} +3F74] = clone {:08X} "

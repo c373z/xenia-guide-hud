@@ -299,6 +299,16 @@ DEFINE_bool(guide_syscmdbuf_fields, false,
             "implementation of the system command buffer.",
             "Kernel");
 
+DEFINE_int32(guide_front_buffer_format, -1,
+             "If >= 0, force the low 6 bits of [front_buffer+0x20] to this "
+             "value after cloning. 819F7F20 compares exactly those bits "
+             "against 0x3D (\"rlwinm r10,r10,0,26,31 / cmplwi cr6,r10,0x3d\"), "
+             "and the draw emitter 819F5D18 reads the same field and passes "
+             "the masked value to 819FC1E0. The clone inherits the colour "
+             "surface's format, which is not a front buffer's - so 0x3D is a "
+             "value taken from the guest's own comparison rather than guessed.",
+             "Kernel");
+
 DEFINE_bool(guide_fake_front_buffer, false,
             "If the present path's device has a colour surface on RT0 but no "
             "front buffer at +3F74, clone the colour surface into that slot. "
