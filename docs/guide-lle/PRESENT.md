@@ -1721,3 +1721,43 @@ The software runs end to end. What it does not do is render, and the reason is
 upstream of drawing: the device was never brought up by the system boot Xenia
 does not have, so the path that would emit geometry is inert even though every
 call along it succeeds.
+
+## Confirming the wait's exit condition by forcing it
+
+`819F4488` has exactly one path that returns "done": the test on bit 1 of
+`[device+2B3D]` at the top. Everything else returns "still waiting". That
+reading came from the disassembly and had never been tested.
+
+`guide_force_cmdbuf_complete` sets the bit from a host thread - no breakpoint,
+no perturbation of the guest's scheduling:
+
+```
+CmdBufComplete: armed, 8s
+CmdBufComplete: set bit1 of [40870D00+2B3D]
+CmdBufComplete: set bit1 of [40883A80+2B3D]
+```
+
+The behaviour changes immediately and unmistakably. The log goes from ~20,000
+lines to **815,441**, ending in:
+
+```
+VdGetSystemCommandBuffer #787293 [XAM CREATEDEVICE] from '' p0=709DEFF0 p1=709DEF5C
+VdGetSystemCommandBuffer #787294 [XAM CREATEDEVICE] ...
+VdGetSystemCommandBuffer #787295 [XAM CREATEDEVICE] ...
+```
+
+787,295 calls, roughly 20,000 a second. So the reading was right: **the wait
+does end when that bit is set**, and the guest leaves it and carries on. This
+is a causal confirmation of a static reading, which most of the conclusions in
+this file do not have.
+
+What it also shows is the shape of the next obstacle. Released from the wait,
+xam immediately asks for the system command buffer again, gets Xenia's zeroed
+descriptor again, submits, waits, is released again, and repeats. The stall
+becomes a spin. `CreateDevice` still never returns and
+`VdInitializeRingBuffer` is still never called.
+
+So forcing the exit converts a deadlock into a livelock, which is what you
+would expect when the thing being waited for is real work that never happens.
+It is not a step toward the device coming up; it is a demonstration that the
+wait is not what stands in the way - the missing command buffer is.

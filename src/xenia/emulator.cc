@@ -1283,6 +1283,37 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                   ks->processor()->AddBreakpoint(r6_bp.get());
                   XELOGI("819F7F20 trace installed");
                 }
+              if (cvars::guide_force_cmdbuf_complete > 0) {
+                static bool fc_started = false;
+                if (!fc_started) {
+                  fc_started = true;
+                  auto* fm4 = ks->memory();
+                  int delay = cvars::guide_force_cmdbuf_complete;
+                  std::thread([fm4, delay]() {
+                    xe::threading::set_name("CmdBufComplete");
+                    std::this_thread::sleep_for(std::chrono::seconds(delay));
+                    auto rd4 = [fm4](uint32_t a) {
+                      return a ? xe::load_and_swap<uint32_t>(
+                                     fm4->TranslateVirtual(a)) : 0u;
+                    };
+                    for (int i = 0; i < 4000; ++i) {
+                      for (uint32_t slot : {0x81D43684u, 0x801E6FC8u}) {
+                        uint32_t dev = rd4(slot);
+                        if (!dev) continue;
+                        auto* p = fm4->TranslateVirtual(dev + 0x2B3Du);
+                        if (p && !(*p & 0x02)) {
+                          *p = static_cast<uint8_t>(*p | 0x02);
+                          XELOGI("CmdBufComplete: set bit1 of [{:08X}+2B3D]",
+                                 dev);
+                        }
+                      }
+                      std::this_thread::sleep_for(
+                          std::chrono::milliseconds(5));
+                    }
+                  }).detach();
+                  XELOGI("CmdBufComplete: armed, {}s", delay);
+                }
+              }
               if (cvars::guide_watch_front_buffer) {
                 static bool watch_started = false;
                 if (!watch_started) {

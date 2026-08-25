@@ -224,6 +224,17 @@ DEFINE_bool(guide_system_process_type, false,
             "mode-1 device path is one place it matters. Restored afterwards.",
             "Kernel");
 
+DEFINE_int32(guide_force_cmdbuf_complete, 0,
+             "Seconds after the button press to start setting bit 1 of "
+             "[device+2B3D] from a host thread. That bit is the ONLY exit "
+             "819F4488 has - every other path through it returns 'still "
+             "waiting' - so mode 1's async command buffer wait ends when "
+             "something sets it, and nothing in Xenia ever does because the "
+             "system command buffer is stubbed. The exit condition is read "
+             "from the disassembly rather than guessed. Setting it from the "
+             "host is a probe of what the bring-up does next, not a fix.",
+             "Kernel");
+
 DEFINE_bool(guide_word_diff, false,
             "Word-level diff of FE030000-FE050000 across the Guide's draw, "
             "reporting contiguous runs of changed words. The command stream's "
