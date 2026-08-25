@@ -2624,3 +2624,47 @@ first explanation that accounts for why clearing the flag by hand leads
 immediately to needing a device redirect, then a front buffer, then display
 mode fields: each stand-in replaces something the same absent bring-up would
 have provided.
+
+## A function that clears the flag, and how far that goes
+
+If `[xui_ctx+0x1C]` is set by something, the complementary question is whether
+anything clears it. Scanning the XUI range for stores to `+0x1C` whose source
+register was just loaded with a constant finds exactly one:
+
+```
+8190F7D4  stw r30(=0),0x1C(r31)     in fn 8190F7A0
+```
+
+One site, storing **zero**. Nothing in the XUI range stores a constant `1`
+there, so the `1` the flag carries is computed rather than a literal default.
+
+`8190F7A0` never runs, and neither does its chain:
+
+```
+81914740 -> 81914578 -> 8190F7A0      none of the three execute
+```
+
+### What this is not
+
+It is tempting to read that as "the function that would clear the flag never
+runs", and the temptation should be resisted. `8190F7A0` writes `0x1C` of
+whatever object arrives in `r3`, and nothing here shows that object is the XUI
+context. Plenty of objects have a field at `+0x1C`; this investigation has
+already mistaken one object's offset for another's more than once.
+
+The only circumstantial support is the call site:
+
+```
+8191B81C  lwz r4,-13952(r31)     ; = [81D6C980] with r31 = 81D70000
+8191B820  bl  8190F7A0
+```
+
+`81D6C980` sits eight bytes from the XUI context global `81D6C978`, so the
+caller is working in that neighbourhood. That is suggestive of the right
+subsystem and says nothing about `r3`.
+
+So: there is exactly one constant-zero store to a `+0x1C` field in the XUI
+code, it is in a function that never executes, and whether that field belongs
+to the XUI context is unverified. Confirming it needs the object in `r3` at
+runtime - which cannot be read with a breakpoint, since the function never runs
+to break on.
