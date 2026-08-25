@@ -9,6 +9,8 @@
 
 #include <ranges>
 
+#include <thread>
+
 #include "xenia/emulator.h"
 
 #include "config.h"
@@ -1292,6 +1294,26 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                            static_cast<uint32_t>(br), loc);
                     // Step 4: XuiSceneCreate(basePath, sceneFile, 0, &out)
                     XELOGI("Guide button: step 4 XuiSceneCreate calling");
+                    // Watchdog: sample this thread's guest context from a host
+                    // thread. If lr/r1 move, guest code is still executing (a
+                    // loop); if they are frozen, the thread is not running at
+                    // all. That is the distinction the CPU and kernel-call
+                    // measurements could not make.
+                    {
+                      auto* wt = kernel::XThread::GetCurrentThread();
+                      std::thread([wt]() {
+                        for (int i = 0; i < 12; ++i) {
+                          xe::threading::Sleep(std::chrono::seconds(2));
+                          auto* c = wt->thread_state()->context();
+                          XELOGI("Watchdog {}: lr={:08X} r1={:08X} r3={:08X} "
+                                 "r4={:08X}",
+                                 i, static_cast<uint32_t>(c->lr),
+                                 static_cast<uint32_t>(c->r[1]),
+                                 static_cast<uint32_t>(c->r[3]),
+                                 static_cast<uint32_t>(c->r[4]));
+                        }
+                      }).detach();
+                    }
                     uint64_t sca[] = {pbuf, rdm(0x91400170u), 0, outh};
                     uint64_t scr = ks->processor()->Execute(
                         ts, 0x913FE6D4u, sca, xe::countof(sca));
