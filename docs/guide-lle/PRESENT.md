@@ -2579,3 +2579,48 @@ This is worth having separated. Of the major claims in this file:
 
 The first group stands on its own. The second describes what happens to a
 system I have partly assembled by hand, and should be read that way.
+
+## The clean-configuration blocker, and where it comes from
+
+Stripping away everything fabricated, the stable configuration has exactly one
+thing stopping the render path: `[dc+0x134] = 1`, inherited from
+`[xui_ctx+0x1C]`. Clearing it is what `guide_clear_null_render` does, and doing
+so drags in the rest of the fabricated state. So the clean question is what
+sets it legitimately.
+
+The XUI context global `81D6C978` has three writers, found only by searching
+for *any* base register with displacement `0xC978` - the `lis 0x81D7` form
+finds only reads:
+
+```
+818FADD0  in fn 818FAD98
+818FF278  in fn 818FF140    <- XUI ordinal 0x351
+818FF3F4  in fn 818FF2C8    <- XUI ordinal 0x352
+```
+
+`818FF140` is the context creator, and it contains **no store to `+0x1C`** at
+all. Yet the bootstrap's own log shows the flag already set the moment the
+render host returns:
+
+```
+GuideBootstrap: XUI ctx 4088A0A0 [1C] 00000001 -> 00000000
+```
+
+So it is set somewhere inside `8178DC58`'s call tree rather than at context
+construction.
+
+### Which suggests the flag is a symptom
+
+A field that means "render nothing, report success" is the sort of thing a
+renderer sets when it finds it has no usable device - not a switch someone
+forgot to flip. If that reading is right, the flag is downstream of the same
+missing device bring-up that everything else in this file converges on, and
+clearing it by hand is treating the symptom, which is exactly what the
+fabricated deep configuration turns out to be doing.
+
+That reading is **not** established - no test here distinguishes "set because
+the device is missing" from "set for some unrelated reason". But it is the
+first explanation that accounts for why clearing the flag by hand leads
+immediately to needing a device redirect, then a front buffer, then display
+mode fields: each stand-in replaces something the same absent bring-up would
+have provided.
