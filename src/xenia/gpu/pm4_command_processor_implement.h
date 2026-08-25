@@ -471,9 +471,11 @@ bool COMMAND_PROCESSOR::ExecutePacketType3(uint32_t packet) XE_RESTRICT {
                                                                        count);
         break;
       case PM4_DRAW_INDX:
+        ++guide_draw_count_;
         result = COMMAND_PROCESSOR::ExecutePacketType3_DRAW_INDX(packet, count);
         break;
       case PM4_DRAW_INDX_2:
+        ++guide_draw_count_;
         result =
             COMMAND_PROCESSOR::ExecutePacketType3_DRAW_INDX_2(packet, count);
         break;

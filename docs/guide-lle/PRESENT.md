@@ -1601,3 +1601,45 @@ directions: a bitmask that accepted noise, a walker that accepted zeros, and a
 register sample too narrow to see its target. The pattern is the same each
 time - a test that cannot fail is not evidence - and it is worth more caution
 than the result currently deserves.
+
+## A test with a control that passes
+
+Three probes on this question had failed by being unable to return a negative.
+This one counts draw packets actually dispatched inside the command processor -
+`guide_draw_count_`, incremented at the `PM4_DRAW_INDX` and `PM4_DRAW_INDX_2`
+dispatch sites - and is paired with a control that must read zero:
+
+```
+GuideExec CONTROL: 512 zero words -> 0 draws (must be 0)
+run FE03E284 +269  words; 0  regs,  0 DRAWS
+run FE040A00 +268  words; 0  regs,  0 DRAWS
+run FE041248 +498  words; 1  reg,   0 DRAWS
+run FE041B48 +332  words; 58 regs,  0 DRAWS
+run FE0424A0 +2388 words; 0  regs,  0 DRAWS
+run FE0451C0 +48   words; 2  regs,  0 DRAWS
+```
+
+The control passes, so the counter is not measuring noise. And every run
+dispatches **zero draws**, while one of them genuinely writes 58 registers - so
+the command processor is parsing real packets out of this memory, and none of
+them are draws.
+
+That settles the question the opcode histogram raised and could not answer. The
+histogram reported `DRAW_INDX` 5 and `DRAW_INDX_2` 25 in these blocks; executed,
+they dispatch nothing. Scattered bytes that decode as draw headers are not draw
+packets, and the statistical reading was wrong where the functional one is
+controlled.
+
+### The honest summary of the whole question
+
+- The Guide writes ~4200 words per frame into the region its `VdSwap` pointer
+  names. Measured.
+- Some of it is genuine GPU state: one 332-word run writes 58 registers through
+  the real command processor. Measured, with a control.
+- None of it dispatches a draw. Measured, with a control.
+
+So what the Guide produces is GPU **state**, not drawing. Whether the draws
+exist somewhere this has not looked, or are never emitted because the device
+was never brought up, is not settled here - but "the Guide is rendering and
+only compositing is missing" is not supported, and I stated it twice before
+having a test that could contradict it.

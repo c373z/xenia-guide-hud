@@ -1261,6 +1261,24 @@ void VdSwap_entry(
                pre_sums.size());
         pre_sums.clear();
       }
+      if (::cvars::guide_execute_command_stream) {
+        // Control: a buffer of zeros must dispatch no draws. If it does, the
+        // counter measures something other than what it claims and every
+        // number beside it is void.
+        static bool ctrl_done = false;
+        auto* gsc = kernel_state()->emulator()->graphics_system();
+        if (!ctrl_done && gsc && gsc->command_processor()) {
+          ctrl_done = true;
+          uint32_t z = kernel_state()->memory()->SystemHeapAlloc(4096, 4096);
+          if (z) {
+            std::memset(kernel_state()->memory()->TranslateVirtual(z), 0, 4096);
+            uint32_t b0 = gsc->command_processor()->guide_draw_count_;
+            gsc->command_processor()->ExecuteGuestBufferUnsafe(z, 512);
+            XELOGI("GuideExec CONTROL: 512 zero words -> {} draws (must be 0)",
+                   gsc->command_processor()->guide_draw_count_ - b0);
+          }
+        }
+      }
       if (::cvars::guide_word_diff && !wd_pre.empty()) {
         auto* wm3 = kernel_state()->memory();
         uint32_t runs = 0, total = 0, i = 0;
@@ -1301,6 +1319,8 @@ void VdSwap_entry(
                                 rf->values + gpu::RegisterFile::kRegisterCount);
                 for (uint32_t v : reg_snap) before += v;
               }
+              uint32_t draws_before =
+                  gs2->command_processor()->guide_draw_count_;
               gs2->command_processor()->ExecuteGuestBufferUnsafe(
                   kWdLo + start * 4, len);
               uint32_t after = 0;
@@ -1323,9 +1343,11 @@ void VdSwap_entry(
                                         hm->TranslateVirtual(kWdLo +
                                                              (start + k) * 4)));
               }
-              XELOGI("GuideExec: run {:08X} +{} words; {} registers written "
+              uint32_t draws_now = gs2->command_processor()->guide_draw_count_;
+              XELOGI("GuideExec: run {:08X} +{} words; {} regs, {} DRAWS "
                      "| head {}",
-                     kWdLo + start * 4, len, changed_regs, head);
+                     kWdLo + start * 4, len, changed_regs,
+                     draws_now - draws_before, head);
             }
           }
           if (runs < 12) {

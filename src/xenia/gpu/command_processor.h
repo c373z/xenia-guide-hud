@@ -445,6 +445,11 @@ class CommandProcessor {
   // protected and normally only reached from packet dispatch on the command
   // processor thread; calling this from elsewhere is NOT thread safe and is
   // for investigation only.
+  // Counts draw packets actually dispatched. Register checksums proved a
+  // poor witness - they under-report writes that rewrite an existing value -
+  // whereas a draw either dispatches or it does not.
+  uint32_t guide_draw_count_ = 0;
+
   void ExecuteGuestBufferUnsafe(uint32_t ptr, uint32_t count) {
     ExecuteIndirectBuffer(ptr, count);
   }
