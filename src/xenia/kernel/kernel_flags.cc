@@ -35,6 +35,15 @@ DEFINE_uint32(xbox_hardware_info_flags, 0x20,
               "0x200 of this word, so without that bit xam never creates a "
               "device and the Guide can never get a render context.",
               "Kernel");
+// xam's XUI render host (runtime 8178DC58) begins by calling a thread-identity
+// check at ghidra 8177FDB8: it compares the current thread, read from the PPC
+// thread pointer at [r13+256], against a thread recorded at 0x81D42520, and
+// returns 1 only if they match. The render host traps when that returns 0.
+// This bootstrap has never satisfied it - it calls the render host from the
+// Guide dispatch thread or the title's swap thread, neither of which is xam's.
+// Everything downstream (XUI context, DC, class registration, scene creation)
+// therefore runs from a thread xam does not consider legitimate, which is the
+// most likely reason state it would normally set up is missing.
 DEFINE_uint32(guide_xui_anim_init, 0x8174FDE0,
               "Runtime address of xam's initialiser for the XUI animation "
               "global at 81D3F924 (0 disables). Without it that global is null, "
