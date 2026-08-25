@@ -224,6 +224,18 @@ DEFINE_bool(guide_system_process_type, false,
             "mode-1 device path is one place it matters. Restored afterwards.",
             "Kernel");
 
+DEFINE_int32(guide_syscmdbuf_buffer_kb, 0,
+             "If non-zero, allocate a buffer of this many KB once and hand it "
+             "to the guest in VdGetSystemCommandBuffer's descriptor as "
+             "p0+0x04 = address and p0+0x08 = size, then report whether the "
+             "guest ever writes PM4 into it. Those two fields are the "
+             "principled candidates: the guest stores +0x04 into "
+             "[device+0x60C0] as persistent state, and +0x08 gates roughly "
+             "0xE0 bytes of processing that is skipped while it is zero. The "
+             "test is falsifiable - either type-3 packet headers (0xC0......) "
+             "appear in the buffer or they do not.",
+             "Kernel");
+
 DEFINE_bool(guide_syscmdbuf_fields, false,
             "Fill the two fields of VdGetSystemCommandBuffer's p0 descriptor "
             "that the only guest caller actually reads: +0x30 = 0x500 and "

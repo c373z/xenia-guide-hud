@@ -1249,3 +1249,41 @@ specification, and three of them still have no observed meaning.
 
 That is a smaller and better-shaped problem than "reverse a 0x94-byte kernel
 structure".
+
+## p0+0x04 and p0+0x08 are not a buffer pointer and size
+
+The opacity finding above left a gap: dash never reads the descriptor, but xam
+must learn where to write its commands from *somewhere*, and the two fields
+with unexplained readers are the obvious place. `p0+0x04` is stored by the
+guest into `[device+0x60C0]`, which is what you would do with a buffer address
+you need to keep; `p0+0x08` gates roughly `0xE0` bytes of processing that is
+skipped entirely while it is zero, which is what a submission path would look
+like. That is a hypothesis worth testing rather than a guess.
+
+`guide_syscmdbuf_buffer_kb` tests it: allocate a buffer once, hand it back as
+`p0+0x04 = address` and `p0+0x08 = size`, and then check whether the guest
+writes anything into it. PM4 type-3 packets begin `0xC0......`, so the check is
+mechanical.
+
+```
+VdGetSystemCommandBuffer: handing guest buffer 301AF000 size 65536
+SysCmdBuf 301AF000: 0 non-zero words, 0 type-3 headers, first=00000000
+Guide composite draw #1 -> 00000000; ...
+```
+
+**Not one word.** The draw still completes and nothing crashes, so the values
+were accepted - the guest simply does not treat them as a place to write.
+
+So the hypothesis is disproven. Either those fields mean something else, or the
+guest writes its command stream somewhere it already knows about and the
+descriptor plays no part in locating it. Nothing observed distinguishes those
+two, and the buffer-pointer reading should not be carried forward as if the
+absence of a better idea made it likely.
+
+What survives from this and the previous section:
+
+- Titles never read the descriptor; only xam does.
+- xam reads `+0x04`, `+0x08`, `+0x1C`, `+0x90`, and the display mode at `+0x30`
+  and `+0x34`.
+- Filling the display mode lets the present complete.
+- Filling `+0x04` and `+0x08` with a buffer and its size produces no writes.

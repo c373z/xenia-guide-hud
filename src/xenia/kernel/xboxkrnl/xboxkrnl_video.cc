@@ -84,6 +84,8 @@ thread_local bool in_guide_draw_scope = false;
 // Set while xam's D3D device creation runs, to see which kernel
 // video calls that path makes.
 thread_local bool in_xam_createdevice_scope = false;
+uint32_t guide_syscmdbuf_ptr_ = 0;
+uint32_t guide_syscmdbuf_size_ = 0;
 
 
 bool IsWidescreen(KernelState* kernel_state, Resolution res) {
@@ -380,6 +382,26 @@ void VdGetSystemCommandBuffer_entry(lpunknown_t p0_ptr, lpunknown_t p1_ptr) {
   p0_ptr.Zero(0x94);
   xe::store_and_swap<uint32_t>(p0_ptr, 0xBEEF0000);
   xe::store_and_swap<uint32_t>(p1_ptr, 0xBEEF0001);
+  if (::cvars::guide_syscmdbuf_buffer_kb > 0) {
+    static uint32_t buf = 0, buf_size = 0;
+    if (!buf) {
+      buf_size = static_cast<uint32_t>(::cvars::guide_syscmdbuf_buffer_kb) * 1024;
+      buf = kernel_state()->memory()->SystemHeapAlloc(buf_size, 4096);
+      if (buf) {
+        std::memset(kernel_state()->memory()->TranslateVirtual(buf), 0,
+                    buf_size);
+        XELOGI("VdGetSystemCommandBuffer: handing guest buffer {:08X} size {}",
+               buf, buf_size);
+      }
+    }
+    if (buf) {
+      auto* b = reinterpret_cast<uint8_t*>(p0_ptr.host_address());
+      xe::store_and_swap<uint32_t>(b + 0x04, buf);
+      xe::store_and_swap<uint32_t>(b + 0x08, buf_size);
+      guide_syscmdbuf_ptr_ = buf;
+      guide_syscmdbuf_size_ = buf_size;
+    }
+  }
   if (::cvars::guide_syscmdbuf_fields) {
     // 819FE138 reads p0+30 and p0+34 and compares them against 0x500 and
     // 0x5BE. They are the only fields of the 0x94-byte descriptor with an
@@ -1169,6 +1191,23 @@ void VdSwap_entry(
           return xe::load_and_swap<uint32_t>(mem->TranslateVirtual(a));
         };
         uint32_t ddc = rdw(guide_draw_this_ + 12);
+        // Did the guest write anything into the buffer we handed it? PM4
+        // type-3 packets start 0xC0......, so their presence is checkable
+        // rather than a matter of opinion.
+        if (guide_syscmdbuf_ptr_) {
+          uint32_t nonzero = 0, pm4 = 0, first = 0;
+          for (uint32_t i = 0; i < guide_syscmdbuf_size_ / 4 && i < 4096; ++i) {
+            uint32_t v = rdw(guide_syscmdbuf_ptr_ + i * 4);
+            if (v) {
+              if (!nonzero) first = v;
+              ++nonzero;
+            }
+            if ((v & 0xC0000000u) == 0xC0000000u) ++pm4;
+          }
+          XELOGI("SysCmdBuf {:08X}: {} non-zero words, {} type-3 headers, "
+                 "first={:08X}",
+                 guide_syscmdbuf_ptr_, nonzero, pm4, first);
+        }
         uint32_t dev = ddc ? rdw(ddc + 0x1CCu) : 0;
         XELOGI("Guide composite draw #{} -> {:08X}; draw dc={:08X} "
                "[11C]={:08X} [134]={:08X} [1CC]={:08X}",
