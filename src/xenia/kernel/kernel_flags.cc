@@ -35,6 +35,11 @@ DEFINE_uint32(xbox_hardware_info_flags, 0x20,
               "0x200 of this word, so without that bit xam never creates a "
               "device and the Guide can never get a render context.",
               "Kernel");
+DEFINE_bool(guide_step_registrations, false,
+            "Drive the 56 calls in hud's registration routine (913F0DB0) one "
+            "at a time with logging instead of calling hud's scene creator, "
+            "to identify which registration blocks the title thread.",
+            "Kernel");
 DEFINE_bool(guide_register_classes, false,
             "Run xam's extra XUI class registrars (817503E8, 8199BE08, "
             "8176B2C8) from the title thread AFTER XuiInit. All three return 0 "

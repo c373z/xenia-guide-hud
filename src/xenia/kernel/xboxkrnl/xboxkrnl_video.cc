@@ -676,6 +676,32 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   // GamerCardRegisterControls; read its thunk to get the real target.
   XELOGI("GuideBootstrap: thunk 913FEA04: {:08X} {:08X} {:08X} {:08X}",
          rd(0x913FEA04u), rd(0x913FEA08u), rd(0x913FEA0Cu), rd(0x913FEA10u));
+  if (::cvars::guide_step_registrations) {
+    // hud's init tail-calls 913F0DB0, a flat sequence of 56 registrations.
+    // Driving them one at a time here shows exactly which one blocks, which a
+    // single call into the whole routine cannot.
+    static const uint32_t kRegs[] = {
+        0x913FEA04u, 0x913EE1A0u, 0x913EF358u, 0x913EF3F0u, 0x913EF488u,
+        0x913EF520u, 0x913EF5B8u, 0x913EFC18u, 0x913EDF10u, 0x913EDFA8u,
+        0x913EE9A8u, 0x913F0BD8u, 0x913EE0C0u, 0x913F0C80u, 0x913EFE48u,
+        0x913EFDB0u, 0x913EFEE0u, 0x913EFF78u, 0x913F0010u, 0x913F0568u,
+        0x913F0600u, 0x913F0308u, 0x913F03A0u, 0x913F08F8u, 0x913F00A8u,
+        0x913F0140u, 0x913F01D8u, 0x913F0270u, 0x913F0438u, 0x913F0698u,
+        0x913F04D0u, 0x913F0730u, 0x913F07C8u, 0x913F0860u, 0x913EE5B8u,
+        0x913F0D18u, 0x913F0AA8u, 0x913EF8A0u, 0x913F0B40u, 0x913EF6C8u,
+        0x913F0990u, 0x913FE934u, 0x913ECE40u, 0x913ECD28u, 0x913EDA30u,
+        0x913EFAE8u, 0x913EFB80u, 0x913EDB00u, 0x913EDB98u, 0x913EDC30u,
+        0x913EDCC8u, 0x913EDDF8u, 0x913EDD60u, 0x913EF9B8u, 0x913EE910u,
+        0x913EFA50u};
+    for (size_t i = 0; i < xe::countof(kRegs); ++i) {
+      XELOGI("GuideBootstrap: reg[{}] {:08X} calling", i, kRegs[i]);
+      uint64_t ra[] = {0};
+      uint64_t rr = processor->Execute(ts, kRegs[i], ra, xe::countof(ra));
+      XELOGI("GuideBootstrap: reg[{}] {:08X} -> {:08X}", i, kRegs[i],
+             static_cast<uint32_t>(rr));
+    }
+    XELOGI("GuideBootstrap: all registrations done");
+  }
   uint32_t obj_vt = rd(guide_bs_obj_);
   uint32_t scene_fn = obj_vt ? rd(obj_vt + 27 * 4) : 0;
   uint64_t ir = 0;
