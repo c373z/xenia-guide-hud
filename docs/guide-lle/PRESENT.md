@@ -1335,3 +1335,43 @@ which is above chance but nowhere near evidence of a PM4 stream. The column is
 a hint about where to look next, not a finding. Identifying whether any of
 these blocks holds a command stream needs the packet headers decoded - type,
 opcode and count checked for self-consistency - not a bitmask.
+
+## The draw writes no command stream
+
+The previous section flagged the "type-3-looking words" count as unreliable and
+said the real test was decoding packet headers. Done, and the answer is no.
+
+The first attempt at a packet walker was wrong in the same direction as the
+bitmask. It advanced through the buffer honouring each header's length, which
+sounds rigorous, but `0x00000000` parses as a **type-0 packet with count 1** -
+so a run of zeros walks forever and reports a long, perfectly consistent chain.
+It produced "1423 packets" for a block that is mostly empty.
+
+Replaced with a test against Xenia's own opcode table (`PM4_*` in
+`src/xenia/gpu/xenos.h`, 47 opcodes): count only type-3 packets whose opcode
+Xenia recognises and whose length stays in bounds, and never treat a zero word
+as a packet.
+
+Dumping the six changed blocks and scanning them:
+
+- **Stable configuration** (Present short-circuits): 3 recognised packets in
+  one block, 1 in another, 0 elsewhere. At or below what chance produces.
+- **Deep configuration** (Present executes for real, `[134]=00000000`, draw
+  returns): **0 recognised packets in every block.**
+
+So the Guide's frame writes a great deal of data - six 64KB blocks change on
+the first draw - and none of it is a PM4 command stream. The `5800`
+type-3-looking words were noise, exactly as suspected.
+
+### What this does and does not establish
+
+It does not establish that the Guide emits no commands anywhere. The diff only
+covers `0x40800000-0x40A00000`, chosen because that is where its device, DC and
+wrapper objects live, and the earlier attempt to cover 512MB killed the run. A
+command buffer could sit in physical memory, in the `FE4xxxxx` region xam's
+`VdSwap` calls reference, or anywhere else outside that 2MB.
+
+What it does establish is that the memory the draw demonstrably touches holds
+scene data, not commands - which is consistent with everything else here: xam's
+device has no command buffer to write into, because `VdGetSystemCommandBuffer`
+never gave it one.

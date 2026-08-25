@@ -1220,6 +1220,18 @@ void VdSwap_entry(
               XELOGI("DrawDiff: block {:08X} changed, {} type-3-looking words",
                      a, pm4);
               ++shown;
+              // The bitmask count is not evidence. Dump the bytes so packet
+              // headers can be walked for self-consistency offline.
+              if (hp) {
+                auto path = std::filesystem::path("dump_" +
+                                                  fmt::format("{:08X}", a) +
+                                                  ".bin");
+                FILE* f = fopen(path.string().c_str(), "wb");
+                if (f) {
+                  fwrite(hp, 1, kBlk, f);
+                  fclose(f);
+                }
+              }
             }
           }
         }
