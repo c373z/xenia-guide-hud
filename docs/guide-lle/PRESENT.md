@@ -3159,3 +3159,42 @@ something that works, diff it against something that does not - is usually the
 strongest tool available, and here it is simply unavailable. What remains has
 to be established from the disassembly and from what a single non-working
 instance reveals, which is the position the rest of this file already occupies.
+
+## Verifying the interpretation everything rests on
+
+Almost every conclusion here depends on reading `[dc+0x134] != 0` as "null
+rendering". That reading came from two branch tests; it is worth confirming
+against what the skipped code actually does.
+
+`XuiRenderBegin` skips `dc->vtable[20]` when the flag is set. That method is
+`818FDDE8`:
+
+```
+81905008  lwz    r11,460(r31)      ; [dc+1CC] - the device
+8190500C  cmplwi cr6,r11,0
+81905010  bne    cr6,+8
+81905014  twi    31,r0,25          ; assert: the device must exist
+81905018  lwz    r4,312(r31)       ; [dc+138]
+```
+
+It asserts the device pointer is non-null before doing anything else, then
+proceeds into device work. So the method `Begin` skips is precisely the one
+that touches the device, and skipping it is exactly "render without touching
+the device".
+
+Combined with `XuiRenderPresent` returning `S_OK` on the same flag, the
+interpretation holds up: **`[dc+0x134]` selects a mode in which the XUI frame
+runs completely but never reaches the hardware.** That is consistent with
+everything measured - the scene lays out real geometry, the draw returns
+success, and no GPU draw is ever dispatched.
+
+Worth doing explicitly. A foundational reading that had only ever been inferred
+from branch polarity now has a second, independent line of evidence: the code
+on the other side of the branch does device work and refuses to run without a
+device.
+
+### Also checked and eliminated
+
+`hud_overlay.xex` is **byte-identical** to `hud.xex` (0 differing bytes of
+118,784), so it is not an alternative Guide build to try. Eliminated without
+needing a run.
