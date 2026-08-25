@@ -2892,3 +2892,39 @@ Confirming it needs the class identity - a shared vtable pointer, or the same
 consumer accepting objects from both. That has not been checked, and until it
 is, "the Guide gets the wrong constructor" is the best-supported reading rather
 than an established fact.
+
+## The sibling constructor is not one: retracted
+
+The previous section flagged what would settle whether `819441D0` builds the
+same class - a shared vtable, or a common consumer - and called the
+wrong-constructor reading "best-supported rather than established". Checked,
+and it fails.
+
+`818FD0E8`, the constructor the Guide gets, installs a vtable:
+
+```
+818FD14C  stw r11,0(r3)      ; [obj+00] = 8163E200
+```
+
+`819441D0` does not. It zeroes the object and sets one trailing field:
+
+```
+8194B408  stw r11,4(r3)      ; +04 = 0
+8194B40C  stw r11,8(r3)      ; +08 = 0
+   ...                        ; +0C, +10, +14, +18, +1C, +20, +24 all = 0
+8194B430  stw r10,40(r3)     ; +28 = 1
+```
+
+No store to `+0x00` at all. That is a plain struct being cleared, not a
+polymorphic object being constructed - and a 44-byte struct with fields running
+`+0x00` to `+0x28` is simply a different thing that happens to be the same size.
+
+So the table in the previous section compared two unrelated constructors. Its
+`[+0x04]` and `[+0x1C]` columns are real, but they describe different objects,
+and "the Guide gets the wrong constructor" is retracted.
+
+The caveat was the right one to raise: 44 bytes is not distinctive, the two
+matching offsets were coincidence, and the vtable settles it in one
+instruction. What survives is narrower - `818FD0E8` builds a vtable-bearing
+44-byte object with `[+0x04]` and `[+0x1C]` both set to 1, and nothing observed
+clears either.
