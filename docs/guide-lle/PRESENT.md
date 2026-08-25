@@ -116,8 +116,9 @@ that loop:
 
 - **`819F31A8` = `SetRenderTarget(device, index, surface)`**. It asserts
   (`twi 31,r0,25`) when `index > 3`, which is the four-slot bound check, and
-  when `surface` is non-null it validates bit 30 of `[surface+0]` and asserts
-  if clear. It also asserts unless `[device+3118] == 0`; xam's device has 0
+  when `surface` is non-null it tests bit 30 of `[surface+0]`. **See the
+  correction at the end of this file: the assert fires when that bit is SET,
+  not clear.** It also asserts unless `[device+3118] == 0`; xam's device has 0
   there, so that guard passes for us.
 - **`819F38C8` = `SetDepthStencilSurface(device, surface)`**, the single
   writer of `32B0`.
@@ -492,3 +493,49 @@ Also measured: no `VdSetGraphicsInterruptCallback` call occurs anywhere in the
 mode-1 run, by xam or by the title. Whatever sets the bit in a real system is
 not reached through an interrupt callback that xam has registered by this
 point.
+
+## Where [dc+134] comes from, and a correction to the surface check
+
+### The null-render flag is inherited, not decided
+
+The DC initialiser is `818FDE98`, called with the DC in r3 and a creation
+parameter object in r4. It fills in the fields the present path later reads:
+
+```
+818FDE98+2C  stw r27,[dc+1C8]        ; the parameter object
+818FDE98+30  lwz r3,[r27+8]
+818FDE98+34  stw r3,[dc+1CC]         ; -> 4088A0E0, what Present dispatches on
+...
+818FDE98+58  lwz r11,[r27+1C]
+818FDE98+7C  stw r11,[dc+134]        ; <-- the null-render flag
+```
+
+So `[dc+134]` is not a decision the DC makes. It is copied verbatim from
+`[param+1C]`, whichever creation parameters the caller supplied. Our bootstrap
+calls `XuiRenderCreateDC` with only an out-pointer and xam builds the
+parameter block internally from the XUI render context at `81D6C978`; the DC
+the draw actually uses is a different one that hud creates. So the value comes
+from hud's parameters, by way of xam's context, and zeroing it after the fact
+- which is what `guide_force_real_present` does - is treating the symptom.
+
+### The surface type check is the other way round
+
+An earlier section here said `SetRenderTarget` "validates bit 30 of
+`[surface+0]` and asserts if clear". That is backwards. The code is:
+
+```
+819FA3E4  lwz     r11,0(r22)
+819FA3E8  rlwinm. r11,r11,0,1,1     ; isolate bit 30; Rc=1, so CR0 is set
+819FA3EC  beq     cr0,+8            ; skip the trap when the bit is ZERO
+819FA3F0  twi     31,r0,25
+```
+
+The trap fires when the bit is **set**. A surface xam will accept has bit 30
+**clear**.
+
+The practical consequence is that the bit is worthless as a search filter -
+nearly anything passes it. A sweep of the device wrapper and the D3D device
+for "valid surfaces" on the inverted test returned twelve hits, including
+`819E9750`, whose first word is `7D8802A6` - the `mfspr r12,8` of a function
+prologue. Any surface has to be recognised by the packed fetch constant at
+`+0x24`, not by the type bit.

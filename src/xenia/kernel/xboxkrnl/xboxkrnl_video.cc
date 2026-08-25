@@ -935,6 +935,17 @@ void VdSwap_entry(
           if (pdev) {
             XELOGI("Guide pre-draw: dev [32A0]={:08X} [32B0]={:08X}",
                    prd(pdev + 0x32A0u), prd(pdev + 0x32B0u));
+            // NOTE on SetRenderTarget's surface check (819FA3E4): it is
+            //   rlwinm. r11,w0,0,1,1   ; isolate bit 30, Rc=1 so CR0 is set
+            //   beq     cr0,+8         ; skip the trap when the bit is ZERO
+            //   twi     31,r0,25
+            // so the assert fires when bit 30 is SET - a valid surface has it
+            // CLEAR. That is the opposite of what an earlier note here said,
+            // and it makes the bit useless as a search filter: almost any
+            // object passes. Scanning on it matched function pointers
+            // (819E9750, whose first word is the 7D8802A6 of "mfspr r12,8").
+            // The real constraint is the packed fetch constant at +0x24, so a
+            // surface has to be recognised by that, not by the type bit.
           }
           // The title's device (VdGlobalDevice, 801E6FC4) is a working device
           // of the same class. Diffing it against xam's says which fields the
