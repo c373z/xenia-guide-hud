@@ -995,6 +995,14 @@ uint32_t xeKeWaitForSingleObject(void* object_ptr, uint32_t wait_reason,
     // RtlEnterCriticalSection blocks by calling this directly rather than
     // through the KeWaitForSingleObject export, so instrument here. Only the
     // Guide thread, to stay out of the hot path.
+    //
+    // Two traps when reading kernel logs to find where a thread is stuck:
+    // exports marked kHighFrequency (RtlEnterCriticalSection among them) are
+    // suppressed entirely unless log_high_frequency_kernel_calls is on, so
+    // "the thread made no kernel calls" is meaningless without it; and the
+    // guest PPC context in thread_state() is stale during JIT execution, so
+    // sampling registers cannot tell a running thread from a wedged one. Use
+    // per-thread GetThreadTimes for that instead.
     auto* wth = XThread::GetCurrentThread();
     static std::atomic<uint32_t> wait_count{0};
     uint32_t wn = ++wait_count;
