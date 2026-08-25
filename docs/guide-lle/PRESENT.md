@@ -2021,3 +2021,46 @@ at a recorded negative rather than a search.
 What it establishes is still worth having: the events are not signalled because
 a specific, named function is never called, and that function is the system
 boot's job.
+
+## Correction: the boot entry takes no arguments
+
+The previous section said `81751428` "takes arguments, and nothing here says
+what they are", and stopped rather than guess. The stopping was right; the
+reason was wrong. Its prologue:
+
+```
+81751428+0C  addi r11,r1,80
+81751428+10  addi r31,r0,0
+81751428+14  addi r5,r0,0
+81751428+18  addi r4,r0,19
+81751428+1C  addi r3,r1,80        ; r3, r4, r5 all WRITTEN before any read
+81751428+30  bl 817A90E0
+81751428+38  lis r30,0x81D4
+81751428+3C  lwz r3,[81D3FBC0]    ; works from globals
+```
+
+Every argument register is written before it is read. **The function takes no
+arguments.** It operates on globals and locals.
+
+So the crash is not a signature problem. Unwinding it:
+
+```
+GUEST CRASH: access violation at 81778508, fault_addr 4
+GUEST CRASH: r3=00000000
+GUEST CRASH: unwind: 817271D8 817512F8 8175149C
+```
+
+`8175149C` is inside `81751428` itself, so the chain is
+`81751428` -> `817512D8` -> `817271B8` -> `817784F8`, which dereferences
+`[r3+4]` with `r3` null.
+
+A null object four calls deep, in a function that reads globals rather than
+parameters, means **the state it depends on was never set up**. `81751428` is
+one step of a boot sequence, and calling it in isolation finds the globals that
+earlier steps would have initialised still empty.
+
+That is a better characterisation than "unknown arguments", and it points
+somewhere different: the question is not how to call this function but what has
+to have happened before it. Which is the same answer the rest of this file
+keeps arriving at from other directions - there is a system boot, Xenia does
+not run it, and its individual pieces do not work when lifted out of it.
