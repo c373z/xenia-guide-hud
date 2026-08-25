@@ -1077,3 +1077,43 @@ The two values are worth being careful about. `0x500` and `0x5BE` were taken
 from the guest's own comparisons, so satisfying them is not a guess - but
 *why* those values, and what the other `0x8C` bytes of the descriptor mean, is
 still unknown. A descriptor that passes two checks is not a command buffer.
+
+## The descriptor, field by field
+
+Scanning `819FE138` for every access to the `p0` block (`r1+304`) and to `p1`
+(`r1+156`) gives the whole observed contract, not just the two compared fields:
+
+| field | accesses | what is known |
+|---|---|---|
+| `p0+0x00` | **none** | no reader at all - Xenia's `0xBEEF0000` there is read by nobody |
+| `p0+0x04` | 1 read | |
+| `p0+0x08` | 3 reads | compared against 0, drives a three-way branch |
+| `p0+0x1C` | 1 read | |
+| `p0+0x30` | 1 read | compared against `0x500` |
+| `p0+0x34` | 1 read | compared against `0x5BE` |
+| `p0+0x90` | 2 reads | on a path that asserts if it is zero |
+| `p1` | 4 reads | stored to `[device+2B10]+8`, the writeback |
+
+Two things worth taking from that table.
+
+The magic Xenia writes at `p0+0x00` has no consumer in the only function that
+calls this export. Whatever it was chosen to satisfy, it is not this.
+
+And at `81A05A88`, immediately after the `p0+0x90` check, the guest copies
+**56 bytes from `p0+0x20`** with a memcpy. `0x30` and `0x34` sit inside that
+block, so they are two fields of a 56-byte structure the guest lifts out
+wholesale - which is why satisfying them individually is not the same as
+providing the structure.
+
+### The p0+0x90 assert never fires
+
+It reads as a hard requirement - `twi 31,r0,25` when the field is zero, and
+Xenia zeroes it. It is not one, at least not on our path. With
+`log_guest_asserts` on, a full run logs **zero** guest asserts. The branch
+carrying that assert is not taken, and the guest is entirely satisfied with
+what it gets: no traps, no crashes, and a present that returns.
+
+That is worth stating plainly because it cuts against the obvious story. The
+guest is not limping past a series of checks it should have failed. On the path
+it actually takes, everything it inspects is acceptable to it. What is missing
+is not validation the guest performs - it is execution that Xenia does not do.
