@@ -1038,3 +1038,42 @@ This is where the work stops being about the Guide. Everything from the button
 press to the draw is now understood and runs; what remains is a GPU-side
 feature of Xenia that no title has ever needed, because only system software
 uses this path.
+
+## The present completes
+
+Filling the two descriptor fields the guest actually reads - `p0+0x30 = 0x500`
+and `p0+0x34 = 0x5BE`, behind `guide_syscmdbuf_fields` - changes the outcome:
+
+```
+VdGetSystemCommandBuffer: filled p0+30=0x500 p0+34=0x5BE
+Guide: front buffer [dev 40883A80 +3F74] = clone 301C1000 of RT0 4088B3E0
+Guide composite draw #1 -> 00000000; draw dc=4089B400 [11C]=00000000
+                           [134]=00000000 [1CC]=4088B7A0
+```
+
+`[134]=00000000` means Present did not take the S_OK short-circuit, and the
+draw **returned**. That is the first time the composite draw has completed on
+the real present path - every previous run either faulted or never came back.
+Zero guest crashes.
+
+So the whole guest-side sequence now runs to completion: button press, handler,
+Guide object, xam device, render host, DC, scene, XUI frame, and a present that
+returns.
+
+### It still does not draw anything
+
+- Exactly one draw completes. The title thread stops afterwards, so `VdSwap`
+  never comes round again and there is no draw #2.
+- A capture 18s after the press is `2EF6B4B7`, byte for byte the no-press
+  control.
+
+Which is what the rest of this file predicts. Completing the present means the
+guest wrote its commands and was satisfied with the answers it got back; it
+does not mean anything executed those commands. `VdGetSystemCommandBuffer`
+still hands out a zeroed descriptor with two plausible-looking fields, and
+Xenia's command processor never sees xam's buffer.
+
+The two values are worth being careful about. `0x500` and `0x5BE` were taken
+from the guest's own comparisons, so satisfying them is not a guess - but
+*why* those values, and what the other `0x8C` bytes of the descriptor mean, is
+still unknown. A descriptor that passes two checks is not a command buffer.

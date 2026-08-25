@@ -224,6 +224,16 @@ DEFINE_bool(guide_system_process_type, false,
             "mode-1 device path is one place it matters. Restored afterwards.",
             "Kernel");
 
+DEFINE_bool(guide_syscmdbuf_fields, false,
+            "Fill the two fields of VdGetSystemCommandBuffer's p0 descriptor "
+            "that the only guest caller actually reads: +0x30 = 0x500 and "
+            "+0x34 = 0x5BE, the values 819FE138 compares them against. Xenia "
+            "zeroes the whole 0x94-byte block, so both comparisons fail today "
+            "and the guest takes a path written for a descriptor it never "
+            "received. This is a probe to find the next expectation, not an "
+            "implementation of the system command buffer.",
+            "Kernel");
+
 DEFINE_bool(guide_fake_front_buffer, false,
             "If the present path's device has a colour surface on RT0 but no "
             "front buffer at +3F74, clone the colour surface into that slot. "

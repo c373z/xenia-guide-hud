@@ -380,6 +380,18 @@ void VdGetSystemCommandBuffer_entry(lpunknown_t p0_ptr, lpunknown_t p1_ptr) {
   p0_ptr.Zero(0x94);
   xe::store_and_swap<uint32_t>(p0_ptr, 0xBEEF0000);
   xe::store_and_swap<uint32_t>(p1_ptr, 0xBEEF0001);
+  if (::cvars::guide_syscmdbuf_fields) {
+    // 819FE138 reads p0+30 and p0+34 and compares them against 0x500 and
+    // 0x5BE. They are the only fields of the 0x94-byte descriptor with an
+    // observed reader.
+    auto* base = reinterpret_cast<uint8_t*>(p0_ptr.host_address());
+    xe::store_and_swap<uint32_t>(base + 0x30, 0x500);
+    xe::store_and_swap<uint32_t>(base + 0x34, 0x5BE);
+    static std::atomic<uint32_t> once{0};
+    if (once++ == 0) {
+      XELOGI("VdGetSystemCommandBuffer: filled p0+30=0x500 p0+34=0x5BE");
+    }
+  }
 }
 DECLARE_XBOXKRNL_EXPORT1(VdGetSystemCommandBuffer, kVideo, kStub);
 
