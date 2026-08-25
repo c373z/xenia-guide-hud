@@ -2310,3 +2310,46 @@ hardware either, so `81D3C8E8` must be initialised by something else entirely.
 The chain from the three notification events back through this function was
 real as disassembly and useless as an explanation: it traced a path that does
 not execute.
+
+## All three are thread routines; the entry-point reading is fully withdrawn
+
+`refs.py` (added here) looks for all three ways an address can be referenced -
+a direct `bl`, a word stored in data, and `lis`/`addi` forming it in a register
+- and handles the sign extension that `addi` applies. Run against the three
+functions:
+
+```
+81750FA8:  register 817518E8 in fn 81751718
+81751428:  register 81751534 in fn 81751500
+8178E9F0:  register 8179171C in fn 817915A0
+```
+
+**All three are referenced.** The previous section said `8178E9F0` "survives
+all three tests and remains genuinely unreferenced"; that was wrong, because my
+hand-written scan looked for `lis 0x8178` when `0xE9F0` has bit 15 set and
+`addi` sign-extends, so the `lis` half is `0x8179`:
+
+```
+8179890C  lis  r11,0x8179
+81798918  addi r4,r0,0            ; thread parameter: zero
+8179891C  addi r3,r11,-5648       ; r3 = 8178E9F0
+81798920  bl   8177C8E0           ; the same thread creator as 81750FA8
+```
+
+So `8178E9F0` is a thread start routine too, created by `817915A0` - the very
+function that signals the three notification events - with parameter zero,
+through the same helper `8177C8E0`.
+
+That reorganises everything cleanly. `817915A0` is the startup for this
+subsystem: it signals the events *and* starts the device thread. It never runs,
+so neither happens. There are no external entry points here at all; there is
+one function that would start the whole thing and does not execute.
+
+### Four versions of one mistake
+
+The entry-point narrative was built and rebuilt on scans that each missed a
+form of reference: direct calls only, then direct plus stored, then a
+register scan with a sign-extension bug. Each time the gap was in the tool
+rather than the reasoning, and each time the conclusion looked stronger than it
+was. `refs.py` covers all three forms and documents what it still cannot see -
+an address assembled by arithmetic other than `lis`/`addi`.
