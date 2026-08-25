@@ -991,6 +991,17 @@ DECLARE_XBOXKRNL_EXPORT1(NtCancelTimer, kThreading, kImplemented);
 uint32_t xeKeWaitForSingleObject(void* object_ptr, uint32_t wait_reason,
                                  uint32_t processor_mode, uint32_t alertable,
                                  uint64_t* timeout_ptr) {
+  {
+    // RtlEnterCriticalSection blocks by calling this directly rather than
+    // through the KeWaitForSingleObject export, so instrument here. Only the
+    // Guide thread, to stay out of the hot path.
+    auto* wth = XThread::GetCurrentThread();
+    if (wth && wth->name().find("Guide") != std::string::npos) {
+      XELOGI("GuideWait: wait obj_host={} reason={} alertable={} timeout={}",
+             object_ptr, wait_reason, alertable,
+             timeout_ptr ? static_cast<int64_t>(*timeout_ptr) : -1);
+    }
+  }
   auto object = XObject::GetNativeObject<XObject>(kernel_state(), object_ptr);
 
   if (!object) {
