@@ -2353,3 +2353,57 @@ register scan with a sign-extension bug. Each time the gap was in the tool
 rather than the reasoning, and each time the conclusion looked stronger than it
 was. `refs.py` covers all three forms and documents what it still cannot see -
 an address assembled by arithmetic other than `lis`/`addi`.
+
+## A real Xenia bug on the path: kernel_debug_monitor never worked
+
+Tracing what would start `817915A0` leads to `817439D0`, which registers
+callbacks by dispatching through a kernel global:
+
+```
+8174ABE8  lwz r11,[815F044C]      ; KeDebugMonitorData
+8174ABEC  lwz r11,0(r11)
+8174ABF0  cmplwi cr6,r11,0
+8174ABF4  beq  cr6 -> return      ; null: register nothing, silently
+8174ABF8  lwz r11,24(r11)         ; vtable slot at +0x18
+8174AC00  addi r3,r0,50
+8174AC04  bctrl
+```
+
+Measured, `[815F044C] = 80207A64` - a valid pointer - but `[[815F044C]] = 0`.
+Xenia's own comment at that address says "Offset 0x18 is a 4b pointer to a
+handler function that seems to take two arguments", which matches the
+disassembly exactly.
+
+Xenia has a `kernel_debug_monitor` cvar for this, and **it did not work**:
+
+```cpp
+uint32_t pKeDebugMonitorData = memory_->SystemHeapAlloc(...);
+xe::store_and_swap<uint32_t>(memory_->TranslateVirtual(pKeDebugMonitorData),
+                             pKeDebugMonitorData);      // into the block
+auto lp = memory_->TranslateVirtual<...>(pKeDebugMonitorData);
+std::memset(lp, 0, sizeof(...));                        // ...then erased
+```
+
+The pointer was written into the freshly allocated block rather than into the
+exported variable, and the `memset` immediately after erased even that. So
+`KeDebugMonitorData` stayed zero and the cvar had no guest-visible effect at
+all. Fixed by writing the pointer to `KeDebugMonitorData` after the block is
+initialised.
+
+With the fix: `[[815F044C]]` is a real object, and the guest starts using it -
+`KeDebugMonitorCallback` is invoked **53,525 times** in one session, where
+previously it was unreachable. No crashes, and the Guide bootstrap is
+unaffected.
+
+### It is not the Guide's missing piece
+
+`81723D70`, `81751500`, `81751428` and `817915A0` still do not run. Registering
+a callback is not the same as it being invoked, and the invocations that do
+happen are for something else.
+
+There is a larger caution here. This entire chain is gated on the **debug
+monitor**, which is a devkit facility. On retail hardware it is absent too, so
+a path that only runs under it cannot be how the Guide normally starts. The
+chain is real as disassembly and was worth following to its end - it found a
+genuine emulator bug - but it is a debugging facility, not the Guide's startup
+path, and should not be pursued further on the assumption that it is.

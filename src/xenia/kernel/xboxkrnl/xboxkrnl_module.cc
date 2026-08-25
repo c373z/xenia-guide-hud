@@ -101,13 +101,20 @@ XboxkrnlModule::XboxkrnlModule(Emulator* emulator, KernelState* kernel_state)
   } else {
     uint32_t pKeDebugMonitorData =
         memory_->SystemHeapAlloc(sizeof(X_KEDEBUGMONITORDATA));
-    xe::store_and_swap<uint32_t>(memory_->TranslateVirtual(pKeDebugMonitorData),
-                                 pKeDebugMonitorData);
     auto lpKeDebugMonitorData =
         memory_->TranslateVirtual<X_KEDEBUGMONITORDATA*>(pKeDebugMonitorData);
     std::memset(lpKeDebugMonitorData, 0, sizeof(X_KEDEBUGMONITORDATA));
     lpKeDebugMonitorData->callback_fn =
         GenerateTrampoline("KeDebugMonitorCallback", KeDebugMonitorCallback);
+    // The pointer has to land in the exported variable itself. This used to
+    // write it into the freshly allocated block instead - and then memset the
+    // block, erasing even that - so KeDebugMonitorData stayed zero and the
+    // cvar had no guest-visible effect at all. Guests read
+    // [[KeDebugMonitorData]] and skip whatever they wanted the monitor for
+    // when it is null; xam's callback registration (817439D0) is one such
+    // caller, and it silently registers nothing.
+    xe::store_and_swap<uint32_t>(memory_->TranslateVirtual(KeDebugMonitorData),
+                                 pKeDebugMonitorData);
   }
   export_resolver_->SetVariableMapping(
       "xboxkrnl.exe", ordinals::KeDebugMonitorData, KeDebugMonitorData);

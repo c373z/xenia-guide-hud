@@ -1368,6 +1368,19 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                 uint32_t gate = gate_ptr ? rd(gate_ptr) : 0;
                 XELOGI("Guide button: VdGlobalDevice(801E6FC4) = {:08X}",
                        rd(0x801E6FC4u));
+                // 817439D0 registers callbacks by dispatching through
+                // [[815F044C]]->vtable[6]; if that object is null it returns
+                // having registered nothing. 81723D98 registers 81723D70
+                // there, and 81723D70 is the head of the chain that would
+                // eventually run 817915A0 and signal the three events.
+                {
+                  uint32_t slot = rd(0x815F044Cu);
+                  uint32_t obj = slot ? rd(slot) : 0;
+                  XELOGI("Guide button: callback registry [815F044C]={:08X} "
+                         "-> obj {:08X} {}",
+                         slot, obj,
+                         obj ? "(present)" : "(NULL - registration is a no-op)");
+                }
                 XELOGI("Guide button: device gate [815F048C]={:08X} "
                        "[*]={:08X} bit200={}",
                        gate_ptr, gate, (gate & 0x200) ? "set" : "clear");
