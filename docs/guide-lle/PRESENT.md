@@ -1680,3 +1680,44 @@ negative at all.
 
 It also leaves a regression test behind. If any future change makes the Guide
 render, this number stops being 5800.
+
+## The answer, measured in both configurations
+
+`GuideDrawGPU` counts GPU draws dispatched across the guest's own draw call,
+which the per-swap sampler cannot see in the deep configuration - there the
+composite draw happens after the title thread has stopped swapping.
+
+Deep configuration, `[dc+134] = 00000000`, Present executing for real, draw
+returning `00000000`:
+
+```
+GuideDrawGPU: the guest draw dispatched 0 GPU draws
+Guide composite draw #1 -> 00000000; ... [134]=00000000 ...
+```
+
+Stable configuration, from the per-swap series: the dashboard's rate holds at
+exactly 29.0 draws per swap through the press and 3300 composite draws, so the
+Guide's contribution there is zero as well.
+
+**In both configurations, with the entire present path executing, the Guide
+dispatches no GPU draws.** The counter has a control that reads zero for a
+buffer of zeros, and is sharp enough that one extra draw would show.
+
+So the answer to what happens when you press the Xbox button, as far as this
+work can establish it:
+
+1. The button reaches hud, which creates the Guide object and stores it.
+2. xam creates a device, an XUI render context, a device context and a scene -
+   `scene=00010000`, every time.
+3. The per-frame draw runs: `XuiRenderBegin`, the scene messages,
+   `XuiRenderEnd`, `XuiRenderPresent`, six frames deep into xam's real
+   presentation code, returning `00000000`.
+4. It writes about 4200 words of GPU state per frame into the region its
+   `VdSwap` pointer names, some of which the command processor accepts and
+   acts on.
+5. It never issues a draw.
+
+The software runs end to end. What it does not do is render, and the reason is
+upstream of drawing: the device was never brought up by the system boot Xenia
+does not have, so the path that would emit geometry is inert even though every
+call along it succeeds.

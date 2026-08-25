@@ -88,3 +88,23 @@ Two cautions carried forward:
 - The device redirect was originally racy and some run-to-run differences
   recorded in PRESENT.md are that race, not the cvars. It is now applied per
   frame to [wrapper+12].
+
+
+## Final state of the GPU question
+
+Measured with a draw counter inside the command processor, with a control that
+reads zero for a buffer of zeros:
+
+- Deep configuration, Present executing for real: the guest draw dispatches
+  **0** GPU draws.
+- Stable configuration: the dashboard holds exactly 29.0 draws per swap across
+  the press and 3300 composite draws, so the Guide adds none.
+
+The Guide's software runs completely and produces GPU state but no drawing
+work. Do not spend time on compositing or presentation - there is nothing being
+drawn to composite. The gap is upstream: the device bring-up that mode 1 starts
+and never finishes, which stalls in xam's async command buffer wait because
+Xenia stubs VdGetSystemCommandBuffer.
+
+Regression test: if any change makes the Guide render, the dashboard's draw
+rate stops being exactly 5800 per 200 swaps.

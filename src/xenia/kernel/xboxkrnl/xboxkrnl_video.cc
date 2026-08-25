@@ -1234,6 +1234,17 @@ void VdSwap_entry(
               wm3->TranslateVirtual(kWdLo + i * 4));
         }
       }
+      // Draws dispatched by the guest's own draw call, measured across the
+      // Execute itself. The per-swap sampler cannot see this in the deep
+      // configuration, where the composite draw happens after the title
+      // thread has stopped swapping.
+      uint32_t gd_before = 0;
+      {
+        auto* gsx = kernel_state()->emulator()->graphics_system();
+        if (gsx && gsx->command_processor()) {
+          gd_before = gsx->command_processor()->guide_draw_count_;
+        }
+      }
       in_guide_draw_scope = true;
       uint64_t gr = kernel_state()->processor()->Execute(
           gth->thread_state(), guide_draw_fn_, gargs, xe::countof(gargs));
@@ -1415,6 +1426,18 @@ void VdSwap_entry(
                 XELOGI("GuideExec: submitted {:08X} +{} words", start, words);
               }
             }
+          }
+        }
+      }
+      {
+        auto* gsx = kernel_state()->emulator()->graphics_system();
+        if (gsx && gsx->command_processor()) {
+          uint32_t gd_after = gsx->command_processor()->guide_draw_count_;
+          static uint32_t reported = 0;
+          if (reported < 5) {
+            ++reported;
+            XELOGI("GuideDrawGPU: the guest draw dispatched {} GPU draws",
+                   gd_after - gd_before);
           }
         }
       }
