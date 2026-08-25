@@ -872,17 +872,6 @@ void VdSwap_entry(
     lpdword_t frontbuffer_ptr,  // ptr to frontbuffer address
     lpdword_t texture_format_ptr, lpdword_t color_space_ptr, lpdword_t width,
     lpdword_t height) {
-  {
-    // Which thread is presenting? The Guide renders through xam's D3D device
-    // while the title renders through its own; if only one thread ever swaps,
-    // the Guide's frames never reach the presenter.
-    static std::atomic<uint32_t> swap_count{0};
-    uint32_t n = ++swap_count;
-    if (n <= 3 || (n % 300) == 0) {
-      auto* th = XThread::GetCurrentThread();
-      XELOGI("VdSwap #{} from thread '{}'", n, th ? th->name() : "<none>");
-    }
-  }
   // Composite the Guide here. The title's D3D device is thread-affine and
   // this runs on the thread that owns it, inside the title's frame and just
   // before its swap - which is where the Guide is drawn on hardware. The

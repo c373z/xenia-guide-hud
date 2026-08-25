@@ -1059,32 +1059,6 @@ DECLARE_XBOXKRNL_EXPORT1(NtCancelTimer, kThreading, kImplemented);
 uint32_t xeKeWaitForSingleObject(void* object_ptr, uint32_t wait_reason,
                                  uint32_t processor_mode, uint32_t alertable,
                                  uint64_t* timeout_ptr) {
-  {
-    // RtlEnterCriticalSection blocks by calling this directly rather than
-    // through the KeWaitForSingleObject export, so instrument here. Only the
-    // Guide thread, to stay out of the hot path.
-    //
-    // Two traps when reading kernel logs to find where a thread is stuck:
-    // exports marked kHighFrequency (RtlEnterCriticalSection among them) are
-    // suppressed entirely unless log_high_frequency_kernel_calls is on, so
-    // "the thread made no kernel calls" is meaningless without it; and the
-    // guest PPC context in thread_state() is stale during JIT execution, so
-    // sampling registers cannot tell a running thread from a wedged one. Use
-    // per-thread GetThreadTimes for that instead.
-    auto* wth = XThread::GetCurrentThread();
-    static std::atomic<uint32_t> wait_count{0};
-    uint32_t wn = ++wait_count;
-    const bool is_guide =
-        wth && wth->name().find("Guide") != std::string::npos;
-    // Control: log every 500th wait from ANY thread too, so the absence of
-    // Guide-thread lines is evidence rather than a silent instrument.
-    if (is_guide || (wn % 500) == 0) {
-      XELOGI("WaitProbe #{}{}: thread='{}' reason={} alertable={} timeout={}",
-             wn, is_guide ? " GUIDE" : "",
-             wth ? wth->name() : std::string("<none>"), wait_reason, alertable,
-             timeout_ptr ? static_cast<int64_t>(*timeout_ptr) : -1);
-    }
-  }
   auto object = XObject::GetNativeObject<XObject>(kernel_state(), object_ptr);
 
   if (!object) {
