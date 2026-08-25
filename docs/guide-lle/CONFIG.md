@@ -179,3 +179,37 @@ procedure now demonstrably works from nothing but the five lines above.
 The config in the tree is that freshly generated one, so it carries every cvar
 this branch added at its default rather than whatever state a long series of
 experiments left behind.
+
+## The deep configuration is smaller than documented
+
+The deep-reach section above lists six cvars. Testing each by removal:
+
+| cvar | removed | needed? |
+|---|---|---|
+| `guide_syscmdbuf_fields` | emitter still reached, no crash, draw returns | **no** |
+| `guide_fake_front_buffer` | crash at `819F5EC4`, null descriptor | yes |
+| `guide_use_bound_device` | crash at `819DE94C`, null render target, emitter never reached | yes |
+| `guide_create_primary_device` | (gates mode 1 itself) | yes |
+| `guide_bootstrap_before_device` | (bootstrap never queued under mode 1) | yes |
+| `guide_clear_null_render` | (the flag being cleared is the whole point) | yes |
+
+So five, not six. `guide_syscmdbuf_fields` is redundant: it was necessary
+before `guide_use_bound_device` existed - filling the display-mode fields was
+what let the present complete back then - and pointing the DC at the bound
+device now achieves the same thing properly. An earlier section describes those
+fields as load-bearing; that was true when written and is not any more.
+
+### What is actually fabricated
+
+Of the five, only two hand the guest invented state:
+
+- `guide_use_bound_device` - repoints the DC at a device that already exists.
+  A redirect, not an invention.
+- `guide_fake_front_buffer` - **a clone of the colour surface standing in for a
+  front buffer nothing allocates.** This is the one genuinely made-up object.
+
+The other three are ordering and a flag patch. So the earlier warning that deep
+measurements rest on "three pieces of hand-fabricated state" overstates it:
+there is one invented object and one redirect. That is still enough to make
+"the emitter emits zero draws" a statement about this configuration rather than
+about xam, but the surface is smaller and better understood than it was.
