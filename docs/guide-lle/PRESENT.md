@@ -2108,3 +2108,41 @@ So the approach of lifting individual entry points out of the boot and calling
 them is not a way in, and this is the evidence for that rather than an opinion
 about it. Anyone tempted to try the same thing should read this section first -
 it costs a build and a run to rediscover.
+
+## How much weight "no caller inside xam" can carry
+
+Several conclusions above lean on a function having no caller inside xam, and
+read that as "the system boot calls it". Worth measuring how distinctive that
+property actually is:
+
+```
+xam functions with unwind data:        18,301
+never the target of a direct bl:        4,494  (24.6%)
+indirect call sites (bctrl) in .text:   5,950
+```
+
+**A quarter of xam's functions are never directly called**, and there are
+almost six thousand indirect call sites. xam is C++ with vtables throughout -
+this file has already followed several dispatches through `dc->vtable[21]` and
+`device->vtable[24]`. So "no direct caller" is a common property with an
+obvious innocent explanation, and on its own it does **not** establish that a
+function is a boot entry point.
+
+That weakens how `81750FA8`, `81751428` and `8178E9F0` were described. Calling
+them "entry points the system boot invokes" was an inference from a property
+shared by 4,494 functions, and `callers.py` cannot see indirect calls - a
+limitation in its own docstring that I have now failed to apply twice.
+
+What survives for those three is the direct evidence, which is unaffected:
+
+- `8178E9F0` produces a device that reaches the GPU where `8178F748` does not.
+  Measured.
+- `81751428` and `81750FA8` both fault when called cold, on null state, in
+  chains that read globals rather than parameters. Measured.
+- The three notification events are never signalled and `817915A0`, the only
+  code that signals them, never runs. Measured.
+
+Those stand. The claim that should not be repeated without better evidence is
+the architectural one - that these particular functions are *the* interface the
+system boot drives. They may equally be reached through a function pointer from
+somewhere that itself never runs.
