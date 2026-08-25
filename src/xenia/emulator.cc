@@ -1824,6 +1824,30 @@ bool Emulator::ExceptionCallback(Exception* ex) {
     return false;
   }
 
+  // Log the essentials BEFORE pausing. Pause() waits for the graphics system
+  // and command processor to acknowledge, and if either is blocked - which is
+  // likely when a guest thread has just faulted mid-frame - it never returns
+  // and the crash dump below is never written. That turns a diagnosable crash
+  // into a silent freeze.
+  {
+    auto* early_thread = kernel::XThread::GetCurrentThread();
+    auto* early_fn = code_cache->LookupFunction(ex->pc());
+    uint32_t guest_pc =
+        early_fn ? early_fn->MapMachineCodeToGuestAddress(ex->pc()) : 0;
+    const char* code_str =
+        ex->code() == Exception::Code::kAccessViolation ? "access violation"
+        : ex->code() == Exception::Code::kIllegalInstruction
+            ? "illegal instruction"
+            : "other";
+    XELOGE(
+        "GUEST CRASH: {} at guest PC {:08X} (host {:X}), thread '{}', "
+        "fault_addr {:016X}",
+        code_str, guest_pc, ex->pc(),
+        early_thread ? early_thread->name() : std::string("<none>"),
+        ex->code() == Exception::Code::kAccessViolation ? ex->fault_address()
+                                                        : 0);
+  }
+
   // Within range. Pause the emulator and eat the exception.
   Pause();
 
