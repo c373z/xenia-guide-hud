@@ -8,6 +8,7 @@
  */
 
 #include "xenia/cpu/mmio_handler.h"
+#include "xenia/kernel/xthread.h"
 
 #include <cstring>
 
@@ -400,6 +401,23 @@ bool MMIOHandler::ExceptionCallbackThunk(Exception* ex, void* data) {
 }
 
 bool MMIOHandler::ExceptionCallback(Exception* ex) {
+  {
+    // Instrumented to test whether a guest thread that blocks with no CPU and
+    // no kernel call is sitting in a guarded-memory trap. Logs every 200th
+    // fault from any thread as a control, so an absence of Guide-thread lines
+    // is evidence rather than a silent instrument.
+    static std::atomic<uint32_t> fault_count{0};
+    uint32_t fn = ++fault_count;
+    auto* fth = kernel::XThread::GetCurrentThread();
+    const bool is_guide =
+        fth && fth->name().find("Guide") != std::string::npos;
+    if (is_guide || (fn % 200) == 0) {
+      XELOGI("FaultProbe #{}{}: thread='{}' code={} addr={:X}", fn,
+             is_guide ? " GUIDE" : "",
+             fth ? fth->name() : std::string("<none>"),
+             static_cast<int>(ex->code()), ex->fault_address());
+    }
+  }
   if (ex->code() != Exception::Code::kAccessViolation) {
     return false;
   }
