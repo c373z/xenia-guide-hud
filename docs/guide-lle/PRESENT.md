@@ -2668,3 +2668,35 @@ code, it is in a function that never executes, and whether that field belongs
 to the XUI context is unverified. Confirming it needs the object in `r3` at
 runtime - which cannot be read with a breakpoint, since the function never runs
 to break on.
+
+## That candidate is a dead end, resolved statically
+
+The `r3` question can be answered without running anything. Reading `81914578`
+from its start to the call site, every write to `r3` is a call return, and the
+last one before the call is:
+
+```
+8191B810  bl    81944A70          ; r3 = its return value
+8191B814  cmplwi cr0,r3,0
+8191B818  beq   cr0,+0x14         ; skip if null
+8191B81C  lwz   r4,-13952(r31)
+8191B820  bl    8190F7A0          ; r3 unchanged
+```
+
+So the object whose `+0x1C` gets zeroed is **whatever `81944A70` returns** -
+a freshly obtained object, null-checked on the spot. It is not the XUI context
+that already exists and carries the flag.
+
+So `8190F7A0` is initialising a new object's field, not clearing the Guide's.
+The lead is closed: the fact that it never runs is irrelevant to `[dc+0x134]`,
+and chasing why it does not run would have been chasing nothing.
+
+Recording it because the shape was persuasive - the only constant-zero store to
+that offset anywhere in the XUI code, in a function that never executes, called
+from code touching a global eight bytes from the context pointer. Three
+coincidences pointing the same way, and the answer was one instruction's worth
+of dataflow away the whole time.
+
+What remains true and unexplained: `[xui_ctx+0x1C]` is `1` by the time the
+render host returns, no constant `1` is stored to that offset anywhere in the
+XUI range, and nothing observed clears it.
