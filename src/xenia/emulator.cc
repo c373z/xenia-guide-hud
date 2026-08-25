@@ -1283,6 +1283,46 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                   ks->processor()->AddBreakpoint(r6_bp.get());
                   XELOGI("819F7F20 trace installed");
                 }
+              if (cvars::guide_watch_front_buffer) {
+                static bool watch_started = false;
+                if (!watch_started) {
+                  watch_started = true;
+                  auto* wm = ks->memory();
+                  std::thread([wm]() {
+                    xe::threading::set_name("FrontBufferWatch");
+                    auto rdw = [wm](uint32_t a) {
+                      return a ? xe::load_and_swap<uint32_t>(
+                                     wm->TranslateVirtual(a))
+                               : 0u;
+                    };
+                    uint32_t last_dev[2] = {0, 0}, last_fb[2] = {0, 0};
+                    const uint32_t slots[2] = {0x81D43684u, 0x801E6FC8u};
+                    const char* names[2] = {"81D43684", "801E6FC8"};
+                    for (int i = 0; i < 60000; ++i) {
+                      for (int k = 0; k < 2; ++k) {
+                        uint32_t dev = rdw(slots[k]);
+                        uint32_t fb = dev ? rdw(dev + 0x3F74u) : 0;
+                        if (dev != last_dev[k]) {
+                          XELOGI("FBWatch[{}]: device {:08X} -> {:08X}",
+                                 names[k], last_dev[k], dev);
+                          last_dev[k] = dev;
+                          last_fb[k] = 0;
+                        }
+                        if (fb != last_fb[k]) {
+                          XELOGI("FBWatch[{}]: dev {:08X} front buffer "
+                                 "{:08X} -> {:08X}",
+                                 names[k], dev, last_fb[k], fb);
+                          last_fb[k] = fb;
+                        }
+                      }
+                      std::this_thread::sleep_for(
+                          std::chrono::microseconds(500));
+                    }
+                    XELOGI("FBWatch: finished");
+                  }).detach();
+                  XELOGI("FBWatch: started");
+                }
+              }
               if (cvars::guide_bootstrap_before_device &&
                   cvars::guide_bootstrap_on_title_thread) {
                 // The mode-1 creator below never returns, so anything after it

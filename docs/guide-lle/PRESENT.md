@@ -937,3 +937,54 @@ What is measured, and what is not:
 Those do not yet form a consistent story, and I am not going to invent one to
 join them. The obstacle is methodological: the store can only be observed with
 a breakpoint, and any breakpoint stops the draw path from being taken at all.
+
+## Past the last crash, and still no pixels
+
+### The front buffer is never written, confirmed without a breakpoint
+
+`guide_watch_front_buffer` polls `[device+3F74]` from a host thread every
+500us for both xam device globals. Across a full session it logs both devices
+appearing and **no front-buffer transition at all**. The field is null the
+whole time, not written-then-cleared. That settles what a code breakpoint
+could not.
+
+### The redirect was racy
+
+The same watch exposed something else. In one run the bootstrap logged
+`device global unchanged (40870D00, bound=00000000)` - `VdGlobalXamDevice` was
+still 0 at that moment - and that run faulted at the *old* site, `819DE94C`,
+while the watch later saw the bound device appear. So doing the redirect once,
+at bootstrap, wins or loses a race, and **some of the run-to-run differences
+earlier in this file are that race rather than the cvars**. Merely adding a
+host polling thread was enough to flip it.
+
+It is now done per frame against the pointer the present path actually reads,
+`[wrapper+12]`, which is race-free.
+
+### Supplying a front buffer removes the crash entirely
+
+`guide_fake_front_buffer` clones the bound colour surface into `+3F74`:
+
+```
+Guide: front buffer [dev 40883A80 +3F74] = clone 301C5000 of RT0 4088B570
+```
+
+Result: **zero guest crashes**. The fault that has ended every run since the
+device redirect is gone. The title thread then executes 315 further log lines,
+compiling xam D3D functions it had never reached before (`81A06148`,
+`81A05F48`), and does not return from the draw inside the capture window.
+
+So the Guide's present now runs without faulting, several layers deeper than
+anything reached before.
+
+### And the screen does not change
+
+A capture 22s after the button press is `2EF6B4B7` - byte for byte the same
+file as the no-press control from `work/noguideshot.ps1`. No pixels.
+
+That is consistent with what the async-command-buffer wait already said many
+sections ago: xam's device submits through the system command buffer, and
+`VdGetSystemCommandBuffer` is a stub that hands back `0xBEEF0000` and
+`0xBEEF0001`. Whatever the Guide is now drawing goes into a buffer nothing
+executes. Removing the null dereferences got the software to run; it did not
+connect it to the GPU, and no amount of further work on this side will.

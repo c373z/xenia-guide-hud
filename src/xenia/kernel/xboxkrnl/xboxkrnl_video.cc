@@ -1047,6 +1047,59 @@ void VdSwap_entry(
           }
         }
       }
+      if (::cvars::guide_use_bound_device) {
+        // Doing this once at bootstrap is racy: VdGlobalXamDevice is sometimes
+        // still 0 when the bootstrap runs, and then no redirect happens at all
+        // - which is what makes some runs fault at 819DE94C and others at
+        // 819F5EC4. Patch the pointer the present path actually reads,
+        // [wrapper+12] (8191B418 does "lwz r3,12(r31)"), every frame until it
+        // agrees. That is race-free.
+        auto* wm2 = kernel_state()->memory();
+        auto w2 = [wm2](uint32_t a) {
+          return xe::load_and_swap<uint32_t>(wm2->TranslateVirtual(a));
+        };
+        uint32_t wdc = w2(guide_draw_this_ + 12);
+        uint32_t wrap = wdc ? w2(wdc + 0x1CCu) : 0;
+        uint32_t boundd = w2(0x801E6FC8u);
+        if (wrap && boundd && w2(wrap + 12u) != boundd) {
+          static uint32_t reported = 0;
+          uint32_t was = w2(wrap + 12u);
+          xe::store_and_swap<uint32_t>(wm2->TranslateVirtual(wrap + 12u),
+                                       boundd);
+          if (reported++ < 3) {
+            XELOGI("Guide: present-path device [wrapper {:08X} +12] {:08X} -> "
+                   "{:08X} (RT0={:08X} fb={:08X})",
+                   wrap, was, boundd, w2(boundd + 0x32A0u),
+                   w2(boundd + 0x3F74u));
+          }
+        }
+      }
+      if (::cvars::guide_fake_front_buffer) {
+        static bool fb_done = false;
+        if (!fb_done) {
+          auto* fm2 = kernel_state()->memory();
+          auto f2 = [fm2](uint32_t a) {
+            return xe::load_and_swap<uint32_t>(fm2->TranslateVirtual(a));
+          };
+          uint32_t fdc2 = f2(guide_draw_this_ + 12);
+          uint32_t wrap2 = fdc2 ? f2(fdc2 + 0x1CCu) : 0;
+          uint32_t dv2 = wrap2 ? f2(wrap2 + 12u) : 0;
+          uint32_t rt = dv2 ? f2(dv2 + 0x32A0u) : 0;
+          if (dv2 && rt && !f2(dv2 + 0x3F74u)) {
+            fb_done = true;
+            uint32_t clone = fm2->SystemHeapAlloc(0x100, 16);
+            if (clone) {
+              std::memcpy(fm2->TranslateVirtual(clone),
+                          fm2->TranslateVirtual(rt), 0x100);
+              xe::store_and_swap<uint32_t>(
+                  fm2->TranslateVirtual(dv2 + 0x3F74u), clone);
+              XELOGI("Guide: front buffer [dev {:08X} +3F74] = clone {:08X} "
+                     "of RT0 {:08X}",
+                     dv2, clone, rt);
+            }
+          }
+        }
+      }
       if (::cvars::guide_bind_depth_copy) {
         static bool depth_done = false;
         if (!depth_done) {

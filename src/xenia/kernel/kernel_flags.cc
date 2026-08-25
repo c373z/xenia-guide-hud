@@ -224,6 +224,26 @@ DEFINE_bool(guide_system_process_type, false,
             "mode-1 device path is one place it matters. Restored afterwards.",
             "Kernel");
 
+DEFINE_bool(guide_fake_front_buffer, false,
+            "If the present path's device has a colour surface on RT0 but no "
+            "front buffer at +3F74, clone the colour surface into that slot. "
+            "The fault is a null dereference of a six-dword fetch-constant "
+            "descriptor, so any structurally valid surface should move it - "
+            "which is the point. This is a probe of what lies past the front "
+            "buffer, not a front buffer: a real one is allocated by 819E7310 "
+            "and would have its own memory.",
+            "Kernel");
+
+DEFINE_bool(guide_watch_front_buffer, false,
+            "Poll [device+3F74] - the front buffer - from a host thread and "
+            "log every transition, for both xam device globals. A code "
+            "breakpoint on the store cannot answer this: installing one "
+            "changes scheduling enough that the draw path is never taken, so "
+            "the store and the fault can never be observed in the same run. "
+            "Reading guest memory from the host perturbs nothing, and catches "
+            "a value that is written and then cleared.",
+            "Kernel");
+
 DEFINE_bool(guide_bind_depth_copy, false,
             "Before the first Guide draw, if the device has a colour surface "
             "on RT0 but nothing on the depth slot, clone the colour surface "
