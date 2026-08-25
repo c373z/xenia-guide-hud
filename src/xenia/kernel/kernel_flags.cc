@@ -53,6 +53,16 @@ DEFINE_bool(guide_skip_bkgnd_transition, true,
             "background transition."
             ,
             "Kernel");
+DEFINE_uint32(guide_xam_ui_startup, 0,
+              "Runtime address of xam's UI startup (ghidra 8179C748), the "
+              "only caller of the render host. Like the render host it "
+              "begins with the thread-identity check, so it must run on "
+              "xam's recorded UI thread. Queued there as an APC rather than "
+              "called from ours. Defaults 0: xam's threads wait with "
+              "alertable=0, so a queued APC never runs. Injecting work onto "
+              "xam's UI thread needs a different mechanism."
+              ,
+              "Kernel");
 DEFINE_bool(guest_native_timers, false,
             "Adopt guest-created KTIMERs so they can be waited on, and "
             "implement KeSetTimer/KeSetTimerEx/KeCancelTimer. Fixes a "

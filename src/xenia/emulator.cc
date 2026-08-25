@@ -1235,6 +1235,33 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                 kernel::xboxkrnl::QueueGuideBootstrap(
                     hud_base, obj, cvars::guide_use_title_device,
                     skin_mod);
+                // xam's UI startup and everything under it check that the
+                // caller is xam's recorded UI thread (81D42520). Spoofing that
+                // check satisfied the comparison but not the thread's own
+                // state, so queue the startup as an APC on the real thread.
+                if (cvars::guide_xam_ui_startup) {
+                  uint32_t ui_thread = xe::load_and_swap<uint32_t>(
+                      ks->memory()->TranslateVirtual(0x81D42520u));
+                  auto threads =
+                      ks->object_table()->GetObjectsByType<kernel::XThread>(
+                          kernel::XObject::Type::Thread);
+                  bool queued = false;
+                  for (auto& th : threads) {
+                    if (th->guest_object() == ui_thread) {
+                      XELOGI("Guide button: queueing xam UI startup {:08X} as "
+                             "an APC on xam's UI thread {:08X}",
+                             uint32_t(cvars::guide_xam_ui_startup), ui_thread);
+                      th->EnqueueApc(cvars::guide_xam_ui_startup, 0, 0, 0);
+                      queued = true;
+                      break;
+                    }
+                  }
+                  if (!queued) {
+                    XELOGW("Guide button: xam UI thread {:08X} not found among "
+                           "{} threads",
+                           ui_thread, threads.size());
+                  }
+                }
                 XELOGI("Guide button: queued XUI bootstrap for the title "
                        "thread (hud {:08X}, obj {:08X})",
                        hud_base, obj);

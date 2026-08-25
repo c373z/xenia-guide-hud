@@ -18,6 +18,7 @@ DECLARE_bool(lle_xam_trace_loader);
 DECLARE_bool(lle_xam_app_host);
 DECLARE_uint32(xbox_hardware_info_flags);
 DECLARE_bool(guide_skip_bkgnd_transition);
+DECLARE_uint32(guide_xam_ui_startup);
 DECLARE_bool(guest_native_timers);
 DECLARE_bool(system_root_early);
 DECLARE_bool(guide_spoof_ui_thread);
