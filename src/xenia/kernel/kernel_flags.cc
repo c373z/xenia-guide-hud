@@ -44,6 +44,15 @@ DEFINE_uint32(xbox_hardware_info_flags, 0x20,
 // Everything downstream (XUI context, DC, class registration, scene creation)
 // therefore runs from a thread xam does not consider legitimate, which is the
 // most likely reason state it would normally set up is missing.
+DEFINE_bool(guide_skip_bkgnd_transition, true,
+            "NOP the call to CHUDBkgndScene::PlayTransition at runtime "
+            "8174EE6C. Its caller reads the CHUDBkgndScene singleton from "
+            "81D3F924, finds null, traps, and calls anyway - dereferencing "
+            "null and killing Guide scene creation. Skipping the call tests "
+            "whether the rest of scene creation can complete without the "
+            "background transition."
+            ,
+            "Kernel");
 DEFINE_bool(guide_spoof_ui_thread, false,
             "Temporarily point xam's recorded UI thread (81D42520) at the "
             "calling thread across the render-host call, then restore it. "
@@ -100,13 +109,14 @@ DEFINE_bool(guide_step_registrations, false,
             "at a time with logging instead of calling hud's scene creator, "
             "to identify which registration blocks the title thread.",
             "Kernel");
-DEFINE_bool(guide_register_classes, false,
+DEFINE_bool(guide_register_classes, true,
             "Run xam's extra XUI class registrars (817503E8, 8199BE08, "
             "8176B2C8) from the title thread AFTER XuiInit. All three return 0 "
             "there, unlike lle_xam_xui_init which runs them before XuiInit and "
-            "makes it fail on the duplicate XuiElement. Defaults OFF: with the "
-            "classes registered the scene creator gets further and then hangs "
-            "the title thread, freezing the dashboard.",
+            "makes it fail on the duplicate XuiElement. Required: XuiScene is "
+            "registered here, and without it scene creation fails 80300004. "
+            "(This used to appear to hang; that was the CHUDBkgndScene crash, "
+            "now handled separately.)",
             "Kernel");
 DEFINE_string(guide_skin_path, "",
               "Guest path to hud's XUI skin package. hud builds its resource "

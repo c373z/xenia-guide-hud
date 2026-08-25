@@ -624,6 +624,24 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
            "(r13={:08X})",
            recorded, current, r13);
   }
+  if (::cvars::guide_skip_bkgnd_transition) {
+    // Do NOT patch guest code here - writing to a code page faults the host.
+    // Instead give the CHUDBkgndScene singleton slot a zeroed object so
+    // PlayTransition's dereference lands on readable memory. This is a probe,
+    // not a fix: the object has no vtable and no state, so it only answers
+    // whether anything downstream of the transition can still run.
+    uint32_t cur = rd(0x81D3F924u);
+    if (!cur) {
+      uint32_t stub = memory->SystemHeapAlloc(0x400, 16);
+      if (stub) {
+        std::memset(memory->TranslateVirtual(stub), 0, 0x400);
+        xe::store_and_swap<uint32_t>(memory->TranslateVirtual(0x81D3F924u),
+                                     stub);
+        XELOGI("GuideBootstrap: CHUDBkgndScene slot 81D3F924 = stub {:08X}",
+               stub);
+      }
+    }
+  }
   uint32_t saved_ui_thread = 0;
   bool spoofed = false;
   if (::cvars::guide_spoof_ui_thread) {
@@ -756,10 +774,18 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   }
   uint64_t ir = 0;
   if (scene_fn) {
-    uint64_t a2[] = {guide_bs_obj_, 0, 0};
+    // The third argument is an OUT pointer: on success the creator stores the
+    // scene handle through it (stw r11,0(r29) at 913EBA18, r29 = r5). Passing
+    // 0 made it store through null once the earlier crash was cleared.
+    uint32_t scene_out = memory->SystemHeapAlloc(16, 16);
+    if (scene_out) {
+      std::memset(memory->TranslateVirtual(scene_out), 0, 16);
+    }
+    uint64_t a2[] = {guide_bs_obj_, 0, scene_out};
     ir = processor->Execute(ts, scene_fn, a2, xe::countof(a2));
-    XELOGI("GuideBootstrap: scene creator {:08X} -> {:08X}", scene_fn,
-           static_cast<uint32_t>(ir));
+    XELOGI("GuideBootstrap: scene creator {:08X} -> {:08X}, scene={:08X}",
+           scene_fn, static_cast<uint32_t>(ir),
+           scene_out ? rd(scene_out) : 0);
   } else {
     // Mirror what hud's scene creator sets before it calls the init:
     // [obj+28] = second arg, [obj+32] = 1 (render_obj+16),
