@@ -1466,3 +1466,52 @@ So the same missing bring-up that leaves xam's device without a ring buffer
 also leaves the stream it writes without discoverable bounds. Guessing the
 extent by walking headers is not a substitute, and the fragment submitted here
 should not be read as evidence either way.
+
+## Measuring the stream's extent, and executing it
+
+Header walking cannot find a command buffer's bounds, but the words the draw
+writes *are* its bounds. `guide_word_diff` snapshots `FE030000-FE050000` word
+by word around the draw and reports contiguous runs of change:
+
+```
+WordDiff: run FE03E284 .. FE03E6B8  (269 words)
+WordDiff: run FE040A00 .. FE040E30  (268 words)
+WordDiff: run FE0424A0 .. FE04582C  (2388 words)
+...
+WordDiff: 19 runs, 4201 words changed
+```
+
+The largest run in the first block starts at **`FE03E284`** - which is exactly
+the pointer xam passes to `VdSwap` as its buffer argument, the one Xenia's own
+signature comments call "ptr into primary ringbuffer". The measurement and the
+guest's own parameter agree on the address independently. The header walker had
+guessed `FE038000` and captured 41 words; it was wrong by 24KB.
+
+Feeding the measured runs to the command processor:
+
+```
+GuideExec: submitted measured run FE03E284 +269 words
+GuideExec: submitted measured run FE040A00 +268 words
+GuideExec: submitted measured run FE0424A0 +2388 words
+... 9 runs
+```
+
+Roughly 4000 words of the Guide's own command stream, executed. **Zero
+crashes** - the command processor consumed it without complaint, which is
+itself a check on the stream being real; malformed packets would not survive
+that. And the screen is unchanged, still byte-identical to the no-press
+control.
+
+### What is left unresolved
+
+This is a far stronger test than the 53-word fragment, but it still does not
+show the commands did nothing. The most likely reading is that they render into
+xam's own render target - the surface bound at RT0 - and that getting that
+surface onto the display is a separate step this has never performed. The
+screenshot captures what the display scans out, not what the GPU drew.
+
+The next measurement is therefore not another execution attempt but a check on
+the target: diff the memory behind the RT0 surface across the execution. If it
+changes, the Guide has been drawn and the remaining problem is purely
+composition. If it does not, the commands are being executed without effect and
+the state they depend on is missing.

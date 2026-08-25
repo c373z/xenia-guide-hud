@@ -224,6 +224,15 @@ DEFINE_bool(guide_system_process_type, false,
             "mode-1 device path is one place it matters. Restored afterwards.",
             "Kernel");
 
+DEFINE_bool(guide_word_diff, false,
+            "Word-level diff of FE030000-FE050000 across the Guide's draw, "
+            "reporting contiguous runs of changed words. The command stream's "
+            "extent cannot be found by walking headers - packets sit between "
+            "long runs of NOP padding, so a walker grabs a fragment - but the "
+            "words the draw actually wrote ARE its extent, and those can be "
+            "measured instead of guessed.",
+            "Kernel");
+
 DEFINE_bool(guide_execute_command_stream, false,
             "After the Guide's composite draw, walk the PM4 stream it wrote "
             "into FE03xxxx/FE04xxxx and run it through the command processor. "

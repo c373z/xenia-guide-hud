@@ -1207,6 +1207,16 @@ void VdSwap_entry(
         }
         XELOGI("DrawDiff: snapshot of {} blocks taken", pre_sums.size());
       }
+      static std::vector<uint32_t> wd_pre;
+      const uint32_t kWdLo = 0xFE030000u, kWdHi = 0xFE050000u;
+      if (::cvars::guide_word_diff && wd_pre.empty()) {
+        auto* wm3 = kernel_state()->memory();
+        wd_pre.resize((kWdHi - kWdLo) / 4);
+        for (uint32_t i = 0; i < wd_pre.size(); ++i) {
+          wd_pre[i] = xe::load_and_swap<uint32_t>(
+              wm3->TranslateVirtual(kWdLo + i * 4));
+        }
+      }
       in_guide_draw_scope = true;
       uint64_t gr = kernel_state()->processor()->Execute(
           gth->thread_state(), guide_draw_fn_, gargs, xe::countof(gargs));
@@ -1249,6 +1259,44 @@ void VdSwap_entry(
         XELOGI("DrawDiff: {} of {} blocks changed across the draw", changed,
                pre_sums.size());
         pre_sums.clear();
+      }
+      if (::cvars::guide_word_diff && !wd_pre.empty()) {
+        auto* wm3 = kernel_state()->memory();
+        uint32_t runs = 0, total = 0, i = 0;
+        while (i < wd_pre.size()) {
+          uint32_t now = xe::load_and_swap<uint32_t>(
+              wm3->TranslateVirtual(kWdLo + i * 4));
+          if (now == wd_pre[i]) { ++i; continue; }
+          uint32_t start = i, gap = 0;
+          while (i < wd_pre.size() && gap < 16) {
+            uint32_t v = xe::load_and_swap<uint32_t>(
+                wm3->TranslateVirtual(kWdLo + i * 4));
+            if (v == wd_pre[i]) ++gap; else gap = 0;
+            ++i;
+          }
+          uint32_t len = (i - gap) - start;
+          total += len;
+          // Execute the runs the draw actually wrote. The extent comes from
+          // the diff, not from walking headers: the largest run begins at
+          // FE03E284, which is exactly the pointer xam hands to VdSwap, while
+          // the header walker had guessed FE038000 and captured a fragment.
+          if (::cvars::guide_execute_command_stream && len >= 32) {
+            auto* gs2 = kernel_state()->emulator()->graphics_system();
+            if (gs2 && gs2->command_processor()) {
+              gs2->command_processor()->ExecuteGuestBufferUnsafe(
+                  kWdLo + start * 4, len);
+              XELOGI("GuideExec: submitted measured run {:08X} +{} words",
+                     kWdLo + start * 4, len);
+            }
+          }
+          if (runs < 12) {
+            XELOGI("WordDiff: run {:08X} .. {:08X}  ({} words)",
+                   kWdLo + start * 4, kWdLo + (start + len) * 4, len);
+          }
+          ++runs;
+        }
+        XELOGI("WordDiff: {} runs, {} words changed", runs, total);
+        wd_pre.clear();
       }
       if (::cvars::guide_execute_command_stream) {
         static bool ran = false;
