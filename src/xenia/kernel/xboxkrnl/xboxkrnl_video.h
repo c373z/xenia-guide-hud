@@ -28,6 +28,10 @@ void SetGuideDrawHook(uint32_t fn, uint32_t self);
 // Queue the whole XUI bootstrap to run on the title's render thread. The
 // title's D3D device is thread-affine, so every XUI call that touches it -
 // render host, CreateDC, hud's init - has to happen there, not just the draw.
+// True once the title-thread bootstrap has finished its device-touching
+// work. Scene creation waits for this and then runs off the render thread.
+bool GuideBootstrapReady();
+
 void QueueGuideBootstrap(uint32_t hud_base, uint32_t guide_obj,
                          bool use_title_device, uint32_t skin_module);
 

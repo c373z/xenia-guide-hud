@@ -1228,6 +1228,36 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                 XELOGI("Guide button: queued XUI bootstrap for the title "
                        "thread (hud {:08X}, obj {:08X})",
                        hud_base, obj);
+                if (cvars::guide_scene_off_thread) {
+                  // Wait for the title thread to finish the device-touching
+                  // part, then build the scene here. XUI scene loading is
+                  // asynchronous, so it must not run while we hold the
+                  // renderer.
+                  for (int i = 0; i < 400; ++i) {
+                    if (kernel::xboxkrnl::GuideBootstrapReady()) {
+                      break;
+                    }
+                    xe::threading::Sleep(std::chrono::milliseconds(10));
+                  }
+                  if (!kernel::xboxkrnl::GuideBootstrapReady()) {
+                    XELOGW("Guide button: bootstrap never became ready");
+                    return 0;
+                  }
+                  uint32_t ovt = xe::load_and_swap<uint32_t>(
+                      ks->memory()->TranslateVirtual(obj));
+                  uint32_t sfn =
+                      ovt ? xe::load_and_swap<uint32_t>(
+                                ks->memory()->TranslateVirtual(ovt + 27 * 4))
+                          : 0;
+                  XELOGI("Guide button: scene creator {:08X} off-thread", sfn);
+                  if (sfn) {
+                    uint64_t sa[] = {obj, 0, 0};
+                    uint64_t sr =
+                        ks->processor()->Execute(ts, sfn, sa, xe::countof(sa));
+                    XELOGI("Guide button: off-thread scene creator -> {:08X}",
+                           static_cast<uint32_t>(sr));
+                  }
+                }
                 return 0;
               }
               if (cvars::guide_use_title_device) {

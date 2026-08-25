@@ -35,6 +35,13 @@ DEFINE_uint32(xbox_hardware_info_flags, 0x20,
               "0x200 of this word, so without that bit xam never creates a "
               "device and the Guide can never get a render context.",
               "Kernel");
+DEFINE_bool(guide_scene_off_thread, false,
+            "Run hud's scene creator from the Guide's own thread instead of "
+            "from inside the title's swap. Scene loading appears to be "
+            "asynchronous (XUI keeps an AsyncTaskManager), so calling it while "
+            "holding the title's render thread deadlocks. Device-touching work "
+            "stays in the swap.",
+            "Kernel");
 DEFINE_bool(guide_preset_fields, false,
             "With guide_init_only, also set [guide+28/32/64] the way hud's "
             "scene creator does before it calls the init, to test whether the "

@@ -576,6 +576,9 @@ static uint32_t guide_bs_hud_base_ = 0;
 static uint32_t guide_bs_obj_ = 0;
 static bool guide_bs_use_title_device_ = false;
 static uint32_t guide_bs_skin_module_ = 0;
+static std::atomic<bool> guide_bs_ready_{false};
+
+bool GuideBootstrapReady() { return guide_bs_ready_; }
 static std::atomic<bool> guide_bs_pending_{false};
 
 void QueueGuideBootstrap(uint32_t hud_base, uint32_t guide_obj,
@@ -706,6 +709,15 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   uint32_t scene_fn = obj_vt ? rd(obj_vt + 27 * 4) : 0;
   if (::cvars::guide_init_only) {
     scene_fn = 0;  // fall through to the bare-init path below
+  }
+  if (::cvars::guide_scene_off_thread) {
+    // Leave scene creation to the Guide's own thread; install the draw hook
+    // and hand off. Holding the render thread through an async scene load
+    // deadlocks it.
+    SetGuideDrawHook(guide_bs_hud_base_ + 0xAB28u, render_obj);
+    guide_bs_ready_ = true;
+    XELOGI("GuideBootstrap: device work done; scene creation handed off");
+    return;
   }
   uint64_t ir = 0;
   if (scene_fn) {
