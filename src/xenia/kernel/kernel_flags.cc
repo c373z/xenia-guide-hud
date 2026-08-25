@@ -180,6 +180,18 @@ DEFINE_bool(guide_create_scene, true,
             "XuiElementLayoutTree - is null without it, so the draw succeeds "
             "while laying out nothing.",
             "Kernel");
+DEFINE_int32(guide_stall_probe_seconds, 0,
+             "If non-zero, sample the guest PC of the thread that runs the "
+             "Guide's device creation, starting this many seconds after the "
+             "button press. Samples are taken by suspending the host thread "
+             "and reading RIP, then resolving it through the same code-cache "
+             "lookup the crash handler uses. Several samples are taken so a "
+             "spin can be told from a block: a moving PC is a loop, a fixed "
+             "one is a wait. DemandFunction cannot answer this - it logs only "
+             "a function's first compilation, so a thread looping in already "
+             "compiled code is silent.",
+             "Kernel");
+
 DEFINE_bool(guide_create_primary_device, false,
             "Call xam's OTHER device creator, 8178E9F0, instead of 8178F748. "
             "Both funnel into 819F4D28, whose second argument selects a mode: "

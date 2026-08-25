@@ -1234,6 +1234,75 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                          "creation", saved_pt);
                 }
                 XELOGI("Guide button: calling device creator {:08X}", create_fn);
+                if (cvars::guide_stall_probe_seconds > 0 && cur) {
+                  // CreateDevice may never return, so the probe has to live on
+                  // a host thread of its own. Collect raw RIPs first and
+                  // resolve them only after resuming - LookupFunction takes the
+                  // code cache lock, and holding a suspended thread across that
+                  // is a deadlock waiting to happen.
+                  void* nh = cur->thread() ? cur->thread()->native_handle()
+                                           : nullptr;
+                  int delay = cvars::guide_stall_probe_seconds;
+                  auto* proc = ks->processor();
+                  if (nh) {
+                    std::thread([nh, delay, proc, ksp = ks]() {
+                      xe::threading::set_name("GuideStallProbe");
+                      std::this_thread::sleep_for(std::chrono::seconds(delay));
+                      uint64_t rips[8] = {};
+                      for (int i = 0; i < 8; ++i) {
+                        CONTEXT ctx = {};
+                        ctx.ContextFlags = CONTEXT_CONTROL;
+                        if (SuspendThread(reinterpret_cast<HANDLE>(nh)) !=
+                            static_cast<DWORD>(-1)) {
+                          if (GetThreadContext(reinterpret_cast<HANDLE>(nh),
+                                               &ctx)) {
+                            rips[i] = ctx.Rip;
+                          }
+                          ResumeThread(reinterpret_cast<HANDLE>(nh));
+                        }
+                        std::this_thread::sleep_for(
+                            std::chrono::milliseconds(120));
+                      }
+                      // 819F4488 polls [[device+2B10]] against [arg+8] with
+                      // the 819F3FC8 delay between reads. Sample the polled
+                      // word itself so "never advances" is measured, not
+                      // assumed. 81D43684 is xam's device slot.
+                      {
+                        auto* m = ksp->memory();
+                        auto rdp = [m](uint32_t a) {
+                          return xe::load_and_swap<uint32_t>(
+                              m->TranslateVirtual(a));
+                        };
+                        uint32_t dv = rdp(0x81D43684u);
+                        uint32_t idp = dv ? rdp(dv + 0x2B10u) : 0;
+                        XELOGI("StallProbe: device={:08X} [2B10]={:08X}", dv,
+                               idp);
+                        if (idp) {
+                          uint32_t a = rdp(idp);
+                          std::this_thread::sleep_for(
+                              std::chrono::milliseconds(1500));
+                          uint32_t b = rdp(idp);
+                          XELOGI("StallProbe: polled word [{:08X}] = {:08X} "
+                                 "then {:08X} ({})",
+                                 idp, a, b,
+                                 a == b ? "UNCHANGED" : "advanced");
+                        }
+                      }
+                      auto* cc = proc->backend()->code_cache();
+                      for (int i = 0; i < 8; ++i) {
+                        if (!rips[i]) {
+                          XELOGI("StallProbe[{}]: no sample", i);
+                          continue;
+                        }
+                        auto* f = cc->LookupFunction(rips[i]);
+                        uint32_t g =
+                            f ? f->MapMachineCodeToGuestAddress(rips[i]) : 0;
+                        XELOGI("StallProbe[{}]: host {:X} -> guest {:08X}{}", i,
+                               rips[i], g, f ? "" : "  (not guest code)");
+                      }
+                    }).detach();
+                  }
+                }
                 kernel::xboxkrnl::in_xam_createdevice_scope = true;
                 uint64_t cr = ks->processor()->Execute(ts, create_fn, ca,
                                                        xe::countof(ca));

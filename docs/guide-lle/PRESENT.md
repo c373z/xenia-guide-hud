@@ -347,3 +347,50 @@ a **byte-identical** file (`2EF6B4B7`). That screen is the dashboard's own
 sign-in UI at that point in its boot, and has nothing to do with the Guide.
 `work/noguideshot.ps1` is that control; run it before believing any screenshot
 in this project.
+
+## Where mode 1 stops: measured
+
+`guide_stall_probe_seconds` samples the guest PC of the thread running the
+Guide's device creation, by suspending the host thread, reading RIP, and
+resolving it through the same code-cache lookup the crash handler uses. RIPs
+are collected first and resolved only after resuming, because `LookupFunction`
+takes the code cache lock.
+
+Sixteen samples across two runs all land in the same place:
+
+```
+StallProbe[0]: host A080D26E -> guest 819F4004
+StallProbe[1]: host A080D268 -> guest 819F3FF8
+StallProbe[5]: host A080D20B -> guest 819F3FC8
+...
+```
+
+`819F3FC8`..`819F4004` is the `bdnz` delay loop. The thread is **spinning, not
+blocked** - it makes no kernel calls at all while there. Its only caller is
+`819F4488`, a poll routine of the shape `do { delay(); } while (!ready)`.
+
+So the answer to "where does mode 1 stop" is: xam submits two frames through
+the system command buffer, then busy-waits for the GPU to acknowledge them,
+and the acknowledgement never comes.
+
+Both halves of that acknowledgement are stubbed in Xenia:
+
+- `VdGetSystemCommandBuffer` zeroes 0x94 bytes and returns the constants
+  `0xBEEF0000` and `0xBEEF0001`. Marked `kStub`.
+- `VdSetSystemCommandBufferGpuIdentifierAddress` has an empty body. Marked
+  `kStub`. Its own comment in Xenia reads `// r3 = 0x2B10(d3d?) + 8`.
+
+### What is NOT established
+
+That comment made `[device+2B10]` look like the polled word, and `819F4488`
+does read `[[r29+2B10]]` on one of its paths. Measuring killed it: with mode 1
+running, `[81D43684] = 40870D00` and `[device+2B10] = 00000000`. A null there
+would fault if it were dereferenced, and nothing faults - so either that path
+is not the one being taken (there is a flag test at `819F4488+34` on
+`[r29+2B3D]` bit 1 that skips the poll body), or `r29` is not this device.
+
+So: the thread spins in a poll, and the two exports that would let a poll of
+this kind finish are stubs. **Which** word it polls is unresolved, and the
+`2B10` reading is specifically disproven for this run. Pinning it down needs
+the guest registers at spin time; the probe currently captures `CONTEXT_CONTROL`
+only, so it has RIP and nothing else.
