@@ -842,6 +842,17 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   // for it at ghidra 81946AE0 / runtime 8193F8E0, so installing one is easy
   // once we know which object to install. Letting hud call XuiInit itself
   // does not help - its params are null too.
+  {
+    // What is the render DC actually bound to? If it holds no surface, the
+    // draw calls are no-ops by construction rather than by submission.
+    uint32_t dc = rd(render_obj + 12);
+    XELOGI("GuideBootstrap: DC {:08X} contents:", dc);
+    for (int i = 0; i < 6 && dc; ++i) {
+      XELOGI("  dc[{:02X}] = {:08X} {:08X} {:08X} {:08X}", i * 16,
+             rd(dc + i * 16), rd(dc + i * 16 + 4), rd(dc + i * 16 + 8),
+             rd(dc + i * 16 + 12));
+    }
+  }
   SetGuideDrawHook(guide_bs_hud_base_ + 0xAB28u, render_obj);
   XELOGI("GuideBootstrap: draw hook installed on title thread");
 }
