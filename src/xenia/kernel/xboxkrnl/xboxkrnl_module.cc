@@ -128,13 +128,15 @@ XboxkrnlModule::XboxkrnlModule(Emulator* emulator, KernelState* kernel_state)
   } else {
     uint32_t pKeCertMonitorData =
         memory_->SystemHeapAlloc(sizeof(X_KECERTMONITORDATA));
-    xe::store_and_swap<uint32_t>(memory_->TranslateVirtual(pKeCertMonitorData),
-                                 pKeCertMonitorData);
     auto lpKeCertMonitorData =
         memory_->TranslateVirtual<X_KECERTMONITORDATA*>(pKeCertMonitorData);
     std::memset(lpKeCertMonitorData, 0, sizeof(X_KECERTMONITORDATA));
     lpKeCertMonitorData->callback_fn =
         GenerateTrampoline("KeCertMonitorCallback", KeCertMonitorCallback);
+    // Same fix as KeDebugMonitorData above: the pointer has to go into the
+    // exported variable, not into the block it points at.
+    xe::store_and_swap<uint32_t>(memory_->TranslateVirtual(KeCertMonitorData),
+                                 pKeCertMonitorData);
   }
   export_resolver_->SetVariableMapping(
       "xboxkrnl.exe", ordinals::KeCertMonitorData, KeCertMonitorData);

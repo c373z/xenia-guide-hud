@@ -2407,3 +2407,28 @@ a path that only runs under it cannot be how the Guide normally starts. The
 chain is real as disassembly and was worth following to its end - it found a
 genuine emulator bug - but it is a debugging facility, not the Guide's startup
 path, and should not be pursued further on the assumption that it is.
+
+## The same bug in KeCertMonitorData, and verification of both
+
+`KeCertMonitorData` had the identical defect - allocate a block, write the
+block's address into the block, memset it away, never touch the exported
+variable - so `kernel_cert_monitor` was equally inert. Fixed the same way.
+
+Verified together:
+
+| | with both cvars off | with both on |
+|---|---|---|
+| dashboard framebuffer | `2EF6B4B7` | `2EF6B4B7` |
+| guest crashes | 0 | 0 |
+| `KeDebugMonitorCallback` invocations | unreachable | **21,411** |
+| `KeCertMonitorCallback` invocations | unreachable | **1** |
+
+The framebuffer hash is the same as the long-standing no-press control, so
+neither fix changes rendering. Both callbacks go from unreachable to actually
+used by the guest.
+
+These two are worth separating from the Guide work when it comes to
+upstreaming. They are not Guide-specific and not LLE-specific: any title that
+probes `KeDebugMonitorData` or `KeCertMonitorData` sees null today regardless
+of the cvar, and silently takes its "no monitor present" path. The fixes are
+four lines and independent of everything else on this branch.
