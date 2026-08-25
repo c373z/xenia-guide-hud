@@ -1166,3 +1166,40 @@ in the sense that everything today is built around them being inert. And
 `p0+0x08` should not be filled with a guessed value: unlike `0x500` and
 `0x5BE`, which were read out of the guest's own comparisons, nothing observed
 says what belongs there.
+
+## What 0x500 and 0x5BE actually are
+
+Earlier this file recorded, as an explicit guess, that `0x500` and `0x5BE` were
+"the right magnitude for Xenos register indices". That guess was wrong, and
+there is now evidence.
+
+Three functions in xam reference both constants: `819FE138`, the caller of
+`VdGetSystemCommandBuffer`; `81A0F3B0`; and `81A14110`. In `81A0F3B0` they are
+not compared but **loaded as arguments**:
+
+```
+81A0F46C  li  r4,0x5BE
+81A0F470  li  r3,0x500
+81A0F474  li  r7,0
+81A0F478  li  r6,2
+81A0F47C  bl  81D1009C          -> VdSetDisplayModeOverride
+```
+
+Xenia's own declaration is
+`VdSetDisplayModeOverride(width, height, refresh_rate, unk3, unk4)`, so
+`0x500` = 1280 and `0x5BE` = 1470 are a **display mode**, not register
+indices. (Xenia's export is itself a stub, so the parameter names are its
+reading rather than documented fact - but a width of 1280 is hard to argue
+with.)
+
+Which reinterprets the descriptor. `819FE138` compares `p0+0x30` against 1280
+and `p0+0x34` against 1470, so those two fields hold the display width and
+height, and the 56-byte block at `p0+0x20` that the guest memcpys out is a
+**video mode structure**, not command-buffer plumbing.
+
+That makes the earlier probe make more sense than it did at the time. Filling
+those two fields let the present complete because the guest could finally match
+the mode it was looking for - not because anything about command submission had
+been satisfied. It also means the two fields say nothing about where a command
+buffer lives, so they are no help with `p0+0x04` and `p0+0x08`, which remain
+the open question.
