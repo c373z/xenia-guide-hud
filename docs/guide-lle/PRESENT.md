@@ -94,3 +94,66 @@ this commit should be re-checked against the fixed output.
   render range (runtime `818FDF14`, `81901224`); neither has been traced to a
   caller yet. Do not assume clearing it is correct until that is known - it
   may be a legitimate "no device" flag whose real fix is upstream.
+
+## The render-target binding, located
+
+`device+32A0` is not a single field: it is an array of four render-target
+slots, with `device+32B0` the depth-stencil. No `stw` in xam ever targets
+`32A0` directly - three sites take its address with `addi rX,r31,0x32A0` and
+store through the pointer, which is why a naive store scan finds nothing.
+
+Function `819F4C00` makes the roles unambiguous. It resets the device:
+
+```
+r29 = &dev[32A0]; r30 = 0
+  if ([r29] != [dev+3F78]) call 819F31A8(dev, r30, 0)   ; per render target
+  r29 += 4; r30++; while (r30 < 4)
+if ([dev+32B0] != [dev+3F70]) call 819F38C8(dev, 0)     ; depth-stencil
+```
+
+Both callees confirm their own signatures rather than being inferred from
+that loop:
+
+- **`819F31A8` = `SetRenderTarget(device, index, surface)`**. It asserts
+  (`twi 31,r0,25`) when `index > 3`, which is the four-slot bound check, and
+  when `surface` is non-null it validates bit 30 of `[surface+0]` and asserts
+  if clear. It also asserts unless `[device+3118] == 0`; xam's device has 0
+  there, so that guard passes for us.
+- **`819F38C8` = `SetDepthStencilSurface(device, surface)`**, the single
+  writer of `32B0`.
+
+Neither appears in any vtable in `.rdata` or `.data`, so they are called
+statically inside xam - which means they are reachable from the host with a
+direct `processor->Execute`, the same way the bootstrap already calls xam
+functions.
+
+### What is still missing
+
+A surface object. Binding needs one that xam's D3D will accept, and the
+constraint is now known precisely: bit 30 of its first word must be set, and
+the present path reads a packed fetch constant from `[surface+24]`
+(`rlwinm r10,r9,14,18,31` and `rlwinm r9,r9,29,17,31` pull width and height
+out of it).
+
+Two candidate sources, neither tested:
+
+1. `VdSwap`'s second argument is described in Xenia's own signature as the
+   "frontbuffer Direct3D 9 texture header fetch" - a real descriptor for the
+   buffer already on screen.
+2. The title's current render target. Note this cannot be lifted by offset:
+   the device diff shows the title's device carries the same value patterns
+   at exactly `+80` from xam's (`title+3004..3014` == `xam+3084..3094`,
+   `title+3024..302C` == `xam+30A4..30AC`), so dash and xam link different
+   D3D builds with different `D3DDevice` layouts. `D3DSurface` may well be
+   compatible where `D3DDevice` is not, but that is an assumption, not a
+   finding.
+
+### One reading that is NOT established
+
+Sampling `32A0`/`32B0` on the *title's* device also returns zero. That is
+consistent with two different stories - that a render target is simply never
+bound on xam's device, or that nothing is bound on any device at `VdSwap`
+time because it falls between frames - and the differing struct layouts mean
+the title sample may not even be reading the same fields. Do not build on
+either reading until a surface has actually been bound and the result
+observed.

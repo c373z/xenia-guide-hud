@@ -918,6 +918,29 @@ void VdSwap_entry(
             XELOGI("Guide pre-draw: dev [32A0]={:08X} [32B0]={:08X}",
                    prd(pdev + 0x32A0u), prd(pdev + 0x32B0u));
           }
+          // The title's device (VdGlobalDevice, 801E6FC4) is a working device
+          // of the same class. Diffing it against xam's says which fields the
+          // system boot would have filled in, without having to guess at D3D
+          // internals. Only report offsets where they differ and at least one
+          // side is non-zero.
+          uint32_t tdev = prd(0x801E6FC4u);
+          uint32_t xdev = prd(0x801E6FC8u);
+          XELOGI("Device diff: title={:08X} xam={:08X}", tdev, xdev);
+          if (tdev && xdev) {
+            // The same value patterns show up in xam's device at exactly +80
+            // from the title's, so the two are different struct layouts (dash
+            // and xam link different D3D builds) and offsets are NOT portable
+            // between them. Dump the region around xam's render-target fields
+            // on both, side by side, rather than diffing.
+            for (uint32_t off = 0x3280; off <= 0x32C0; off += 4) {
+              XELOGI("  +{:04X}: title={:08X} xam={:08X}", off, prd(tdev + off),
+                     prd(xdev + off));
+            }
+            XELOGI("  -- title at xam_offset-0x80 --");
+            for (uint32_t off = 0x3200; off <= 0x3240; off += 4) {
+              XELOGI("  +{:04X}: title={:08X}", off, prd(tdev + off));
+            }
+          }
         }
       }
       if (::cvars::guide_force_real_present) {
