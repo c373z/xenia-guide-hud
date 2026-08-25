@@ -7,6 +7,8 @@
  ******************************************************************************
  */
 
+#include <unordered_map>
+
 #include "xenia/kernel/xobject.h"
 
 #include "xenia/base/byte_stream.h"
@@ -396,6 +398,13 @@ void XObject::SetNativePointer(uint32_t native_ptr, bool uninitialized) {
   guest_object_ptr_ = native_ptr;
 }
 
+// Guest-address -> handle for adopted guest timers. See the timer case below
+// for why these cannot be stashed in the object itself.
+static std::unordered_map<uint32_t, uint32_t>& GuestTimerTable() {
+  static std::unordered_map<uint32_t, uint32_t> table;
+  return table;
+}
+
 object_ref<XObject> XObject::GetNativeObject(KernelState* kernel_state,
                                              void* native_ptr,
                                              X_OBJECT_TYPES as_type,
@@ -458,8 +467,30 @@ object_ref<XObject> XObject::GetNativeObject(KernelState* kernel_state,
           result = nullptr;
           break;
         }
+        // Timers cannot use the StashHandle association below: the guest
+        // initialises header.wait_list itself and then walks and unlinks
+        // entries from it, so overwriting that field with a signature and a
+        // handle corrupts a list the guest is using. Keep the association in a
+        // side table keyed by guest address and leave the structure alone.
+        uint32_t guest_addr =
+            kernel_state->memory()->HostToGuestVirtual(native_ptr);
+        auto& table = GuestTimerTable();
+        auto it = table.find(guest_addr);
+        if (it != table.end()) {
+          auto existing = kernel_state->object_table()
+                              ->LookupObject<XObject>(it->second, true);
+          if (existing) {
+            result = existing.release();
+            break;
+          }
+          table.erase(it);
+        }
         auto timer = new XTimer(kernel_state);
         timer->InitializeNative(native_ptr, header);
+        table[guest_addr] = timer->handle();
+        // Retain: the table holds a reference for the lifetime of the guest
+        // object, and the caller gets its own via object_ref below.
+        timer->Retain();
         result = timer;
       } break;
       case X_OBJECT_TYPES::ProcessObject:
@@ -493,7 +524,8 @@ object_ref<XObject> XObject::GetNativeObject(KernelState* kernel_state,
     }
     // Stash pointer in struct.
     // FIXME: This assumes the object contains a dispatch header (some don't!)
-    if (result) {
+    if (result && type != X_OBJECT_TYPES::TimerNotificationObject &&
+        type != X_OBJECT_TYPES::TimerSynchronizationObject) {
       StashHandle(header, result->handle());
     }
   }
