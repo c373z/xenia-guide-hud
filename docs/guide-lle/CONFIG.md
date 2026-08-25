@@ -47,3 +47,47 @@ do not. The two failure signatures worth recognising:
 
 Note that this reproduces the *software* path only. It does not put pixels on
 screen - see NEXT.md for why, and for what is still unknown.
+
+## The deepest-reach configuration
+
+The six settings above are the *stable* setup: the Guide's software runs, the
+scene is created, and the dashboard keeps rendering. Everything below is a
+second, less stable configuration that gets the present to complete. Keep them
+separate - this one stops the dashboard after one frame.
+
+On top of the six above, all default off:
+
+| Setting | Why |
+|---|---|
+| `guide_create_primary_device` | Call xam's mode-1 device creator `8178E9F0` instead of `8178F748`. Mode 1 owns the GPU and binds a render target; mode 2 does neither. |
+| `guide_bootstrap_before_device` | Queue the bootstrap before that call. The mode-1 creator never returns, so in the normal order the queue call is dead code and the Guide never starts at all. |
+| `guide_use_bound_device` | Point the present path at the device that has a render target. Under mode 1 two xam devices exist and only one is bound. Applied per frame to `[wrapper+12]`, because doing it once at bootstrap loses a race. |
+| `guide_clear_null_render` | Clear `[xui_ctx+1C]` so the DC is built with `[dc+134] = 0`. Otherwise `XuiRenderPresent` returns S_OK without presenting. |
+| `guide_fake_front_buffer` | Clone the bound colour surface into `[device+3F74]`. Nothing ever allocates a front buffer for xam's device, and the present dereferences it. |
+| `guide_syscmdbuf_fields` | Fill `p0+0x30 = 0x500` and `p0+0x34 = 0x5BE` in `VdGetSystemCommandBuffer`'s descriptor - the display mode the guest checks for. |
+
+### What it looks like
+
+```
+GuideBootstrap: render host -> 00000000, XUI ctx <ptr>, provider 81D22A54
+GuideBootstrap: scene creator 913EB940 -> 00000000, scene=00010000
+Guide: front buffer [dev <ptr> +3F74] = clone <ptr> of RT0 <ptr>
+Guide composite draw #1 -> 00000000; draw dc=<ptr> [11C]=00000000
+                           [134]=00000000 [1CC]=<ptr>
+```
+
+`[134]=00000000` is the part that matters: Present did not short-circuit. Zero
+guest crashes.
+
+### What it does not do
+
+- **No pixels.** A capture is byte-identical to `work/noguideshot.ps1`.
+- **Exactly one draw.** The title thread stops afterwards, so the dashboard
+  freezes. This is not a configuration to leave enabled.
+
+Three of these six - `use_bound_device`, `fake_front_buffer`,
+`syscmdbuf_fields` - hand the guest something the system would normally have
+built for itself. They are probes that establish what is missing, not fixes.
+The real gap is in PRESENT.md: `VdGetSystemCommandBuffer` returns a descriptor
+with no command buffer in it, and `VdSwap` throws away the one the guest hands
+back.
