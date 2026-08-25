@@ -2146,3 +2146,43 @@ Those stand. The claim that should not be repeated without better evidence is
 the architectural one - that these particular functions are *the* interface the
 system boot drives. They may equally be reached through a function pointer from
 somewhere that itself never runs.
+
+## Sharpening the test: called, dispatched, or neither
+
+The previous section was right that "no direct caller" is common - 4,494 of
+18,301 functions - and wrong to leave it there, because the obvious innocent
+explanation is testable. A function reached through a vtable or a function
+pointer must have its address **stored somewhere as data**. Splitting the 4,494
+on that:
+
+```
+functions:                                18,301
+never a direct bl target:                  4,494
+  ...address IS stored as data:            2,294   <- vtable / fn-pointer dispatch
+  ...and not stored anywhere either:       2,200   <- unreachable from inside xam
+```
+
+Half of them are ordinary C++ indirect dispatch, exactly as suspected. The
+other half are reachable by no static means at all: nothing calls them and
+nothing holds their address.
+
+The three in question fall in the second set:
+
+| function | never called | never stored |
+|---|---|---|
+| `81750FA8` | yes | **yes** |
+| `81751428` | yes | **yes** |
+| `8178E9F0` | yes | **yes** |
+| `817915A0` | no - directly called | - |
+| `81792880` | no - directly called | - |
+
+So the entry-point reading is restored, now on evidence rather than on a
+property shared by a quarter of the module: `81750FA8`, `81751428` and
+`8178E9F0` cannot be reached from within xam by any static path. Something
+outside the module calls them, which is what an entry point is.
+
+Two honest limits. 2,200 functions share that property, so it identifies a
+class rather than singling these three out - much of that class is likely dead
+code. And an address computed at runtime rather than stored would not show up
+here, though for a function that is also never directly called that is a
+stretch.
