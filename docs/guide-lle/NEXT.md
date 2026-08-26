@@ -790,3 +790,60 @@ portable way to find it.
 The Guide itself behaves identically on all three: same scene
 (`scnInfoUpsellLive`), same element (`labelHeading`), same handles, no crash,
 and zero draws. Nothing about the Guide's behaviour depends on the title.
+
+---
+
+## Where the draws actually stop (localised)
+
+The draw emitter `819F5D18` has exactly **one** caller, `819F7F20`, which in
+turn has **eight** callers. Measured with breakpoints (armed at the button
+press - see the tooling note below):
+
+* The Guide reaches the emitter only via `819FEB78`, and that call site passes
+  a **hardcoded literal zero** mask:
+
+        81a05e44  addi r8,r0,0
+        81a05e48  addi r7,r0,0
+        81a05e50  addi r5,r0,0
+        81a05e58  addi r4,r0,0     <- the mask
+        81a05e64  bl   819F7F20
+
+  Confirmed live: `819F7F20` and `819F5D18` are both entered with `r4 = 0`.
+  This is a no-op call **by design**, not a failure.
+
+* The call sites that pass a real, computed mask - `8191B250`, `81A0CFA0`,
+  `81793E10`, `81792928` - are **never entered**. Zero hits, full-length
+  unperturbed run.
+
+So nothing in the scene generates draw calls at all. The emitter is not
+failing, the device is not blocking it, and the ring is irrelevant: the render
+walk never asks for anything to be drawn.
+
+### Red herrings this retires
+
+* the missing ring buffer on the mode-2 device
+* the command-buffer capture and `guide_second_context`
+* the whole "second rendering context" line
+
+All of these sit downstream of a draw stream that was never going to have
+content. They were worth building - the crashes they fixed were real - but they
+could not have produced pixels.
+
+### What this points at
+
+`XuiControlGetVisual` on `labelHeading` returns `80300017` with a null visual.
+That was set aside earlier as possibly a type mismatch; combined with "no draw
+path is ever entered", the simplest consistent explanation is that the element
+tree has geometry but nothing drawable attached, so the walk finds nothing to
+emit.
+
+Open question, now narrow: why do the loaded elements have no visuals, when the
+scene, its registered classes and its layout are all present and correct?
+
+### Tooling note that cost three runs
+
+Breakpoints must be armed **after** the target has been JIT-translated.
+`InstallGuideStoreTraces` was moved to xam-load time, which silently made every
+probe inert - two "no hits" results were tooling artifacts, not evidence. Adding
+a second install site did not help either, because the vector is static and the
+early call claimed it. It is now armed only at the button press.

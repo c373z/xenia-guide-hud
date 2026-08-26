@@ -1111,6 +1111,8 @@ X_STATUS Emulator::CreateZarchivePackage(
   return X_STATUS_SUCCESS;
 }
 
+static void InstallGuideStoreTraces(xe::kernel::KernelState* ks);
+
 void Emulator::on_guide_button_pressed(uint8_t user_index) {
   XELOGI("Guide button: pressed (user {}), handler={:08X} buf={:08X} "
          "out_sz={:08X}",
@@ -1299,6 +1301,10 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                   }).detach();
                   XELOGI("ThreadProbe: armed for {}s", pdelay);
                 }
+                // Arm again here: breakpoints set before the target is
+                // JIT-translated do not take, so the xam-load call is
+                // inert for anything not yet executed.
+                InstallGuideStoreTraces(ks);
                 static std::unique_ptr<cpu::Breakpoint> pump_bp;
                 if (cvars::guide_trace_pump && !pump_bp) {
                   pump_bp = std::make_unique<cpu::Breakpoint>(
@@ -2897,7 +2903,6 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
       return xam_result;
     }
     XELOGI("LLE xam: loaded at {:08X}", xam_module->hmodule_ptr());
-    InstallGuideStoreTraces(kernel_state_.get());
     if (cvars::guide_patch_cmdbuf_reset) {
       // 81A01464  stw r30,0x2B4C(r31)  ; zeroes the cmdbuf write cursor
       const uint32_t kRAddr = 0x81A01464u;
