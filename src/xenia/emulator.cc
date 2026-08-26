@@ -3218,6 +3218,38 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
       }
     }
     ReportXamTextPopulation(memory(), "after xam load");
+    // These addresses hold correct code here and read back as zero later in
+    // the run, then are correct again by 30s. Poll them so the transition is
+    // timestamped against the surrounding log rather than inferred.
+    {
+      Memory* wmem = memory();
+      std::thread([wmem]() {
+        xe::threading::set_name("XamTextWatch");
+        const uint32_t addrs[] = {0x8186E528u, 0x818936B8u, 0x81747D70u,
+                                  0x818AE538u};
+        uint32_t last[4] = {};
+        bool primed = false;
+        for (int iter = 0; iter < 120000; ++iter) {
+          for (int i = 0; i < 4; ++i) {
+            auto* hp = wmem->LookupHeap(addrs[i]);
+            if (!hp || hp->QueryRangeAccess(addrs[i], addrs[i] + 3) ==
+                           xe::memory::PageAccess::kNoAccess) {
+              continue;
+            }
+            uint32_t v = xe::load_and_swap<uint32_t>(
+                wmem->TranslateVirtual(addrs[i]));
+            if (primed && v != last[i]) {
+              XELOGE("XamTextWatch: {:08X} changed {:08X} -> {:08X}",
+                     addrs[i], last[i], v);
+            }
+            last[i] = v;
+          }
+          primed = true;
+          std::this_thread::sleep_for(std::chrono::microseconds(500));
+        }
+      }).detach();
+      XELOGI("XamTextWatch: polling 4 xam .text addresses");
+    }
     if (cvars::guide_patch_null_render) {
       // 818FDEF0  lwz r11,0x1C(r27)   ; XUI context's null-render flag
       // 818FDF14  stw r11,0x134(r30)  ; over the device context's copy
@@ -3273,6 +3305,10 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
   }
   XELOGI("Loading module {}", module_path);
   auto module = kernel_state_->LoadUserModule(module_path);
+  // xam code that was correct right after xam loaded reads back as zero later
+  // in the run. Bracket the title load, which is the largest thing that
+  // happens in between.
+  ReportXamTextPopulation(memory(), "after title load");
   if (!module) {
     XELOGE("Failed to load user module {}", path);
     return X_STATUS_NOT_FOUND;

@@ -7,6 +7,7 @@
  ******************************************************************************
  */
 
+#include "xenia/cpu/module.h"
 #include "xenia/cpu/ppc/ppc_scanner.h"
 
 #include "xenia/base/logging.h"
@@ -99,11 +100,25 @@ bool PPCScanner::Scan(GuestFunction* function, FunctionDebugInfo* debug_info) {
             }
           }
         }
+        // Re-read immediately. If the value comes back non-zero a moment
+        // later, the zero was transient and the interesting question is what
+        // writes it; if it stays zero, the memory really is zero here and the
+        // question is instead why this address was ever taken for a function
+        // start. Also report which module claims the address and the host
+        // pointer, so a wrong translation can be told from wrong contents.
+        void* host_ptr = memory->TranslateVirtual(start_address);
+        uint32_t reread[3] = {};
+        for (int r = 0; r < 3; ++r) {
+          reread[r] = xe::load_and_swap<uint32_t>(host_ptr);
+        }
         XELOGE(
             "PPCScanner: {:08X} begins with 0x00000000; not a function "
-            "(heap={} access={}) window[-16..+28]: {}",
-            start_address, zheap ? "yes" : "no", static_cast<int>(zaccess),
-            around);
+            "(module={} heap={} access={} host={}) reread {:08X} {:08X} "
+            "{:08X} window[-16..+28]: {}",
+            start_address,
+            function->module() ? function->module()->name() : "?",
+            zheap ? "yes" : "no", static_cast<int>(zaccess), host_ptr,
+            reread[0], reread[1], reread[2], around);
         return false;
       }
       // Don't include the 0's.

@@ -1629,3 +1629,48 @@ This particular question has now produced three plausible-and-wrong answers
 than another inference: record the value at one of these addresses on a tight
 timer from a host thread and log the transition, which pins *when* it goes
 zero relative to the surrounding log lines.
+
+### Measured: xam .text goes zero and comes back, identically
+
+A polling watcher (`XamTextWatch`, started right after xam loads, samples four
+known-affected addresses every 0.5ms) pins the behaviour down. Sample run:
+
+    5435  XamTextWatch: 8186E528 changed 7D8802A6 -> 00000000
+    5436  XamTextWatch: 81747D70 changed 7D8802A6 -> 00000000
+    5444  PPCScanner: 818AE538 begins with 0x00000000; not a function
+    5555  XamTextWatch: 818936B8 changed 7D8802A6 -> 00000000
+    5556  XamTextWatch: 818AE538 changed 7D8802A6 -> 00000000
+    5863  XamTextWatch: 81747D70 changed 00000000 -> 7D8802A6
+    5913  XamTextWatch: 8186E528 changed 00000000 -> 7D8802A6
+    5914  XamTextWatch: 818936B8 changed 00000000 -> 7D8802A6
+
+Facts, all measured:
+
+- The memory really does read zero, stably (three consecutive re-reads through
+  a verified-correct host pointer, `module=xam`), so it is not a torn or
+  racy read.
+- It **comes back to the identical original value** (`7D8802A6`, the `mfspr
+  r12,8` these functions all start with).
+- Four addresses spread across ~800KB flip within a few log lines of each
+  other and restore together. That is region-wide, not per-function writes.
+- The scanner trips inside exactly this window - which is the whole bug.
+
+Because the contents return unchanged, the likely shape is that reads
+transiently resolve to a different (zero) mapping rather than the image being
+overwritten and rewritten - but that is inference, not measurement.
+
+Ruled out by experiment, not reasoning:
+
+- **hud.xex load** - happens at line ~16888, long after the window.
+- **Title (`dash.xex`) load** - a dump taken immediately after it shows the
+  addresses still correct.
+- **`lle_xam_heap0_alias`** - the project's heap-aliasing hack. Running with
+  `--lle_xam_heap0_alias=false` reproduces the transitions unchanged.
+- The surrounding log during the window is nothing but `DemandFunction` and
+  `Invalid instruction` lines, i.e. heavy JIT translation and no other event.
+
+Next: find what remaps or rewrites that range. Since the window is bounded now,
+a page-protection trap (make the range read-only and catch the writer) or
+logging every `Memory`/heap operation that touches `81700000-81D60000` during
+those lines would name it. Prefer that over another hypothesis - this question
+has already produced three wrong ones.
