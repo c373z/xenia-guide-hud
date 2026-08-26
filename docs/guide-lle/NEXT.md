@@ -1537,3 +1537,48 @@ an incompletely loaded image, rather than separate problems.
 Current remaining crash is `x64::ResolveFunction` dereferencing the null it
 gets back when translation legitimately refuses (it now logs the target first,
 but still cannot satisfy the call).
+
+### Answered: it is a race, not missing pages
+
+Of the two readings above, (2) is correct. Two measurements settle it.
+
+**Measurement 1 - how much of xam is actually zero.** A one-shot scan of
+xam's `.text` range right after it loads (now logged as `xam .text
+population`) reports the same thing every run:
+
+    47 of 1520 mapped pages are entirely zero (3.1%);
+    longest zero run 35 pages at 81D3D000; first 81D14000 last 81D5F000
+
+Those zero pages are all at the top of the range, `81D14000-81D5F000` - the
+kernel import thunk and globals area (`81D0FF3C` KeWaitForMultipleObjects,
+`81D424A8`, `81D4F610`, `81D6D508`). Zeros there are ordinary uninitialised
+data, not a load failure. The `.text` code region is fully populated.
+
+**Measurement 2 - the failing address moves.** The address the scanner finds
+zero is different every run:
+
+    8186E528, 81747D70, 818936B8, 818ACC98, 818AE538, 8181AB70
+
+**None of them is inside the zero range from measurement 1.** So each is
+populated by the time xam has finished loading, and the zero read is
+transient: functions are being demand-scanned on guest threads while the image
+is still being written.
+
+That also explains the intermittency that has dogged this whole
+investigation - which crash fires, and whether a run survives at all, depends
+on which function happens to be scanned inside the window.
+
+So the chain in full: guest threads scan xam before it is fully populated ->
+a function's first instruction reads as zero -> `PPCScanner` backs up and
+records `end = start - 4` -> `PPCHIRBuilder`'s unsigned count underflows ->
+a gigabyte-sized memset faults in `memcpy` -> and, before the fixes above,
+that fault happened while the global critical region was held, leaving the
+emulator wedged behind a modal dialog twenty seconds later.
+
+The fixes so far make every link in that chain fail loudly instead of
+silently, which is why boot now reaches 11-15k lines instead of ~5.7k. They do
+not remove the race itself.
+
+Next: find why guest threads execute xam code before the module load has
+finished populating it. That is the actual defect; everything else here is a
+symptom of it.

@@ -76,8 +76,34 @@ bool PPCScanner::Scan(GuestFunction* function, FunctionDebugInfo* debug_info) {
         // (end - start) / 4 + 1: that underflows to ~2^30 and the memsets
         // sized from it run over gigabytes, faulting inside memcpy far from
         // the actual cause. Refuse the scan instead.
-        XELOGE("PPCScanner: {:08X} begins with 0x00000000; not a function",
-               start_address);
+        // Is the page simply never populated, or is the scan running ahead
+        // of it being written? Dump the neighbourhood and the page state:
+        // an all-zero window means nothing was ever loaded there, whereas
+        // isolated zeros would point somewhere else entirely.
+        auto* zheap = memory->LookupHeap(start_address);
+        auto zaccess = zheap ? zheap->QueryRangeAccess(start_address,
+                                                       start_address + 3)
+                             : xe::memory::PageAccess::kNoAccess;
+        std::string around;
+        if (zheap && zaccess != xe::memory::PageAccess::kNoAccess) {
+          for (int k = -4; k < 8; ++k) {
+            uint32_t a2 = start_address + k * 4;
+            auto* nh = memory->LookupHeap(a2);
+            if (nh && nh->QueryRangeAccess(a2, a2 + 3) !=
+                          xe::memory::PageAccess::kNoAccess) {
+              around += fmt::format(
+                  "{:08X} ",
+                  xe::load_and_swap<uint32_t>(memory->TranslateVirtual(a2)));
+            } else {
+              around += "........ ";
+            }
+          }
+        }
+        XELOGE(
+            "PPCScanner: {:08X} begins with 0x00000000; not a function "
+            "(heap={} access={}) window[-16..+28]: {}",
+            start_address, zheap ? "yes" : "no", static_cast<int>(zaccess),
+            around);
         return false;
       }
       // Don't include the 0's.

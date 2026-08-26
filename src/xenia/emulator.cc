@@ -3149,6 +3149,50 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                kRAddr, rcur, kROrig);
       }
     }
+    {
+      // xam functions have been found reading back as 0x00000000 from guest
+      // memory while the image on disk holds ordinary code there, which
+      // corrupts function bounds and crashes the translator. Measure how much
+      // of xam's .text is actually populated, once, right after it loads.
+      const uint32_t kTextStart = 0x81770000u;
+      const uint32_t kTextEnd = 0x81D60000u;
+      uint32_t zero_pages = 0, total_pages = 0, run = 0, best_run = 0;
+      uint32_t best_start = 0, first_zero = 0, last_zero = 0;
+      for (uint32_t pg = kTextStart; pg < kTextEnd; pg += 0x1000) {
+        auto* hp = memory()->LookupHeap(pg);
+        if (!hp || hp->QueryRangeAccess(pg, pg + 0xFFF) ==
+                       xe::memory::PageAccess::kNoAccess) {
+          continue;
+        }
+        ++total_pages;
+        const uint32_t* w = memory()->TranslateVirtual<const uint32_t*>(pg);
+        bool all_zero = true;
+        for (uint32_t i = 0; i < 0x1000 / 4; ++i) {
+          if (w[i]) {
+            all_zero = false;
+            break;
+          }
+        }
+        if (all_zero) {
+          ++zero_pages;
+          if (!first_zero) first_zero = pg;
+          last_zero = pg;
+          if (++run > best_run) {
+            best_run = run;
+            best_start = pg - (run - 1) * 0x1000;
+          }
+        } else {
+          run = 0;
+        }
+      }
+      XELOGI(
+          "xam .text population: {} of {} mapped pages are entirely zero "
+          "({:.1f}%); longest zero run {} pages at {:08X}; first {:08X} "
+          "last {:08X}",
+          zero_pages, total_pages,
+          total_pages ? 100.0 * zero_pages / total_pages : 0.0, best_run,
+          best_start, first_zero, last_zero);
+    }
     if (cvars::guide_patch_null_render) {
       // 818FDEF0  lwz r11,0x1C(r27)   ; XUI context's null-render flag
       // 818FDF14  stw r11,0x134(r30)  ; over the device context's copy
