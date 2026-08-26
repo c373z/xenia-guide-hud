@@ -621,3 +621,20 @@ context and composite the result - an emulator feature, not a bootstrap fix.
 What is genuinely finished: the hosting problem. xam accepts the press, spawns
 its thread, and drives its own Guide bring-up, with the title still rendering
 and no crash until the render target is needed.
+
+### Ruled out: doing xam's bring-up before the title owns the ring
+
+If the mode-1 conflict were an ordering problem, running xam's bring-up first
+would fix it - the title's own `VdInitializeRingBuffer` would then take the ring
+back naturally, which is the order on hardware. Tested by pressing at 12s, the
+earliest the handler can function:
+
+    GuideRing: before creator ptr=1FAE2000 size=00100000   (already the title's)
+    GuideRing: CHANGED after 1s ptr 1FAE2000->1D686000
+
+The title's ring is already up. There is no window, and there cannot be one:
+the Guide button handler needs `hud.xex` loaded and registered, which only
+happens once the title is running, and the title initialises its ring almost
+immediately on boot.
+
+So the conflict is not ordering, not configuration, and not a missing field.
