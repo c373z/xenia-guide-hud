@@ -82,6 +82,10 @@ void PPCHIRBuilder::Reset() {
   HIRBuilder::Reset();
 }
 
+// A single guest function larger than this is not plausible; xex sections are
+// smaller than this in their entirety. Used only to catch corrupt bounds.
+static constexpr uint32_t kMaxFunctionSpan = 0x400000;
+
 bool PPCHIRBuilder::Emit(GuestFunction* function, uint32_t flags) {
   SCOPE_profile_cpu_f("cpu");
 
@@ -93,6 +97,20 @@ bool PPCHIRBuilder::Emit(GuestFunction* function, uint32_t flags) {
   // precompile twice i've also seen ones with a start and end address that are
   // the same...
   assert_true(function_->address() <= function_->end_address());
+  // That assert is compiled out in release, and the subtraction below is
+  // unsigned: an end address before the start underflows to a count near
+  // 2^30, so the memsets a few lines down run over gigabytes and fault deep
+  // inside memcpy with no indication of where it came from. Reject the
+  // function instead - Emit returning false is already a supported outcome.
+  if (function_->end_address() < function_->address() ||
+      function_->end_address() - function_->address() > kMaxFunctionSpan) {
+    XELOGE(
+        "PPCHIRBuilder: refusing to translate {} {:08X}: end address {:08X} "
+        "is before the start or implausibly far past it",
+        function_->module() ? function_->module()->name() : "?",
+        function_->address(), function_->end_address());
+    return false;
+  }
   instr_count_ = (function_->end_address() - function_->address()) / 4 + 1;
 
   with_debug_info_ = (flags & EMIT_DEBUG_COMMENTS) == EMIT_DEBUG_COMMENTS;

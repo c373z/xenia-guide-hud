@@ -720,6 +720,15 @@ uint64_t ResolveFunction(void* raw_context, uint64_t target_address) {
   auto fn = thread_state->processor()->ResolveFunction(
       static_cast<uint32_t>(target_address));
   assert_not_null(fn);
+  if (!fn) {
+    // assert_not_null is compiled out in release, and the dereference below
+    // then faults with nothing in the log to say which call failed. Resolution
+    // legitimately fails when a function has corrupt bounds and the translator
+    // refuses it, so name the target before going down.
+    XELOGE("ResolveFunction: no function for guest {:08X} - the guest call to "
+           "it cannot be satisfied",
+           static_cast<uint32_t>(target_address));
+  }
   auto x64_fn = static_cast<X64Function*>(fn);
   uint64_t addr = reinterpret_cast<uint64_t>(x64_fn->machine_code());
 

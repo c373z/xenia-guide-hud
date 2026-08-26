@@ -1434,3 +1434,57 @@ of 12/16 silently produced garbage.
 
 Progress overall: boot went from ~5.7k log lines (hard wedge) to 11-15k with
 runs that sometimes complete cleanly.
+
+### The host-side crash: an unsigned underflow in the JIT
+
+Logging a backtrace on `ExceptionCallback`'s pass-through path (host faults
+previously produced **no log line at all**) gave the chain behind
+`VCRUNTIME140.dll+1E78B`:
+
+    guest JIT -> x64::ResolveFunction -> Processor::ResolveFunction
+              -> Processor::DemandFunction -> PPCTranslator::Translate
+              -> PPCHIRBuilder::Emit -> memcpy   [fault_addr 15CFA138000]
+
+`ppc_hir_builder.cc:96` computes
+
+```cpp
+instr_count_ = (function_->end_address() - function_->address()) / 4 + 1;
+```
+
+with **unsigned** operands. Upstream already suspected this - the line above it
+is `assert_true(address <= end_address)` with a comment "chrispy: i've seen
+this one happen, not sure why" - but that assert is compiled out in release.
+An end address before the start underflows to a count near 2^30, the two
+`memset`s below then run over gigabytes, and it faults in `memcpy` with a
+fault address around 1.5 TB. Nothing in the log said where it came from.
+
+Guarding it names the offending function immediately, and it is the same one
+every run:
+
+    PPCHIRBuilder: refusing to translate xam 818936B8:
+      end address 818936B4 is before the start
+    ResolveFunction: no function for guest 818936B8 - the guest call to it
+      cannot be satisfied
+
+So a real xam function is registered with `end_address = address - 4`.
+
+Three separate release-only landmines were involved, all the same shape - an
+`assert_*` that documents an invariant, compiled out, followed by code that
+relies on it:
+
+| Site | Compiled-out assert | Consequence in release |
+|---|---|---|
+| `XObject::GetNativeObject` | `assert_not_null(native_ptr)` | faults under the global lock, wedges the emulator |
+| `PPCHIRBuilder::Emit` | `assert_true(address <= end_address)` | unsigned underflow, gigabyte memset |
+| `x64::ResolveFunction` | `assert_not_null(fn)` | null deref with nothing logged |
+
+### Where boot stands
+
+With `--break_on_debugbreak=false` (guest asserts no longer fatal) runs now
+reach 8k-15k log lines, and some complete with no crash at all, against ~5.7k
+when hard-wedged. Crashes are intermittent, so **always sample 2-3 runs**.
+
+Next: find why xam function `818936B8` is registered with an end address
+before its start. That is function discovery - `.pdata` parsing or the
+XexModule function table - not the translator. Fixing it should remove the
+last reproducible crash on this path.

@@ -2389,7 +2389,36 @@ bool Emulator::ExceptionCallback(Exception* ex) {
   }
 
   if (!(ex->pc() >= code_base && ex->pc() < code_end)) {
-    // Didn't occur in guest code. Let it pass.
+    // Didn't occur in guest code. Let it pass - but say so first. A host-side
+    // fault otherwise produces no log line at all: the only trace is Xenia's
+    // modal "Unhandled Exception" dialog, which reports a bare module+offset
+    // and no caller. Raw addresses are logged rather than resolved here
+    // because resolving would take the loader lock, which is not safe from an
+    // exception handler. Feed exe-relative frames to tools/sym.ps1 offline.
+    static std::atomic<uint32_t> host_faults{0};
+    if (++host_faults <= 4) {
+      void* frames[32] = {};
+      USHORT n = RtlCaptureStackBackTrace(0, 32, frames, nullptr);
+      uint64_t exe_base =
+          reinterpret_cast<uint64_t>(GetModuleHandleW(nullptr));
+      std::string bt;
+      for (USHORT i = 0; i < n; ++i) {
+        uint64_t a = reinterpret_cast<uint64_t>(frames[i]);
+        if (a >= exe_base && a < exe_base + 0x2000000ull) {
+          bt += fmt::format("exe+{:X} ", a - exe_base);
+        } else {
+          bt += fmt::format("{:X} ", a);
+        }
+      }
+      XELOGE("HOST FAULT: pc={:X} (exe+{:X}) fault_addr={:X} exe_base={:X}",
+             ex->pc(),
+             ex->pc() >= exe_base ? ex->pc() - exe_base : 0ull,
+             ex->code() == Exception::Code::kAccessViolation
+                 ? ex->fault_address()
+                 : 0,
+             exe_base);
+      XELOGE("HOST FAULT: frames: {}", bt);
+    }
     return false;
   }
 
