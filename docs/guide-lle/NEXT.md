@@ -435,3 +435,189 @@ to `[dev+0x6340]`, 3072 to `[dev+0x6348]`) and is one of the 7 callers of
 `[3F74]` all zero - its call to the begin routine is behind a branch it does not
 take on a half-built device. Third bring-up routine to no-op this way, after
 `81A0F858` and (crashing instead) `81A0FE48`.
+
+---
+
+## A different model: let xam host the Guide (from Aurora)
+
+Aurora, a custom dashboard that successfully shows the real Guide, imports 292
+xam functions including 86 XUI ones - and **not one render entry point**. No
+`XuiInit` (0x340), no `XuiRenderCreateDC` (0x34C), no `XuiRenderBegin` /
+`End` / `Present` (0x34B / 0x34F / 0x353). It imports only the scene, element,
+class and message ordinals (0x343-0x35F). It builds UI trees and never drives a
+render loop.
+
+What it does import is **`XamInputSendXenonButtonPress`, ordinal 0x506**. It
+synthesises the Guide button press through xam's own API and lets xam host and
+render the Guide.
+
+That is the opposite of this bootstrap, which loads hud itself, calls its XUI
+entry points and drives its draw loop from `VdSwap`. It also matches the one
+lesson that held all through the render-side work: going *through* xam's own
+paths works, injecting state from outside them does not.
+
+### What works today
+
+* Real xam does export 0x506; it resolves to runtime **817C4CD8**.
+* That export is a thin wrapper taking ONE argument:
+  `or r4,r3,r3 ; lwz r3,[81D4F610] ; b 817C2090` - the button code goes in the
+  first argument and the global at `81D4F610` is its context.
+* That context is null under this bootstrap, so the worker faults at `+0x10`.
+  **`817C2B68()`** takes no arguments, asserts the global is still 0, allocates
+  a 36-byte context and stores it. Calling it first fixes that.
+* With both: `xam input ctx init -> [81D4F610] = <ptr>` then
+  `xam button API(0, 400) -> 00000001`. **Accepted, no crash, and the title
+  keeps rendering** (swaps continue at the normal 3000 per 200).
+
+`guide_xam_button_api` takes the button code (0x400 = Guide) and does both steps.
+
+### What does not happen yet
+
+Nothing consumes the press. The draw rate stays flat at exactly 3000 per 200
+swaps, no Guide appears, and no extra draws are dispatched. On hardware the
+press is queued and xam's system UI thread picks it up. Earlier work already
+found that thread is a problem here - the callback registry at `[815F044C]`
+resolves to a null object ("registration is a no-op") and the recorded UI
+thread at `81D42520` does not match the caller.
+
+So the next question is what consumes a queued Xenon button press, rather than
+anything render-side. This line is worth more than the emitter work: it does not
+crash, does not disturb the title, and is the architecture the Guide is actually
+built around.
+
+### The consumer side: a complete causal chain
+
+`XamInputSendXenonButtonPress` is consumed. xam spawns a Guide thread **in
+response to the press** (not from the context initialiser - an earlier note
+here claiming an ordering problem was wrong and the wait added for it has been
+removed). That thread then blocks, and the whole chain is now known:
+
+1. The thread runs a short setup, executes the table loop in `81BF8550`
+   **exactly once** (proved with a counting breakpoint, not inferred from the
+   absence of log lines), and that function returns normally.
+2. It then blocks in `KeWaitForSingleObject(81E05528, 3, 1, 0, NULL)` - an
+   infinite wait - called from `81BF8EC8`, returning to `81BF8ECC`. Confirmed
+   twice over: an all-thread probe reports `lr=81BF8ECC r3=81E05528`, and the
+   disassembly forms exactly that object in r29 at that call.
+3. Only four functions reference the event `81E05528`. The signaller is
+   `KeSetEvent(81E05528, 1, 0)` at `81BF913C` inside **`81BF90E8`**, and it is
+   conditional - a `beq` at `81BF9130` skips it unless a check passes.
+4. `81BF90E8` has exactly one caller: `81C0A2C0`.
+5. `81C0A2C0` is never called directly. Its address is formed in a register at
+   `81BF97CC` and passed as `r4` to a **virtual method, vtable slot 7**, of the
+   object at `[r11+0x44]`:
+
+        lwz  r3,68(r11)      ; the registrar object
+        addi r4,r11,-23872   ; = 81C0A2C0, the callback
+        lwz  r10,0(r3)       ; its vtable
+        lwz  r9,28(r10)      ; slot 7
+        bctrl                ; r3->slot7(r3, callback)
+
+So the Guide thread waits on an event that is only ever signalled by a callback,
+and that callback only fires if the registration through that vtable slot
+actually works. Earlier work already found the callback registry at
+`[815F044C]` resolving to a null object - "registration is a no-op". These are
+very likely the same failure.
+
+**This is the most tractable target found so far.** It is a closed set of five
+functions and one event, with no rendering involved, and it does not crash or
+disturb the title. Next: identify the registrar object at `[r11+0x44]` and what
+its vtable slot 7 does under this bootstrap.
+
+### CORRECTION: the Guide thread is not stuck
+
+The section above traced a chain ending in "the Guide thread waits forever
+because `[obj+0x130]` is 0 and the `KeSetEvent` never happens". **That is
+wrong.** Measured directly with a breakpoint on the `KeSetEvent` call site
+`81BF913C`:
+
+    GuidePump hit #1 thread 01000018 r3=81E05528 r4=00000001 lr=81BF9118
+
+The event **is** signalled, on the Audio Worker thread. So the gate passes, the
+counter is not zero, and the wake path works end to end.
+
+The thread being observed inside `KeWaitForSingleObject` is therefore normal -
+it is an **idle event-driven loop**, waiting for its next event, not deadlocked.
+"Parked in a wait" and "blocked forever" are not the same thing, and every
+inference built on the second reading was unfounded.
+
+How the error was made, since it is worth not repeating: each step was deduced
+from the one after it rather than measured.
+
+* "the thread is blocked" - inferred from an absence of log lines
+* "the KeSetEvent never ran" - inferred from the thread being blocked
+* "`[obj+0x130]` is 0" - inferred from the KeSetEvent not running
+* "the loop never ran" - inferred from the error path not being JITed, when a
+  *successful* run would never touch the error path either
+* "a kernel call fails and skips the loop" - the call actually returns 0
+
+Two of those were also contradicted by direct measurement when finally taken
+(`r3=0` at `81BF9630`, and the `KeSetEvent` hit above). `[obj+0x130]` itself was
+never measured at any point.
+
+### What is actually established on the consumer side
+
+* `XamInputSendXenonButtonPress` (0x506, runtime `817C4CD8`) is real, takes one
+  argument, needs its context global `[81D4F610]` which `817C2B68()` creates.
+* The press is **accepted** (`-> 00000001`), causes xam to spawn a Guide thread,
+  and does not crash or disturb the title.
+* Registration happens, the callback `81C0A2C0` fires, and the event is
+  signalled. The consumer machinery works.
+* No Guide appears and no draws are dispatched regardless.
+
+So the open question is NOT why the thread is stuck. It is what else opening the
+Guide requires beyond the button press - or whether `0x400` is even the right
+button code for this API.
+
+### The Aurora route works, and lands on the same wall from the correct side
+
+Running with the hand-rolled bootstrap **disabled entirely**
+(`lle_guide_draw=false`, `guide_create_xam_device=false`, only
+`guide_xam_button_api` and `guide_patch_null_render` on), xam drives the whole
+Guide itself. It:
+
+* spawns its Guide thread in response to the press,
+* runs registration, fires the callback, signals the event,
+* JITs its own render path on the **title's** thread - `818FF2C8` (the XUI
+  render host), `818FD0E8` (the XUI context constructor), `8191Bxxx`,
+* calls hud's draw entry, and crashes at `819DE94C` with the unwind
+  `819DEB30 8191B024 818FDE60 818F8374 818FAEB8 913EAB4C`.
+
+That unwind is **identical** to the one the hand-rolled bootstrap produced. Two
+consequences worth keeping: the reconstruction was faithful - we were driving
+xam's real path, not an artificial one - and the render blocker is genuine
+rather than self-inflicted.
+
+Measured at slot 20 on xam's own objects (breakpoint at `818FDDE8`):
+
+    r3=408936D0  lr=818F8374  [dc+1CC]=40883A70  dev=40870D00
+    RT0=00000000  [3F74]=00000000  [134]=00000000
+
+`[134]=0` confirms `guide_patch_null_render` takes effect on xam's own device
+context. But xam's default device `40870D00` has no render target and no front
+buffer, because nothing in this environment performs the GPU bring-up that
+would give it one - and the only creator that does (mode 1) repoints the ring
+away from the title, which is measured and unrecoverable.
+
+### The likely shape of the real problem
+
+On hardware xam has a display path independent of the running title, and the
+hardware compositor merges them. Xenia models a single GPU ring owned by
+whoever brought it up. The Guide needs a second rendering context the emulator
+has no concept of.
+
+Every dead end in this document is a symptom of that one thing:
+
+* mode 1 vs mode 2 - the only properly brought-up device steals the ring
+* ring save/restore - the title blocks on GPU progress that never resumes
+* the begin/end lifecycles - state injected from outside is discarded because
+  the owning renderer never ran its frame
+* an RT-less device on both xam's own path and ours
+
+So this is probably not a missing field or a wrong argument. Making the Guide
+render likely means giving Xenia a way to run xam's rendering as a second
+context and composite the result - an emulator feature, not a bootstrap fix.
+
+What is genuinely finished: the hosting problem. xam accepts the press, spawns
+its thread, and drives its own Guide bring-up, with the title still rendering
+and no crash until the render target is needed.

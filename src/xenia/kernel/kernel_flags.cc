@@ -410,6 +410,41 @@ DEFINE_bool(guide_watch_front_buffer, false,
             "a value that is written and then cleared.",
             "Kernel");
 
+DEFINE_int32(guide_probe_threads_seconds, 0,
+             "Seconds after the Guide button press to suspend every guest "
+             "thread in turn, sample its host RIP, and resolve it to a guest "
+             "address. xam spawns a Guide thread in response to "
+             "XamInputSendXenonButtonPress; it runs a short setup, returns "
+             "from 81BF8550, then parks somewhere and never JITs or exits "
+             "again. A counting breakpoint proved it executes exactly once, so "
+             "it is blocked rather than pumping - but where it blocks is "
+             "outside any code read so far, and only its program counter "
+             "answers that.",
+             "Kernel");
+
+DEFINE_uint32(guide_trace_pump, 0,
+              "Install a counting breakpoint on this runtime address and "
+              "report how often it is hit. Written to settle whether xam's "
+              "Guide thread - the one XamInputSendXenonButtonPress spawns - is "
+              "alive and pumping or parked. It stops writing to the log once "
+              "everything in its loop is JITed, so an absence of log lines "
+              "proves nothing either way. 81BF73E8 and 81BF8238 are the two "
+              "functions its loop at 81BF8550 calls per 44-byte table entry.",
+              "Kernel");
+
+DEFINE_int32(guide_xam_button_api, -1,
+             "Call xam's own XamInputSendXenonButtonPress (ordinal 0x506) with "
+             "this value as its second argument, instead of hand-rolling the "
+             "Guide hosting. Aurora - a custom dashboard that successfully "
+             "shows the real Guide - imports 292 xam functions including 86 "
+             "XUI ones, but NOT a single render entry point: no XuiInit "
+             "(0x340), no XuiRenderCreateDC (0x34C), no "
+             "XuiRenderBegin/End/Present (0x34B/0x34F/0x353). It builds scenes "
+             "and asks xam to open the Guide; xam hosts and renders it. That "
+             "is the opposite of this bootstrap, which loads hud itself and "
+             "drives its draw loop. Negative leaves it off.",
+             "Kernel");
+
 DEFINE_int32(guide_bind_cmdbuf_kb, 0,
              "Allocate a command buffer of this many KB and point the Guide "
              "device's write cursor [dev+0x2B4C] at it. Packet emission "

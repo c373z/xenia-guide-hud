@@ -1183,6 +1183,43 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
               // The XUI render context global (81D6C978) is written inside
               // the function containing runtime 818FF278. Find which export
               // that is by listing the XUI ordinal range.
+              {
+                // Does the REAL xam export ordinal 0x506? The image is a
+                // XEX with its own export mechanism, not a PE .edata, so
+                // parsing it offline does not work - ask the loader.
+                auto bm = ks->GetModule("xam.xex", true);
+                uint32_t ba = bm ? bm->GetProcAddressByOrdinal(0x506) : 0;
+                XELOGI("Guide button: XamInputSendXenonButtonPress "
+                       "(ord 506) -> {:08X}", ba);
+                if (ba && cvars::guide_xam_button_api >= 0) {
+                  // The wrapper loads its context from [81D4F610] and
+                  // the worker dereferences it at +0x10, so a null there
+                  // faults. 817C2B68 takes no arguments, asserts the
+                  // global is still 0, allocates a 36-byte context and
+                  // stores it. Run it first if nothing else has.
+                  uint32_t ictx = xe::load_and_swap<uint32_t>(
+                      ks->memory()->TranslateVirtual(0x81D4F610u));
+                  if (!ictx) {
+                    uint64_t ia2[] = {0};
+                    uint64_t ir2 = ks->processor()->Execute(
+                        ts, 0x817C2B68u, ia2, xe::countof(ia2));
+                    ictx = xe::load_and_swap<uint32_t>(
+                        ks->memory()->TranslateVirtual(0x81D4F610u));
+                    XELOGI("Guide button: xam input ctx init -> {:08X}, "
+                           "[81D4F610] now {:08X}",
+                           static_cast<uint32_t>(ir2), ictx);
+                  }
+                  uint64_t ba_args[] = {
+                      uint64_t(uint32_t(cvars::guide_xam_button_api))};
+                  uint64_t br = ks->processor()->Execute(
+                      ts, ba, ba_args, xe::countof(ba_args));
+                  XELOGI("Guide button: xam button API({}, {:X}) -> "
+                         "{:08X}",
+                         0,
+                         uint32_t(cvars::guide_xam_button_api),
+                         static_cast<uint32_t>(br));
+                }
+              }
               auto xm = ks->GetModule("xam.xex", true);
               if (xm) {
                 for (uint32_t ord = 0x340; ord <= 0x358; ++ord) {
@@ -1205,6 +1242,108 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                 XELOGI("Guide button: XuiInit returned {:08X}, ctx now {:08X}",
                        static_cast<uint32_t>(xr), rd(0x81D6C978u));
               }
+                if (cvars::guide_probe_threads_seconds > 0) {
+                  int pdelay = cvars::guide_probe_threads_seconds;
+                  auto* pproc = ks->processor();
+                  std::thread([pdelay, pproc, ksp = ks]() {
+                    xe::threading::set_name("GuideThreadProbe");
+                    std::this_thread::sleep_for(
+                        std::chrono::seconds(pdelay));
+                    auto ths =
+                        ksp->object_table()
+                            ->GetObjectsByType<kernel::XThread>(
+                                kernel::XObject::Type::Thread);
+                    struct Row {
+                      uint32_t h; std::string nm;
+                      uint64_t rip; uint32_t lr, r3;
+                    };
+                    std::vector<Row> rows;
+                    for (auto& th : ths) {
+                      void* nh2 = th->thread() ? th->thread()->native_handle()
+                                               : nullptr;
+                      if (!nh2) continue;
+                      uint64_t rip = 0;
+                      uint32_t lr = 0, r3 = 0;
+                      CONTEXT c2 = {};
+                      c2.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
+                      if (SuspendThread(reinterpret_cast<HANDLE>(nh2)) !=
+                          static_cast<DWORD>(-1)) {
+                        if (GetThreadContext(reinterpret_cast<HANDLE>(nh2),
+                                             &c2)) {
+                          rip = c2.Rip;
+                        }
+                        ResumeThread(reinterpret_cast<HANDLE>(nh2));
+                      }
+                      auto* tc = th->thread_state()
+                                     ? th->thread_state()->context()
+                                     : nullptr;
+                      if (tc) {
+                        lr = static_cast<uint32_t>(tc->lr);
+                        r3 = static_cast<uint32_t>(tc->r[3]);
+                      }
+                      rows.push_back(
+                          {th->handle(), th->thread_name(), rip, lr, r3});
+                    }
+                    // Resolve only after every thread is running again:
+                    // LookupFunction takes the code cache lock.
+                    auto* cc2 = pproc->backend()->code_cache();
+                    for (auto& r : rows) {
+                      auto* f2 = r.rip ? cc2->LookupFunction(r.rip) : nullptr;
+                      uint32_t g2 =
+                          f2 ? f2->MapMachineCodeToGuestAddress(r.rip) : 0;
+                      XELOGI("ThreadProbe: {:08X} {:26} guest {:08X} lr={:08X} "
+                             "r3={:08X}{}",
+                             r.h, r.nm, g2, r.lr, r.r3,
+                             f2 ? "" : "  (host: in a kernel call)");
+                    }
+                  }).detach();
+                  XELOGI("ThreadProbe: armed for {}s", pdelay);
+                }
+                static std::unique_ptr<cpu::Breakpoint> pump_bp;
+                if (cvars::guide_trace_pump && !pump_bp) {
+                  pump_bp = std::make_unique<cpu::Breakpoint>(
+                      ks->processor(), cpu::Breakpoint::AddressType::kGuest,
+                      uint64_t(uint32_t(cvars::guide_trace_pump)),
+                      [](cpu::Breakpoint* bp, cpu::ThreadDebugInfo* ti,
+                         uint64_t host_pc) {
+                        static std::atomic<uint32_t> n{0};
+                        uint32_t k = ++n;
+                        if (k <= 3 || k % 500 == 0) {
+                          auto* th = kernel::XThread::GetCurrentThread();
+                          auto* c = th ? th->thread_state()->context()
+                                       : nullptr;
+                          // r3 at the DC vtable slots is the device
+                          // context: [dc+0x1CC] is its device wrapper and
+                          // [dev+0x32A0] its RT0. Follow the chain so the
+                          // device xam picks for itself is visible.
+                          auto* pm = th ? th->kernel_state()->memory()
+                                        : nullptr;
+                          auto rp = [pm](uint32_t a) -> uint32_t {
+                            if (!pm) return 0;
+                            if (a < 0x1000u) return 0;
+                            auto* hp = pm->LookupHeap(a);
+                            if (!hp || hp->QueryRangeAccess(a, a + 4) ==
+                                           xe::memory::PageAccess::kNoAccess)
+                              return 0;
+                            return xe::load_and_swap<uint32_t>(
+                                pm->TranslateVirtual(a));
+                          };
+                          uint32_t dc = c ? uint32_t(c->r[3]) : 0;
+                          uint32_t wrap = rp(dc + 0x1CCu);
+                          uint32_t dev = rp(wrap + 12u);
+                          XELOGI("GuidePump hit #{} thread {:08X} r3={:08X} "
+                                 "lr={:08X} [dc+1CC]={:08X} dev={:08X} "
+                                 "RT0={:08X} [3F74]={:08X} [134]={:08X}",
+                                 k, th ? th->handle() : 0, dc,
+                                 c ? uint32_t(c->lr) : 0, wrap, dev,
+                                 rp(dev + 0x32A0u), rp(dev + 0x3F74u),
+                                 rp(dc + 0x134u));
+                        }
+                      });
+                  ks->processor()->AddBreakpoint(pump_bp.get());
+                  XELOGI("GuidePump: counting breakpoint at {:08X}",
+                         uint32_t(cvars::guide_trace_pump));
+                }
                 static std::unique_ptr<cpu::Breakpoint> srt_bp;
                 if (cvars::guide_trace_setrendertarget && !srt_bp) {
                   srt_bp = std::make_unique<cpu::Breakpoint>(
