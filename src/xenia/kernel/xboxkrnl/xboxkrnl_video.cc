@@ -1679,10 +1679,106 @@ void VdSwap_entry(
                  q(qd + 0x3F74u));
         }
       }
+      // --- second rendering context: begin ---
+      // The title owns the only GPU ring, so xam gets a command buffer of
+      // its own instead. Begin it through xam's own routine every frame:
+      // 81A01358 asserts the cursor is 0 on entry (a paired begin/end
+      // protocol), which is why setting it up once never survived.
+      uint32_t sc_dev = 0, sc_begin_cursor = 0;
+      if (::cvars::guide_second_context_kb > 0) {
+        auto* sm = kernel_state()->memory();
+        auto sr = [sm](uint32_t a) {
+          return a ? xe::load_and_swap<uint32_t>(sm->TranslateVirtual(a))
+                   : 0u;
+        };
+        uint32_t sdc = sr(guide_draw_this_ + 12);
+        uint32_t swrap = sdc ? sr(sdc + 0x1CCu) : 0;
+        sc_dev = swrap ? sr(swrap + 12u) : 0;
+        if (sc_dev) {
+          if (!guide_cmdbuf_base_) {
+            guide_cmdbuf_size_ =
+                uint32_t(::cvars::guide_second_context_kb) * 1024u;
+            guide_cmdbuf_base_ =
+                sm->SystemHeapAlloc(guide_cmdbuf_size_, 4096);
+            XELOGI("GuideCtx2: buffer {:08X} +{} bytes",
+                   guide_cmdbuf_base_, guide_cmdbuf_size_);
+          }
+          if (guide_cmdbuf_base_) {
+            std::memset(sm->TranslateVirtual(guide_cmdbuf_base_), 0,
+                        guide_cmdbuf_size_);
+            // Do NOT call the begin ourselves. xam has its own begin
+            // (81A041F0) which derives the whole command buffer from
+            // [dev+0x30]: cursor = ptr, base = ptr+4, limit = ptr+160.
+            // That field is uninitialised here (it reads 5), so xam
+            // rebuilds the buffer at a garbage address and overwrites
+            // anything we set up. Give it a real pointer instead and let
+            // xam derive the rest through its own path.
+            xe::store_and_swap<uint32_t>(
+                sm->TranslateVirtual(sc_dev + 0x30u), guide_cmdbuf_base_);
+            sc_begin_cursor = guide_cmdbuf_base_;
+            static uint32_t sc_b = 0;
+            if (++sc_b <= 3) {
+              XELOGI("GuideCtx2 begin: dev={:08X} cursor={:08X} "
+                     "base={:08X} limit={:08X}",
+                     sc_dev, sc_begin_cursor, sr(sc_dev + 0x2B48u),
+                     sr(sc_dev + 0x2B50u));
+            }
+          }
+        }
+      }
       in_guide_draw_scope = true;
       uint64_t gr = kernel_state()->processor()->Execute(
           gth->thread_state(), guide_draw_fn_, gargs, xe::countof(gargs));
       in_guide_draw_scope = false;
+      // --- second rendering context: submit ---
+      // The begin left the cursor at buffer-4 and every emitted word
+      // advances it by 4, so the distance from where the begin left it
+      // is exactly how much the Guide wrote. Submit that directly -
+      // this runs inside the title's frame, before its swap, so with
+      // guide_bind_title_rt the Guide lands in the buffer about to be
+      // presented.
+      if (::cvars::guide_second_context_kb > 0 && sc_dev &&
+          guide_cmdbuf_base_) {
+        auto* sm2 = kernel_state()->memory();
+        auto sd = [sm2](uint32_t a) {
+          return xe::load_and_swap<uint32_t>(sm2->TranslateVirtual(a));
+        };
+        // xam allocates its OWN command buffer and puts it in [dev+0x30]
+        // (our pointer there gets overwritten), and the cursor is cleared
+        // by the end before we can read it. So inspect the buffer
+        // contents directly: find the last non-zero word in the window
+        // xam set up, which is exactly what it wrote this frame.
+        uint32_t xbuf = sd(sc_dev + 0x30u);
+        uint32_t xlim = sd(sc_dev + 0x2B50u);
+        uint32_t span = (xlim > xbuf && xlim - xbuf < 0x4000u)
+                            ? (xlim - xbuf) / 4
+                            : 40u;
+        uint32_t words = 0;
+        if (xbuf) {
+          for (uint32_t w = 0; w < span; ++w) {
+            if (sd(xbuf + w * 4)) words = w + 1;
+          }
+        }
+        static uint32_t sc_n = 0;
+        ++sc_n;
+        if (words) {
+          auto* gs3 = kernel_state()->emulator()->graphics_system();
+          if (gs3 && gs3->command_processor()) {
+            uint32_t before = gs3->command_processor()->guide_draw_count_;
+            gs3->command_processor()->ExecuteGuestBufferUnsafe(xbuf, words);
+            uint32_t after = gs3->command_processor()->guide_draw_count_;
+            if (sc_n <= 3 || sc_n % 300 == 0) {
+              XELOGI("GuideCtx2 #{}: submitted {} words from {:08X} "
+                     "(first={:08X}), GPU draws +{}",
+                     sc_n, words, xbuf, sd(xbuf), after - before);
+            }
+          }
+        } else if (sc_n <= 3 || sc_n % 300 == 0) {
+          XELOGI("GuideCtx2 #{}: xam buffer {:08X} empty (span {} words, "
+                 "limit {:08X})",
+                 sc_n, xbuf, span, xlim);
+        }
+      }
       if (::cvars::guide_restore_title_ring) {
         // The Guide has emitted its packets into xam's ring; hand
         // the GPU back the title's so it can present again.

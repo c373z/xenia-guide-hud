@@ -422,6 +422,17 @@ DEFINE_int32(guide_probe_threads_seconds, 0,
              "answers that.",
              "Kernel");
 
+DEFINE_string(guide_trace_stores, "",
+              "Comma-separated runtime addresses to install counting "
+              "breakpoints on, reporting which fired with the register file. "
+              "Written to find which of the eleven writers of the "
+              "command-buffer cursor [dev+0x2B4C] zeroes it during the Guide's "
+              "draw: the begin sets it correctly and the emitter still reads "
+              "0, and reasoning about which writer runs has been less "
+              "reliable in this project than breakpointing all of them at "
+              "once.",
+              "Kernel");
+
 DEFINE_uint32(guide_trace_pump, 0,
               "Install a counting breakpoint on this runtime address and "
               "report how often it is hit. Written to settle whether xam's "
@@ -443,6 +454,30 @@ DEFINE_int32(guide_xam_button_api, -1,
              "and asks xam to open the Guide; xam hosts and renders it. That "
              "is the opposite of this bootstrap, which loads hud itself and "
              "drives its draw loop. Negative leaves it off.",
+             "Kernel");
+
+DEFINE_bool(guide_patch_cmdbuf_reset, false,
+            "Nop the store at 81A01464, which zeroes the command-buffer cursor "
+            "[dev+0x2B4C]. xam calls 81A013B8 (its frame end/flush) from "
+            "81A06080 during the Guide's draw, and that clears the cursor set "
+            "by the begin - which is why a command buffer prepared before the "
+            "draw is always gone by the time packets are emitted. With the "
+            "reset removed the buffer survives long enough for the Guide to "
+            "write into it. Needs guide_second_context_kb to be useful.",
+            "Kernel");
+
+DEFINE_int32(guide_second_context_kb, 0,
+             "Give xam its own command buffer of this many KB and submit what "
+             "the Guide writes into it as a second rendering pass inside the "
+             "title's frame. The title owns the single GPU ring and mode-1 "
+             "bring-up takes it away irrecoverably, so xam cannot have a ring "
+             "of its own; but Xenia can execute a guest PM4 buffer directly. "
+             "Each frame this resets the cursor, calls xam's own begin "
+             "(81A01358) so the buffer is set up through the lifecycle that "
+             "owns it rather than by poking fields, runs the Guide's draw, "
+             "then submits whatever was emitted. Pair with "
+             "guide_bind_title_rt so the Guide draws into the back buffer the "
+             "title is about to present.",
              "Kernel");
 
 DEFINE_int32(guide_bind_cmdbuf_kb, 0,

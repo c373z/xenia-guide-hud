@@ -1299,6 +1299,49 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                   }).detach();
                   XELOGI("ThreadProbe: armed for {}s", pdelay);
                 }
+                static std::vector<std::unique_ptr<cpu::Breakpoint>> st_bps;
+                if (!cvars::guide_trace_stores.empty() && st_bps.empty()) {
+                  std::string spec = cvars::guide_trace_stores;
+                  size_t pos = 0;
+                  while (pos <= spec.size()) {
+                    size_t comma = spec.find(',', pos);
+                    std::string tok = spec.substr(
+                        pos, comma == std::string::npos ? std::string::npos
+                                                        : comma - pos);
+                    if (!tok.empty()) {
+                      uint32_t addr =
+                          uint32_t(std::strtoul(tok.c_str(), nullptr, 16));
+                      if (addr) {
+                        auto bp = std::make_unique<cpu::Breakpoint>(
+                            ks->processor(),
+                            cpu::Breakpoint::AddressType::kGuest,
+                            uint64_t(addr),
+                            [](cpu::Breakpoint* bp,
+                               cpu::ThreadDebugInfo* ti, uint64_t hpc) {
+                              auto* th = kernel::XThread::GetCurrentThread();
+                              auto* c =
+                                  th ? th->thread_state()->context() : nullptr;
+                              static std::atomic<uint32_t> sn{0};
+                              uint32_t s = ++sn;
+                              if (s > 60) return;
+                              XELOGI("StoreTrace {:08X} #{}: r11={:08X} "
+                                     "r30={:08X} r31={:08X} lr={:08X}",
+                                     bp->guest_address(), s,
+                                     c ? uint32_t(c->r[11]) : 0,
+                                     c ? uint32_t(c->r[30]) : 0,
+                                     c ? uint32_t(c->r[31]) : 0,
+                                     c ? uint32_t(c->lr) : 0);
+                            });
+                        ks->processor()->AddBreakpoint(bp.get());
+                        st_bps.push_back(std::move(bp));
+                      }
+                    }
+                    if (comma == std::string::npos) break;
+                    pos = comma + 1;
+                  }
+                  XELOGI("StoreTrace: installed {} breakpoints",
+                         st_bps.size());
+                }
                 static std::unique_ptr<cpu::Breakpoint> pump_bp;
                 if (cvars::guide_trace_pump && !pump_bp) {
                   pump_bp = std::make_unique<cpu::Breakpoint>(
@@ -2814,6 +2857,30 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
       return xam_result;
     }
     XELOGI("LLE xam: loaded at {:08X}", xam_module->hmodule_ptr());
+    if (cvars::guide_patch_cmdbuf_reset) {
+      // 81A01464  stw r30,0x2B4C(r31)  ; zeroes the cmdbuf write cursor
+      const uint32_t kRAddr = 0x81A01464u;
+      const uint32_t kROrig = 0x93DF2B4Cu;
+      auto* rw = memory()->TranslateVirtual<uint32_t*>(kRAddr);
+      uint32_t rcur = xe::load_and_swap<uint32_t>(rw);
+      if (rcur == kROrig) {
+        void* rpage = reinterpret_cast<void*>(
+            reinterpret_cast<uintptr_t>(rw) & ~uintptr_t(0xFFF));
+        xe::memory::PageAccess rold = xe::memory::PageAccess::kReadOnly;
+        if (xe::memory::Protect(rpage, 0x1000,
+                                xe::memory::PageAccess::kReadWrite,
+                                &rold)) {
+          xe::store_and_swap<uint32_t>(rw, 0x60000000u);
+          xe::memory::Protect(rpage, 0x1000, rold, nullptr);
+          XELOGI("Guide: patched {:08X} {:08X} -> 60000000 (cmdbuf "
+                 "cursor reset removed)",
+                 kRAddr, rcur);
+        }
+      } else {
+        XELOGW("Guide: NOT patching {:08X}: found {:08X}, expected {:08X}",
+               kRAddr, rcur, kROrig);
+      }
+    }
     if (cvars::guide_patch_null_render) {
       // 818FDEF0  lwz r11,0x1C(r27)   ; XUI context's null-render flag
       // 818FDF14  stw r11,0x134(r30)  ; over the device context's copy
