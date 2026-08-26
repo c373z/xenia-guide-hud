@@ -3239,8 +3239,21 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
             uint32_t v = xe::load_and_swap<uint32_t>(
                 wmem->TranslateVirtual(addrs[i]));
             if (primed && v != last[i]) {
-              XELOGE("XamTextWatch: {:08X} changed {:08X} -> {:08X}",
-                     addrs[i], last[i], v);
+              // Ask the OS what the page actually is at the moment it
+              // changes. If the guard is still PAGE_READONLY then nothing
+              // wrote through this view; if the protection has been reset,
+              // the mapping was replaced rather than written.
+              MEMORY_BASIC_INFORMATION mbi = {};
+              void* hostp = wmem->TranslateVirtual(addrs[i]);
+              SIZE_T got = VirtualQuery(hostp, &mbi, sizeof(mbi));
+              XELOGE(
+                  "XamTextWatch: {:08X} changed {:08X} -> {:08X} "
+                  "(host={} protect={:X} state={:X} type={:X} allocbase={} "
+                  "regionsize={:X})",
+                  addrs[i], last[i], v, hostp,
+                  got ? mbi.Protect : 0u, got ? mbi.State : 0u,
+                  got ? mbi.Type : 0u, got ? mbi.AllocationBase : nullptr,
+                  got ? static_cast<uint64_t>(mbi.RegionSize) : 0ull);
             }
             last[i] = v;
           }

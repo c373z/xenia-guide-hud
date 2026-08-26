@@ -1709,3 +1709,72 @@ How to test it: protect *every* host view of those pages rather than the one
 obtained from `TranslateVirtual`, or log Xenia's view mapping/unmapping calls
 (`MapViews`/`UnmapViews` and the physical-heap mirrors) with the same range
 filter already used by `XamRangeOp`.
+
+## SOLVED: xam was being loaded twice, over itself
+
+The zero window is a **second load of xam.xex over the live image**.
+
+`XamRangeOp` logging showed it once I stopped looking only at the first few
+entries: `AllocFixed address=815F0000 size=008C0000` appears **twice** - once
+at load (line 476) and again ~120 lines before the first zero transition
+(line 5479), identical address and size. Re-allocating commits fresh zero
+pages (hence the zeros), resets page protection to `PAGE_READWRITE` (hence the
+read-only guard silently not firing - `VirtualQuery` at the moment of change
+reports `protect=4`), and the loader then writes the same image back (hence
+contents returning to the identical `7D8802A6`).
+
+**What triggers it: our own Guide bootstrap.** The sequence is
+`ResolvePath(\xam.xex)` immediately followed by the `Guide Loader` thread
+starting. Loading `hud.xex` makes Xenia resolve hud's import of `xam.xex`, and
+`KernelState::LoadUserModule` de-duplicates by **path**:
+
+```cpp
+auto name = xe::utf8::find_name_from_guest_path(raw_name);
+std::string path(raw_name);
+if (name == raw_name) {
+  path = xe::utf8::join_guest_paths(
+      xe::utf8::find_base_guest_path(executable_module_->path()), name);
+}
+for (auto& existing_module : user_modules_) {
+  if (existing_module->Matches(path)) return existing_module;   // misses
+}
+```
+
+An import of bare `xam.xex` resolves against the *executable's* directory. Our
+LLE xam was loaded from `SYS:\xam.xex`, so the paths differ, the match fails,
+and a second copy is loaded on top of the first.
+
+### Confirmation
+
+Running with `--lle_xam=GAME:\xam.xex --guide_hud_path=GAME:\hud.xex` so the
+paths agree, three runs:
+
+| | before | after |
+|---|---|---|
+| `AllocFixed 815F0000` | 2 | **1** |
+| `XamTextWatch` transitions | 8 | **0** |
+| `PPCScanner` failures | 1+ | **0** |
+| log lines | 5.7k-15k | **~18040** |
+| `Guide: buffers` (handler published) | no | **yes** |
+
+Both `Guide: DllMain returned` and `Guide: buffers` now appear, so
+`guide_handler_` is finally set - which is what the Guide button path has been
+gated on all along.
+
+### This was config drift, and CONFIG.md was right
+
+CONFIG.md documents `lle_xam = "GAME:\xam.xex"`. The saved config had drifted
+to `SYS:\xam.xex`. Config drift breaking a working setup has happened before
+in this project; it is worth checking the saved config against CONFIG.md
+before believing any new "regression".
+
+### But do not just change the config
+
+`SYS:` exists for a reason: it makes LLE xam usable with a *real game*, whose
+`GAME:` disc obviously does not contain `xam.xex`. Switching to `GAME:` fixes
+the dashboard and silently reintroduces the double-load for every real title.
+
+The actual fix is to make the de-duplication find the already-loaded xam
+regardless of the path it was loaded from - match `xam.xex` by module name, or
+register the LLE xam under the path a title's imports will resolve to. Until
+then, `GAME:` is a dashboard-only workaround.
