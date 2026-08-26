@@ -1587,9 +1587,18 @@ void VdSwap_entry(
           auto r2 = [rm](uint32_t a) {
             return xe::load_and_swap<uint32_t>(rm->TranslateVirtual(a));
           };
-          uint32_t rdc = r2(guide_draw_this_ + 12);
+          // Reach the device through the DC chain when our draw hook is
+          // driving, and through xam's device globals when it is not.
+          // Without the fallback this only ever ran under our own
+          // bootstrap, so the xam-driven path - the one that matters -
+          // never got a render target bound at all.
+          uint32_t rdc = guide_draw_this_ ? r2(guide_draw_this_ + 12) : 0;
           uint32_t rwrap = rdc ? r2(rdc + 0x1CCu) : 0;
           uint32_t rdev = rwrap ? r2(rwrap + 12u) : 0;
+          if (!rdev) {
+            rdev = r2(0x81D43684u);
+            if (!rdev) rdev = r2(0x801E6FC8u);
+          }
           uint32_t tdev = r2(0x801E6FC4u);
           uint32_t surf = tdev ? r2(tdev + 0x3AC4u) : 0;
           if (rdev && surf && !r2(rdev + 0x32A0u)) {
