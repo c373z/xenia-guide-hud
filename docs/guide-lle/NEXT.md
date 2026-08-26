@@ -971,3 +971,54 @@ Both made an experiment look like a negative when it had not been tested:
 * the registrar loop scored a non-zero return as failure. These functions take
   no arguments and do not return an HRESULT, so that scored every successful
   call as a failure.
+
+## The XUIZ resource container (offline analysis)
+
+`tools/xuiz_extract.py` parses the XUIZ container embedded in hud/xam and
+dumps every scene to disk. This is entirely offline, so it replaces the
+breakpoint probes that were perturbing the very code paths they measured.
+
+    python tools/xuiz_extract.py work/hud17489.pe 0x21000 work/xur
+
+Layout (big-endian) at the section base (`0x21000` in hud 17489):
+
+| Offset | Field |
+|--------|-------|
+| `+0x00` | `'XUIZ'` |
+| `+0x04` | version (3) |
+| `+0x08` | total container size (`0x28e9d`) |
+| `+0x10` | directory size (`0x35ef`) |
+| `+0x14` | entry count (`0x1a1` = 417) |
+| `+0x1E` | directory: repeated `[u8 namelen][name][u32 size][u32 offset]` |
+
+Gotchas, all of which cost a wrong turn first:
+
+- The directory starts at `+0x1E`, not `+0x1D` or `+0x1F`.
+- The declared count is 417 but only **416** entries are real; the last one
+  overruns into the next section and its "size" field reads back as that
+  section's `XUIS` magic. The parser stops when a size exceeds the container.
+- **Directory offsets are not usable as file offsets.** They are not
+  section-relative and do not point at the payloads. Scenes are located
+  instead by scanning for `XUIB` magic.
+- The `XUIB` run is **offset by one** from the .xur listing: block N+1 carries
+  entry N. Block 0 is an extra `XUIB` of size `0x65d` matching no directory
+  entry. The extractor verifies this shift against declared sizes rather than
+  assuming it, and every located block's internal size (at `+0x0E`) matches
+  its directory entry.
+- `Status.xur` has no payload in the contiguous run and is reported
+  UNRESOLVED. 33 of 34 scenes extract cleanly.
+
+XUR header: magic at `+0x00`, version 8 at `+0x04`, tool version `0x000e0000`
+at `+0x0C`, **file size at `+0x0E`**, section count at `+0x12`. Note several
+scenes (including working ones such as `GamesTabSignedOut`) have high-entropy
+payloads, so the per-section table is not yet decoded.
+
+### Leads this dissolved
+
+- **"`GuideMain.xur` fails because its string table is missing."** Dead. The
+  361 `.xus` entries are one root `Strings.xus` plus 10 locale folders of 36.
+  There are no per-scene en-US `.xus` files for *any* scene: default-locale
+  strings all live inside the root `Strings.xus`, which indexes them by scene
+  name. `GuideMain` is not special here.
+- **"`GuideMain` declares a different section count."** Dead. Both
+  `GuideMain.xur` and the working `GamesTabSignedOut.xur` declare 10.
