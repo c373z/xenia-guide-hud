@@ -705,3 +705,50 @@ The pattern in every case: an inference from an absence (no log lines, zeroed
 memory, an error code that fit the theory) that a direct API call or breakpoint
 then contradicted. Asking the guest through its own API has been reliable;
 reading memory against an assumed layout has not.
+
+### Why the second context captures nothing (probable)
+
+`guide_second_context_kb` captures the buffer at `[dev+0x30]`, whose window
+xam's own begin (`81A041F0`) sets up as cursor=ptr, base=ptr+4, limit=ptr+160.
+It works mechanically - the begin runs, the buffer is ours to read, the submit
+path executes - and it always finds the same single non-PM4 word `0000200E`
+sitting at `[ptr]`, with the entire packet area (`ptr+4` onward) zero.
+
+The telling detail: with a render target bound, `XuiRenderBegin`'s slot 20 runs
+a **Clear**, and a clear is GPU work that must emit packets. Zero words appear.
+So it is not only the Guide's draws that are missing - even the clear emits
+nothing into this buffer.
+
+That points at the capture target, not the Guide. A ~144-byte window is far too
+small to be a frame's draw stream; it looks like a small auxiliary/system
+buffer. The real draw stream goes to the **ring buffer**, which the mode-2
+device does not have - mode 2 skips `VdInitializeRingBuffer` by design.
+
+This also reconciles the two halves that never fit together:
+
+* mode 2 - no ring, emitter reached, emits nothing
+* mode 1 - has a ring, but the emitter is never reached at all
+
+Both are consistent with "the emitter needs a ring to target". If so,
+`guide_second_context` has been faithfully capturing and submitting the wrong
+buffer from the start, which explains why it never crashes and never varies.
+
+**Not verified.** The alternative is that the emitter genuinely produces nothing
+for an unrelated reason and this buffer would have received it. Distinguishing
+them means finding where the clear's packets actually go - not assuming this
+buffer is the destination because it is where a crash once pointed.
+
+### Cross-title validation
+
+The Guide behaves identically on Plants vs Zombies and Sonic & All-Stars Racing
+Transformed: same scene (`scnInfoUpsellLive`), same elements (`labelHeading`),
+same handles, same absence of draws. Findings here are about xam/hud, not about
+any one game.
+
+That check also caught a portability bug worth remembering: `guide_bind_title_rt`
+had a hardcoded `[title_dev+0x3AC4]` from PvZ, and on Sonic that field holds
+`0x0D`, so SetRenderTarget faulted dereferencing address 13. Titles link their
+own D3D builds with their own device layouts. The scan now locates the render
+target by decoding `[p+0x24]` as a fetch constant and preferring a match
+against `VdQueryVideoMode`'s display mode, with a warned fallback for titles
+that render at a lower internal resolution.
