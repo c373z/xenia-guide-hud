@@ -477,6 +477,16 @@ DEFINE_bool(guide_inject_label_text, false,
             "reason entirely.",
             "Kernel");
 
+DEFINE_string(guide_scene_override, "",
+              "Create this scene from hud's package instead of only the one "
+              "hud picks. hud always creates InfoUpsellLive.xur - the \"no Xbox "
+              "Live\" upsell page - which is a nearly empty page even when it "
+              "works. The package also contains GuideMain.xur, GamesTabSignedIn"
+              ".xur, Diagnostics.xur and 32 other scenes, so this loads a named "
+              "one directly through XuiSceneCreate and reports its children and "
+              "their visuals.",
+              "Kernel");
+
 DEFINE_bool(guide_static_locator, false,
             "Set [guide+8] = -1 so hud builds its resource locator with "
             "XamBuildResourceLocator instead of XamBuildDynamicResourceLocator. "

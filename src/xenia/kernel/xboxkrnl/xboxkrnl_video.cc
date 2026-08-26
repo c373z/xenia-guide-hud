@@ -1059,6 +1059,107 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
           reg2 += fmt::format("{:08X} ", rd(0x81D6D0D8u + w * 4));
         }
         XELOGI("GuideScene: table @81D6D0D8: {}", reg2);
+        // XuiInit's normal (null-params) path consults [81D6D0A4], which
+        // sits next to the resource provider at [81D6D0AC]. Read the
+        // whole neighbourhood after the scene has loaded - this is the
+        // state XUI uses to find visuals, so an empty slot here would be
+        // a fact rather than another theory.
+        std::string xg;
+        for (uint32_t a = 0x81D6D090u; a <= 0x81D6D0C0u; a += 4) {
+          xg += fmt::format("{:08X}:{:08X} ", a, rd(a));
+        }
+        XELOGI("GuideScene: XUI globals {}", xg);
+        if (!::cvars::guide_scene_override.empty()) {
+          auto xm2 = kernel_state()->GetModule("xam.xex", true);
+          uint32_t sc2 = xm2 ? xm2->GetProcAddressByOrdinal(0x357) : 0;
+          uint32_t glc2 = xm2 ? xm2->GetProcAddressByOrdinal(0x32F) : 0;
+          // Build the same locator hud uses and ask for a named scene.
+          auto wide = [&](uint32_t buf, const std::string& t) {
+            for (size_t w = 0; w < t.size(); ++w) {
+              xe::store_and_swap<uint16_t>(
+                  memory->TranslateVirtual(buf + uint32_t(w) * 2),
+                  uint16_t(t[w]));
+            }
+            xe::store_and_swap<uint16_t>(
+                memory->TranslateVirtual(buf + uint32_t(t.size()) * 2), 0);
+          };
+          uint32_t loc = memory->SystemHeapAlloc(256, 16);
+          uint32_t nmb = memory->SystemHeapAlloc(256, 16);
+          uint32_t out2 = memory->SystemHeapAlloc(16, 16);
+          std::string spec2 = ::cvars::guide_scene_override;
+          size_t sp = 0;
+          while (sp <= spec2.size()) {
+            size_t cm = spec2.find(',', sp);
+            std::string one = spec2.substr(
+                sp, cm == std::string::npos ? std::string::npos
+                                            : cm - sp);
+            if (!one.empty()) {
+          if (loc && nmb && out2 && sc2) {
+            std::memset(memory->TranslateVirtual(loc), 0, 256);
+            std::memset(memory->TranslateVirtual(nmb), 0, 256);
+            std::memset(memory->TranslateVirtual(out2), 0, 16);
+            wide(loc, fmt::format("section://{:08X},hud#strings.xus",
+                                  guide_bs_skin_module_));
+            wide(nmb, one);
+            uint64_t sa[] = {loc, nmb, 0ull, out2};
+            uint64_t sr2 = processor->Execute(ts, sc2, sa,
+                                              xe::countof(sa));
+            uint32_t nsc = rd(out2);
+            XELOGI("GuideScene: override XuiSceneCreate(\"{}\") -> "
+                   "{:08X}, scene {:08X}",
+                   one,
+                   static_cast<uint32_t>(sr2), nsc);
+            if (nsc && glc2) {
+              uint32_t co2 = memory->SystemHeapAlloc(16, 16);
+              if (co2) {
+                std::memset(memory->TranslateVirtual(co2), 0, 16);
+                uint64_t ca2[] = {nsc, co2};
+                processor->Execute(ts, glc2, ca2, xe::countof(ca2));
+                XELOGI("GuideScene: override last child {:08X}",
+                       rd(co2));
+                uint32_t okid = rd(co2);
+                // Does an element of a scene that loads properly get a
+                // visual? The claim that nothing anywhere has one was
+                // only ever tested on the near-empty upsell page.
+                std::string oid;
+                uint32_t ovr = 0xFFFFFFFFu, ovis = 0;
+                uint32_t gid2 = xm2 ? xm2->GetProcAddressByOrdinal(0x32E)
+                                    : 0;
+                uint32_t gvi2 = xm2 ? xm2->GetProcAddressByOrdinal(0x395)
+                                    : 0;
+                if (okid && gid2) {
+                  std::memset(memory->TranslateVirtual(co2), 0, 16);
+                  uint64_t q1[] = {okid, co2};
+                  processor->Execute(ts, gid2, q1, xe::countof(q1));
+                  uint32_t sp3 = rd(co2);
+                  if (sp3 > 0x1000u) {
+                    for (uint32_t w = 0; w < 40; ++w) {
+                      uint16_t c3 = xe::load_and_swap<uint16_t>(
+                          memory->TranslateVirtual(sp3 + w * 2));
+                      if (!c3) break;
+                      oid += (c3 >= 0x20 && c3 < 0x7F) ? char(c3) : '?';
+                    }
+                  }
+                }
+                if (okid && gvi2) {
+                  std::memset(memory->TranslateVirtual(co2), 0, 16);
+                  uint64_t q2[] = {okid, co2};
+                  ovr = uint32_t(processor->Execute(ts, gvi2, q2,
+                                                    xe::countof(q2)));
+                  ovis = rd(co2);
+                }
+                XELOGI("GuideScene: override child {:08X} \"{}\" "
+                       "visual -> {:08X}: {:08X}",
+                       okid, oid, ovr, ovis);
+              }
+            }
+          }
+
+            }
+            if (cm == std::string::npos) break;
+            sp = cm + 1;
+          }
+        }
       }
         XELOGI("GuideScene: XuiObjectFromHandle({:08X}) -> {:08X}, "
                "object {:08X}",

@@ -892,3 +892,45 @@ Elements load with correct structure, ids and layout; none has a visual. The
 scene, its classes, its locator, the device, the render target and the command
 buffer are all verified working. No current lead into the visual question is
 better supported than the four above were.
+
+### Scene loading works; visuals never attach (multi-scene evidence)
+
+`guide_scene_override` loads a named scene from hud's package directly through
+`XuiSceneCreate`, so scenes other than the one hud picks can be tested.
+
+| scene | result |
+|---|---|
+| `InfoUpsellLive.xur` | S_OK |
+| `GamesTabSignedOut.xur` | S_OK |
+| `Controller_Full.xur` | S_OK |
+| `ConsoleContract.xur` | S_OK (large tree) |
+| `Diagnostics.xur` | `80300013` |
+| `GuideMain.xur` | `80004005` (E_FAIL) |
+
+Four of six load. Resource loading, the locator, the package, the class
+registry and the scene loader are therefore all healthy - demonstrated across
+independent scenes, not inferred from one.
+
+But every element sampled across those working scenes has **no visual**:
+
+    ConsoleContract    "labHeading"     -> 80300017, null
+    GamesTabSignedOut  "btnRedeemCode"  -> 80300017, null
+    Controller_Full    "battery"        -> 8030000A, null
+    InfoUpsellLive     "labelHeading", "btnJoinLive", "btnB" -> 80300017, null
+
+So "nothing gets a visual" is systemic, not a property of the near-empty upsell
+page - which was the main reason to doubt it earlier.
+
+This joins up with a measured absence: scenes reference their imagery
+cross-module (`xam://livelogo_upsell.png` is in hud's package), and the XUI
+resource provider is only ever asked to open **one** thing - `strings.xus`. No
+`xam://` resource is ever requested. Package contents: 360 `.xus`, 35 `.xur`,
+27 `.png`.
+
+### hud falls back because GuideMain.xur cannot be created
+
+hud always creates `InfoUpsellLive.xur`, and `GuideMain.xur` - the real Guide
+scene, present in the same package - fails with `E_FAIL` through the identical
+locator that loads four other scenes. So the upsell page is a fallback, not a
+choice. `Diagnostics.xur` fails differently (`80300013`), which argues against a
+single systemic cause for the two failures.
