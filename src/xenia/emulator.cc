@@ -1345,11 +1345,26 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                                   }
                                 }
                               }
+                              std::string wstr2;
+                              uint32_t sp2 = c ? uint32_t(c->r[4]) : 0;
+                              if (mm && sp2 > 0x1000u) {
+                                auto* hp2 = mm->LookupHeap(sp2);
+                                if (hp2 &&
+                                    hp2->QueryRangeAccess(sp2, sp2 + 64) !=
+                                        xe::memory::PageAccess::kNoAccess) {
+                                  for (uint32_t w = 0; w < 48; ++w) {
+                                    uint16_t ch = xe::load_and_swap<uint16_t>(
+                                        mm->TranslateVirtual(sp2 + w * 2));
+                                    if (!ch) break;
+                                    wstr2 += (ch >= 0x20 && ch < 0x7F)
+                                                 ? char(ch) : '?';
+                                  }
+                                }
+                              }
                               XELOGI("StoreTrace {:08X} #{}: r3={:08X} "
-                                     "r4={:08X} lr={:08X} str=\"{}\"",
-                                     bp->guest_address(), s, sp,
-                                     c ? uint32_t(c->r[4]) : 0,
-                                     c ? uint32_t(c->lr) : 0, wstr);
+                                     "\"{}\"  r4={:08X} \"{}\"  lr={:08X}",
+                                     bp->guest_address(), s, sp, wstr,
+                                     sp2, wstr2, c ? uint32_t(c->lr) : 0);
                             });
                         ks->processor()->AddBreakpoint(bp.get());
                         st_bps.push_back(std::move(bp));
@@ -3469,6 +3484,38 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
               guide_skin_module_ = hud->hmodule_ptr();
               XELOGI("Guide: hud handle={:08X} hmodule_ptr={:08X}",
                      hud->handle(), hud->hmodule_ptr());
+              if (cvars::guide_static_locator) {
+                // hud picks the locator builder at 913EB994:
+                //   cmpwi cr6,r3,-1 ; bneq -> dynamic (module = [obj+8])
+                // [obj+8] is 0, giving "section://@0,...". Nopping the
+                // branch forces the static builder, which takes its
+                // module from [obj+4]. Patching hud itself covers the
+                // xam-driven path too - setting [obj+8] only works when
+                // our own bootstrap runs.
+                const uint32_t kBAddr = 0x913EB994u;
+                const uint32_t kBOrig = 0x409A0020u;
+                auto* bw = memory()->TranslateVirtual<uint32_t*>(kBAddr);
+                uint32_t bcur = xe::load_and_swap<uint32_t>(bw);
+                if (bcur == kBOrig) {
+                  void* bp2 = reinterpret_cast<void*>(
+                      reinterpret_cast<uintptr_t>(bw) & ~uintptr_t(0xFFF));
+                  xe::memory::PageAccess bold =
+                      xe::memory::PageAccess::kReadOnly;
+                  if (xe::memory::Protect(bp2, 0x1000,
+                                          xe::memory::PageAccess::kReadWrite,
+                                          &bold)) {
+                    xe::store_and_swap<uint32_t>(bw, 0x60000000u);
+                    xe::memory::Protect(bp2, 0x1000, bold, nullptr);
+                    XELOGI("Guide: patched hud {:08X} {:08X} -> 60000000 "
+                           "(force static resource locator)",
+                           kBAddr, bcur);
+                  }
+                } else {
+                  XELOGW("Guide: NOT patching hud {:08X}: found {:08X}, "
+                         "expected {:08X}",
+                         kBAddr, bcur, kBOrig);
+                }
+              }
               if (!cvars::guide_skin_path.empty()) {
                 auto skin = ks->LoadUserModule(cvars::guide_skin_path, false);
                 if (skin) {

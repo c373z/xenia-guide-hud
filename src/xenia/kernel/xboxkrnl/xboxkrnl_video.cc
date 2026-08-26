@@ -19,6 +19,7 @@
 #include "xenia/gpu/register_file.h"
 #include "xenia/gpu/graphics_system.h"
 #include "xenia/kernel/kernel_state.h"
+#include "xenia/kernel/xmodule.h"
 #include "xenia/kernel/util/shim_utils.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_private.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_rtl.h"
@@ -1052,6 +1053,93 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
           }
           XELOGI("GuideScene: object head {}", head);
         }
+      // Ask XUI itself whether the scene has any children, rather than
+      // guessing from a memory dump: XuiElementGetLastChild is ordinal
+      // 0x32F. A scene that loaded visual content has children; an empty
+      // one does not, and that is the difference between a render pass
+      // that emits draws and one that emits nothing.
+      auto xmod = kernel_state()->GetModule("xam.xex", true);
+      uint32_t glc = xmod ? xmod->GetProcAddressByOrdinal(0x32F) : 0;
+      if (glc) {
+        uint32_t child_out = memory->SystemHeapAlloc(16, 16);
+        if (child_out) {
+          std::memset(memory->TranslateVirtual(child_out), 0, 16);
+          uint64_t ca[] = {scene_h, child_out};
+          uint64_t cr = processor->Execute(ts, glc, ca, xe::countof(ca));
+          uint32_t kid = rd(child_out);
+          XELOGI("GuideScene: XuiElementGetLastChild({:08X}) -> {:08X}, "
+                 "child {:08X}",
+                 scene_h, static_cast<uint32_t>(cr), kid);
+          // Walk down: 00010000 is the root container and the navigated
+          // scene is its child, so the scene's OWN children are what the
+          // .xur populates. Two more levels tells us whether the visual
+          // content is really there.
+          for (int depth = 0; depth < 3 && kid; ++depth) {
+            std::memset(memory->TranslateVirtual(child_out), 0, 16);
+            uint64_t ka[] = {kid, child_out};
+            uint64_t kr = processor->Execute(ts, glc, ka,
+                                            xe::countof(ka));
+            uint32_t next = rd(child_out);
+            XELOGI("GuideScene: depth {} child of {:08X} -> {:08X}, "
+                   "{:08X}",
+                   depth + 1, kid, static_cast<uint32_t>(kr), next);
+            // Geometry and identity of each element: a populated tree
+            // whose elements have zero bounds renders nothing, and that
+            // is indistinguishable from "no content" unless measured.
+            uint32_t gid = xmod ? xmod->GetProcAddressByOrdinal(0x32E) : 0;
+            uint32_t gpos = xmod ? xmod->GetProcAddressByOrdinal(0x3DF) : 0;
+            uint32_t buf3 = memory->SystemHeapAlloc(32, 16);
+            if (buf3 && gpos) {
+              std::memset(memory->TranslateVirtual(buf3), 0, 32);
+              uint64_t pa[] = {kid, buf3};
+              uint64_t pr = processor->Execute(ts, gpos, pa,
+                                              xe::countof(pa));
+              XELOGI("GuideScene:   {:08X} GetPosition -> {:08X}: "
+                     "{:08X} {:08X} {:08X} {:08X}",
+                     kid, static_cast<uint32_t>(pr), rd(buf3),
+                     rd(buf3 + 4), rd(buf3 + 8), rd(buf3 + 12));
+            }
+            if (buf3 && gid) {
+              std::memset(memory->TranslateVirtual(buf3), 0, 32);
+              uint64_t ia3[] = {kid, buf3};
+              uint64_t ir3 = processor->Execute(ts, gid, ia3,
+                                               xe::countof(ia3));
+              // GetId hands back a wide string naming the element; that
+              // says what type it is, which decides whether GetVisual
+              // failing is meaningful or just a type mismatch.
+              uint32_t idp = rd(buf3);
+              std::string ids;
+              if (idp > 0x1000u) {
+                for (uint32_t w = 0; w < 64; ++w) {
+                  uint16_t ch = xe::load_and_swap<uint16_t>(
+                      memory->TranslateVirtual(idp + w * 2));
+                  if (!ch) break;
+                  ids += (ch >= 0x20 && ch < 0x7F) ? char(ch) : '?';
+                }
+              }
+              XELOGI("GuideScene:   {:08X} GetId -> {:08X}: {:08X} "
+                     "\"{}\"",
+                     kid, static_cast<uint32_t>(ir3), idp, ids);
+            }
+            // An element carries geometry, but what actually rasterises
+            // is its attached visual. A tree that lays out correctly and
+            // draws nothing is exactly what missing visuals look like.
+            uint32_t gvis = xmod ? xmod->GetProcAddressByOrdinal(0x395)
+                                 : 0;
+            if (buf3 && gvis) {
+              std::memset(memory->TranslateVirtual(buf3), 0, 32);
+              uint64_t va[] = {kid, buf3};
+              uint64_t vr = processor->Execute(ts, gvis, va,
+                                              xe::countof(va));
+              XELOGI("GuideScene:   {:08X} GetVisual -> {:08X}: {:08X}",
+                     kid, static_cast<uint32_t>(vr), rd(buf3));
+            }
+            kid = next;
+          }
+        }
+      } else {
+        XELOGW("GuideScene: could not resolve XuiElementGetLastChild");
+      }
       }
     }
   } else {
