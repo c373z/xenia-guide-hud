@@ -9,6 +9,7 @@
 
 #include <ranges>
 
+#include <mutex>
 #include <thread>
 
 #include "xenia/base/mutex.h"
@@ -2684,22 +2685,52 @@ static std::string format_version(xex2_version version) {
 // JIT/loader deadlock is likely to be holding. Resolving first would hang the
 // probe and lose the only evidence.
 static void ArmGuideThreadProbe(xe::kernel::KernelState* ks, int pdelay) {
+  // Two threads, because enumerating the object table is exactly what a
+  // freeze blocks on. The cacher keeps a fresh list of thread objects and
+  // will itself wedge on the object table lock once the hang hits - that is
+  // expected. The sampler only ever touches the cached references, so it can
+  // still read thread contexts after everything else is stuck. Holding
+  // object_refs keeps those threads alive, so the handles stay valid.
+  struct Shared {
+    std::mutex mu;
+    std::vector<kernel::object_ref<kernel::XThread>> threads;
+    uint32_t generation = 0;
+  };
+  auto shared = std::make_shared<Shared>();
+
+  std::thread([shared, ksp = ks]() {
+    xe::threading::set_name("GuideProbeCache");
+    for (;;) {
+      auto ths = ksp->object_table()->GetObjectsByType<kernel::XThread>(
+          kernel::XObject::Type::Thread);
+      {
+        std::lock_guard<std::mutex> lk(shared->mu);
+        shared->threads = std::move(ths);
+        shared->generation++;
+      }
+      std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+  }).detach();
+
   auto* pproc = ks->processor();
-  std::thread([pdelay, pproc, ksp = ks]() {
+  std::thread([pdelay, pproc, shared]() {
     xe::threading::set_name("GuideThreadProbe");
     std::this_thread::sleep_for(std::chrono::seconds(pdelay));
-    // Write to a plain file, not XELOGI. If the logger itself is what is
-    // wedged, every XELOGI here would block and the probe would produce
-    // nothing - which is indistinguishable from the probe never running.
-    // These markers say how far the probe got.
+    // Plain file, not XELOGI: if the logger were wedged these markers would
+    // be the only evidence that the probe ran at all.
     FILE* pf = fopen("probe.txt", "w");
-    auto mark = [&](const char* m) {
-      if (pf) {
-        fprintf(pf, "%s\n", m);
-        fflush(pf);
-      }
-    };
-    mark("probe: awake");
+    std::vector<kernel::object_ref<kernel::XThread>> ths;
+    uint32_t gen = 0;
+    {
+      std::lock_guard<std::mutex> lk(shared->mu);
+      ths = shared->threads;
+      gen = shared->generation;
+    }
+    if (pf) {
+      fprintf(pf, "probe: awake, snapshot gen=%u threads=%zu%s", gen,
+              ths.size(), "\n");
+      fflush(pf);
+    }
     struct Row {
       uint32_t h;
       std::string nm;
@@ -2707,9 +2738,6 @@ static void ArmGuideThreadProbe(xe::kernel::KernelState* ks, int pdelay) {
       uint32_t lr, r3;
     };
     std::vector<Row> rows;
-    auto ths = ksp->object_table()->GetObjectsByType<kernel::XThread>(
-        kernel::XObject::Type::Thread);
-    mark("probe: got object table");
     for (auto& th : ths) {
       void* nh2 = th->thread() ? th->thread()->native_handle() : nullptr;
       if (!nh2) continue;
@@ -2731,28 +2759,25 @@ static void ArmGuideThreadProbe(xe::kernel::KernelState* ks, int pdelay) {
       }
       rows.push_back({th->handle(), th->thread_name(), rip, lr, r3});
     }
-    mark("probe: sampled threads");
     if (pf) {
       for (auto& r : rows) {
         fprintf(pf, "%08X %-26s rip=%016llX lr=%08X r3=%08X\n", r.h,
                 r.nm.c_str(), static_cast<unsigned long long>(r.rip), r.lr,
                 r.r3);
       }
+      fprintf(pf, "probe: sampled %zu threads\n", rows.size());
       fflush(pf);
     }
-    // Pass 1: raw, lock-free. This always lands in the log.
-    for (auto& r : rows) {
-      XELOGI("ThreadProbe/raw: {:08X} {:26} rip={:016X} lr={:08X} r3={:08X}",
-             r.h, r.nm, r.rip, r.lr, r.r3);
-    }
-    XELOGI("ThreadProbe/raw: {} threads sampled; resolving (may block if the "
-           "code cache lock is held)",
-           rows.size());
-    // Pass 2: resolve to guest addresses. May never return under a deadlock.
+    // Resolution last: LookupFunction takes the code cache lock and may never
+    // return under a deadlock. Everything above is already on disk by now.
     auto* cc2 = pproc->backend()->code_cache();
     for (auto& r : rows) {
       auto* f2 = r.rip ? cc2->LookupFunction(r.rip) : nullptr;
       uint32_t g2 = f2 ? f2->MapMachineCodeToGuestAddress(r.rip) : 0;
+      if (pf) {
+        fprintf(pf, "resolved %08X guest %08X%s", r.h, g2, "\n");
+        fflush(pf);
+      }
       XELOGI("ThreadProbe: {:08X} {:26} guest {:08X} lr={:08X} r3={:08X}{}",
              r.h, r.nm, g2, r.lr, r.r3,
              f2 ? "" : "  (host: in a kernel call)");

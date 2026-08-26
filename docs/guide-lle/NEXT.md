@@ -1196,3 +1196,46 @@ enumerate threads. Getting the loader thread's own stack needs either a native
 debugger (none installed -- no `cdb`, `ntsd`, or `procdump`) or a probe that
 samples thread handles captured *before* the freeze rather than enumerating
 them during it.
+
+### Correction: the lock is lost ~20s BEFORE the hud load
+
+The probe now samples without touching the object table: a cacher thread keeps
+a fresh list of `object_ref<XThread>` (and wedges on the object table lock when
+the hang hits, which is fine), while the sampler only reads those cached
+references. Holding the refs keeps the threads alive, so the handles stay
+valid. It produces data under the freeze:
+
+    probe: awake, snapshot gen=1 threads=4
+    0100000C GPU Commands          rip=00007FF9D7441B14 lr=00000000 r3=00000000
+    01000010 GPU Frame limiter     rip=00007FF9D7442114 lr=00000000 r3=00000000
+    01000014 XMA Decoder           rip=00007FF9D7441B14 lr=00000000 r3=00000000
+    01000018 Audio Worker          rip=00007FF9D7441B14 lr=00000000 r3=00000000
+
+The `gen` counter is the important number, and it needed a control before it
+could be read:
+
+| Run | generations in 35s | threads cached |
+|---|---|---|
+| healthy (`--lle_xam=`) | **35** (one per second, as designed) | 28 |
+| frozen (LLE xam) | **1** | 4 |
+
+The cacher is therefore sound. In the frozen run only the *first* enumeration
+ever completed, and the snapshot holds just the four early GPU/audio worker
+threads -- so the object table lock stopped being available at roughly
+**t = 1s**, about twenty seconds before the Guide Loader touches hud.xex.
+
+**This corrects the previous section.** The lock is not "held across the hud
+module load". It is taken very early under LLE xam and never released; the
+emulator then runs and logs normally for ~20s because nothing needs it, and
+the hud load is merely the *first operation that does*. That is why the freeze
+looked like it lived in `FinishLoadingUserModule` -- it is the victim, not the
+cause.
+
+The four sampled threads are all parked in ntdll (`rip=00007FF9D744....`) with
+`lr=0`/`r3=0`, i.e. host worker threads with no guest context, so they are not
+the holder either.
+
+Next: find what acquires the object table lock early under LLE xam and does
+not release it. The cacher already brackets it to within one second of
+`CompleteLaunch`, so logging lock acquire/release around the title and xam
+module loads should name the holder directly.
