@@ -773,3 +773,20 @@ own D3D builds with their own device layouts. The scan now locates the render
 target by decoding `[p+0x24]` as a fetch constant and preferring a match
 against `VdQueryVideoMode`'s display mode, with a warned fallback for titles
 that render at a lower internal resolution.
+
+### Three-title validation
+
+| title | render target found | display-mode match |
+|---|---|---|
+| Plants vs Zombies | `[dev+0x3AC4]` = 1280x720 | exact |
+| Fable III | `[dev+0x3148]` = 1280x720 | exact |
+| Sonic & All-Stars Racing | `[dev+0x565C]` = 1153x609 | fallback (warned) |
+
+Three titles, three different offsets. Any hardcoded offset is wrong on most
+games - the original `0x3AC4` crashed Sonic outright - so the scan that decodes
+`[p+0x24]` as a fetch constant and prefers a display-mode match is the only
+portable way to find it.
+
+The Guide itself behaves identically on all three: same scene
+(`scnInfoUpsellLive`), same element (`labelHeading`), same handles, no crash,
+and zero draws. Nothing about the Guide's behaviour depends on the title.
