@@ -1582,3 +1582,50 @@ not remove the race itself.
 Next: find why guest threads execute xam code before the module load has
 finished populating it. That is the actual defect; everything else here is a
 symptom of it.
+
+### Correction: not "scanned before written" either. Still unresolved.
+
+The previous section concluded the zeros were a load race - functions scanned
+before their pages were written. Direct measurement says that is wrong, and
+the honest state is that the cause is **not yet known**.
+
+Three facts, each measured rather than inferred:
+
+1. **The code is present at load.** Dumping the exact failing addresses right
+   after xam loads gives correct code, byte-for-byte matching the image on
+   disk:
+
+       8186E528: 7D8802A6 9181FFF8 9421FFA0 9081007C 7C681B78 ...
+       818936B8: 7D8802A6 4BF7A091 9421FF40 A1630000 ...
+       81747D70: 7D8802A6 9181FFF8 FBE1FFF0 9421FFA0 ...
+
+   (This also independently confirms the `runtime + 0x7200` file mapping: the
+   guest bytes match what `ppcdis` shows at the mapped file VA.)
+
+2. **The code is still present later.** The same dump at probe time (30s) is
+   identical. Whole-page zero counts *fall* over the run, 47 -> 45, and the
+   zero pages stay confined to `81D14000-81D5F000` (globals and import
+   thunks, progressively initialised). Nothing clobbers the code region.
+
+3. **Yet `PPCScanner` reads 48 consecutive zero bytes at those very
+   addresses** partway through the run, through the same
+   `memory->TranslateVirtual` path.
+
+So the value is correct before and after, and zero in between. The load-race
+story cannot explain (1): the population is already correct before `dash.xex`
+is even loaded, long before the scanner trips.
+
+Note also `LLE xam: loaded at 30013000`, which is a system-heap address, not
+the `0x817xxxxx` range the code executes from - worth understanding before
+theorising further, since it may mean there are two copies of the image.
+
+What would fit: something transiently zeroes or remaps those words mid-run -
+a second write pass over the image, a page being unmapped and re-mapped, or a
+protection change that makes reads return zero. None of that is established.
+
+**Do not write another confident causal story here without measuring it.**
+This particular question has now produced three plausible-and-wrong answers
+(missing pages, load race, clobbering). The next step is a watchpoint rather
+than another inference: record the value at one of these addresses on a tight
+timer from a host thread and log the transition, which pins *when* it goes
+zero relative to the surrounding log lines.

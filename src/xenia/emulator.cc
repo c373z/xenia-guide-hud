@@ -1118,6 +1118,7 @@ X_STATUS Emulator::CreateZarchivePackage(
 
 static void InstallGuideStoreTraces(xe::kernel::KernelState* ks);
 static void ArmGuideThreadProbe(xe::kernel::KernelState* ks, int pdelay);
+static void ReportXamTextPopulation(Memory* memory, const char* when);
 
 void Emulator::on_guide_button_pressed(uint8_t user_index) {
   XELOGI("Guide button: pressed (user {}), handler={:08X} buf={:08X} "
@@ -2730,6 +2731,69 @@ static std::string format_version(xex2_version version) {
 // LookupFunction takes the code cache lock and that is exactly the lock a
 // JIT/loader deadlock is likely to be holding. Resolving first would hang the
 // probe and lose the only evidence.
+// Report how much of xam's .text reads back as zero. Called at more than one
+// point: a page that is populated at load and zero later means something is
+// clobbering the image, which is a different bug from it never being loaded.
+static void ReportXamTextPopulation(Memory* memory, const char* when) {
+  const uint32_t kTextStart = 0x81770000u;
+  const uint32_t kTextEnd = 0x81D60000u;
+  uint32_t zero_pages = 0, total_pages = 0, run = 0, best_run = 0;
+  uint32_t best_start = 0, first_zero = 0, last_zero = 0;
+  for (uint32_t pg = kTextStart; pg < kTextEnd; pg += 0x1000) {
+    auto* hp = memory->LookupHeap(pg);
+    if (!hp || hp->QueryRangeAccess(pg, pg + 0xFFF) ==
+                   xe::memory::PageAccess::kNoAccess) {
+      continue;
+    }
+    ++total_pages;
+    const uint32_t* w = memory->TranslateVirtual<const uint32_t*>(pg);
+    bool all_zero = true;
+    for (uint32_t i = 0; i < 0x1000 / 4; ++i) {
+      if (w[i]) {
+        all_zero = false;
+        break;
+      }
+    }
+    if (all_zero) {
+      ++zero_pages;
+      if (!first_zero) first_zero = pg;
+      last_zero = pg;
+      if (++run > best_run) {
+        best_run = run;
+        best_start = pg - (run - 1) * 0x1000;
+      }
+    } else {
+      run = 0;
+    }
+  }
+  // Whole-page counting misses a hole inside an otherwise populated page,
+  // which is exactly what a bogus function start landing in inter-function
+  // padding would look like. Dump the specific addresses the scanner has
+  // tripped on so they can be diffed against the image on disk.
+  for (uint32_t probe_addr : {0x8186E528u, 0x818936B8u, 0x81747D70u}) {
+    auto* hp = memory->LookupHeap(probe_addr);
+    if (!hp || hp->QueryRangeAccess(probe_addr, probe_addr + 31) ==
+                   xe::memory::PageAccess::kNoAccess) {
+      XELOGI("xam probe {:08X} ({}): unmapped", probe_addr, when);
+      continue;
+    }
+    std::string words;
+    for (uint32_t i = 0; i < 8; ++i) {
+      words += fmt::format(
+          "{:08X} ", xe::load_and_swap<uint32_t>(
+                         memory->TranslateVirtual(probe_addr + i * 4)));
+    }
+    XELOGI("xam probe {:08X} ({}): {}", probe_addr, when, words);
+  }
+  XELOGI(
+      "xam .text population ({}): {} of {} mapped pages are entirely zero "
+      "({:.1f}%); longest zero run {} pages at {:08X}; first {:08X} "
+      "last {:08X}",
+      when, zero_pages, total_pages,
+      total_pages ? 100.0 * zero_pages / total_pages : 0.0, best_run,
+      best_start, first_zero, last_zero);
+}
+
 static void ArmGuideThreadProbe(xe::kernel::KernelState* ks, int pdelay) {
   // Two threads, because enumerating the object table is exactly what a
   // freeze blocks on. The cacher keeps a fresh list of thread objects and
@@ -2762,6 +2826,10 @@ static void ArmGuideThreadProbe(xe::kernel::KernelState* ks, int pdelay) {
   std::thread([pdelay, pproc, shared]() {
     xe::threading::set_name("GuideThreadProbe");
     std::this_thread::sleep_for(std::chrono::seconds(pdelay));
+    // Compare against the same scan taken at load: a page populated then and
+    // zero now means the image is being clobbered after loading, which is a
+    // different bug from it never being loaded.
+    ReportXamTextPopulation(pproc->memory(), "at probe time");
     // Plain file, not XELOGI: if the logger were wedged these markers would
     // be the only evidence that the probe ran at all.
     FILE* pf = fopen("probe.txt", "w");
@@ -3149,50 +3217,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                kRAddr, rcur, kROrig);
       }
     }
-    {
-      // xam functions have been found reading back as 0x00000000 from guest
-      // memory while the image on disk holds ordinary code there, which
-      // corrupts function bounds and crashes the translator. Measure how much
-      // of xam's .text is actually populated, once, right after it loads.
-      const uint32_t kTextStart = 0x81770000u;
-      const uint32_t kTextEnd = 0x81D60000u;
-      uint32_t zero_pages = 0, total_pages = 0, run = 0, best_run = 0;
-      uint32_t best_start = 0, first_zero = 0, last_zero = 0;
-      for (uint32_t pg = kTextStart; pg < kTextEnd; pg += 0x1000) {
-        auto* hp = memory()->LookupHeap(pg);
-        if (!hp || hp->QueryRangeAccess(pg, pg + 0xFFF) ==
-                       xe::memory::PageAccess::kNoAccess) {
-          continue;
-        }
-        ++total_pages;
-        const uint32_t* w = memory()->TranslateVirtual<const uint32_t*>(pg);
-        bool all_zero = true;
-        for (uint32_t i = 0; i < 0x1000 / 4; ++i) {
-          if (w[i]) {
-            all_zero = false;
-            break;
-          }
-        }
-        if (all_zero) {
-          ++zero_pages;
-          if (!first_zero) first_zero = pg;
-          last_zero = pg;
-          if (++run > best_run) {
-            best_run = run;
-            best_start = pg - (run - 1) * 0x1000;
-          }
-        } else {
-          run = 0;
-        }
-      }
-      XELOGI(
-          "xam .text population: {} of {} mapped pages are entirely zero "
-          "({:.1f}%); longest zero run {} pages at {:08X}; first {:08X} "
-          "last {:08X}",
-          zero_pages, total_pages,
-          total_pages ? 100.0 * zero_pages / total_pages : 0.0, best_run,
-          best_start, first_zero, last_zero);
-    }
+    ReportXamTextPopulation(memory(), "after xam load");
     if (cvars::guide_patch_null_render) {
       // 818FDEF0  lwz r11,0x1C(r27)   ; XUI context's null-render flag
       // 818FDF14  stw r11,0x134(r30)  ; over the device context's copy
