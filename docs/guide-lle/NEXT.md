@@ -225,3 +225,213 @@ guest crashes, and both cvars still default off.
 Note the branch's own copy of that file also changes `XboxHardwareInfo` to read
 from `xbox_hardware_info_flags`, which is Guide-specific and deliberately
 excluded from the patch.
+
+---
+
+## Session: running the Guide over a real title (Plants vs. Zombies)
+
+Everything below was measured against a real game booting from an ISO, not the
+dashboard. Two pieces of infrastructure made that possible:
+
+* `guide_system_root` mounts a host directory as the guest device `SYS:`.
+  Without it `lle_xam` and `guide_hud_path` have to live on `GAME:`, which is
+  only the dashboard folder when the dashboard is the title; launching a disc
+  makes `GAME:` the disc and both loads fail with `C0000225`.
+* `guide_auto_press_seconds` fires the Guide button directly. `SendKeys` needs
+  window focus the emulator does not reliably hold under automation, so the
+  press was being silently dropped and the load-time `lle_guide_draw` path was
+  being measured instead of the button path. Those are different code paths
+  with different object conventions (`obj` vs the button handler's `obj+16`).
+
+### Address conventions (settled, and worth not re-deriving)
+
+`.pdata` stores **runtime** addresses. `ppcdis.py` takes **file VAs**
+(runtime + 0x7200), and branch targets it prints are already file VAs. Check any
+candidate against `.pdata` before trusting a disassembly - a wrong space lands
+mid-function and looks like real code.
+
+### The XUI render chain, decoded
+
+* `XuiRenderBegin(dc, colour)` - the second argument is `0xFF000000`, an opaque
+  black **clear colour**, not a surface. It is forwarded unchanged through every
+  layer; nothing upstream supplies a render target.
+* DC vtable is at runtime `8163E4E8`: slot18 `818F82F0`, slot19 `818F8A90`,
+  slot20 `818FDDE8`, slot21 `818F9290`.
+* Slot 18 reads `[dc+0x11C]` (must be 0) then `[dc+0x134]`, and dispatches
+  slot 20 (`vtable+0x50`) only when `[dc+0x134] == 0`.
+* Slot 20 asserts `[dc+0x1CC]` (the device) is non-null, then calls the device's
+  own vtable slot 11 with the colour - it is **Clear**, not SetRenderTarget.
+* `[dc+0x134]` gets its value from exactly one place: `818FDF14`
+  `stw r11,0x134(r30)`, copying `[ctx+0x1C]`. `81900E70` already initialises the
+  field to 0. `guide_patch_null_render` nops that store at xam load time.
+  The pre-existing `guide_clear_null_render` never worked because it clears
+  `[ctx+0x1C]` at bootstrap while the per-frame context is constructed later.
+
+### Render-target plumbing
+
+* RT0 is `[dev+0x32A0]`, RT1 `+0x32A4`, depth `+0x32B0`, front buffer `+0x3F74`,
+  and `[dev+0x3F78]` is the device's **default** target.
+* Real setter: `819F31A8(device, index<=3, surface)`. It asserts on index > 3
+  and validates bit 30 of the surface's word 0.
+* `819F4C00` is **unbind-all**: it walks RT0..RT3 and calls
+  `SetRenderTarget(dev, i, NULL)` for every slot that does not equal
+  `[dev+0x3F78]`. This is why poking `[dev+0x32A0]` directly does not stick -
+  register the surface at `+0x3F78` as well and bind through `819F31A8`.
+* The title's live render target is at `[VdGlobalDevice+0x3AC4]`. Scanning the
+  title device for pointers whose `[+0x24]` unpacks as a fetch constant
+  (`width = (rotl(v,14) & 0x3FFF) + 1`, `height = (rotl(v,29) & 0x7FFF) + 1`,
+  the emitter's own bit ops) yields exactly one candidate and it decodes to the
+  title's real resolution. `guide_bind_title_rt` binds it.
+
+### Do not compare devices field-by-field across modules
+
+The title and xam each statically link their own D3D build. Their device object
+layouts are **not** the same struct, so reading the title's device at xam's
+offsets is meaningless. Two apparent findings were discarded for this reason.
+Surface objects are different - those are GPU fetch constants, hardware format,
+and do transfer.
+
+### The two device creators, fully characterised
+
+| creator | title keeps rendering | device usable |
+|---|---|---|
+| none | yes | - |
+| mode 2 `8178F748` (`pPresentationParameters = NULL`) | **yes** | no ring buffer, open-ended uninitialised state |
+| mode 1 `8178E9F0` (real presentation parameters) | **no** | properly brought up |
+
+The press itself is harmless - with no device creation the title runs on
+untouched. Mode 1 re-points the GPU ring from the title's 1MB buffer at
+`1FAE2000` to its own 4KB one.
+
+### Dead end: mode 1 plus ring restore
+
+The ring is only re-pointed, not destroyed, so restoring the registers looked
+promising. `GuideRingSave()` / `GuideRingRestore()` on the command processor do
+this non-destructively (Xenia's own `InitializeRingBuffer` memsets the ring and
+resets the read index, which would be worse than not restoring).
+
+**It does not work.** The registers were handed back exactly as saved and the
+title never swapped again. It is not merely starved of a ring - its render
+thread blocks and does not recover, almost certainly waiting on GPU progress
+(fence / read-pointer writeback) that never advances once its packets stopped
+being consumed. Restoring a register does not retroactively advance that.
+
+Test this kind of claim in isolation before building on it. The planned
+restructuring (move the draw and restore into a single `VdSwap` call) would have
+failed for the same reason, since the thread is already blocked before ordering
+matters.
+
+### Where the mode-2 route stands
+
+Faults cleared in sequence, each revealing the next: null-render gate -> clear
+with no render target -> emitter's null 6th argument (`+0x3F74`) -> RT0 read
+null (`+0x32A0`) -> packet emission with no command buffer -> descriptor path.
+
+`guide_syscmdbuf_buffer_kb` / `guide_syscmdbuf_fields` both take effect and moved
+the fault twice; `819FE138`, which those cvars were written for, is in the crash
+unwind. The buffer is plumbed but the guest has written 0 words into it.
+
+Patching device fields one at a time was **not converging** - six deep when it
+stopped, each one something mode-1 bring-up would have done. The remaining
+question is whether the system command buffer can give the mode-2 device a real
+place to emit packets, since that is the one route that both preserves the title
+and has been advancing.
+
+### Not established
+
+No GPU draws have been observed from the Guide. An earlier claim of "3 draws"
+in this session was **wrong**: the baseline is 3000 per 200 swaps only after
+startup settles, the first two samples vary run to run, and both deviating
+intervals occurred before the draw hook was installed. `GuideDrawGPU: dispatched
+0` has been accurate throughout.
+
+### Dead end: hand-invoking xam's device bring-up routines
+
+`guide_device_init_fn` takes a runtime address and calls it as `f(device, 0)` on
+the Guide's device, so candidates can be tried without a rebuild. Both writers
+of the command-buffer pointer `[dev+0x2B10]` were tried:
+
+* `81A0F858` - returns S_OK and changes nothing. `[2B10]`, `[2B4C]`, RT0 and
+  `[3F74]` all stay zero. Its writes sit behind branches that an
+  un-brought-up device never reaches; only its prologue (two asserts and a
+  conditional unbind-all) actually runs.
+* `81A0FE48` - crashes at `81A04648` (fault `+0x4C`), unwinding through
+  `81A0FF7C` which is `81A0FE48+0x134`. It takes a real second argument and
+  depends on state that does not exist yet.
+
+The generalisation: bring-up is not a routine that can be invoked on a
+half-built device, it is a sequence whose steps assume each other. Picking
+individual functions out of it and calling them is guesswork, and two
+independent attempts failed in two different ways (silent no-op, and crash).
+
+Anything further here needs the **contract** of `VdGetSystemCommandBuffer` -
+what descriptor the guest expects and what it does with it - established by
+reading `819FE138`, rather than by calling routines and seeing what happens.
+`guide_syscmdbuf_fields` already supplies the two fields that function compares
+(`+0x30 = 0x500`, `+0x34 = 0x5BE`); the question is what it reads after that.
+
+### Dead end: hand-binding the command-buffer cursor
+
+`guide_bind_cmdbuf_kb` allocates a buffer and writes it into `[dev+0x2B4C]`.
+The bind applies (logged), and the crash at `81A01638` is byte-identical
+afterwards. The assert at the top of `81A015B8` traps only when the caller's
+cursor and `[dev+0x2B4C]` **differ**; we get an access violation instead, so
+both read 0 by the time emission runs - the bound value was overwritten.
+
+There are 11 `stw rX,0x2B4C(rY)` sites in xam. The cursor is managed per
+emission, not set once, and unlike RT0 there is no "default" field to register a
+value against so that a reset leaves it alone. Hand-binding cannot hold it.
+
+### Which configuration actually reaches the draw emitter
+
+Worth being explicit, because it is the opposite of what the device-quality
+argument suggests:
+
+* **mode 1** (properly brought-up device, RT0 bound by xam itself, front buffer
+  present): render host, `XuiRenderCreateDC`, all three registrars and
+  `scene=00010000` all succeed, the composite draw returns S_OK - and the
+  emitter is **never entered**. Zero draws, no faults, nothing to chase.
+* **mode 2 + hand-bound RT0 and front buffer**: the emitter **is** entered.
+  That is what produced the successive faults at `819F5EC4`, `819F5F60` and
+  finally packet emission at `81A01638`.
+
+So the compromised-looking configuration is the one that gets the Guide drawing,
+and its only remaining blocker is a write cursor that cannot be hand-bound.
+
+No GPU draw has been observed in any configuration.
+
+### The command-buffer protocol, and why binding it still does not hold
+
+`81A01358(device, buffer, wordCount)` is the real setup routine:
+
+    lwz  r11,[dev+0x2B4C] ; asserts the cursor is currently 0
+    stw  r30,[dev+0x2B48] ; base   = buffer
+    stw  r30,[dev+0x2B4C] ; cursor = buffer - 4
+    stw  r11,[dev+0x2B50] ; limit  = buffer + count*4 - 4
+    stw  r10,[dev+0x2B58] ; 4
+    return cursor
+
+The pre-decrement to `buffer-4` is why emission does `+4` **before** each store.
+`guide_bind_cmdbuf_kb` now calls this rather than writing `+2B4C`, and it works
+exactly as decoded (base/cursor/limit all correct, correct return).
+
+The crash at `81A01638` is nevertheless byte-identical: emission reads a cursor
+of 0 on the same device, and the entry assert does not trap, so both sides read
+0 by then. The cursor is reset between our init and the emission - which the
+entry assert implies by design, since it requires 0 on entry. This is a paired
+begin/end protocol and the begin belongs inside the device's per-frame setup.
+
+**Generalisation, now supported by four independent attempts** (RT0, the front
+buffer, the raw cursor write, and this): every field involved is owned by a
+begin/end lifecycle, and a value injected from outside that lifecycle is
+discarded by it. Two of the four only appeared to work - RT0 and `+3F74` hold
+because nothing resets them before the draw, not because binding them is
+correct. Nothing short of running the real per-frame setup will hold, and that
+setup is what mode 2 is defined to skip.
+
+`819F4770(device)` is the routine that allocates the command buffer (4096 bytes
+to `[dev+0x6340]`, 3072 to `[dev+0x6348]`) and is one of the 7 callers of
+`81A01358`. Calling it directly returns 1 and leaves `[2B10]`, `[2B4C]`, RT0 and
+`[3F74]` all zero - its call to the begin routine is behind a branch it does not
+take on a half-built device. Third bring-up routine to no-op this way, after
+`81A0F858` and (crashing instead) `81A0FE48`.

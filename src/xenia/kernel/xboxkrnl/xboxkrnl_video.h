@@ -34,6 +34,13 @@ void SetGuideDrawHook(uint32_t fn, uint32_t self);
 // work. Scene creation waits for this and then runs off the render thread.
 bool GuideBootstrapReady();
 
+// xam's mode-1 device creator re-points the GPU ring from the title's ring to
+// its own, which is why the title stops swapping at the button press. Save the
+// title's ring before that call and restore it once the Guide has drawn, so
+// the Guide gets a properly brought-up device and the title still presents.
+void GuideSaveTitleRing();
+void GuideRestoreTitleRing();
+
 void QueueGuideBootstrap(uint32_t hud_base, uint32_t guide_obj,
                          bool use_title_device, uint32_t skin_module);
 

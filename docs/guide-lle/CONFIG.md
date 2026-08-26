@@ -1,8 +1,8 @@
 # Reproducing the working Guide bootstrap
 
 Everything below is a `xenia-canary.config.toml` setting. Xenia writes that
-file on first run with source defaults; only these six values differ from
-those defaults, and with all six set the Guide bootstrap runs end to end.
+file on first run with source defaults; only these values differ from those
+defaults, and with them set the Guide bootstrap runs end to end.
 
 Launch is just the dashboard - the harness passes no flags:
 
@@ -192,6 +192,34 @@ The deep-reach section above lists six cvars. Testing each by removal:
 | `guide_create_primary_device` | (gates mode 1 itself) | yes |
 | `guide_bootstrap_before_device` | (bootstrap never queued under mode 1) | yes |
 | `guide_clear_null_render` | (the flag being cleared is the whole point) | yes |
+
+### Running over a real game instead of the dashboard
+
+`lle_xam` and `guide_hud_path` are **guest** paths. `GAME:` is whatever was
+launched, so `GAME:\xam.xex` only resolves when the dashboard folder is the
+title; launching a game disc makes `GAME:` the disc and both loads fail with
+`C0000225`. Set `guide_system_root` to the host directory holding `xam.xex` and
+`hud.xex` - it is mounted as the guest device `SYS:` - and point both settings
+at `SYS:` instead. That form works for the dashboard *and* for a disc, so it is
+the better default:
+
+| Setting | Value |
+|---|---|
+| `guide_system_root` | host path to `dashroot` |
+| `lle_xam` | `"SYS:\xam.xex"` |
+| `guide_hud_path` | `"SYS:\hud.xex"` |
+
+### Pressing the Guide button under automation
+
+The button is bound to VK `0x08` (Backspace) via `keybind_guide`, but sending it
+with `SendKeys` needs the emulator window to hold focus, which it does not
+reliably do when driven from a script - the press is silently dropped and the
+**load-time** `lle_guide_draw` path gets exercised instead of the button path.
+Those are different code paths with different object conventions (`obj` versus
+the button handler's `obj+16`), so measuring the wrong one is easy and quiet.
+Set `guide_auto_press_seconds` to fire the press directly, and give the title
+long enough to reach its render loop first (the dashboard is much slower to JIT
+than a game; 45s suits a game, the dashboard wants more).
 
 So five, not six. `guide_syscmdbuf_fields` is redundant: it was necessary
 before `guide_use_bound_device` existed - filling the display-mode fields was

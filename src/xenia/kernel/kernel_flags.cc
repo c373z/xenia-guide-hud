@@ -299,6 +299,59 @@ DEFINE_bool(guide_syscmdbuf_fields, false,
             "implementation of the system command buffer.",
             "Kernel");
 
+DEFINE_string(guide_system_root, "",
+              "Host directory holding xam.xex and hud.xex, mounted as the "
+              "guest device SYS:. Without it those files have to live on the "
+              "title's own GAME: device, which only works when the title is "
+              "the dashboard folder - launching a real game disc makes GAME: "
+              "the disc and both loads fail. Set lle_xam and guide_hud_path "
+              "to SYS:\\... when using this.",
+              "Kernel");
+
+DEFINE_int32(guide_auto_press_seconds, 0,
+             "Seconds after the title starts to fire the Guide button "
+             "automatically, as if the Xbox button were pressed. Sending the "
+             "key with SendKeys depends on the emulator window holding focus, "
+             "which it does not reliably do under automation - the press is "
+             "silently dropped and the load-time path gets measured instead "
+             "of the button path. Zero leaves the button manual.",
+             "Kernel");
+
+DEFINE_uint32(guide_force_obj14, 0,
+              "Value to store into the Guide object's [+0x14] before hud's "
+              "XUI init (913EA898) runs. That init reads [obj+0x14] and, when "
+              "it is zero, bails to 913EA920 without ever calling "
+              "XuiRenderCreateDC - which is why [obj+0x0C] (the device "
+              "context slot) stays null and no frame has a device context at "
+              "all. The constructor at 913EA840 zeroes it and something we do "
+              "not perform is meant to set it. On the DC-creating branch the "
+              "field is only tested, never dereferenced, so a non-zero value "
+              "is enough to take it.",
+              "Kernel");
+
+DEFINE_bool(guide_patch_null_render, false,
+            "Nop the store at runtime 818FDF14, which copies the XUI "
+            "context's null-render flag [ctx+0x1C] over the device context's "
+            "[dc+0x134]. The device context constructor (81900E70) already "
+            "initialises that field to 0; the copy is what sets it to 1, and "
+            "a non-zero [dc+0x134] makes XuiRenderBegin skip vtable[20] and "
+            "the draw emitter 819F5D18 never build a DRAW_INDX packet. With "
+            "the copy removed the zero survives and the Guide's geometry "
+            "should reach the command stream. Applied to xam's image at load "
+            "time, before anything JITs the function.",
+            "Kernel");
+
+DEFINE_uint32(guide_coverage_fn, 0,
+              "Guest address of a function whose per-instruction execution "
+              "counts to report after the Guide's draw. Requires "
+              "trace_function_coverage and a trace_function_data_path, which "
+              "make the JIT emit a counter increment per guest instruction. "
+              "Reports the furthest instruction reached, which is how to find "
+              "where 819F5D18 stops instead of building a draw packet - its "
+              "draw construction sites are reachable but sit behind ~390 "
+              "branch points, too many to read.",
+              "Kernel");
+
 DEFINE_int32(guide_front_buffer_shift, 0,
              "Bytes to shift the front-buffer clone's source by. The bound "
              "colour surface carries what looks like a fetch constant at "
@@ -355,6 +408,68 @@ DEFINE_bool(guide_watch_front_buffer, false,
             "the store and the fault can never be observed in the same run. "
             "Reading guest memory from the host perturbs nothing, and catches "
             "a value that is written and then cleared.",
+            "Kernel");
+
+DEFINE_int32(guide_bind_cmdbuf_kb, 0,
+             "Allocate a command buffer of this many KB and point the Guide "
+             "device's write cursor [dev+0x2B4C] at it. Packet emission "
+             "(81A015B8) asserts its caller's cursor equals that field, "
+             "reserves words by advancing it, and writes each packet word "
+             "through it; on a mode-2 device the cursor is 0 so the first "
+             "word stores to guest address 4. Mode 2 is the only "
+             "configuration in which the draw emitter is actually reached - "
+             "mode 1 brings the device up properly but the emitter is never "
+             "entered and no draws are dispatched - so this binds the one "
+             "field standing between the emitter and somewhere real to write.",
+             "Kernel");
+
+DEFINE_uint32(guide_device_init_fn, 0,
+              "Runtime address of an xam device routine to call as f(device, "
+              "0) on the Guide's device before it draws, to try to bring up "
+              "the state mode 2 leaves zeroed. An address rather than a bool "
+              "so candidates can be tried without a rebuild. Known writers of "
+              "the command-buffer pointer [dev+0x2B10] are 81A0F858 (calling "
+              "it is a no-op here - its writes sit behind branches an "
+              "un-brought-up device does not reach) and 81A0FE48.",
+              "Kernel");
+
+DEFINE_bool(guide_device_begin, false,
+            "Call xam's own device setup routine, runtime 81A0F858, on the "
+            "device the Guide draws with. It takes only the device, and it is "
+            "the single routine that writes [dev+0x2B10] (the command-buffer "
+            "pointer whose nullness faults packet emission), writes "
+            "[dev+0x3F74] (the front buffer the draw emitter takes as its "
+            "sixth argument), and binds RT0 - the three fields that were "
+            "otherwise being patched by hand, one fault at a time, without "
+            "converging. It asserts [dev+0x38F0] and [dev+0x4020] are zero and "
+            "calls the unbind-all at 819F4C00 first, so run it BEFORE "
+            "guide_bind_title_rt rather than after.",
+            "Kernel");
+
+DEFINE_bool(guide_restore_title_ring, false,
+            "Save the GPU ring registers before xam's mode-1 device creator "
+            "and restore them after the Guide has drawn. Mode 1 is the only "
+            "creator that brings a device up properly - real presentation "
+            "parameters, a ring buffer, and all the device state mode 2 "
+            "leaves zeroed - but it re-points the ring from the title's 1MB "
+            "buffer to its own 4KB one, so the title's packets stop reaching "
+            "the GPU and it never presents again. The ring is only "
+            "re-pointed, not torn down, so handing the registers back should "
+            "let the title resume and present the buffer the Guide drew into.",
+            "Kernel");
+
+DEFINE_bool(guide_bind_title_rt, false,
+            "Bind the TITLE's live render target as RT0 on the device the "
+            "Guide's present path uses. Only xam's mode-1 creator produces a "
+            "device with RT0 bound, and mode 1 re-runs GPU bring-up, which "
+            "stops the title's own rendering dead at the button press - so it "
+            "can never be the overlay path. Mode 2 leaves the title running "
+            "but its device has no render target. The title's RT sits at "
+            "[VdGlobalDevice+0x3AC4]: scanning the title device for pointers "
+            "whose [+0x24] unpacks as a fetch constant finds exactly one "
+            "candidate, and it decodes to the title's real resolution. "
+            "Binding it means the Guide draws into the title's back buffer, "
+            "which is what an overlay should do.",
             "Kernel");
 
 DEFINE_bool(guide_bind_depth_copy, false,

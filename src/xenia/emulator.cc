@@ -1112,6 +1112,9 @@ X_STATUS Emulator::CreateZarchivePackage(
 }
 
 void Emulator::on_guide_button_pressed(uint8_t user_index) {
+  XELOGI("Guide button: pressed (user {}), handler={:08X} buf={:08X} "
+         "out_sz={:08X}",
+         user_index, guide_handler_, guide_buf_, guide_out_sz_);
   // Drive the Guide open sequence if hud.xex is loaded and registered. This
   // runs the message dispatch on a guest thread - hud's handler must not be
   // called from the host UI thread. It does not yet produce a visible Guide
@@ -1466,7 +1469,51 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                                ks->memory()->TranslateVirtual(0x81D3C8E8u)));
                   }
                 }
+                if (cvars::guide_restore_title_ring) {
+                  kernel::xboxkrnl::GuideSaveTitleRing();
+                }
                 XELOGI("Guide button: calling device creator {:08X}", create_fn);
+                {
+                  // Snapshot the ring before the creator: mode 1 reaches
+                  // VdInitializeRingBuffer and the title stops swapping.
+                  // If the ring is merely repointed, restoring it may let
+                  // the title carry on; if it is torn down some other way,
+                  // that shows here instead.
+                  auto* rgs = ks->emulator()->graphics_system();
+                  if (rgs && rgs->command_processor()) {
+                    uint32_t rp = 0, rs = 0, rw = 0;
+                    rgs->command_processor()->GuideRingState(&rp, &rs, &rw);
+                    XELOGI("GuideRing: before creator ptr={:08X} "
+                           "size={:08X} wb={:08X}", rp, rs, rw);
+                    std::thread([rgs, rp, rs, rw]() {
+                      xe::threading::set_name("GuideRingWatch");
+                      for (int i = 0; i < 60; ++i) {
+                        xe::threading::Sleep(std::chrono::seconds(1));
+                        uint32_t p2 = 0, s2 = 0, w2 = 0;
+                        rgs->command_processor()->GuideRingState(&p2, &s2,
+                                                                &w2);
+                        if (p2 != rp || s2 != rs || w2 != rw) {
+                          XELOGI("GuideRing: CHANGED after {}s ptr {:08X}"
+                                 "->{:08X} size {:08X}->{:08X} wb "
+                                 "{:08X}->{:08X}",
+                                 i + 1, rp, p2, rs, s2, rw, w2);
+                          if (cvars::guide_restore_title_ring) {
+                            // Isolated test of the core claim: the ring
+                            // is re-pointed, not destroyed, so handing
+                            // the registers back should let the title
+                            // resume. Give mode-1 bring-up a moment to
+                            // finish before taking the ring back.
+                            xe::threading::Sleep(
+                                std::chrono::seconds(3));
+                            kernel::xboxkrnl::GuideRestoreTitleRing();
+                          }
+                          return;
+                        }
+                      }
+                      XELOGI("GuideRing: unchanged for 60s");
+                    }).detach();
+                  }
+                }
                 if (cvars::guide_stall_probe_seconds > 0 && cur) {
                   // CreateDevice may never return, so the probe has to live on
                   // a host thread of its own. Collect raw RIPs first and
@@ -2594,6 +2641,22 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
   // LLE xam bootstrap: load the real xam.xex as a guest module before the main
   // module, so the main module's xam imports bind against xam's real export
   // table instead of Xenia's HLE xam. See XexModule::SetupLibraryImports.
+  if (!cvars::guide_system_root.empty()) {
+    // xam.xex and hud.xex normally have to sit on the title's own GAME:
+    // device, which only works when the title is the dashboard folder.
+    // Mount them separately so a real game disc can be the title.
+    auto sys_device = std::make_unique<vfs::HostPathDevice>(
+        "\\SYS", xe::to_path(cvars::guide_system_root), true);
+    if (sys_device->Initialize() &&
+        file_system_->RegisterDevice(std::move(sys_device))) {
+      file_system_->RegisterSymbolicLink("SYS:", "\\SYS");
+      XELOGI("Guide: mounted system root {} as SYS:",
+             cvars::guide_system_root);
+    } else {
+      XELOGE("Guide: failed to mount system root {}",
+             cvars::guide_system_root);
+    }
+  }
   if (!cvars::lle_xam.empty()) {
     XELOGI("LLE xam: loading guest xam from {}", cvars::lle_xam);
     lle_xam_module_ = kernel_state_->LoadUserModule(cvars::lle_xam, false);
@@ -2612,8 +2675,51 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
       return xam_result;
     }
     XELOGI("LLE xam: loaded at {:08X}", xam_module->hmodule_ptr());
+    if (cvars::guide_patch_null_render) {
+      // 818FDEF0  lwz r11,0x1C(r27)   ; XUI context's null-render flag
+      // 818FDF14  stw r11,0x134(r30)  ; over the device context's copy
+      const uint32_t kAddr = 0x818FDF14u;
+      const uint32_t kOrig = 0x917E0134u;
+      XELOGI("Guide: patch step 1, memory()={}",
+             static_cast<const void*>(memory()));
+      auto* pw = memory()->TranslateVirtual<uint32_t*>(kAddr);
+      XELOGI("Guide: patch step 2, host ptr={}", static_cast<void*>(pw));
+      uint32_t cur = xe::load_and_swap<uint32_t>(pw);
+      XELOGI("Guide: patch step 3, cur={:08X}", cur);
+      if (cur == kOrig) {
+        // Guest code pages are mapped without write access, so the store
+        // faults unless the page is temporarily made writable.
+        void* page = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(pw) &
+                                             ~uintptr_t(0xFFF));
+        xe::memory::PageAccess old_access = xe::memory::PageAccess::kReadOnly;
+        bool unprotected = xe::memory::Protect(
+            page, 0x1000, xe::memory::PageAccess::kReadWrite, &old_access);
+        if (!unprotected) {
+          XELOGE("Guide: could not unprotect {:08X} for patching", kAddr);
+          return X_STATUS_UNSUCCESSFUL;
+        }
+        xe::store_and_swap<uint32_t>(pw, 0x60000000u);  // nop
+        xe::memory::Protect(page, 0x1000, old_access, nullptr);
+        XELOGI("Guide: patched {:08X} {:08X} -> 60000000 (null-render copy "
+               "removed)",
+               kAddr, cur);
+      } else {
+        XELOGW("Guide: NOT patching {:08X}: found {:08X}, expected {:08X}",
+               kAddr, cur, kOrig);
+      }
+    }
   }
 
+  if (cvars::guide_auto_press_seconds > 0) {
+    int delay = cvars::guide_auto_press_seconds;
+    std::thread([this, delay]() {
+      xe::threading::set_name("GuideAutoPress");
+      xe::threading::Sleep(std::chrono::seconds(delay));
+      XELOGI("Guide button: auto-press firing after {}s", delay);
+      on_guide_button_pressed(0);
+    }).detach();
+    XELOGI("Guide button: auto-press armed for {}s", delay);
+  }
   XELOGI("Loading module {}", module_path);
   auto module = kernel_state_->LoadUserModule(module_path);
   if (!module) {
@@ -3632,19 +3738,92 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                     mem->TranslateVirtual(0x91400690u));
                 if (obj) {
                   uint64_t ia[] = {obj};
+                  if (cvars::guide_force_obj14) {
+                    xe::store_and_swap<uint32_t>(
+                        mem->TranslateVirtual(obj + 0x14u),
+                        cvars::guide_force_obj14);
+                    XELOGI("Guide: forced [obj+14] = {:08X} so init takes the "
+                           "XuiRenderCreateDC branch",
+                           uint32_t(cvars::guide_force_obj14));
+                  }
                   XELOGI("Guide: hud XUI init {:08X} this={:08X}", hb + 0xA898u,
                          obj);
                   uint64_t ir = ks->processor()->Execute(ts, hb + 0xA898u, ia,
                                                           xe::countof(ia));
                   XELOGI("Guide: hud XUI init returned {:08X}",
                          static_cast<uint32_t>(ir));
+                  // [obj+12] is null on this path, so the device context
+                  // XuiRenderCreateDC produced is stored elsewhere in the
+                  // object. Dump the head of it to find the pointer: a DC
+                  // lives in the 0x40000000 heap like the object itself.
+                  {
+                    std::string ow;
+                    for (uint32_t w = 0; w < 32; ++w) {
+                      uint32_t v = xe::load_and_swap<uint32_t>(
+                          mem->TranslateVirtual(obj + w * 4));
+                      ow += fmt::format("{:02X}:{:08X} ", w * 4, v);
+                    }
+                    XELOGI("Guide: obj {:08X} head {}", obj, ow);
+                  }
+                  // The device context hangs off [this+12]; [dc+0x134] is
+                  // the null-render flag that decides whether XuiRenderBegin
+                  // dispatches vtable[20] and the emitter ever builds a
+                  // DRAW_INDX. Report it alongside the GPU draw count so a
+                  // cleared flag that still produces no draws is
+                  // distinguishable from a flag that never cleared.
+                  auto* gsd = ks->emulator()->graphics_system();
+                  auto* cpd = gsd ? gsd->command_processor() : nullptr;
+                  uint32_t prev_draws =
+                      cpd ? cpd->guide_draw_count_ : 0u;
                   for (int frame = 0; frame < 6000; ++frame) {
                     uint64_t da[] = {obj};
                     ks->processor()->Execute(ts, hb + 0xAB28u, da,
                                              xe::countof(da));
+                    if (frame < 3 || frame % 500 == 0) {
+                      uint32_t dcp = xe::load_and_swap<uint32_t>(
+                          mem->TranslateVirtual(obj + 12));
+                      uint32_t flag =
+                          dcp ? xe::load_and_swap<uint32_t>(
+                                    mem->TranslateVirtual(dcp + 0x134u))
+                              : 0xFFFFFFFFu;
+                      uint32_t now = cpd ? cpd->guide_draw_count_ : 0u;
+                      XELOGI("GuideFrame {}: dc={:08X} [134]={:08X} "
+                             "gpu_draws +{} (total {})",
+                             frame, dcp, flag, now - prev_draws, now);
+                      prev_draws = now;
+                    }
                     xe::threading::Sleep(std::chrono::milliseconds(16));
                   }
                   XELOGI("Guide: hud draw loop finished");
+                  if (cvars::guide_coverage_fn) {
+                    auto* cf = ks->processor()->LookupFunction(
+                        cvars::guide_coverage_fn);
+                    auto* cgf =
+                        cf ? dynamic_cast<cpu::GuestFunction*>(cf) : nullptr;
+                    if (cgf && cgf->trace_data().is_valid()) {
+                      auto& td = cgf->trace_data();
+                      auto* cnt = reinterpret_cast<uint64_t*>(
+                          td.instruction_execute_counts());
+                      uint32_t n = td.instruction_count(), ex = 0, last = 0;
+                      for (uint32_t i = 0; i < n; ++i) {
+                        if (cnt[i]) {
+                          ++ex;
+                          last = td.start_address() + i * 4;
+                        }
+                      }
+                      XELOGI("Coverage {:08X}: {}/{} executed, furthest "
+                             "{:08X} (+0x{:X})",
+                             uint32_t(cvars::guide_coverage_fn), ex, n, last,
+                             last - td.start_address());
+                    } else {
+                      XELOGI("Coverage {:08X}: no counts - lookup={}, "
+                             "guest_fn={}, trace_valid={}",
+                             uint32_t(cvars::guide_coverage_fn),
+                             cf ? "ok" : "null", cgf ? "ok" : "cast-failed",
+                             (cgf && cgf->trace_data().is_valid())
+                                 ? "yes" : "no");
+                    }
+                  }
                 }
               }
 

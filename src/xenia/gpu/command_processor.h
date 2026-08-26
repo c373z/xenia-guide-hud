@@ -450,6 +450,32 @@ class CommandProcessor {
   // whereas a draw either dispatches or it does not.
   uint32_t guide_draw_count_ = 0;
 
+  // Ring-buffer state, for checking what xam's mode-1 device creator
+  // takes from a running title: mode 1 reaches VdInitializeRingBuffer
+  // and the title stops swapping at the button press.
+  struct GuideRing {
+    uint32_t ptr, size, wb, rptr, freq;
+  };
+  GuideRing GuideRingSave() {
+    return {primary_buffer_ptr_, primary_buffer_size_, read_ptr_writeback_ptr_,
+            read_ptr_index_, read_ptr_update_freq_};
+  }
+  // Restores the ring registers WITHOUT the memset InitializeRingBuffer does:
+  // the point is to hand the GPU back the title's existing ring with its
+  // contents and read position intact, not a cleared one.
+  void GuideRingRestore(const GuideRing& r) {
+    primary_buffer_ptr_ = r.ptr;
+    primary_buffer_size_ = r.size;
+    read_ptr_writeback_ptr_ = r.wb;
+    read_ptr_index_ = r.rptr;
+    read_ptr_update_freq_ = r.freq;
+  }
+  void GuideRingState(uint32_t* ptr, uint32_t* size, uint32_t* wb) {
+    *ptr = primary_buffer_ptr_;
+    *size = primary_buffer_size_;
+    *wb = read_ptr_writeback_ptr_;
+  }
+
   void ExecuteGuestBufferUnsafe(uint32_t ptr, uint32_t count) {
     ExecuteIndirectBuffer(ptr, count);
   }

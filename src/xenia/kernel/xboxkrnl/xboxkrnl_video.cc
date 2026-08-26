@@ -14,6 +14,7 @@
 
 #include "xenia/base/logging.h"
 #include "xenia/emulator.h"
+#include "xenia/cpu/function.h"
 #include "xenia/gpu/command_processor.h"
 #include "xenia/gpu/register_file.h"
 #include "xenia/gpu/graphics_system.h"
@@ -559,6 +560,8 @@ static std::vector<GraphicsNotificationRoutine>* graphics_notification_routines_
 
 uint32_t guide_prev_device_ = 0;
 static uint32_t guide_draw_fn_ = 0;
+static uint32_t guide_cmdbuf_base_ = 0;
+static uint32_t guide_cmdbuf_size_ = 0;
 static uint32_t guide_draw_this_ = 0;
 
 void SetGuideDrawHook(uint32_t fn, uint32_t self) {
@@ -702,6 +705,40 @@ static std::atomic<bool> guide_bs_ready_{false};
 bool GuideBootstrapReady() { return guide_bs_ready_; }
 static std::atomic<bool> guide_bs_pending_{false};
 
+static gpu::CommandProcessor::GuideRing saved_ring_{};
+static bool saved_ring_valid_ = false;
+
+void GuideSaveTitleRing() {
+  auto* gs = kernel_state()->emulator()->graphics_system();
+  if (!gs || !gs->command_processor()) {
+    return;
+  }
+  saved_ring_ = gs->command_processor()->GuideRingSave();
+  saved_ring_valid_ = true;
+  XELOGI("GuideRing: saved title ring ptr={:08X} size={:08X} wb={:08X}",
+         saved_ring_.ptr, saved_ring_.size, saved_ring_.wb);
+}
+
+void GuideRestoreTitleRing() {
+  if (!saved_ring_valid_) {
+    return;
+  }
+  auto* gs = kernel_state()->emulator()->graphics_system();
+  if (!gs || !gs->command_processor()) {
+    return;
+  }
+  uint32_t p = 0, s = 0, w = 0;
+  gs->command_processor()->GuideRingState(&p, &s, &w);
+  if (p == saved_ring_.ptr) {
+    return;  // already the title's ring
+  }
+  saved_ring_valid_ = false;
+  gs->command_processor()->GuideRingRestore(saved_ring_);
+  XELOGI("GuideRing: restored title ring ptr {:08X}->{:08X} "
+         "size {:08X}->{:08X}",
+         p, saved_ring_.ptr, s, saved_ring_.size);
+}
+
 void QueueGuideBootstrap(uint32_t hud_base, uint32_t guide_obj,
                          bool use_title_device, uint32_t skin_module) {
   guide_bs_hud_base_ = hud_base;
@@ -722,6 +759,25 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   };
   auto* processor = kernel_state()->processor();
   auto* ts = thread->thread_state();
+  // guide_bootstrap_before_device queues this ahead of the device
+  // creation, because the mode-1 creator never returns. That means
+  // VdGlobalXamDevice can still be null when the first swap picks the
+  // bootstrap up, and the guide_use_bound_device redirect then no-ops
+  // against a null device. Re-arm and retry on the next swap instead of
+  // blocking the title's render thread waiting for it.
+  if (::cvars::guide_use_bound_device && !rd(0x801E6FC8u)) {
+    static uint32_t waits = 0;
+    if (++waits <= 600) {
+      guide_bs_pending_ = true;
+      if (waits == 1 || waits % 120 == 0) {
+        XELOGI("GuideBootstrap: deferring, VdGlobalXamDevice still null "
+               "(swap {})", waits);
+      }
+      return;
+    }
+    XELOGW("GuideBootstrap: VdGlobalXamDevice never appeared after {} "
+           "swaps; proceeding without the redirect", waits);
+  }
 
   if (guide_bs_use_title_device_) {
     uint32_t title_dev = rd(0x801E6FC4u);
@@ -1023,6 +1079,91 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
     XELOGI("GuideBootstrap: DC present gates: [11C]={:08X} [134]={:08X} "
            "[1CC]={:08X}",
            rd(dc + 0x11Cu), rd(dc + 0x134u), rd(dc + 0x1CCu));
+    {
+      // Which vtable the DC actually has, and the render-begin slots.
+      // 818F82F0 dispatches slot 20 (vtable+0x50) with the surface it
+      // was handed; slots 18/19/21 are begin/end/present. Read them
+      // rather than trusting the static vtable at file VA 81640684 -
+      // the crash unwind puts slot 20's callee below that address.
+      uint32_t dcv = dc ? rd(dc) : 0;
+      if (dcv) {
+        XELOGI("GuideBootstrap: DC {:08X} vtable {:08X} [0C]={:08X} "
+               "slot18={:08X} slot19={:08X} slot20={:08X} slot21={:08X}",
+               dc, dcv, rd(dc + 0x0Cu), rd(dcv + 18 * 4),
+               rd(dcv + 19 * 4), rd(dcv + 20 * 4), rd(dcv + 21 * 4));
+      } else {
+        XELOGI("GuideBootstrap: DC {:08X} has no vtable", dc);
+      }
+    }
+    {
+      // Present (819DE94C) reads [dev+0x32A0], falls back to
+      // [dev+0x32B0], then dereferences +0x24 of it as a fetch-constant
+      // descriptor. Both null is the crash. Dump the slots on xam's own
+      // device and on the title's so it is visible which, if either,
+      // actually carries a surface.
+      uint32_t xam_dev = rd(0x81D43684u);
+      uint32_t ttl_dev = rd(0x801E6FC4u);
+      for (auto& e : {std::make_pair("xam", xam_dev),
+                      std::make_pair("title", ttl_dev)}) {
+        if (!e.second) {
+          XELOGI("GuideBootstrap: {} device is null", e.first);
+          continue;
+        }
+        XELOGI("GuideBootstrap: {} device {:08X}: [32A0]={:08X} "
+               "[32B0]={:08X} [3F74]={:08X}",
+               e.first, e.second, rd(e.second + 0x32A0u),
+               rd(e.second + 0x32B0u), rd(e.second + 0x3F74u));
+        {
+          // Packet emission (81A015B8) asserts the caller's cursor
+          // equals [dev+0x2B4C], reserves N words by advancing it, and
+          // records the reservation at [dev+0x2B54]. On the mode-2
+          // device the cursor is 0, so the first packet word stores to
+          // guest address 4. Dump the region on both devices to see what
+          // a device with a real ring buffer carries here.
+          std::string cb;
+          for (uint32_t o = 0x2B40; o <= 0x2B60; o += 4) {
+            cb += fmt::format("+{:X}={:08X} ", o, rd(e.second + o));
+          }
+          XELOGI("GuideBootstrap: {} device cmdbuf {}", e.first, cb);
+        }
+        // Both surface slots are null even on a healthy device, so look
+        // for a real surface object anywhere in the device: guest heap
+        // pointers whose word 0 passes the same validity test the setter
+        // at 819F38C8 applies (bit 30 clear; "!" marks ones that fail).
+        // A render target is a GPU fetch-constant descriptor: 819DE94C
+        // reads [surface+0x24] and unpacks it with
+        //   rlwinm r10,r9,14,18,31 ; rlwinm r9,r9,29,17,31
+        // i.e. width = (rotl(v,14) & 0x3FFF) + 1, height = (rotl(v,29) &
+        // 0x7FFF) + 1. Decode every candidate the same way; the title's real
+        // RT should come out at its actual resolution. Validate readability
+        // first - an uncommitted pointer faults host-side and kills the
+        // thread with no guest crash report.
+        auto rotl32 = [](uint32_t v, uint32_t n) {
+          return (v << n) | (v >> (32 - n));
+        };
+        auto readable = [&](uint32_t a) {
+          auto* hp = memory->LookupHeap(a);
+          return hp && hp->QueryRangeAccess(a, a + 0x28u) !=
+                           xe::memory::PageAccess::kNoAccess;
+        };
+        std::string cands;
+        for (uint32_t o = 0; o < 0x4000; o += 4) {
+          uint32_t v = rd(e.second + o);
+          if (v < 0x40000000u || v >= 0x50000000u || !readable(v)) {
+            continue;
+          }
+          uint32_t w0 = rd(v), fc = rd(v + 0x24u);
+          uint32_t w = (rotl32(fc, 14) & 0x3FFFu) + 1;
+          uint32_t h = (rotl32(fc, 29) & 0x7FFFu) + 1;
+          if (w >= 64 && w <= 4096 && h >= 64 && h <= 4096) {
+            cands += fmt::format("+{:X}={:08X}(w0={:08X} fc={:08X} {}x{}) ", o,
+                                 v, w0, fc, w, h);
+          }
+        }
+        XELOGI("GuideBootstrap: {} device surface-shaped candidates: {}",
+               e.first, cands.empty() ? "none" : cands);
+      }
+    }
   }
   SetGuideDrawHook(guide_bs_hud_base_ + 0xAB28u, render_obj);
   XELOGI("GuideBootstrap: draw hook installed on title thread");
@@ -1048,6 +1189,30 @@ void VdSwap_entry(
     // must be through the title's own ring buffer, which this counter also
     // sees. Comparing a run with the button pressed against one without is the
     // test.
+    {
+      // slot 20 (818FDDE8) clears the render target, which present and
+      // clear both reach via [dev+0x32A0] ? : [dev+0x32B0]. Both read
+      // null when the bootstrap samples them, but that sampling happens
+      // inside VdSwap - after the title has finished its frame. Track
+      // whether they are EVER non-null, and at which swap, to tell
+      // "never bound" apart from "unbound by the time we look".
+      static uint32_t rt_seen = 0;
+      if (rt_seen < 3) {
+        auto* m = kernel_state()->memory();
+        auto rdw2 = [m](uint32_t a) {
+          return a ? xe::load_and_swap<uint32_t>(m->TranslateVirtual(a))
+                   : 0u;
+        };
+        uint32_t td = rdw2(0x801E6FC4u);
+        uint32_t a = rdw2(td + 0x32A0u), b = rdw2(td + 0x32B0u);
+        if (a || b) {
+          ++rt_seen;
+          XELOGI("SwapRT: title device {:08X} has a render target at "
+                 "swap-entry: [32A0]={:08X} [32B0]={:08X}",
+                 td, a, b);
+        }
+      }
+    }
     static std::atomic<uint32_t> swaps{0};
     uint32_t sn = ++swaps;
     if ((sn % 200) == 0) {
@@ -1217,6 +1382,129 @@ void VdSwap_entry(
           }
         }
       }
+      if (::cvars::guide_device_begin || ::cvars::guide_device_init_fn) {
+        static bool dbg_done = false;
+        if (!dbg_done) {
+          dbg_done = true;
+          auto* dm = kernel_state()->memory();
+          auto d2 = [dm](uint32_t a) {
+            return a ? xe::load_and_swap<uint32_t>(
+                           dm->TranslateVirtual(a)) : 0u;
+          };
+          uint32_t ddc = d2(guide_draw_this_ + 12);
+          uint32_t dwrap = ddc ? d2(ddc + 0x1CCu) : 0;
+          uint32_t ddev = dwrap ? d2(dwrap + 12u) : 0;
+          auto* dth = XThread::GetCurrentThread();
+          if (ddev && dth) {
+            uint32_t dfn = ::cvars::guide_device_init_fn
+                               ? uint32_t(::cvars::guide_device_init_fn)
+                               : 0x81A0F858u;
+            uint64_t dargs[] = {ddev, 0ull};
+            uint64_t dres = kernel_state()->processor()->Execute(
+                dth->thread_state(), dfn, dargs, xe::countof(dargs));
+            XELOGI("Guide: device init {:08X}(dev {:08X}) -> {:08X}; "
+                   "[2B10]={:08X} [2B4C]={:08X} RT0={:08X} [3F74]={:08X}",
+                   dfn, ddev, static_cast<uint32_t>(dres),
+                   d2(ddev + 0x2B10u),
+                   d2(ddev + 0x2B4Cu), d2(ddev + 0x32A0u),
+                   d2(ddev + 0x3F74u));
+          } else {
+            XELOGW("Guide: device begin skipped (dev={:08X})", ddev);
+          }
+        }
+      }
+      if (::cvars::guide_bind_cmdbuf_kb > 0) {
+        static uint32_t cbuf = 0;
+        if (!cbuf) {
+          auto* cm = kernel_state()->memory();
+          auto c2 = [cm](uint32_t a) {
+            return a ? xe::load_and_swap<uint32_t>(
+                           cm->TranslateVirtual(a)) : 0u;
+          };
+          uint32_t cdc = c2(guide_draw_this_ + 12);
+          uint32_t cwrap = cdc ? c2(cdc + 0x1CCu) : 0;
+          uint32_t cdev = cwrap ? c2(cwrap + 12u) : 0;
+          uint32_t csize =
+              uint32_t(::cvars::guide_bind_cmdbuf_kb) * 1024u;
+          if (cdev && !c2(cdev + 0x2B4Cu)) {
+            cbuf = cm->SystemHeapAlloc(csize, 4096);
+            if (cbuf) {
+              std::memset(cm->TranslateVirtual(cbuf), 0, csize);
+              // Go through xam's own setter rather than writing the
+              // cursor: 81A01358(dev, buffer, words) sets base +2B48,
+              // cursor +2B4C = buffer-4 (emission does +4 before each
+              // store), limit +2B50 and stride +2B58 together, and
+              // asserts the cursor is currently 0. Writing +2B4C alone
+              // leaves the other three inconsistent and does not hold.
+              auto* cth = XThread::GetCurrentThread();
+              uint64_t cargs[] = {cdev, cbuf, csize / 4};
+              uint64_t cres =
+                  cth ? kernel_state()->processor()->Execute(
+                            cth->thread_state(), 0x81A01358u, cargs,
+                            xe::countof(cargs))
+                      : 0;
+              guide_cmdbuf_base_ = cbuf;
+              guide_cmdbuf_size_ = csize;
+              XELOGI("Guide: cmdbuf init {:08X}(dev {:08X}, {:08X}, {}) "
+                     "-> {:08X}; base={:08X} cursor={:08X} limit={:08X}",
+                     0x81A01358u, cdev, cbuf, csize / 4,
+                     static_cast<uint32_t>(cres), c2(cdev + 0x2B48u),
+                     c2(cdev + 0x2B4Cu), c2(cdev + 0x2B50u));
+            }
+          } else {
+            XELOGW("Guide: cmdbuf bind skipped (dev={:08X} cursor={:08X})",
+                   cdev, cdev ? c2(cdev + 0x2B4Cu) : 0);
+          }
+        }
+      }
+      if (::cvars::guide_bind_title_rt) {
+        // Must run BEFORE guide_fake_front_buffer, which clones RT0
+        // into +3F74 and does nothing while RT0 is null.
+        static bool rt_done = false;
+        if (!rt_done) {
+          auto* rm = kernel_state()->memory();
+          auto r2 = [rm](uint32_t a) {
+            return xe::load_and_swap<uint32_t>(rm->TranslateVirtual(a));
+          };
+          uint32_t rdc = r2(guide_draw_this_ + 12);
+          uint32_t rwrap = rdc ? r2(rdc + 0x1CCu) : 0;
+          uint32_t rdev = rwrap ? r2(rwrap + 12u) : 0;
+          uint32_t tdev = r2(0x801E6FC4u);
+          uint32_t surf = tdev ? r2(tdev + 0x3AC4u) : 0;
+          if (rdev && surf && !r2(rdev + 0x32A0u)) {
+            rt_done = true;
+            // Writing [dev+0x32A0] by hand does not stick: 819F4C00
+            // walks RT0..RT3 and calls SetRenderTarget(dev, i, NULL) for
+            // any slot not equal to [dev+0x3F78], the device's own
+            // default target. Register the surface as that default AND
+            // bind it through xam's real setter (819F31A8), so it goes
+            // through the bookkeeping xam checks rather than around it.
+            xe::store_and_swap<uint32_t>(
+                rm->TranslateVirtual(rdev + 0x3F78u), surf);
+            auto* bth = XThread::GetCurrentThread();
+            uint64_t sargs[] = {rdev, 0ull, surf};
+            uint64_t sres =
+                bth ? kernel_state()->processor()->Execute(
+                          bth->thread_state(), 0x819F31A8u, sargs,
+                          xe::countof(sargs))
+                    : 0;
+            XELOGI("Guide: SetRenderTarget(dev {:08X}, 0, {:08X} "
+                   "fc={:08X}) -> {:08X}; RT0 now {:08X} [3F78]={:08X}",
+                   rdev, surf, r2(surf + 0x24u),
+                   static_cast<uint32_t>(sres), r2(rdev + 0x32A0u),
+                   r2(rdev + 0x3F78u));
+            XELOGI("Guide: bound title RT {:08X} (fc={:08X}) as RT0 on "
+                   "device {:08X}",
+                   surf, r2(surf + 0x24u), rdev);
+          } else if (!rdev || !surf) {
+            static uint32_t warned = 0;
+            if (warned++ < 3) {
+              XELOGW("Guide: cannot bind title RT (dev={:08X} "
+                     "surf={:08X})", rdev, surf);
+            }
+          }
+        }
+      }
       if (::cvars::guide_fake_front_buffer) {
         static bool fb_done = false;
         if (!fb_done) {
@@ -1368,10 +1656,38 @@ void VdSwap_entry(
           gd_before = gsx->command_processor()->guide_draw_count_;
         }
       }
+      {
+        // The emitter reads RT0 as [dev+0x32A0 + r17*4] with r17 = 0 and
+        // faults on null, even though guide_bind_title_rt set it and
+        // guide_fake_front_buffer successfully cloned from it. Sample it
+        // here, immediately before the draw, so "reset between bind and
+        // use" is measured rather than inferred.
+        static uint32_t rtl = 0;
+        if (rtl < 4) {
+          ++rtl;
+          auto* qm = kernel_state()->memory();
+          auto q = [qm](uint32_t a) {
+            return a ? xe::load_and_swap<uint32_t>(
+                           qm->TranslateVirtual(a)) : 0u;
+          };
+          uint32_t qdc = q(guide_draw_this_ + 12);
+          uint32_t qw = qdc ? q(qdc + 0x1CCu) : 0;
+          uint32_t qd = qw ? q(qw + 12u) : 0;
+          XELOGI("GuidePreDraw: device {:08X} RT0={:08X} RT1={:08X} "
+                 "depth={:08X} [3F74]={:08X}",
+                 qd, q(qd + 0x32A0u), q(qd + 0x32A4u), q(qd + 0x32B0u),
+                 q(qd + 0x3F74u));
+        }
+      }
       in_guide_draw_scope = true;
       uint64_t gr = kernel_state()->processor()->Execute(
           gth->thread_state(), guide_draw_fn_, gargs, xe::countof(gargs));
       in_guide_draw_scope = false;
+      if (::cvars::guide_restore_title_ring) {
+        // The Guide has emitted its packets into xam's ring; hand
+        // the GPU back the title's so it can present again.
+        GuideRestoreTitleRing();
+      }
       if (::cvars::guide_diff_draw_writes && !pre_sums.empty()) {
         auto* mmv = kernel_state()->memory();
         uint32_t changed = 0, idx = 0, shown = 0;
@@ -1561,6 +1877,35 @@ void VdSwap_entry(
             ++reported;
             XELOGI("GuideDrawGPU: the guest draw dispatched {} GPU draws",
                    gd_after - gd_before);
+          }
+        }
+      }
+      if (::cvars::guide_coverage_fn) {
+        static bool cov_done = false;
+        if (!cov_done) {
+          cov_done = true;
+          auto* f = kernel_state()->processor()->LookupFunction(
+              ::cvars::guide_coverage_fn);
+          auto* gf = f ? dynamic_cast<cpu::GuestFunction*>(f) : nullptr;
+          if (gf && gf->trace_data().is_valid()) {
+            auto& td = gf->trace_data();
+            auto* counts =
+                reinterpret_cast<uint64_t*>(td.instruction_execute_counts());
+            uint32_t n = td.instruction_count(), executed = 0, last = 0;
+            for (uint32_t i = 0; i < n; ++i) {
+              if (counts[i]) {
+                ++executed;
+                last = td.start_address() + i * 4;
+              }
+            }
+            XELOGI("Coverage {:08X}: {} of {} instructions executed, furthest "
+                   "reached {:08X} (+0x{:X})",
+                   ::cvars::guide_coverage_fn, executed, n, last,
+                   last - td.start_address());
+          } else {
+            XELOGI("Coverage {:08X}: no trace data (need "
+                   "trace_function_coverage and trace_function_data_path)",
+                   ::cvars::guide_coverage_fn);
           }
         }
       }
