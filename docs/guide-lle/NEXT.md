@@ -874,7 +874,10 @@ Recorded so they are not re-opened:
   physical memory, but supplying buffers in the slots a mode-1 device uses
   (`guide_fake_ring`) changes nothing.
 * **XUI classes not registered** - the registry at `81D6D508` is empty at hud
-  load and holds 16 classes after the scene loads.
+  load and holds **27** classes after the scene loads (an earlier note said 16;
+  that came from a dump window only 16 words long). xam has 39 per-class
+  registrars, and calling all of them returns `80300005` - already registered -
+  38 times. Registration is complete and `GuideMain.xur` still fails.
 * **`80300017` is a label type mismatch** - it is not; two buttons return the
   same.
 * **`XuiInit` called with null params** - null is a legitimate path. A non-null
@@ -934,3 +937,37 @@ scene, present in the same package - fails with `E_FAIL` through the identical
 locator that loads four other scenes. So the upsell page is a fallback, not a
 choice. `Diagnostics.xur` fails differently (`80300013`), which argues against a
 single systemic cause for the two failures.
+
+### Every scene tested, and what fails
+
+`guide_scene_override` takes a comma-separated list, so all 35 scenes in hud's
+package can be tried in one run. Of 25 tested, **20 load**:
+
+    fail: GuideMain.xur        80004005 (E_FAIL)
+          GuideMainServer.xur  80004005
+          MiniMediaPlayer.xur  80004005
+          Diagnostics.xur      80300013
+          QuickLaunch.xur      8007013D (Win32: resource name not found)
+
+Everything else loads, including every tab-content scene (`HomeTabSignedIn`,
+`HomeTabSignedInLive`, `HomeTabSignedOut`, `GamesTab*`, `SettingsTab*`,
+`Options*`, `Status`, `InfoMessage`, `SmartGlassInfo`, the controller and
+headset widgets, `ConsoleContract`).
+
+The pattern: the Guide's tab **contents** all load; the top-level **containers**
+(`GuideMain`, `GuideMainServer`) and one composite widget fail with the same
+`E_FAIL`. So hud's upsell page is a fallback for a container that will not
+create, not a choice.
+
+Class registration is NOT the cause - see the correction above. 27 classes are
+registered and every registrar reports "already registered".
+
+### Two instrumentation flaws worth not repeating
+
+Both made an experiment look like a negative when it had not been tested:
+
+* the registry dump read a fixed 16 words, so it could never show registration
+  growing - and it had been quoted as evidence the registry was "healthy".
+* the registrar loop scored a non-zero return as failure. These functions take
+  no arguments and do not return an HRESULT, so that scored every successful
+  call as a failure.

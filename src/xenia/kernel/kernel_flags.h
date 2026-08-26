@@ -62,6 +62,7 @@ DECLARE_uint32(guide_trace_pump);
 DECLARE_int32(guide_xam_button_api);
 DECLARE_bool(guide_patch_cmdbuf_reset);
 DECLARE_bool(guide_inject_label_text);
+DECLARE_bool(guide_register_all_classes);
 DECLARE_string(guide_scene_override);
 DECLARE_bool(guide_static_locator);
 DECLARE_bool(guide_fake_ring);

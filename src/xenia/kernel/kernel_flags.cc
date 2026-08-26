@@ -477,6 +477,17 @@ DEFINE_bool(guide_inject_label_text, false,
             "reason entirely.",
             "Kernel");
 
+DEFINE_bool(guide_register_all_classes, false,
+            "Call every XUI class registrar in xam, not just the three the "
+            "bootstrap knows about. xam has 39 per-class registrars (callers of "
+            "the internal registration function 8194F118) and the class "
+            "registry ends up holding only 16 entries, so most classes are "
+            "never registered. GuideMain.xur, GuideMainServer.xur and "
+            "MiniMediaPlayer.xur all fail with E_FAIL while 20 leaf scenes "
+            "load - the shape of a scene asking for a control class that is "
+            "not registered.",
+            "Kernel");
+
 DEFINE_string(guide_scene_override, "",
               "Create this scene from hud's package instead of only the one "
               "hud picks. hud always creates InfoUpsellLive.xur - the \"no Xbox "

@@ -913,6 +913,33 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   // duplicate "XuiElement" - see phase 67. Classes and cached resources share
   // the registry at 81D6D508, and a scene cannot instantiate a class that is
   // not in it.
+  if (::cvars::guide_register_all_classes) {
+    // xam has 39 per-class registrars; the registry otherwise ends up
+    // with only 16 entries. A scene asking for an unregistered control
+    // class is exactly what E_FAIL from XuiSceneCreate looks like.
+    static const uint32_t kRegs[] = {
+        0x8194F3B8u, 0x8194F860u, 0x8194F950u, 0x8194FAC0u,
+        0x8194FBE8u, 0x8194FCD8u, 0x8194FDC8u, 0x8194FEB0u,
+        0x8194FFA0u, 0x81950090u, 0x81950178u, 0x81950268u,
+        0x81950350u, 0x819504C0u, 0x819505B0u, 0x819506A0u,
+        0x819507D0u, 0x819508C0u, 0x819509B0u, 0x81950AA0u,
+        0x81950B88u, 0x81950C78u, 0x81950D68u, 0x81950E58u,
+        0x81950F48u, 0x81951038u, 0x81951128u, 0x81951218u,
+        0x81951308u, 0x819513F8u, 0x81952428u, 0x819524D0u,
+        0x81952580u, 0x81952628u, 0x81953298u, 0x81953338u,
+        0x819533E8u, 0x819536B0u, 0x81970290u,
+    };
+    // No arguments (each builds its own descriptor) and no HRESULT, so a
+    // non-zero return is not a failure. Log values instead of scoring them.
+    std::string rets;
+    for (uint32_t ra : kRegs) {
+      uint64_t aa[] = {0};
+      uint64_t rr2 = processor->Execute(ts, ra, aa, xe::countof(aa));
+      rets += fmt::format("{:08X} ", static_cast<uint32_t>(rr2));
+    }
+    XELOGI("GuideBootstrap: called {} class registrars, returns: {}",
+           uint32_t(xe::countof(kRegs)), rets);
+  }
   if (::cvars::guide_register_classes) {
     for (uint32_t reg : {0x817503E8u, 0x8199BE08u, 0x8176B2C8u}) {
       uint64_t rargs[] = {0};
@@ -1049,11 +1076,17 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
         // empty here then the .xur instantiated its elements against no
         // registered classes, which is what a "labelHeading" that has an
         // id and a position but no visual and no text would look like.
+        // 48 words, not 16: a short fixed window could not show whether
+        // extra classes were registered.
         std::string reg;
-        for (uint32_t w = 0; w < 16; ++w) {
-          reg += fmt::format("{:08X} ", rd(0x81D6D508u + w * 4));
+        uint32_t reg_n = 0;
+        for (uint32_t w = 0; w < 48; ++w) {
+          uint32_t rv = rd(0x81D6D508u + w * 4);
+          if (rv) ++reg_n;
+          reg += fmt::format("{:08X} ", rv);
         }
-        XELOGI("GuideScene: XUI registry @81D6D508 after load: {}", reg);
+        XELOGI("GuideScene: XUI registry ({} non-null of 48): {}", reg_n,
+               reg);
         std::string reg2;
         for (uint32_t w = 0; w < 8; ++w) {
           reg2 += fmt::format("{:08X} ", rd(0x81D6D0D8u + w * 4));
