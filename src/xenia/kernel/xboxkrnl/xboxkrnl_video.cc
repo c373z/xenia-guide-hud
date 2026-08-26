@@ -950,6 +950,14 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
     XELOGI("GuideBootstrap: [guide+4] = skin module {:08X}",
            guide_bs_skin_module_);
   }
+  if (::cvars::guide_static_locator) {
+    // The dynamic locator builder is handed [guide+8] as its module and
+    // that field is 0, giving "section://@0,...". Selecting the static
+    // builder makes it use [guide+4], which is set just above.
+    xe::store_and_swap<uint32_t>(
+        memory->TranslateVirtual(guide_bs_obj_ + 8), 0xFFFFFFFFu);
+    XELOGI("GuideBootstrap: [guide+8] = FFFFFFFF (static locator path)");
+  }
   {
     // hud's init ends in a virtual call to the render sub-object's vtable[7]
     // (913ea924: lwz r10,0(r31) / lwz r11,28(r10) / bctrl). That call is where
@@ -1021,6 +1029,31 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
     XELOGI("GuideBootstrap: scene creator {:08X} -> {:08X}, scene={:08X}",
            scene_fn, static_cast<uint32_t>(ir),
            scene_out ? rd(scene_out) : 0);
+    // A scene HANDLE is not evidence of scene CONTENT. Resolve it with
+    // XuiObjectFromHandle (xam ordinal 0x346) and dump the object head:
+    // if the render tree has no children there is nothing to draw, which
+    // would explain an emitter that runs every frame and emits nothing.
+    uint32_t scene_h = scene_out ? rd(scene_out) : 0;
+    if (scene_h) {
+      uint32_t obj_out = memory->SystemHeapAlloc(16, 16);
+      if (obj_out) {
+        std::memset(memory->TranslateVirtual(obj_out), 0, 16);
+        uint64_t oa[] = {scene_h, obj_out};
+        uint64_t orr = processor->Execute(ts, 0x81942938u, oa,
+                                          xe::countof(oa));
+        uint32_t sobj = rd(obj_out);
+        XELOGI("GuideScene: XuiObjectFromHandle({:08X}) -> {:08X}, "
+               "object {:08X}",
+               scene_h, static_cast<uint32_t>(orr), sobj);
+        if (sobj) {
+          std::string head;
+          for (uint32_t w = 0; w < 24; ++w) {
+            head += fmt::format("{:02X}:{:08X} ", w * 4, rd(sobj + w * 4));
+          }
+          XELOGI("GuideScene: object head {}", head);
+        }
+      }
+    }
   } else {
     // Mirror what hud's scene creator sets before it calls the init:
     // [obj+28] = second arg, [obj+32] = 1 (render_obj+16),
@@ -1768,9 +1801,13 @@ void VdSwap_entry(
             gs3->command_processor()->ExecuteGuestBufferUnsafe(xbuf, words);
             uint32_t after = gs3->command_processor()->guide_draw_count_;
             if (sc_n <= 3 || sc_n % 300 == 0) {
-              XELOGI("GuideCtx2 #{}: submitted {} words from {:08X} "
-                     "(first={:08X}), GPU draws +{}",
-                     sc_n, words, xbuf, sd(xbuf), after - before);
+              std::string dump;
+              for (uint32_t w = 0; w < 12 && w < span; ++w) {
+                dump += fmt::format("{:08X} ", sd(xbuf + w * 4));
+              }
+              XELOGI("GuideCtx2 #{}: submitted {} words from {:08X}, "
+                     "GPU draws +{}; buf: {}",
+                     sc_n, words, xbuf, after - before, dump);
             }
           }
         } else if (sc_n <= 3 || sc_n % 300 == 0) {

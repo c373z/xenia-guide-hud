@@ -466,6 +466,18 @@ DEFINE_bool(guide_patch_cmdbuf_reset, false,
             "write into it. Needs guide_second_context_kb to be useful.",
             "Kernel");
 
+DEFINE_bool(guide_static_locator, false,
+            "Set [guide+8] = -1 so hud builds its resource locator with "
+            "XamBuildResourceLocator instead of XamBuildDynamicResourceLocator. "
+            "hud's scene creator tests [guide+8] against -1 and takes the "
+            "dynamic path for anything else, passing [guide+8] itself as the "
+            "module - and it is 0, which produces the locator "
+            "\"section://@0,hud#strings.xus\": a null package, so "
+            "XuiSceneCreate(\"InfoUpsellLive.xur\") finds nothing and returns "
+            "an empty scene. The static path uses [guide+4] instead, which the "
+            "bootstrap already sets to hud's module.",
+            "Kernel");
+
 DEFINE_int32(guide_second_context_kb, 0,
              "Give xam its own command buffer of this many KB and submit what "
              "the Guide writes into it as a second rendering pass inside the "

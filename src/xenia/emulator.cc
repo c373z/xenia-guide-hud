@@ -1324,13 +1324,32 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                               static std::atomic<uint32_t> sn{0};
                               uint32_t s = ++sn;
                               if (s > 60) return;
-                              XELOGI("StoreTrace {:08X} #{}: r11={:08X} "
-                                     "r30={:08X} r31={:08X} lr={:08X}",
-                                     bp->guest_address(), s,
-                                     c ? uint32_t(c->r[11]) : 0,
-                                     c ? uint32_t(c->r[30]) : 0,
-                                     c ? uint32_t(c->r[31]) : 0,
-                                     c ? uint32_t(c->lr) : 0);
+                              // Dump the UTF-16 string at r3 as well:
+                              // these sites pass resource locators, and
+                              // the locator is what decides whether a
+                              // scene loads any visual content.
+                              std::string wstr;
+                              auto* mm = th ? th->kernel_state()->memory()
+                                            : nullptr;
+                              uint32_t sp = c ? uint32_t(c->r[3]) : 0;
+                              if (mm && sp > 0x1000u) {
+                                auto* hp = mm->LookupHeap(sp);
+                                if (hp && hp->QueryRangeAccess(sp, sp + 64) !=
+                                              xe::memory::PageAccess::kNoAccess) {
+                                  for (uint32_t w = 0; w < 48; ++w) {
+                                    uint16_t ch = xe::load_and_swap<uint16_t>(
+                                        mm->TranslateVirtual(sp + w * 2));
+                                    if (!ch) break;
+                                    wstr += (ch >= 0x20 && ch < 0x7F)
+                                                ? char(ch) : '?';
+                                  }
+                                }
+                              }
+                              XELOGI("StoreTrace {:08X} #{}: r3={:08X} "
+                                     "r4={:08X} lr={:08X} str=\"{}\"",
+                                     bp->guest_address(), s, sp,
+                                     c ? uint32_t(c->r[4]) : 0,
+                                     c ? uint32_t(c->lr) : 0, wstr);
                             });
                         ks->processor()->AddBreakpoint(bp.get());
                         st_bps.push_back(std::move(bp));
