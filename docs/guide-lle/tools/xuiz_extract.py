@@ -51,39 +51,36 @@ def parse_directory(data, base):
 def locate_scenes(data, entries):
     """Map .xur entries onto their XUIB payloads.
 
-    The payloads form one contiguous run of XUIB blocks. The run is offset by
-    one relative to the .xur directory listing: block N+1 carries entry N, and
-    block 0 is an extra XUIB (size 0x65d in hud 17489) matching no directory
-    entry. The shift is verified against declared sizes rather than assumed --
-    every block length must equal its entry's declared size.
+    Each XUIB block declares its own byte length at +0x0E, and that length is
+    checked against the distance to the next XUIB magic. With extents pinned
+    that way, the mapping is a straight 1:1 in directory order: the Nth .xur
+    entry is the Nth XUIB block.
+
+    Do NOT try to locate payloads using the directory's size field. That field
+    lags its name by one record -- it holds the size of the *next* member, and
+    matches its own block for only 5 of 34 entries. Trusting it produces a
+    plausible-looking but wrong off-by-one mapping in which every scene is
+    misnamed as its predecessor.
 
     Returns (located, unmatched) where located is [(name, offset, size)].
     """
     hits = [m.start() for m in re.finditer(b'XUIB', data)]
     scenes = sorted((e for e in entries if e[0].endswith('.xur')),
                     key=lambda e: e[2])
+    if len(hits) != len(scenes):
+        raise ValueError('%d XUIB blocks for %d .xur entries'
+                         % (len(hits), len(scenes)))
 
-    def score(shift):
-        n = 0
-        for i in range(len(scenes)):
-            if i + shift + 1 >= len(hits):
-                break
-            if hits[i + shift + 1] - hits[i + shift] != scenes[i][1]:
-                return -1
-            n += 1
-        return n
-
-    shift = max(range(4), key=score)
-    if score(shift) <= 0:
-        raise ValueError('could not align XUIB blocks to directory entries')
-
-    located, unmatched = [], []
-    for i, (name, size, _) in enumerate(scenes):
-        if i + shift < len(hits):
-            located.append((name, hits[i + shift], size))
-        else:
-            unmatched.append(name)
-    return located, unmatched
+    located = []
+    for i, (name, _, _) in enumerate(scenes):
+        start = hits[i]
+        size = struct.unpack_from('>I', data, start + 0x0E)[0]
+        limit = hits[i + 1] if i + 1 < len(hits) else start + size
+        if start + size != limit:
+            raise ValueError('%s: declared size %#x does not reach the next '
+                             'XUIB at %#x' % (name, size, limit))
+        located.append((name, start, size))
+    return located, []
 
 
 def main():
@@ -102,10 +99,6 @@ def main():
     os.makedirs(outdir, exist_ok=True)
     for name, offset, size in scenes:
         blob = data[offset:offset + size]
-        declared = struct.unpack_from('>I', blob, 0x0E)[0]
-        if declared != size:
-            print('  WARNING %s: header size %#x != directory size %#x'
-                  % (name, declared, size))
         open(os.path.join(outdir, name), 'wb').write(blob)
         print('  %-30s %#-9x %#x' % (name, offset, size))
 
