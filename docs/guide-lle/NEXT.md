@@ -1674,3 +1674,38 @@ a page-protection trap (make the range read-only and catch the writer) or
 logging every `Memory`/heap operation that touches `81700000-81D60000` during
 those lines would name it. Prefer that over another hypothesis - this question
 has already produced three wrong ones.
+
+### The contents change without anyone writing them
+
+Two experiments narrow this a lot.
+
+**1. No heap operation touches the range during the window.** Logging
+`AllocFixed`, `Decommit`, `Release` and `Protect` for anything intersecting
+`81700000-81D60000` (`XamRangeOp` in memory.cc) produces entries only at load
+time - one `AllocFixed 815F0000 +8C0000` and a run of per-64K `Protect`
+calls - and **nothing** during the zero window hundreds of lines later.
+
+**2. No write reaches the pages.** Setting the host pages read-only over the
+code range (`XENIA_XAM_RO=1`, opt-in, default off) and letting the fault
+logging catch the writer produces **no fault in the guarded range at all**,
+while `XamTextWatch` still records the usual 8 transitions in the same run.
+
+So the bytes read as zero and later read as their original values again,
+without any write through that mapping and without any heap bookkeeping
+change. Note the first attempt at this guard covered `81700000-81D60000`,
+which includes xam's data, and immediately trapped a legitimate guest write
+to `81D45A58` - so the range was narrowed to `81740000-818C0000`, which is
+code only.
+
+Leading explanation, **not yet confirmed**: Xenia maps guest memory through
+more than one host view, and the write goes through an alias that the
+read-only guard does not cover, or the view itself is briefly remapped to
+zero-filled pages. That would explain contents changing with no fault and no
+heap call. It is consistent with everything measured, which is exactly the
+property the three previous wrong answers also had - so treat it as the next
+thing to test, not as the answer.
+
+How to test it: protect *every* host view of those pages rather than the one
+obtained from `TranslateVirtual`, or log Xenia's view mapping/unmapping calls
+(`MapViews`/`UnmapViews` and the physical-heap mirrors) with the same range
+filter already used by `XamRangeOp`.

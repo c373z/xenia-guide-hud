@@ -798,6 +798,20 @@ BaseHeap::BaseHeap()
 
 BaseHeap::~BaseHeap() = default;
 
+namespace {
+// Diagnostic: xam's .text transiently reads back as zero mid-run and then
+// returns to its original contents, which breaks function scanning. Log any
+// heap operation that touches that range so the culprit names itself.
+constexpr uint32_t kXamWatchLow = 0x81700000u;
+constexpr uint32_t kXamWatchHigh = 0x81D60000u;
+void LogXamRangeOp(const char* op, uint32_t address, uint32_t size) {
+  if (address >= kXamWatchHigh || (address + size) <= kXamWatchLow) {
+    return;
+  }
+  XELOGE("XamRangeOp: {} address={:08X} size={:08X}", op, address, size);
+}
+}  // namespace
+
 void BaseHeap::Initialize(Memory* memory, uint8_t* membase, HeapType heap_type,
                           uint32_t heap_base, uint32_t heap_size,
                           uint32_t page_size, uint32_t host_address_offset) {
@@ -1071,6 +1085,7 @@ bool BaseHeap::Alloc(uint32_t size, uint32_t alignment,
 bool BaseHeap::AllocFixed(uint32_t base_address, uint32_t size,
                           uint32_t alignment, uint32_t allocation_type,
                           uint32_t protect) {
+  LogXamRangeOp("AllocFixed", base_address, size);
   alignment = xe::round_up(alignment, page_size_);
   size = xe::align(size, alignment);
   assert_true((base_address + host_address_offset_) % alignment == 0);
@@ -1359,6 +1374,7 @@ bool BaseHeap::AllocSystemHeap(uint32_t size, uint32_t alignment,
 }
 
 bool BaseHeap::Decommit(uint32_t address, uint32_t size) {
+  LogXamRangeOp("Decommit", address, size);
   uint32_t page_count = get_page_count(size, page_size_);
   uint32_t start_page_number = (address - heap_base_) / page_size_;
   uint32_t end_page_number = start_page_number + page_count - 1;
@@ -1390,6 +1406,7 @@ bool BaseHeap::Decommit(uint32_t address, uint32_t size) {
 }
 
 bool BaseHeap::Release(uint32_t base_address, uint32_t* out_region_size) {
+  LogXamRangeOp("Release", base_address, 0u);
   auto global_lock = global_critical_region_.Acquire();
 
   // Given address must be a region base address.
@@ -1453,6 +1470,7 @@ bool BaseHeap::Release(uint32_t base_address, uint32_t* out_region_size) {
 
 bool BaseHeap::Protect(uint32_t address, uint32_t size, uint32_t protect,
                        uint32_t* old_protect) {
+  LogXamRangeOp("Protect", address, size);
   if (!size) {
     XELOGE("BaseHeap::Protect failed due to zero size");
     return false;

@@ -3249,6 +3249,19 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
         }
       }).detach();
       XELOGI("XamTextWatch: polling 4 xam .text addresses");
+      // Opt-in (XENIA_XAM_RO=1): make xam's .text read-only at the host level
+      // so whatever writes zeros over it traps instead of succeeding. The
+      // existing fault logging then names the writer. Off by default because
+      // it deliberately turns a silent corruption into a crash.
+      if (std::getenv("XENIA_XAM_RO")) {
+        auto* host = memory()->TranslateVirtual(0x81740000u);
+        xe::memory::PageAccess old_access = xe::memory::PageAccess::kReadWrite;
+        bool ok = xe::memory::Protect(host, 0x818C0000u - 0x81740000u,
+                                      xe::memory::PageAccess::kReadOnly,
+                                      &old_access);
+        XELOGI("XamTextWatch: read-only guard over 81740000-818C0000 -> {}",
+               ok ? "armed" : "FAILED");
+      }
     }
     if (cvars::guide_patch_null_render) {
       // 818FDEF0  lwz r11,0x1C(r27)   ; XUI context's null-render flag
