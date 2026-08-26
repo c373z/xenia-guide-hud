@@ -1113,3 +1113,47 @@ is to load the failing scenes first:
     --guide_scene_override=GuideMain.xur,GuideMainServer.xur,MiniMediaPlayer.xur,Options.xur,Status.xur
 
 If they load when placed first, the scene files are exonerated entirely.
+
+### Isolated: the freeze is a JIT/loader deadlock, and it needs LLE xam
+
+Further elimination narrows the freeze above to a lock-ordering deadlock
+between lazy JIT translation and module loading.
+
+**It requires the LLE xam.** With `--lle_xam=` (Xenia's HLE xam) hud loads
+straight through -- `DllMain entry=913F9D00`, `DllMain returned`, `buffers
+inner=30108000 ...` -- and the run reaches **35994** lines instead of ~5500.
+Everything else was ruled out first: `--lle_xam_scope=` (empty) still freezes,
+so it is not the scope machinery.
+
+**It is a deadlock, not a spin or a hang in guest code.** Sampling the frozen
+process: log length pinned at 5530 across 24s while CPU crept 6.7s -> 8.3s ->
+9.8s (~13% of one core, background timers), with all 62 threads in `Wait`.
+
+**The precise stall point.** Across the whole log there are 1275
+`DemandFunction: enter` lines and 1274 `defined`. Exactly one is unmatched:
+
+    i> F80000F4 DemandFunction: enter 8186E528      <- never "defined"
+    i> 01000024 Guide: loading SYS:\hud.xex         <- last line in the log
+
+`LLE xam: DllMain returned` (thread 01000020) is already logged by then, so
+xam is fully up. The stuck function is not the culprit: runtime `8186E528`
+(file `81875728`) is a ~24-instruction leaf that calls `818756E0`, does some
+bit twiddling and returns -- nothing a translator could hang on. Thread
+`F80000F4` is therefore blocked on a *lock* inside `DemandFunction`, not on
+translating that function; it is simply whichever thread happened to demand a
+translation while the Guide Loader held the loader lock inside
+`FinishLoadingUserModule(hud)`.
+
+So: Guide Loader holds the module-loader lock and wants something the JIT
+path holds, while `DemandFunction` holds the JIT/code-cache lock and wants the
+loader lock. Classic ABBA. It is timing-dependent, which fits it appearing
+only now despite an unchanged binary (verified: `xenia_canary.exe` at 13:54 is
+newer than the newest source at 13:53, and the tree is clean -- a rebuild
+would produce the same binary, so rebuilding is *not* the fix).
+
+Pinning down which two locks these are needs a native stack dump of the frozen
+process, which is emulator-internals work rather than Guide work.
+
+**Workaround for unrelated experiments:** anything that does not depend on the
+real xam can run with `--lle_xam=`. The scene load-order experiment cannot --
+it needs LLE xam by construction.
