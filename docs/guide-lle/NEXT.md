@@ -638,3 +638,70 @@ happens once the title is running, and the title initialises its ring almost
 immediately on boot.
 
 So the conflict is not ordering, not configuration, and not a missing field.
+
+---
+
+## Current consolidated state
+
+The whole stack now composes on the **xam-driven** path (our hand-rolled
+bootstrap off), with no crash and the title rendering throughout:
+
+| cvar | what it does |
+|---|---|
+| `guide_xam_button_api=1024` | xam hosts the Guide via `XamInputSendXenonButtonPress` |
+| `guide_static_locator` | patches hud `913EB994` so the resource locator is well-formed |
+| `guide_patch_null_render` | nops `818FDF14` so `[dc+0x134]` stays 0 |
+| `guide_bind_title_rt` | binds the title's RT as RT0 through xam's own setter |
+| `guide_fake_front_buffer` | clones RT0 into `[dev+0x3F74]` |
+| `guide_second_context_kb=256` | captures what xam writes and submits it into the title's frame |
+
+Crash progression on that path: `819DE94C` (clear, no render target) ->
+`81A01638` (packet emission) -> none.
+
+### Verified working, end to end
+
+* press accepted, xam spawns its Guide thread, registration and callback fire,
+  the wake event is signalled (all measured with breakpoints, not inferred)
+* xam runs its own render bring-up on the title's thread
+* scene `scnInfoUpsellLive` loads from `InfoUpsellLive.xur` with ~57 objects
+* tree: root `00010000` -> scene `00010008` -> `labelHeading` `00010039`
+* `labelHeading` has real layout: position (156.0, 36.0)
+* render target bound (`RT0 = 40AE2160`, the title's own surface)
+* every setup call returns S_OK
+
+### The one unexplained step
+
+The draw emitter `819F5D18` is entered every frame and constructs **no**
+DRAW_INDX. xam's command buffer holds a single non-PM4 word (`0000200E`) and
+nothing else, across thousands of frames.
+
+The most specific lead: `XuiControlGetVisual` on `labelHeading` returns
+`80300017` with a null visual. That element is a label - a control that
+rasterises text - so it should have one. A tree that lays out correctly and has
+no visuals draws nothing, which matches every symptom including the oldest
+observation in this project (real layout numbers, zero draws).
+
+Unresolved: why the visual is absent. A label's visual is text, which needs a
+font; `dashroot` has `SegoeXbox-Light.xtt` and xam carries a `skin` resource
+section, and neither has been shown to load. hud never calls
+`XuiTextElementSetText`, though a `.xur` can carry static text, so that is
+suggestive rather than conclusive.
+
+### Corrections made while getting here
+
+Several conclusions in earlier sections were wrong and were overturned by
+measurement. Recorded so they are not re-derived:
+
+* "the Guide thread is stuck" - it is an idle event loop; the wake event **is**
+  signalled (breakpoint on the `KeSetEvent` call site).
+* "the scene is empty" - it has ~57 objects; the emptiness came from dumping
+  memory at `XuiObjectFromHandle`'s result against an assumed layout.
+* "the visual resource isn't loading" - `XuiSceneCreate` returns S_OK and the
+  tree is populated.
+* "InfoUpsellLive is something our bootstrap asked for" - it is hud's own
+  choice, created from `913EB940` even with `guide_create_scene=false`.
+
+The pattern in every case: an inference from an absence (no log lines, zeroed
+memory, an error code that fit the theory) that a direct API call or breakpoint
+then contradicted. Asking the guest through its own API has been reliable;
+reading memory against an assumed layout has not.
