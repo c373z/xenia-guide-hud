@@ -466,6 +466,17 @@ DEFINE_bool(guide_patch_cmdbuf_reset, false,
             "write into it. Needs guide_second_context_kb to be useful.",
             "Kernel");
 
+DEFINE_bool(guide_inject_label_text, false,
+            "Call XuiTextElementSetText on the Guide scene's label with a test "
+            "string. The scene loads with ~57 objects and its \"labelHeading\" "
+            "element has real layout at (156,36), but XuiControlGetVisual "
+            "returns 80300017 with a null visual and hud never sets any text - "
+            "so there may simply be nothing to rasterise. Giving the label text "
+            "is a direct test: if draws appear, the render path works and the "
+            "content was empty; if not, the emitter is failing for another "
+            "reason entirely.",
+            "Kernel");
+
 DEFINE_bool(guide_static_locator, false,
             "Set [guide+8] = -1 so hud builds its resource locator with "
             "XamBuildResourceLocator instead of XamBuildDynamicResourceLocator. "

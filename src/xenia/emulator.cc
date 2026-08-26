@@ -1299,83 +1299,6 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                   }).detach();
                   XELOGI("ThreadProbe: armed for {}s", pdelay);
                 }
-                static std::vector<std::unique_ptr<cpu::Breakpoint>> st_bps;
-                if (!cvars::guide_trace_stores.empty() && st_bps.empty()) {
-                  std::string spec = cvars::guide_trace_stores;
-                  size_t pos = 0;
-                  while (pos <= spec.size()) {
-                    size_t comma = spec.find(',', pos);
-                    std::string tok = spec.substr(
-                        pos, comma == std::string::npos ? std::string::npos
-                                                        : comma - pos);
-                    if (!tok.empty()) {
-                      uint32_t addr =
-                          uint32_t(std::strtoul(tok.c_str(), nullptr, 16));
-                      if (addr) {
-                        auto bp = std::make_unique<cpu::Breakpoint>(
-                            ks->processor(),
-                            cpu::Breakpoint::AddressType::kGuest,
-                            uint64_t(addr),
-                            [](cpu::Breakpoint* bp,
-                               cpu::ThreadDebugInfo* ti, uint64_t hpc) {
-                              auto* th = kernel::XThread::GetCurrentThread();
-                              auto* c =
-                                  th ? th->thread_state()->context() : nullptr;
-                              static std::atomic<uint32_t> sn{0};
-                              uint32_t s = ++sn;
-                              if (s > 60) return;
-                              // Dump the UTF-16 string at r3 as well:
-                              // these sites pass resource locators, and
-                              // the locator is what decides whether a
-                              // scene loads any visual content.
-                              std::string wstr;
-                              auto* mm = th ? th->kernel_state()->memory()
-                                            : nullptr;
-                              uint32_t sp = c ? uint32_t(c->r[3]) : 0;
-                              if (mm && sp > 0x1000u) {
-                                auto* hp = mm->LookupHeap(sp);
-                                if (hp && hp->QueryRangeAccess(sp, sp + 64) !=
-                                              xe::memory::PageAccess::kNoAccess) {
-                                  for (uint32_t w = 0; w < 48; ++w) {
-                                    uint16_t ch = xe::load_and_swap<uint16_t>(
-                                        mm->TranslateVirtual(sp + w * 2));
-                                    if (!ch) break;
-                                    wstr += (ch >= 0x20 && ch < 0x7F)
-                                                ? char(ch) : '?';
-                                  }
-                                }
-                              }
-                              std::string wstr2;
-                              uint32_t sp2 = c ? uint32_t(c->r[4]) : 0;
-                              if (mm && sp2 > 0x1000u) {
-                                auto* hp2 = mm->LookupHeap(sp2);
-                                if (hp2 &&
-                                    hp2->QueryRangeAccess(sp2, sp2 + 64) !=
-                                        xe::memory::PageAccess::kNoAccess) {
-                                  for (uint32_t w = 0; w < 48; ++w) {
-                                    uint16_t ch = xe::load_and_swap<uint16_t>(
-                                        mm->TranslateVirtual(sp2 + w * 2));
-                                    if (!ch) break;
-                                    wstr2 += (ch >= 0x20 && ch < 0x7F)
-                                                 ? char(ch) : '?';
-                                  }
-                                }
-                              }
-                              XELOGI("StoreTrace {:08X} #{}: r3={:08X} "
-                                     "\"{}\"  r4={:08X} \"{}\"  lr={:08X}",
-                                     bp->guest_address(), s, sp, wstr,
-                                     sp2, wstr2, c ? uint32_t(c->lr) : 0);
-                            });
-                        ks->processor()->AddBreakpoint(bp.get());
-                        st_bps.push_back(std::move(bp));
-                      }
-                    }
-                    if (comma == std::string::npos) break;
-                    pos = comma + 1;
-                  }
-                  XELOGI("StoreTrace: installed {} breakpoints",
-                         st_bps.size());
-                }
                 static std::unique_ptr<cpu::Breakpoint> pump_bp;
                 if (cvars::guide_trace_pump && !pump_bp) {
                   pump_bp = std::make_unique<cpu::Breakpoint>(
@@ -2799,6 +2722,89 @@ static std::string format_version(xex2_version version) {
                      +version.build, +version.qfe);
 }
 
+// Installing these at the Guide button press misses anything that happens
+// during xam and hud initialisation - XUI class registration among it - so
+// arm them as soon as the title is loaded instead.
+static void InstallGuideStoreTraces(xe::kernel::KernelState* ks) {
+  static std::vector<std::unique_ptr<cpu::Breakpoint>> st_bps;
+  if (!cvars::guide_trace_stores.empty() && st_bps.empty()) {
+    std::string spec = cvars::guide_trace_stores;
+    size_t pos = 0;
+    while (pos <= spec.size()) {
+      size_t comma = spec.find(',', pos);
+      std::string tok = spec.substr(
+          pos, comma == std::string::npos ? std::string::npos
+                                          : comma - pos);
+      if (!tok.empty()) {
+        uint32_t addr =
+            uint32_t(std::strtoul(tok.c_str(), nullptr, 16));
+        if (addr) {
+          auto bp = std::make_unique<cpu::Breakpoint>(
+              ks->processor(),
+              cpu::Breakpoint::AddressType::kGuest,
+              uint64_t(addr),
+              [](cpu::Breakpoint* bp,
+                 cpu::ThreadDebugInfo* ti, uint64_t hpc) {
+                auto* th = kernel::XThread::GetCurrentThread();
+                auto* c =
+                    th ? th->thread_state()->context() : nullptr;
+                static std::atomic<uint32_t> sn{0};
+                uint32_t s = ++sn;
+                if (s > 60) return;
+                // Dump the UTF-16 string at r3 as well:
+                // these sites pass resource locators, and
+                // the locator is what decides whether a
+                // scene loads any visual content.
+                std::string wstr;
+                auto* mm = th ? th->kernel_state()->memory()
+                              : nullptr;
+                uint32_t sp = c ? uint32_t(c->r[3]) : 0;
+                if (mm && sp > 0x1000u) {
+                  auto* hp = mm->LookupHeap(sp);
+                  if (hp && hp->QueryRangeAccess(sp, sp + 64) !=
+                                xe::memory::PageAccess::kNoAccess) {
+                    for (uint32_t w = 0; w < 48; ++w) {
+                      uint16_t ch = xe::load_and_swap<uint16_t>(
+                          mm->TranslateVirtual(sp + w * 2));
+                      if (!ch) break;
+                      wstr += (ch >= 0x20 && ch < 0x7F)
+                                  ? char(ch) : '?';
+                    }
+                  }
+                }
+                std::string wstr2;
+                uint32_t sp2 = c ? uint32_t(c->r[4]) : 0;
+                if (mm && sp2 > 0x1000u) {
+                  auto* hp2 = mm->LookupHeap(sp2);
+                  if (hp2 &&
+                      hp2->QueryRangeAccess(sp2, sp2 + 64) !=
+                          xe::memory::PageAccess::kNoAccess) {
+                    for (uint32_t w = 0; w < 48; ++w) {
+                      uint16_t ch = xe::load_and_swap<uint16_t>(
+                          mm->TranslateVirtual(sp2 + w * 2));
+                      if (!ch) break;
+                      wstr2 += (ch >= 0x20 && ch < 0x7F)
+                                   ? char(ch) : '?';
+                    }
+                  }
+                }
+                XELOGI("StoreTrace {:08X} #{}: r3={:08X} "
+                       "\"{}\"  r4={:08X} \"{}\"  lr={:08X}",
+                       bp->guest_address(), s, sp, wstr,
+                       sp2, wstr2, c ? uint32_t(c->lr) : 0);
+              });
+          ks->processor()->AddBreakpoint(bp.get());
+          st_bps.push_back(std::move(bp));
+        }
+      }
+      if (comma == std::string::npos) break;
+      pos = comma + 1;
+    }
+    XELOGI("StoreTrace: installed {} breakpoints",
+           st_bps.size());
+  }
+}
+
 X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                                   const std::string_view module_path) {
   // Making changes to the UI (setting the icon) and executing game config
@@ -2891,6 +2897,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
       return xam_result;
     }
     XELOGI("LLE xam: loaded at {:08X}", xam_module->hmodule_ptr());
+    InstallGuideStoreTraces(kernel_state_.get());
     if (cvars::guide_patch_cmdbuf_reset) {
       // 81A01464  stw r30,0x2B4C(r31)  ; zeroes the cmdbuf write cursor
       const uint32_t kRAddr = 0x81A01464u;

@@ -61,6 +61,7 @@ DECLARE_string(guide_trace_stores);
 DECLARE_uint32(guide_trace_pump);
 DECLARE_int32(guide_xam_button_api);
 DECLARE_bool(guide_patch_cmdbuf_reset);
+DECLARE_bool(guide_inject_label_text);
 DECLARE_bool(guide_static_locator);
 DECLARE_int32(guide_second_context_kb);
 DECLARE_int32(guide_bind_cmdbuf_kb);

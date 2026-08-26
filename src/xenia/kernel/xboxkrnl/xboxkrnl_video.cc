@@ -1043,6 +1043,23 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
         uint64_t orr = processor->Execute(ts, 0x81942938u, oa,
                                           xe::countof(oa));
         uint32_t sobj = rd(obj_out);
+      {
+        // The XUI class registry, read AFTER the scene has loaded. The
+        // bootstrap logs it as all zeros at hud-load time; if it is still
+        // empty here then the .xur instantiated its elements against no
+        // registered classes, which is what a "labelHeading" that has an
+        // id and a position but no visual and no text would look like.
+        std::string reg;
+        for (uint32_t w = 0; w < 16; ++w) {
+          reg += fmt::format("{:08X} ", rd(0x81D6D508u + w * 4));
+        }
+        XELOGI("GuideScene: XUI registry @81D6D508 after load: {}", reg);
+        std::string reg2;
+        for (uint32_t w = 0; w < 8; ++w) {
+          reg2 += fmt::format("{:08X} ", rd(0x81D6D0D8u + w * 4));
+        }
+        XELOGI("GuideScene: table @81D6D0D8: {}", reg2);
+      }
         XELOGI("GuideScene: XuiObjectFromHandle({:08X}) -> {:08X}, "
                "object {:08X}",
                scene_h, static_cast<uint32_t>(orr), sobj);
@@ -1133,6 +1150,25 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
                                               xe::countof(va));
               XELOGI("GuideScene:   {:08X} GetVisual -> {:08X}: {:08X}",
                      kid, static_cast<uint32_t>(vr), rd(buf3));
+            }
+            if (::cvars::guide_inject_label_text) {
+              uint32_t stf = xmod ? xmod->GetProcAddressByOrdinal(0x363)
+                                  : 0;
+              uint32_t str = memory->SystemHeapAlloc(64, 16);
+              if (stf && str) {
+                static const char16_t kTxt[] = u"XENIA GUIDE TEST";
+                std::memset(memory->TranslateVirtual(str), 0, 64);
+                for (uint32_t w = 0; kTxt[w]; ++w) {
+                  xe::store_and_swap<uint16_t>(
+                      memory->TranslateVirtual(str + w * 2),
+                      uint16_t(kTxt[w]));
+                }
+                uint64_t ta[] = {kid, str};
+                uint64_t tr = processor->Execute(ts, stf, ta,
+                                                xe::countof(ta));
+                XELOGI("GuideScene:   {:08X} SetText -> {:08X}", kid,
+                       static_cast<uint32_t>(tr));
+              }
             }
             kid = next;
           }
@@ -1600,7 +1636,46 @@ void VdSwap_entry(
             if (!rdev) rdev = r2(0x801E6FC8u);
           }
           uint32_t tdev = r2(0x801E6FC4u);
-          uint32_t surf = tdev ? r2(tdev + 0x3AC4u) : 0;
+          // Find the title's render target by SHAPE, not by a fixed
+          // offset. 0x3AC4 was measured on one game, but every title
+          // links its own D3D build with its own device layout - on
+          // another title that offset held 0x0D and SetRenderTarget
+          // faulted dereferencing it. A surface is a GPU fetch constant:
+          // [p+0x24] unpacks as width = (rotl(v,14) & 0x3FFF) + 1 and
+          // height = (rotl(v,29) & 0x7FFF) + 1, and the setter itself
+          // requires bit 30 of word 0 to be clear.
+          uint32_t surf = 0;
+          if (tdev) {
+            auto rot = [](uint32_t v, uint32_t n) {
+              return (v << n) | (v >> (32 - n));
+            };
+            uint32_t seen = 0;
+            for (uint32_t off = 0; off < 0x10000u && !surf; off += 4) {
+              uint32_t cand = r2(tdev + off);
+              if (cand < 0x40000000u || cand >= 0x50000000u) continue;
+              auto* hp = rm->LookupHeap(cand);
+              if (!hp || hp->QueryRangeAccess(cand, cand + 0x28u) ==
+                             xe::memory::PageAccess::kNoAccess) {
+                continue;
+              }
+              ++seen;
+              uint32_t w0 = r2(cand), fc = r2(cand + 0x24u);
+              uint32_t wd = (rot(fc, 14) & 0x3FFFu) + 1;
+              uint32_t ht = (rot(fc, 29) & 0x7FFFu) + 1;
+              if (!(w0 & 0x40000000u) && wd >= 256 && wd <= 4096 &&
+                  ht >= 256 && ht <= 4096) {
+                surf = cand;
+                XELOGI("Guide: title RT found at [dev+{:X}] = {:08X} "
+                       "({}x{})",
+                       off, cand, wd, ht);
+              }
+            }
+            if (!surf) {
+              XELOGW("Guide: no title RT found in {:08X} ({} "
+                     "pointer candidates examined)",
+                     tdev, seen);
+            }
+          }
           if (rdev && surf && !r2(rdev + 0x32A0u)) {
             rt_done = true;
             // Writing [dev+0x32A0] by hand does not stick: 819F4C00
