@@ -7,6 +7,7 @@
  ******************************************************************************
  */
 
+#include <atomic>
 #include <unordered_map>
 
 #include "xenia/kernel/xobject.h"
@@ -410,6 +411,56 @@ object_ref<XObject> XObject::GetNativeObject(KernelState* kernel_state,
                                              X_OBJECT_TYPES as_type,
                                              bool already_locked) {
   assert_not_null(native_ptr);
+
+  // A null or unmapped dispatch header used to fault a few lines below, while
+  // the global critical region was held. Because that lock is taken with a
+  // bare lock()/unlock() pair, the fault left it held for the life of the
+  // process: Xenia's handler puts up a *modal* exception dialog on the
+  // faulting thread, so it never reaches the unlock, and every later kernel
+  // operation blocks behind it. The emulator looks like it froze twenty
+  // seconds later, wherever the next lock acquisition happens to be.
+  //
+  // A scoped lock would not fix this. The build is /EHsc, under which an
+  // access violation is an SEH exception that does not run C++ destructors.
+  // The only fix is to not fault, so validate the pointer first.
+  auto* mem = kernel_state->memory();
+  uint32_t guest_ptr = native_ptr ? mem->HostToGuestVirtual(native_ptr) : 0;
+  auto* ptr_heap = guest_ptr ? mem->LookupHeap(guest_ptr) : nullptr;
+  // STOPGAP, and knowingly over-broad. QueryRangeAccess reports kNoAccess for
+  // pages the wait shim then reads successfully (81D424A8, dispatch type 9),
+  // so this rejects some objects that are readable. Narrowing it to
+  // "guest_ptr != 0 && LookupHeap() != nullptr" was tried and brings the
+  // access violation straight back, so something this rejects really does
+  // fault on the header read. Until the exact bad pointer is characterised,
+  // the over-broad test is the one that keeps the emulator alive: the objects
+  // it wrongly rejects are dispatch types Xenia does not implement, which
+  // resolve to nullptr a few lines below anyway, so the observable outcome
+  // for them is unchanged.
+  const bool mapped =
+      guest_ptr != 0 && ptr_heap &&
+      ptr_heap->QueryRangeAccess(
+          guest_ptr, guest_ptr + sizeof(X_DISPATCH_HEADER) - 1) !=
+          xe::memory::PageAccess::kNoAccess;
+  if (!mapped) {
+    uint32_t caller_lr = 0;
+    auto* cur_thread = XThread::GetCurrentThread();
+    if (cur_thread && cur_thread->thread_state() &&
+        cur_thread->thread_state()->context()) {
+      caller_lr =
+          static_cast<uint32_t>(cur_thread->thread_state()->context()->lr);
+    }
+    static std::atomic<uint32_t> refused{0};
+    uint32_t rn = ++refused;
+    if (rn <= 8 || (rn % 100000) == 0) {
+      XELOGE(
+          "GetNativeObject #{}: refusing {} dispatch header guest={:08X} "
+          "host={} membase={} (as_type={}) from guest lr={:08X}",
+          rn, guest_ptr ? "unmapped" : "null", guest_ptr,
+          fmt::ptr(native_ptr), fmt::ptr(mem->virtual_membase()),
+          static_cast<uint32_t>(as_type), caller_lr);
+    }
+    return object_ref<XObject>(nullptr);
+  }
 
   // Unfortunately the XDK seems to inline some KeInitialize calls, meaning
   // we never see it and just randomly start getting passed events/timers/etc.

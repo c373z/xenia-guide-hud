@@ -1146,7 +1146,20 @@ dword_result_t KeWaitForMultipleObjects_entry(
         static std::atomic<uint32_t> bad{0};
         uint32_t bn = ++bad;
         if (bn <= 8 || (bn % 100000) == 0) {
-          auto* hdr = reinterpret_cast<uint8_t*>(object_ptr);
+          // Read the dispatch type only if the page is actually there. The
+          // pointer that lands here can be unmapped - dereferencing it
+          // unconditionally faulted, and because this runs while the global
+          // critical region is held (and /EHsc does not unwind SEH), that
+          // fault wedged the whole emulator behind a modal dialog.
+          uint32_t obj_guest = objects_ptr[n];
+          auto* obj_heap = kernel_memory()->LookupHeap(obj_guest);
+          const bool obj_readable =
+              obj_heap && obj_heap->QueryRangeAccess(
+                              obj_guest, obj_guest + sizeof(X_DISPATCH_HEADER) -
+                                             1) !=
+                              xe::memory::PageAccess::kNoAccess;
+          auto* hdr =
+              obj_readable ? reinterpret_cast<uint8_t*>(object_ptr) : nullptr;
           XELOGW(
               "KeWaitForMultipleObjects #{}: object {} of {} at {:08X} will "
               "not resolve; dispatch type {} -> returning INVALID_PARAMETER "

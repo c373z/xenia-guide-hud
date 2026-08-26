@@ -1342,3 +1342,52 @@ Still to find: which caller passes the bad pointer. It happens ~1s in, only
 under LLE xam, on guest thread `F80000DC`, so real xam is calling a kernel
 export with an object pointer Xenia does not accept. Logging the guest LR when
 `native_ptr` is null or unmapped should name it in one run.
+
+### The bad pointer comes from xam's `KeWaitForMultipleObjects`
+
+Guarding the header read in `GetNativeObject` and logging the guest `lr` names
+the caller immediately, and it is the same one every run:
+
+    GetNativeObject: refusing dispatch header (as_type=255) from guest lr=8177AC78
+
+`8177AC78` (file `81781E78`) is the instruction after
+`bl 81D1713C` = runtime `81D0FF3C` = **`KeWaitForMultipleObjects`** (ordinal
+175). The register setup matches its signature: `r3`=count, `r4`=object array
+at `r31+360`, then wait type/reason/mode/alertable/timeout and a stack wait
+block array. That export resolves each array entry with
+`GetNativeObject(..., UndefinedObject)`, which is exactly the `as_type=255`
+seen above.
+
+This is the same retry loop a previous pass already documented in the
+`KeWaitForMultipleObjects` shim ("xam's mode-1 device bring-up ... retrying a
+3-object wait tens of thousands of times a second"). What is new is that one
+of those entries is not merely an unsupported type - it is **unmapped**, and
+reading its header faults.
+
+Two unsafe dereferences fixed, both of which faulted *while the global
+critical region was held*, which is what turned a bad pointer into a
+whole-emulator wedge:
+
+1. `XObject::GetNativeObject` read `header->type` without validating
+   `native_ptr` (`assert_not_null` is compiled out in release).
+2. The `KeWaitForMultipleObjects` shim's own diagnostic logging then read
+   `hdr[0]` unconditionally. Fixing (1) simply moved the fault here -
+   `KeWaitForMultipleObjects_entry+0x35F`.
+
+Boot now gets roughly twice as far: **~10.6k-11.2k log lines, up from ~5.7k**.
+
+### Honest status
+
+- The Guide is **still blocked**. Crashes remain, they are just different
+  ones: `VCRUNTIME140.dll+1E78B`, and `xe::Emulator::ExceptionCallback+0x528`
+  - i.e. Xenia's own exception handler faulting while handling a primary
+  exception, which will hide whatever the real fault was.
+- An earlier single run that reached 53k lines was **luck, not a fix**. Crash
+  occurrence is intermittent per run; only multi-run samples mean anything
+  here. Always run 2-3 times before concluding.
+- The `GetNativeObject` guard is **knowingly over-broad**: `QueryRangeAccess`
+  reports `kNoAccess` for `81D424A8`, which the shim reads successfully. That
+  object is dispatch type 9, which Xenia does not implement, so it resolves to
+  nullptr regardless and the outcome is unchanged - but the test is not a
+  correct readability check. Narrowing it to `guest_ptr != 0 && LookupHeap()`
+  was tried and brings the access violation straight back.
