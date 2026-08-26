@@ -1051,3 +1051,65 @@ separates the 3 failing scenes from the 31 that load**:
 So the `E_FAIL` is **not** attributable to scene content. The next place to
 look is the caller and the locator, not the files.
 
+
+## BLOCKER: the emulator now freezes loading hud.xex
+
+Every Guide experiment is currently unrunnable. The Guide Loader thread logs
+
+    i> 01000024 Guide: loading GAME:\hud.xex
+
+and that is the **last line written to the log**, in every configuration
+tried. The freeze is global, not confined to the loader: the continuous
+`DemandFunction` JIT spam from thread `F800011C` stops on the same line.
+
+Established by elimination -- all of these stop at 5400-5580 lines:
+
+| Variation | Lines |
+|---|---|
+| auto-press at 14s / 18s / 60s | 5415 / 5453 / 5461 |
+| **no press at all** | 5477 |
+| `guide_hud_path` = `SYS:\hud.xex` (config value) | 5461 |
+| `guide_hud_path` = `GAME:\hud.xex` (CONFIG.md value) | 5575 |
+| `guide_hud_path` empty (skip the load) | 5553 |
+| 70s run vs 200s run | 5412 vs 5461 |
+
+What this rules out:
+
+- **Not a timing/JIT-warmup issue.** A 200s run logs no more than a 70s run.
+- **Not the press path.** Removing the press entirely changes nothing.
+- **Not the `SYS:` mount.** `GAME:\hud.xex` freezes identically.
+- **Not the flags added for the scene work.** A bare run with only the
+  auto-press freezes the same way.
+- **Not stray processes.** No `xenia*` process survives between runs.
+- **Not config drift.** All CONFIG.md prerequisites verify:
+  `xbox_hardware_info_flags = 544` (`0x220`), `guide_create_xam_device`,
+  `lle_xam_heap0_alias` true, `guide_use_title_device` false.
+
+Where it hangs, precisely: the press logs `hud=loaded`, so `LoadUserModule`
+returned, but `guide_handler_` is still 0 and no `Guide: DllMain entry` line
+is ever written. Execution is therefore stuck inside
+`FinishLoadingUserModule(hud)` at emulator.cc:3472 -- consistent with a
+deadlock against a loader lock held by a title thread.
+
+Because the press body is gated on `guide_handler_ && guide_buf_ &&
+guide_out_sz_` (emulator.cc:1125), none of it runs: no `GuideScene:`
+diagnostics, no `guide_scene_override`. **This is why the load-order
+experiment below could not be run.**
+
+Possibly related, seen when hud loading is skipped or uses `GAME:`: a guest
+null-deref that does *not* match any signature in CONFIG.md --
+
+    GUEST CRASH: access violation at guest PC 8175D01C, fault_addr 0
+    lr=8175D020 r3=401E29A0 r4=0 r5=815F3DFC
+    unwind: 81751118 81779D54 8177AA9C 8177AE48
+
+### The experiment that is queued behind this
+
+Nothing in the scene *files* distinguishes the 3 failing scenes, so the next
+hypothesis is that the failure is **positional, not scene-specific** --
+resource exhaustion partway through the list would look identical. The test
+is to load the failing scenes first:
+
+    --guide_scene_override=GuideMain.xur,GuideMainServer.xur,MiniMediaPlayer.xur,Options.xur,Status.xur
+
+If they load when placed first, the scene files are exonerated entirely.
