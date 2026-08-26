@@ -1239,3 +1239,60 @@ Next: find what acquires the object table lock early under LLE xam and does
 not release it. The cacher already brackets it to within one second of
 `CompleteLaunch`, so logging lock acquire/release around the title and xam
 module loads should name the holder directly.
+
+## ROOT CAUSE: it was never a deadlock. Xenia crashes and shows a modal dialog
+
+The "freeze" is a **host access violation plus a modal error dialog**. Every
+lock-contention finding above is real but downstream of this.
+
+Enumerating the process's top-level windows during the "hang" finds two
+visible `#32770` (Win32 dialog) windows titled **"Unhandled Exception in
+Xenia"**:
+
+| Faulting thread | Exception address |
+|---|---|
+| `XThread????  (F80000E4)` | `VCRUNTIME140.dll+1E78B` |
+| `XThread????  (F80000DC)` | `xenia_canary.exe+223EFD` |
+
+Both are `0xC0000005` access violations. `F80000DC` is **the same thread the
+probe identified as the global critical region owner**. So the chain is:
+
+1. A guest thread takes the global critical region.
+2. It hits an access violation at `xenia_canary.exe+223EFD`.
+3. Xenia's unhandled-exception handler puts up a **modal** dialog. That
+   dialog's message loop runs on the faulting thread, inside
+   `USER32.dll` -> `win32u.dll` -- exactly the stack the probe sampled.
+4. The thread never returns, so it **never releases the lock**.
+5. The rest of the emulator keeps running and logging for ~20s, until the
+   first operation that needs the lock -- the hud load -- blocks forever.
+6. The harness kills the process, so the log just stops.
+
+The timing corroborates this precisely: the harness now aborts at **~1s**, and
+the probe's cacher reached only `gen=1` -- i.e. the lock was lost at ~1s. The
+hud load at ~20s was never the cause; it was the first victim.
+
+This supersedes the deadlock framing in the two sections above. There is no
+ABBA lock-ordering bug to find.
+
+### The harness was blind to this
+
+`press.ps1` only watched for process exit, and a modal dialog is not an exit.
+It now enumerates windows once a second and aborts with the dialog text.
+
+Two bugs had to be fixed to make that work, both worth knowing:
+
+- `$ok = Wait-Or-Die ...` **captures every string the function writes**, so the
+  existing `ABORT:` messages were being swallowed into `$ok` (and made it a
+  truthy array). They are `Write-Host` now.
+- A PowerShell scriptblock used as a P/Invoke callback cannot emit to the
+  pipeline; output must be accumulated in a `$script:`-scoped variable and
+  printed after the enumeration returns.
+
+The harness now lives in `tools/press.ps1` rather than a temp scratchpad.
+
+### Next
+
+Resolve `xenia_canary.exe+223EFD` to a symbol (a PDB is built -- `/Zi`) and fix
+the access violation. It reproduces in roughly 2 runs out of 3, at ~1s, on a
+guest thread, and only with LLE xam. Fixing it should restore every Guide
+experiment, including the queued scene load-order test.

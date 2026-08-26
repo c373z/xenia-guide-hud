@@ -37,6 +37,12 @@ class alignas(4096) xe_global_mutex {
   void lock();
   void unlock();
   bool try_lock();
+
+  // Diagnostics only. The global critical region is meant to be held very
+  // briefly; if it is ever seen held for a long time, this names the culprit.
+  // Racy by nature - read it as a hint, not a guarantee.
+  DWORD owner_thread_id() const { return owner_thread_; }
+  uint32_t recursion_count() const { return recursion_count_; }
 };
 using global_mutex_type = xe_global_mutex;
 

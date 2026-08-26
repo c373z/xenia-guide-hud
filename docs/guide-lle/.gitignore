@@ -3,3 +3,4 @@
 # committed - the research notes and scripts in this directory are the work
 # product, the basefiles are not. Recreate by copying the extracts here.
 work/
+__pycache__/

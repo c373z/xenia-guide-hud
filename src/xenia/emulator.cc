@@ -16,6 +16,10 @@
 
 #include "xenia/emulator.h"
 
+// For naming OS threads in the Guide thread probe (Windows-only file paths
+// already: this translation unit uses CONTEXT/SuspendThread directly).
+#include <tlhelp32.h>
+
 #include "config.h"
 #include "third_party/fmt/include/fmt/format.h"
 #include "third_party/tabulate/single_include/tabulate/tabulate.hpp"
@@ -2729,13 +2733,133 @@ static void ArmGuideThreadProbe(xe::kernel::KernelState* ks, int pdelay) {
     if (pf) {
       fprintf(pf, "probe: awake, snapshot gen=%u threads=%zu%s", gen,
               ths.size(), "\n");
-      fflush(pf);
+      // Who is sitting on the global critical region? It is supposed to be
+      // held only for very short bursts, so a stable owner here is the hang.
+      fprintf(pf, "probe: GCR owner_tid=%lu recursion=%u%s",
+              static_cast<unsigned long>(
+                  xe::global_critical_region::mutex().owner_thread_id()),
+              xe::global_critical_region::mutex().recursion_count(),
+              "\n");
+      // The GCR owner is an OS thread id, and the holder is often a thread
+      // created after the cached snapshot. Enumerate the process's threads
+      // and read their names straight from the OS, which needs no kernel
+      // lock at all.
+      DWORD gcr_owner =
+          xe::global_critical_region::mutex().owner_thread_id();
+      HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+      if (snap != INVALID_HANDLE_VALUE) {
+        THREADENTRY32 te;
+        te.dwSize = sizeof(te);
+        DWORD pid = GetCurrentProcessId();
+        if (Thread32First(snap, &te)) {
+          do {
+            if (te.th32OwnerProcessID != pid) continue;
+            std::string nm;
+            HANDLE th = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE,
+                                   te.th32ThreadID);
+            if (th) {
+              PWSTR desc = nullptr;
+              if (SUCCEEDED(GetThreadDescription(th, &desc)) && desc) {
+                for (PWSTR q = desc; *q; ++q) {
+                  nm += (*q < 128) ? char(*q) : '?';
+                }
+                LocalFree(desc);
+              }
+              CloseHandle(th);
+            }
+            fprintf(pf, "os-thread tid=%-6lu %-28s%s%s",
+                    static_cast<unsigned long>(te.th32ThreadID), nm.c_str(),
+                    te.th32ThreadID == gcr_owner ? "  <== GCR OWNER" : "",
+                    "\n");
+          } while (Thread32Next(snap, &te));
+        }
+        CloseHandle(snap);
+        fflush(pf);
+      }
+      // Map host addresses to loaded modules, so the owner's rip and return
+      // addresses name a DLL instead of a bare number.
+      struct Mod {
+        uint64_t base, size;
+        std::string name;
+      };
+      std::vector<Mod> mods;
+      HANDLE msnap = CreateToolhelp32Snapshot(
+          TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, GetCurrentProcessId());
+      if (msnap != INVALID_HANDLE_VALUE) {
+        MODULEENTRY32W me;
+        me.dwSize = sizeof(me);
+        if (Module32FirstW(msnap, &me)) {
+          do {
+            std::string nm;
+            for (PWSTR q = me.szModule; *q; ++q) {
+              nm += (*q < 128) ? char(*q) : '?';
+            }
+            mods.push_back({reinterpret_cast<uint64_t>(me.modBaseAddr),
+                            me.modBaseSize, nm});
+          } while (Module32NextW(msnap, &me));
+        }
+        CloseHandle(msnap);
+      }
+      auto where = [&mods](uint64_t a) -> std::string {
+        for (auto& m : mods) {
+          if (a >= m.base && a < m.base + m.size) {
+            return fmt::format("{}+{:X}", m.name, a - m.base);
+          }
+        }
+        return "?";
+      };
+
+      // Sample the GCR owner directly by tid. It is typically a guest thread
+      // created after the cached snapshot, so this is the only way to see
+      // where it stopped.
+      if (gcr_owner) {
+        HANDLE oh = OpenThread(
+            THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION,
+            FALSE, gcr_owner);
+        if (oh) {
+          CONTEXT oc = {};
+          oc.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
+          if (SuspendThread(oh) != static_cast<DWORD>(-1)) {
+            if (GetThreadContext(oh, &oc)) {
+              fprintf(pf, "GCR owner rip=%016llX  %s%s",
+                      static_cast<unsigned long long>(oc.Rip),
+                      where(oc.Rip).c_str(), "\n");
+              fflush(pf);
+              // Walk a little of its stack for return addresses; the guest
+              // frame that took the lock should be in here somewhere.
+              for (int d = 0; d < 48; ++d) {
+                uint64_t slot = 0;
+                SIZE_T got = 0;
+                if (!ReadProcessMemory(
+                        GetCurrentProcess(),
+                        reinterpret_cast<LPCVOID>(oc.Rsp + d * 8), &slot,
+                        sizeof(slot), &got) ||
+                    got != sizeof(slot)) {
+                  break;
+                }
+                if (slot > 0x10000) {
+                  std::string w = where(slot);
+                  if (w != "?") {
+                    fprintf(pf, "GCR owner stack[%02d]=%016llX  %s%s", d,
+                            static_cast<unsigned long long>(slot), w.c_str(),
+                            "\n");
+                  }
+                }
+              }
+              fflush(pf);
+            }
+            ResumeThread(oh);
+          }
+          CloseHandle(oh);
+        }
+      }
     }
     struct Row {
       uint32_t h;
       std::string nm;
       uint64_t rip;
       uint32_t lr, r3;
+      uint32_t tid;
     };
     std::vector<Row> rows;
     for (auto& th : ths) {
@@ -2757,13 +2881,14 @@ static void ArmGuideThreadProbe(xe::kernel::KernelState* ks, int pdelay) {
         lr = static_cast<uint32_t>(tc->lr);
         r3 = static_cast<uint32_t>(tc->r[3]);
       }
-      rows.push_back({th->handle(), th->thread_name(), rip, lr, r3});
+      rows.push_back({th->handle(), th->thread_name(), rip, lr, r3,
+                      th->thread() ? th->thread()->system_id() : 0});
     }
     if (pf) {
       for (auto& r : rows) {
-        fprintf(pf, "%08X %-26s rip=%016llX lr=%08X r3=%08X\n", r.h,
-                r.nm.c_str(), static_cast<unsigned long long>(r.rip), r.lr,
-                r.r3);
+        fprintf(pf, "%08X %-26s tid=%-6u rip=%016llX lr=%08X r3=%08X\n",
+                r.h, r.nm.c_str(), r.tid,
+                static_cast<unsigned long long>(r.rip), r.lr, r.r3);
       }
       fprintf(pf, "probe: sampled %zu threads\n", rows.size());
       fflush(pf);
