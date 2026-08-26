@@ -1282,6 +1282,20 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
             cb += fmt::format("+{:X}={:08X} ", o, rd(e.second + o));
           }
           XELOGI("GuideBootstrap: {} device cmdbuf {}", e.first, cb);
+          // Does this device reference a ring buffer at all? The rings
+          // observed live in physical memory (title 1FAE2000, xam mode-1
+          // 1D686000). A device with no such pointer has nowhere to emit
+          // a draw stream, which would explain why even a Clear produces
+          // no packets in the small buffer at [dev+0x30].
+          std::string rings;
+          for (uint32_t o = 0; o < 0x8000u; o += 4) {
+            uint32_t v = rd(e.second + o);
+            if (v >= 0x10000000u && v < 0x20000000u && (v & 0xFFF) == 0) {
+              rings += fmt::format("+{:X}={:08X} ", o, v);
+            }
+          }
+          XELOGI("GuideBootstrap: {} device ring-like pointers: {}",
+                 e.first, rings.empty() ? "none" : rings);
         }
         // Both surface slots are null even on a healthy device, so look
         // for a real surface object anywhere in the device: guest heap

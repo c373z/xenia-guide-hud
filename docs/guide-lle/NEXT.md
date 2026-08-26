@@ -733,10 +733,23 @@ Both are consistent with "the emitter needs a ring to target". If so,
 `guide_second_context` has been faithfully capturing and submitting the wrong
 buffer from the start, which explains why it never crashes and never varies.
 
-**Not verified.** The alternative is that the emitter genuinely produces nothing
-for an unrelated reason and this buffer would have received it. Distinguishing
-them means finding where the clear's packets actually go - not assuming this
-buffer is the destination because it is where a crash once pointed.
+**Now verified.** Scanning both devices for pointers into physical memory (the
+rings observed live there: title `1FAE2000`, xam mode-1 `1D686000`):
+
+    xam device   ring-like pointers: none
+    title device ring-like pointers: +2A1C=1E4E4000 +36B0=1F6DC000
+                                     +3910=1F6DD000 +5594=1E87C000
+
+xam's mode-2 device references no physical memory whatsoever, while the title's
+references four buffers. It has nowhere to emit a draw stream, so no Clear and
+no draw can produce packets regardless of what else is correct.
+
+That closes the question of why nothing is emitted, and it means
+`guide_second_context` captures a buffer that was never going to receive draws.
+The remaining problem is not the emitter, the scene, the resources or the
+render target - all verified working - but that the device the Guide draws with
+has no ring, and the only creator that builds one (mode 1) takes the ring away
+from the title.
 
 ### Cross-title validation
 
