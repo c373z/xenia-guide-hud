@@ -1296,3 +1296,49 @@ Resolve `xenia_canary.exe+223EFD` to a symbol (a PDB is built -- `/Zi`) and fix
 the access violation. It reproduces in roughly 2 runs out of 3, at ~1s, on a
 guest thread, and only with LLE xam. Fixing it should restore every Guide
 experiment, including the queued scene load-order test.
+
+### The faulting function: `XObject::GetNativeObject`
+
+`xenia_canary.exe+223EFD` symbolizes to
+**`xe::kernel::XObject::GetNativeObject+0x6D`** (`src/xenia/kernel/xobject.cc:408`).
+
+Symbolizing needs no debugger. `dbghelp` via P/Invoke reads the PDB that sits
+next to the exe -- see `tools/sym.ps1`. Two gotchas: `SymLoadModuleEx` ignores
+the requested base unless a non-zero image size is passed, and
+`SYMOPT_DEFERRED_LOADS` makes a failed PDB load look like a missing symbol
+(`err 2`) rather than an error.
+
+Why a fault there wedges the whole emulator:
+
+```cpp
+if (!already_locked) {
+  global_critical_region::mutex().lock();     // <-- raw lock, no RAII
+}
+...
+auto header = reinterpret_cast<X_DISPATCH_HEADER*>(native_ptr);
+if (as_type == X_OBJECT_TYPES::UndefinedObject) {
+  type = header->type;                        // <-- +0x6D faults here
+}
+...
+if (!already_locked) {
+  global_critical_region::mutex().unlock();   // never reached
+}
+```
+
+The function takes the global critical region with a bare `lock()` and relies
+on falling through to a bare `unlock()`. It then dereferences `native_ptr`.
+`assert_not_null(native_ptr)` above is compiled out in release, so a null or
+unmapped guest pointer faults *while the lock is held*, and the lock is never
+released. Xenia's handler then shows its modal dialog on that thread, and the
+lock is gone for the rest of the process's life.
+
+**Note for whoever fixes this: switching to a scoped lock is not sufficient.**
+The build uses `/EHsc`, under which an access violation is an SEH exception
+that does not run C++ destructors, so RAII would not release the lock either.
+The fix has to be to *not fault*: validate `native_ptr` (null, and mapped in
+the guest heap) and return an empty ref before dereferencing the header.
+
+Still to find: which caller passes the bad pointer. It happens ~1s in, only
+under LLE xam, on guest thread `F80000DC`, so real xam is calling a kernel
+export with an object pointer Xenia does not accept. Logging the guest LR when
+`native_ptr` is null or unmapped should name it in one run.
