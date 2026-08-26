@@ -1137,6 +1137,61 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
               XELOGI("GuideScene:   {:08X} GetId -> {:08X}: {:08X} "
                      "\"{}\"",
                      kid, static_cast<uint32_t>(ir3), idp, ids);
+              // Resolve THIS element (not just the root, which was all
+              // that was dumped before) and show its vtable: a real
+              // control has one, a bare element instantiated for want of
+              // a class would look different.
+              uint32_t eo = memory->SystemHeapAlloc(16, 16);
+              uint32_t gof = xmod ? xmod->GetProcAddressByOrdinal(0x346)
+                                  : 0;
+              if (eo && gof) {
+                std::memset(memory->TranslateVirtual(eo), 0, 16);
+                uint64_t ea[] = {kid, eo};
+                processor->Execute(ts, gof, ea, xe::countof(ea));
+                uint32_t eobj = rd(eo);
+                std::string eh;
+                for (uint32_t w = 0; w < 12; ++w) {
+                  eh += fmt::format("{:02X}:{:08X} ", w * 4,
+                                    rd(eobj + w * 4));
+                }
+                XELOGI("GuideScene:   {:08X} object {:08X} head {}", kid,
+                       eobj, eh);
+                // The scene object references more children than
+                // GetLastChild reports ([+0x0C], [+0x10]); walk those
+                // too, with their ids, since they are referenced by a
+                // real object with a real vtable.
+                if (rd(eobj) > 0x90000000u) {
+                  uint32_t gv2 =
+                      xmod ? xmod->GetProcAddressByOrdinal(0x395) : 0;
+                  for (uint32_t co = 0x0C; co <= 0x10; co += 4) {
+                    uint32_t ch = rd(eobj + co);
+                    if (!ch) continue;
+                    uint32_t io2 = memory->SystemHeapAlloc(16, 16);
+                    if (!io2) continue;
+                    std::memset(memory->TranslateVirtual(io2), 0, 16);
+                    uint64_t ia4[] = {ch, io2};
+                    processor->Execute(ts, gid, ia4, xe::countof(ia4));
+                    uint32_t nm = rd(io2);
+                    std::string ns;
+                    if (nm > 0x1000u) {
+                      for (uint32_t w = 0; w < 48; ++w) {
+                        uint16_t c2 = xe::load_and_swap<uint16_t>(
+                            memory->TranslateVirtual(nm + w * 2));
+                        if (!c2) break;
+                        ns += (c2 >= 0x20 && c2 < 0x7F) ? char(c2) : '?';
+                      }
+                    }
+                    std::memset(memory->TranslateVirtual(io2), 0, 16);
+                    uint64_t va4[] = {ch, io2};
+                    uint64_t vr4 = processor->Execute(ts, gv2, va4,
+                                                     xe::countof(va4));
+                    XELOGI("GuideScene:     child [+{:X}] {:08X} "
+                           "\"{}\" visual -> {:08X}: {:08X}",
+                           co, ch, ns, static_cast<uint32_t>(vr4),
+                           rd(io2));
+                  }
+                }
+              }
             }
             // An element carries geometry, but what actually rasterises
             // is its attached visual. A tree that lays out correctly and

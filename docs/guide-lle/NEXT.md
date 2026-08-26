@@ -847,3 +847,48 @@ Breakpoints must be armed **after** the target has been JIT-translated.
 probe inert - two "no hits" results were tooling artifacts, not evidence. Adding
 a second install site did not help either, because the vector is static and the
 early call claimed it. It is now armed only at the button press.
+
+### The scene's full contents, and the one solid symptom
+
+Walking the scene object's own child pointers (not just `GetLastChild`, which
+reports only the last one) gives the whole page:
+
+    00010008  "scnInfoUpsellLive"   scene, real vtable 913E23B8
+      0001000E  "btnJoinLive"    GetVisual -> 80300017, null
+      00010014  "btnB"           GetVisual -> 80300017, null
+      00010039  "labelHeading"   GetVisual -> 80300017, null
+
+A coherent upsell page - heading, a join button, a back button - and **not one
+element has a visual**. Two are buttons, which unambiguously need visuals, so
+this is not a label-specific type mismatch.
+
+That is the one solid symptom, and it matches the localisation above exactly:
+nothing has anything drawable, so the render walk never enters a draw path, so
+the emitter is only ever reached through the hardcoded-zero no-op call.
+
+### Leads that looked strong and dissolved
+
+Recorded so they are not re-opened:
+
+* **the missing ring buffer** - a mode-2 device really does reference no
+  physical memory, but supplying buffers in the slots a mode-1 device uses
+  (`guide_fake_ring`) changes nothing.
+* **XUI classes not registered** - the registry at `81D6D508` is empty at hud
+  load and holds 16 classes after the scene loads.
+* **`80300017` is a label type mismatch** - it is not; two buttons return the
+  same.
+* **`XuiInit` called with null params** - null is a legitimate path. A non-null
+  block with `[0] <= 0xC` is what errors (`8000FFFF`). The normal path then
+  consults a global at `81D6D0A4`, next to the provider at `81D6D0AC`, so the
+  visual source comes from XUI's own state rather than init parameters.
+
+Each of these looked convincing when first spotted and failed on closer
+reading or on measurement. The pattern is worth remembering: in this codebase,
+a mechanism that *could* explain the symptom is not evidence that it *does*.
+
+### Still unexplained
+
+Elements load with correct structure, ids and layout; none has a visual. The
+scene, its classes, its locator, the device, the render target and the command
+buffer are all verified working. No current lead into the visual question is
+better supported than the four above were.
