@@ -1628,6 +1628,38 @@ void VdSwap_entry(
           }
         }
       }
+      if (::cvars::guide_fake_ring) {
+        static bool fr_done = false;
+        if (!fr_done) {
+          auto* fm3 = kernel_state()->memory();
+          auto f3 = [fm3](uint32_t a) {
+            return a ? xe::load_and_swap<uint32_t>(
+                           fm3->TranslateVirtual(a)) : 0u;
+          };
+          uint32_t fdc3 = guide_draw_this_ ? f3(guide_draw_this_ + 12) : 0;
+          uint32_t fw3 = fdc3 ? f3(fdc3 + 0x1CCu) : 0;
+          uint32_t fdev = fw3 ? f3(fw3 + 12u) : 0;
+          if (!fdev) fdev = f3(0x81D43684u);
+          if (fdev && !f3(fdev + 0x3B64u)) {
+            fr_done = true;
+            uint32_t p1 = fm3->SystemHeapAlloc(0x1000, 0x1000,
+                                               kSystemHeapPhysical);
+            uint32_t p2 = fm3->SystemHeapAlloc(0x1000, 0x1000,
+                                               kSystemHeapPhysical);
+            if (p1 && p2) {
+              std::memset(fm3->TranslateVirtual(p1), 0, 0x1000);
+              std::memset(fm3->TranslateVirtual(p2), 0, 0x1000);
+              xe::store_and_swap<uint32_t>(
+                  fm3->TranslateVirtual(fdev + 0x3B64u), p1);
+              xe::store_and_swap<uint32_t>(
+                  fm3->TranslateVirtual(fdev + 0x3DC4u), p2);
+              XELOGI("Guide: fake ring on {:08X}: [3B64]={:08X} "
+                     "[3DC4]={:08X}",
+                     fdev, p1, p2);
+            }
+          }
+        }
+      }
       if (::cvars::guide_bind_title_rt) {
         // Must run BEFORE guide_fake_front_buffer, which clones RT0
         // into +3F74 and does nothing while RT0 is null.

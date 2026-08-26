@@ -489,6 +489,17 @@ DEFINE_bool(guide_static_locator, false,
             "bootstrap already sets to hud's module.",
             "Kernel");
 
+DEFINE_bool(guide_fake_ring, false,
+            "Give the mode-2 Guide device the physical buffers a mode-1 device "
+            "has. Scanning both, a mode-1 xam device holds physical pointers at "
+            "[dev+0x3B64] and [dev+0x3DC4] while a mode-2 device holds none at "
+            "all - which is why nothing it draws can be emitted, not even a "
+            "Clear. Mode 2 is the only configuration where the draw emitter is "
+            "actually reached, so this is the one way to test whether the "
+            "absent ring is what stops emission: allocate physical memory and "
+            "fill those slots.",
+            "Kernel");
+
 DEFINE_int32(guide_second_context_kb, 0,
              "Give xam its own command buffer of this many KB and submit what "
              "the Guide writes into it as a second rendering pass inside the "

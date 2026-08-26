@@ -744,12 +744,20 @@ xam's mode-2 device references no physical memory whatsoever, while the title's
 references four buffers. It has nowhere to emit a draw stream, so no Clear and
 no draw can produce packets regardless of what else is correct.
 
-That closes the question of why nothing is emitted, and it means
-`guide_second_context` captures a buffer that was never going to receive draws.
-The remaining problem is not the emitter, the scene, the resources or the
-render target - all verified working - but that the device the Guide draws with
-has no ring, and the only creator that builds one (mode 1) takes the ring away
-from the title.
+**But supplying them does not fix it.** `guide_fake_ring` allocates physical
+memory and writes it into `[dev+0x3B64]` and `[dev+0x3DC4]` on the mode-2
+device - the two slots a mode-1 device populates - and nothing changes: the
+buffer still holds only `0000200E` and no draws appear.
+
+So the difference between the devices is real, but it is not established as the
+*cause*. Either those two slots are not the ring, or the ring is not what gates
+the emitter. The earlier wording here claimed this closed the question; it does
+not.
+
+What is still solid: the mode-2 device references no physical memory, a Clear
+emits nothing, and `guide_second_context` captures a buffer that never receives
+draws. What is unresolved: why the emitter, which is entered every frame,
+constructs nothing.
 
 ### Cross-title validation
 
