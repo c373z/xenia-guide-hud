@@ -1391,3 +1391,46 @@ Boot now gets roughly twice as far: **~10.6k-11.2k log lines, up from ~5.7k**.
   nullptr regardless and the outcome is unchanged - but the test is not a
   correct readability check. Narrowing it to `guest_ptr != 0 && LookupHeap()`
   was tried and brings the access violation straight back.
+
+### The crash reporter was destroying its own evidence
+
+`Emulator::ExceptionCallback` faulted at emulator.cc:2470, inside the
+"poor-man's backtrace" that scans the guest stack:
+
+```cpp
+for (uint32_t i = 0; i < 400 && shown < 24; ++i) {
+  uint32_t v = xe::load_and_swap<uint32_t>(mm->TranslateVirtual(sp + i * 4));
+```
+
+It walks 1600 bytes past `sp` with no bounds check. Every address here comes
+from a thread that has *already faulted*, so none of it can be assumed mapped;
+when `sp` sat near the end of its stack region the scan ran off the end and
+faulted inside the handler. The back-chain walk just above had the same
+problem (`[cur]` and `[caller_sp - 8]` unvalidated). Both are guarded now.
+
+That second exception replaced the report for the first, so every crash it hit
+was being reported as a handler crash instead of the real fault. Runs now
+produce one dialog instead of two.
+
+`tools/sym.ps1` also gives exact `file:line` now -- `IMAGEHLP_LINEW64` is
+`SizeOfStruct@0, Key@8, LineNumber@16, FileName@24`, and the earlier guesses
+of 12/16 silently produced garbage.
+
+### Remaining crashes, and a flag that helps
+
+- `xe::cpu::backend::x64::TrapDebugBreak+0x39` is **not a Xenia bug**: it is
+  the guest's own `tw`/`twi` assert trap, which becomes a fatal dialog only
+  because `break_on_debugbreak = true` in the config.
+- Running with **`--break_on_debugbreak=false`** removes that dialog. Sampled
+  three runs: 8.6k, 11.5k, and one that crashed not at all at **15062 lines**
+  - the furthest the dashboard has booted in this whole investigation. Passed
+  as a command-line flag deliberately; the saved config is left alone, since
+  editing it has broken plain launches before.
+- The dominant remaining crash is **`VCRUNTIME140.dll+1E78B`** (host code,
+  most likely `memcpy`). It is host-side, so `ExceptionCallback` returns false
+  for it and no `GUEST CRASH` report is written at all. Attributing it needs a
+  host stack walk (`RtlCaptureStackBackTrace`) added to the handler's
+  pass-through path.
+
+Progress overall: boot went from ~5.7k log lines (hard wedge) to 11-15k with
+runs that sometimes complete cleanly.

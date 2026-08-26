@@ -2438,6 +2438,16 @@ bool Emulator::ExceptionCallback(Exception* ex) {
         auto* mm = kernel_state() ? kernel_state()->memory() : nullptr;
         uint32_t sp = static_cast<uint32_t>(ectx->r[1]);
         if (mm && sp) {
+          // Every read below walks addresses derived from a *faulted*
+          // thread's stack, so none of them can be assumed mapped. Reading
+          // off the end of the stack region faulted inside this handler,
+          // which replaced the real crash report with a second exception and
+          // destroyed the evidence for the first.
+          auto readable = [&](uint32_t a, uint32_t len) {
+            auto* hp = mm->LookupHeap(a);
+            return hp && hp->QueryRangeAccess(a, a + len - 1) !=
+                             xe::memory::PageAccess::kNoAccess;
+          };
           // Proper unwind first. PPC keeps a back chain at [sp], and these
           // prologues save LR with "stw r12,-8(r1)" before the stwu, so a
           // frame's return address sits at [caller_sp - 8]. Walking that is
@@ -2447,9 +2457,11 @@ bool Emulator::ExceptionCallback(Exception* ex) {
             std::string bt;
             uint32_t cur = sp;
             for (int f = 0; f < 12 && cur; ++f) {
+              if (!readable(cur, 4)) break;
               uint32_t caller_sp =
                   xe::load_and_swap<uint32_t>(mm->TranslateVirtual(cur));
               if (caller_sp <= cur || caller_sp - cur > 0x10000) break;
+              if (caller_sp < 8 || !readable(caller_sp - 8, 4)) break;
               uint32_t ra = xe::load_and_swap<uint32_t>(
                   mm->TranslateVirtual(caller_sp - 8));
               if (ra < 0x81000000u || ra >= 0x92000000u) break;
@@ -2467,8 +2479,9 @@ bool Emulator::ExceptionCallback(Exception* ex) {
           // so the direct caller's return address fell outside the window and
           // its absence was misread as proof the call was indirect.
           for (uint32_t i = 0; i < 400 && shown < 24; ++i) {
-            uint32_t v = xe::load_and_swap<uint32_t>(
-                mm->TranslateVirtual(sp + i * 4));
+            uint32_t a = sp + i * 4;
+            if (!readable(a, 4)) break;
+            uint32_t v = xe::load_and_swap<uint32_t>(mm->TranslateVirtual(a));
             if (v >= 0x81700000u && v < 0x81E00000u) {
               line += fmt::format("{:08X}(+{:X}) ", v, i * 4);
               ++shown;
