@@ -69,6 +69,17 @@ bool PPCScanner::Scan(GuestFunction* function, FunctionDebugInfo* debug_info) {
     // 'no really we meant to end after that bl' functions.
     if (!code) {
       LOGPPC("function end {:08X} (0x00000000 read)", address);
+      if (address == start_address) {
+        // The very first instruction is zero, so there is no function here at
+        // all. Backing up would set end_address = start_address - 4, and
+        // PPCHIRBuilder computes its instruction count as an *unsigned*
+        // (end - start) / 4 + 1: that underflows to ~2^30 and the memsets
+        // sized from it run over gigabytes, faulting inside memcpy far from
+        // the actual cause. Refuse the scan instead.
+        XELOGE("PPCScanner: {:08X} begins with 0x00000000; not a function",
+               start_address);
+        return false;
+      }
       // Don't include the 0's.
       address -= 4;
       break;

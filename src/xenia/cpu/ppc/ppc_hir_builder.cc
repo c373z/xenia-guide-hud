@@ -105,10 +105,13 @@ bool PPCHIRBuilder::Emit(GuestFunction* function, uint32_t flags) {
   if (function_->end_address() < function_->address() ||
       function_->end_address() - function_->address() > kMaxFunctionSpan) {
     XELOGE(
-        "PPCHIRBuilder: refusing to translate {} {:08X}: end address {:08X} "
-        "is before the start or implausibly far past it",
+        "PPCHIRBuilder: refusing to translate {} {:08X} \"{}\": end address "
+        "{:08X} is before the start or implausibly far past it "
+        "(behavior={} status={})",
         function_->module() ? function_->module()->name() : "?",
-        function_->address(), function_->end_address());
+        function_->address(), function_->name(), function_->end_address(),
+        static_cast<int>(function_->behavior()),
+        static_cast<int>(function_->status()));
     return false;
   }
   instr_count_ = (function_->end_address() - function_->address()) / 4 + 1;

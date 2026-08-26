@@ -1488,3 +1488,52 @@ Next: find why xam function `818936B8` is registered with an end address
 before its start. That is function discovery - `.pdata` parsing or the
 XexModule function table - not the translator. Fixing it should remove the
 last reproducible crash on this path.
+
+### Root of the JIT underflow: xam code that reads as zero
+
+`PPCScanner::Scan` ends a function when it fetches a zero instruction:
+
+```cpp
+if (!code) {
+  // Don't include the 0's.
+  address -= 4;
+  break;
+}
+```
+
+When the zero is the **first** instruction, `address` underflows to
+`start_address - 4`, and `set_end_address(address)` records an end before the
+start - which is precisely the corrupt bound that later underflows
+`PPCHIRBuilder`'s unsigned instruction count. Fixed at source: a function whose
+first instruction is zero is not a function, so the scan now fails instead of
+recording negative bounds.
+
+With that fixed the failure names a different address each build
+(`818936B8`, then `81747D70`), which is the more interesting result:
+
+**Those functions are not zero in the file.** Checking the xam image offline
+at the project's usual `runtime + 0x7200` mapping, both hold ordinary
+prologues:
+
+    81747D70 -> 8174EF70  mfspr r12,8 ; stw r12,-8(r1) ; ...
+    818936B8 -> 8189A8B8  mfspr r12,8 ; bl 8181494C ; ...
+
+So real xam code reads back as `0x00000000` from guest memory. Two readings,
+not yet distinguished:
+
+1. Those pages are never populated - the XEX load leaves parts of xam's
+   `.text` zero.
+2. A race - functions are declared and scanned before the pages they cover
+   have been written.
+
+(2) is worth checking first because it would also explain why the crashes are
+intermittent between runs, and why the address that trips it moves around.
+
+This matters well beyond the crash: if parts of xam are missing or late,
+every downstream oddity in this investigation - the unmapped wait object, the
+guest asserts, the retry loops - could be a symptom of xam executing against
+an incompletely loaded image, rather than separate problems.
+
+Current remaining crash is `x64::ResolveFunction` dereferencing the null it
+gets back when translation legitimately refuses (it now logs the target first,
+but still cannot satisfy the call).
