@@ -1646,6 +1646,11 @@ void VdSwap_entry(
           // requires bit 30 of word 0 to be clear.
           uint32_t surf = 0;
           if (tdev) {
+            X_VIDEO_MODE vm;
+            VdQueryVideoMode(&vm, false);
+            uint32_t disp_w = uint32_t(vm.display_width);
+            uint32_t disp_h = uint32_t(vm.display_height);
+            uint32_t alt = 0, alt_off = 0, alt_w = 0, alt_h = 0;
             auto rot = [](uint32_t v, uint32_t n) {
               return (v << n) | (v >> (32 - n));
             };
@@ -1662,15 +1667,37 @@ void VdSwap_entry(
               uint32_t w0 = r2(cand), fc = r2(cand + 0x24u);
               uint32_t wd = (rot(fc, 14) & 0x3FFFu) + 1;
               uint32_t ht = (rot(fc, 29) & 0x7FFFu) + 1;
-              if (!(w0 & 0x40000000u) && wd >= 256 && wd <= 4096 &&
-                  ht >= 256 && ht <= 4096) {
+              // Range checks alone are not enough: on one title a field
+              // at +0x565C decoded to 1153x609 and passed, which is not a
+              // real render resolution. Require the surface to match the
+              // display mode Xenia already knows, so a coincidental shape
+              // cannot masquerade as the render target.
+              if (w0 & 0x40000000u) continue;
+              // Prefer an exact match against the display mode. Many
+              // titles render at a lower internal resolution and upscale,
+              // so keep the best plausible candidate as a fallback rather
+              // than binding nothing at all - but say which one it was.
+              if (wd == disp_w && ht == disp_h) {
                 surf = cand;
-                XELOGI("Guide: title RT found at [dev+{:X}] = {:08X} "
-                       "({}x{})",
+                XELOGI("Guide: title RT at [dev+{:X}] = {:08X} ({}x{}), "
+                       "matches display mode",
                        off, cand, wd, ht);
+              } else if (!alt && wd >= 256 && wd <= 4096 &&
+                         ht >= 256 && ht <= 4096) {
+                alt = cand;
+                alt_off = off;
+                alt_w = wd;
+                alt_h = ht;
               }
             }
-            if (!surf) {
+            if (!surf && alt) {
+              surf = alt;
+              XELOGW("Guide: no exact display-mode match; using "
+                     "[dev+{:X}] = {:08X} ({}x{}) against display "
+                     "{}x{} - the title may render at a lower "
+                     "internal resolution, or this may be wrong",
+                     alt_off, alt, alt_w, alt_h, disp_w, disp_h);
+            } else if (!surf) {
               XELOGW("Guide: no title RT found in {:08X} ({} "
                      "pointer candidates examined)",
                      tdev, seen);
