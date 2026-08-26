@@ -1157,3 +1157,42 @@ process, which is emulator-internals work rather than Guide work.
 **Workaround for unrelated experiments:** anything that does not depend on the
 real xam can run with `--lle_xam=`. The scene load-order experiment cannot --
 it needs LLE xam by construction.
+
+### Refined: the contended lock is the kernel object table
+
+The `guide_probe_threads_seconds` probe could not observe the freeze as
+written, for a structural reason worth remembering: it was armed *inside* the
+Guide button handler, which is gated on a handler that a freeze during hud
+load never publishes. A probe armed there can never fire on the very hang it
+exists to diagnose. It is now armed from `CompleteLaunch`, before the title
+module load, and split into two passes -- raw registers first, then symbol
+resolution -- because `LookupFunction` takes the code cache lock, which is
+plausibly one of the held locks.
+
+Armed early, the probe still logged nothing. That was itself ambiguous: a
+wedged *logger* would look identical to a probe that never ran, and a wedged
+logger would also explain "the log just stops" while CPU keeps ticking. So the
+probe now writes progress markers to `probe.txt` with `fprintf`/`fflush`,
+bypassing `XELOGI` entirely.
+
+Result -- `probe.txt` contains exactly:
+
+    probe: awake
+
+and not `probe: got object table`. So:
+
+- **The logger is fine.** The emulator is genuinely wedged, not merely silent.
+- **The probe blocks in `object_table()->GetObjectsByType<XThread>()`** -- the
+  kernel object table lock.
+
+That is the lock everything piles up behind. It is held across the hud
+`LoadUserModule`/`FinishLoadingUserModule` (module and thread objects are
+inserted there) while that load waits on something else, and the lazily-JITing
+thread `F80000F4` is stuck behind the same wall.
+
+Still unknown: what the loader thread is itself waiting on while holding that
+lock. The probe cannot answer it, because the probe needs the same lock to
+enumerate threads. Getting the loader thread's own stack needs either a native
+debugger (none installed -- no `cdb`, `ntsd`, or `procdump`) or a probe that
+samples thread handles captured *before* the freeze rather than enumerating
+them during it.

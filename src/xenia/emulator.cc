@@ -1112,6 +1112,7 @@ X_STATUS Emulator::CreateZarchivePackage(
 }
 
 static void InstallGuideStoreTraces(xe::kernel::KernelState* ks);
+static void ArmGuideThreadProbe(xe::kernel::KernelState* ks, int pdelay);
 
 void Emulator::on_guide_button_pressed(uint8_t user_index) {
   XELOGI("Guide button: pressed (user {}), handler={:08X} buf={:08X} "
@@ -1244,63 +1245,9 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                 XELOGI("Guide button: XuiInit returned {:08X}, ctx now {:08X}",
                        static_cast<uint32_t>(xr), rd(0x81D6C978u));
               }
-                if (cvars::guide_probe_threads_seconds > 0) {
-                  int pdelay = cvars::guide_probe_threads_seconds;
-                  auto* pproc = ks->processor();
-                  std::thread([pdelay, pproc, ksp = ks]() {
-                    xe::threading::set_name("GuideThreadProbe");
-                    std::this_thread::sleep_for(
-                        std::chrono::seconds(pdelay));
-                    auto ths =
-                        ksp->object_table()
-                            ->GetObjectsByType<kernel::XThread>(
-                                kernel::XObject::Type::Thread);
-                    struct Row {
-                      uint32_t h; std::string nm;
-                      uint64_t rip; uint32_t lr, r3;
-                    };
-                    std::vector<Row> rows;
-                    for (auto& th : ths) {
-                      void* nh2 = th->thread() ? th->thread()->native_handle()
-                                               : nullptr;
-                      if (!nh2) continue;
-                      uint64_t rip = 0;
-                      uint32_t lr = 0, r3 = 0;
-                      CONTEXT c2 = {};
-                      c2.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
-                      if (SuspendThread(reinterpret_cast<HANDLE>(nh2)) !=
-                          static_cast<DWORD>(-1)) {
-                        if (GetThreadContext(reinterpret_cast<HANDLE>(nh2),
-                                             &c2)) {
-                          rip = c2.Rip;
-                        }
-                        ResumeThread(reinterpret_cast<HANDLE>(nh2));
-                      }
-                      auto* tc = th->thread_state()
-                                     ? th->thread_state()->context()
-                                     : nullptr;
-                      if (tc) {
-                        lr = static_cast<uint32_t>(tc->lr);
-                        r3 = static_cast<uint32_t>(tc->r[3]);
-                      }
-                      rows.push_back(
-                          {th->handle(), th->thread_name(), rip, lr, r3});
-                    }
-                    // Resolve only after every thread is running again:
-                    // LookupFunction takes the code cache lock.
-                    auto* cc2 = pproc->backend()->code_cache();
-                    for (auto& r : rows) {
-                      auto* f2 = r.rip ? cc2->LookupFunction(r.rip) : nullptr;
-                      uint32_t g2 =
-                          f2 ? f2->MapMachineCodeToGuestAddress(r.rip) : 0;
-                      XELOGI("ThreadProbe: {:08X} {:26} guest {:08X} lr={:08X} "
-                             "r3={:08X}{}",
-                             r.h, r.nm, g2, r.lr, r.r3,
-                             f2 ? "" : "  (host: in a kernel call)");
-                    }
-                  }).detach();
-                  XELOGI("ThreadProbe: armed for {}s", pdelay);
-                }
+                // Armed early instead (see ArmGuideThreadProbe): a probe
+                // armed from this handler cannot fire on a freeze that
+                // happens before the handler is ever published.
                 // Arm again here: breakpoints set before the target is
                 // JIT-translated do not take, so the xam-load call is
                 // inert for anything not yet executed.
@@ -2731,6 +2678,89 @@ static std::string format_version(xex2_version version) {
 // Installing these at the Guide button press misses anything that happens
 // during xam and hud initialisation - XUI class registration among it - so
 // arm them as soon as the title is loaded instead.
+// Sample every guest thread's PC. Split into two passes on purpose: the raw
+// registers are logged before anything touches the code cache, because
+// LookupFunction takes the code cache lock and that is exactly the lock a
+// JIT/loader deadlock is likely to be holding. Resolving first would hang the
+// probe and lose the only evidence.
+static void ArmGuideThreadProbe(xe::kernel::KernelState* ks, int pdelay) {
+  auto* pproc = ks->processor();
+  std::thread([pdelay, pproc, ksp = ks]() {
+    xe::threading::set_name("GuideThreadProbe");
+    std::this_thread::sleep_for(std::chrono::seconds(pdelay));
+    // Write to a plain file, not XELOGI. If the logger itself is what is
+    // wedged, every XELOGI here would block and the probe would produce
+    // nothing - which is indistinguishable from the probe never running.
+    // These markers say how far the probe got.
+    FILE* pf = fopen("probe.txt", "w");
+    auto mark = [&](const char* m) {
+      if (pf) {
+        fprintf(pf, "%s\n", m);
+        fflush(pf);
+      }
+    };
+    mark("probe: awake");
+    struct Row {
+      uint32_t h;
+      std::string nm;
+      uint64_t rip;
+      uint32_t lr, r3;
+    };
+    std::vector<Row> rows;
+    auto ths = ksp->object_table()->GetObjectsByType<kernel::XThread>(
+        kernel::XObject::Type::Thread);
+    mark("probe: got object table");
+    for (auto& th : ths) {
+      void* nh2 = th->thread() ? th->thread()->native_handle() : nullptr;
+      if (!nh2) continue;
+      uint64_t rip = 0;
+      uint32_t lr = 0, r3 = 0;
+      CONTEXT c2 = {};
+      c2.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
+      if (SuspendThread(reinterpret_cast<HANDLE>(nh2)) !=
+          static_cast<DWORD>(-1)) {
+        if (GetThreadContext(reinterpret_cast<HANDLE>(nh2), &c2)) {
+          rip = c2.Rip;
+        }
+        ResumeThread(reinterpret_cast<HANDLE>(nh2));
+      }
+      auto* tc = th->thread_state() ? th->thread_state()->context() : nullptr;
+      if (tc) {
+        lr = static_cast<uint32_t>(tc->lr);
+        r3 = static_cast<uint32_t>(tc->r[3]);
+      }
+      rows.push_back({th->handle(), th->thread_name(), rip, lr, r3});
+    }
+    mark("probe: sampled threads");
+    if (pf) {
+      for (auto& r : rows) {
+        fprintf(pf, "%08X %-26s rip=%016llX lr=%08X r3=%08X\n", r.h,
+                r.nm.c_str(), static_cast<unsigned long long>(r.rip), r.lr,
+                r.r3);
+      }
+      fflush(pf);
+    }
+    // Pass 1: raw, lock-free. This always lands in the log.
+    for (auto& r : rows) {
+      XELOGI("ThreadProbe/raw: {:08X} {:26} rip={:016X} lr={:08X} r3={:08X}",
+             r.h, r.nm, r.rip, r.lr, r.r3);
+    }
+    XELOGI("ThreadProbe/raw: {} threads sampled; resolving (may block if the "
+           "code cache lock is held)",
+           rows.size());
+    // Pass 2: resolve to guest addresses. May never return under a deadlock.
+    auto* cc2 = pproc->backend()->code_cache();
+    for (auto& r : rows) {
+      auto* f2 = r.rip ? cc2->LookupFunction(r.rip) : nullptr;
+      uint32_t g2 = f2 ? f2->MapMachineCodeToGuestAddress(r.rip) : 0;
+      XELOGI("ThreadProbe: {:08X} {:26} guest {:08X} lr={:08X} r3={:08X}{}",
+             r.h, r.nm, g2, r.lr, r.r3,
+             f2 ? "" : "  (host: in a kernel call)");
+    }
+  }).detach();
+  XELOGI("ThreadProbe: armed for {}s", pdelay);
+}
+
 static void InstallGuideStoreTraces(xe::kernel::KernelState* ks) {
   static std::vector<std::unique_ptr<cpu::Breakpoint>> st_bps;
   if (!cvars::guide_trace_stores.empty() && st_bps.empty()) {
@@ -2971,6 +3001,14 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
       on_guide_button_pressed(0);
     }).detach();
     XELOGI("Guide button: auto-press armed for {}s", delay);
+  }
+  // Arm the thread probe here rather than only from the Guide button path.
+  // The button handler is gated on a handler that a freeze during hud load
+  // never publishes, so a probe armed there can never fire on the very hang
+  // it exists to diagnose.
+  if (cvars::guide_probe_threads_seconds > 0) {
+    ArmGuideThreadProbe(kernel_state_.get(),
+                        cvars::guide_probe_threads_seconds);
   }
   XELOGI("Loading module {}", module_path);
   auto module = kernel_state_->LoadUserModule(module_path);
