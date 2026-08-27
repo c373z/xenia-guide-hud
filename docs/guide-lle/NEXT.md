@@ -5068,3 +5068,43 @@ A second sample of the context is now taken at the point the XUI bootstrap is
 queued, which brackets the window: still-good there means the corruption
 happens inside the queued bootstrap on the title thread; already-bad means it
 happens between `XuiInit` and the queue, in the device-creation path.
+
+### Refuted: the XUI context is not corrupted. And a methodology mistake.
+
+`XuiCtxWatch` polled `[ctx+0x0C]` every 250us from the queue point to the end
+of the run and produced **no change line at all**. The slot holds `8178DBD8`
+throughout. So the previous section's conclusion - "something writes text over
+the live XUI context" - is wrong, and is withdrawn.
+
+The mistake underneath it is worth naming, because it is easy to repeat here:
+**I combined measurements taken in different runs.** The peek that gave
+`[r31+0x1C8] = 40877DC0` came from one run; the context dumps and the watcher
+came from others. The XUI context happens to land at `40877DC0` in every run,
+which made the numbers look like one coherent picture, but the object whose
+`+0x1C8` was peeked is heap-allocated and there is no guarantee it is the same
+object - or has the same contents - across runs. Two facts that are each true
+of a different run can contradict each other without either being wrong.
+
+What actually follows from the watcher result: at the moment of the fault,
+`[r31+0x1C8]` was **not** `40877DC0`, because `[40877DC0+0x0C]` was
+demonstrably `8178DBD8` for the whole run. So `r31` at the crash points at
+something else.
+
+Note also that `r31` in `81901E40` is simply the function's **first argument**
+(`or r31,r3,r3` in the prologue) - calling it "the dc" was an assumption
+carried over from the `[dc+0x1CC]` naming in this file, not something the code
+establishes. The function is:
+
+    81901E40(a, b, c, d):
+      r11 = [a+0x1C8] ; assert [r11+0x0C] != 0      <- twi, passes
+      r11 = [a+0x1C8] ; r11 = [r11+0x0C]
+      if (!r11) return 80004005
+      [a+0x1CC] ->r3 ; call r11(a_device, b, c, &local)
+
+Both dereferences are of `[a+0x1C8]`, and the assert at `81909078` passing
+means `[r11+0x0C]` was non-zero - consistent with the garbage value rather
+than with a null.
+
+**Correct procedure from here, and it is now running:** take the peek and the
+watch *in the same run*, so the two numbers describe the same objects. Any
+future claim about these structures should come from a single run's log.
