@@ -89,6 +89,8 @@ DECLARE_bool(lle_xam_sysapp_init);
 DECLARE_bool(lle_xam_xui_init);
 DECLARE_bool(lle_xam_heap0_alias);
 DECLARE_bool(lle_xam_heap_init);
+DECLARE_bool(guide_borrow_front_buffer);
+DECLARE_bool(guide_rebind_wrapper_device);
 DECLARE_bool(guide_trace_devsetup);
 DECLARE_bool(guide_force_front_buffer);
 DECLARE_bool(guide_reuse_xui_ctx);

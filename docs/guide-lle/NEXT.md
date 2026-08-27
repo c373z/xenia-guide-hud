@@ -6811,3 +6811,166 @@ wrapper, and the arguments - so the hook is the only missing piece.
 Recorded as the concrete next step rather than attempted here, because
 instrumenting a guest function entry is a different class of change from
 anything else in this session and deserves to start from a clean context.
+
+## The wrapper's SetDevice: 8191BAC8(wrapper, device, params)
+
+Two findings, both from reading rather than running.
+
+**1. It is never called after boot.** A run with `guide_trace_devsetup=true`
+captured `DevSetup #1: device=407CB880 arg2=709DF190 lr=819F4E90` but **zero**
+`SetDevice #` lines. The wrapper is bound around log line 5026, during early
+boot; the breakpoints install at the Guide press (~line 21000). The hook was
+installed far too late to see it. This is the same install-timing mistake as
+the device scan that was moved from `i == 30000` to `i == 4000` - worth
+remembering as a class: *a breakpoint proves nothing about calls that happen
+before it is installed.* To observe the boot-time binding the hook would have
+to be installed at xam load.
+
+**2. The third argument is a pointer, not a flag.** Disassembly of the tail:
+
+```
+81922d00  cmplwi cr6,r30,0     ; device
+81922d04  bneq +8
+81922d08  twi                  ; assert device != 0
+81922d0c  lwz r11,12(r31)      ; current [wrapper+0x0C]
+81922d10  cmplw r30,r11
+81922d14  beq  +0x18           ; no-op if unchanged
+81922d18  bl   819F4998        ; addref new device
+81922d24  bl   8191AD70        ; release old
+81922d28  stw  r30,12(r31)     ; [wrapper+0x0C] = device
+81922d2c  addi r3,r31,16       ; dest = wrapper+0x10
+81922d30  addi r5,r0,124       ; size = 124
+81922d34  or   r4,r28,r28      ; src = third argument
+81922d38  bl   memcpy
+```
+
+(ppcdis addresses; subtract 0x7200 for runtime - see the deprecation note.)
+
+So `r5` is a **readable 124-byte block** memcpy'd into `wrapper+0x10`, which is
+exactly the region the constructor clears. Passing `0` would memcpy from null.
+
+That matters because it is the *second time* this argument-guessing mistake
+would have been made: the earlier hand-call of `81A0FE48(real_dev, 0)` crashed
+because its second argument is a stack pointer, not 0. Reading the callee
+before calling it cost two disassembly commands and avoided a third crash.
+
+`guide_rebind_wrapper_device` therefore passes the wrapper's **own** `+0x10` as
+the source, making the memcpy a self-copy that leaves those fields untouched
+while still swapping the device pointer.
+
+### Correction: the front buffer belongs to the TITLE, not to either Guide device
+
+The rebind worked mechanically on the first try:
+
+```
+Guide: rebound wrapper 40877E00 from device 40870D00 to 407CB880 -> 00000000;
+       [wrapper+0C] now 407CB880 ([3F74]=00000000)
+```
+
+`[wrapper+0x0C]` changed, so `8191BAC8` accepts a hand-made call and the
+124-byte self-copy is safe. But the run refuted the premise the rebind was
+built on. Field `[3F74]` across the whole log:
+
+```
+7  [3F74]=00000000
+2  [3F74]=A240A380   <- line 22201/22219, device 40952400
+```
+
+Device `40952400` is `VdGlobalDevice [801E6FC4]` - **dash's own device**. It is
+the only one with a front buffer. Mode 1's device `407CB880` reads
+`[3F74]=00000000` at every sample including `GuidePreDraw`, because mode 1's
+init stalls and therefore never allocates one.
+
+So "mode 1 allocates a front buffer, mode 2 doesn't, join them" was wrong in
+its central claim. Both Guide-side devices are frontbuffer-less; the display
+belongs to the title. Rebinding to `407CB880` predictably crashed at
+`8191B07C` (`fault_addr 0`, `r3=407CB880`) - dereferencing a device that never
+finished initialising.
+
+This also fits how the Guide is supposed to work: it composites **over** the
+running title rather than owning a display. That makes the title device the
+natural target, and it removes the need for `guide_create_primary_device`
+entirely - along with the mode-1 init stall that has blocked this path for
+many ticks.
+
+`guide_rebind_wrapper_device` now prefers `VdGlobalDevice` when it has a
+non-null front buffer, falling back to the captured mode-1 device otherwise.
+
+**Not yet established:** that the title device *accepts* the Guide's draws.
+It is owned by dash, has its own render targets, and `[dc+0x134]=1` still
+gates the present. A clean rebind is necessary, not sufficient.
+
+### Third time lost to not reading kernel_flags.cc first
+
+Having retargeted the rebind at the title device, I dropped
+`--guide_create_primary_device` on the reasoning that mode 1's device was no
+longer needed. The run crashed at `818FB17C` (`lr=913EA9F0`, dash's own code)
+at log line 21696, before any `GuideScene`, `composite draw` or `DevSetup`.
+
+The flag's own description says exactly why, and I had not read it:
+
+> "Only matters with guide_create_primary_device: the mode-1 creator never
+> returns, so in the normal order the queue call is never reached and the
+> bootstrap never runs at all."
+
+`guide_bootstrap_before_device` **reorders the bootstrap ahead of the device
+creator**. With no creator being called, that ordering is meaningless and the
+bootstrap runs against a state that is not ready. The two flags are a pair;
+dropping one and keeping the other is not a valid configuration.
+
+The rule, now stated for the third time in this file: **grep
+`kernel_flags.cc` for a flag before adding, removing or reasoning about it.**
+The cvar descriptions in that file are a second findings document, and they
+have now pre-answered three questions that each cost a tick to rediscover
+(mode 1 vs 2; the mode-1 stall being expected; this flag pairing).
+
+Correct configuration for a title-device rebind: **neither** mode-1 flag.
+Mode 2 alone already produces scenes, visuals and composite draws, and the
+rebind target is read from `VdGlobalDevice` directly, so it has no dependency
+on the `DevSetup` capture at all.
+
+### Rebinding to the title device: front buffer reaches the draw path, then faults
+
+First configuration in the project where the draw path sees a real front
+buffer:
+
+```
+Guide: rebound wrapper 40877E00 from device 40870D00 to 40952400 -> 00000000;
+       [wrapper+0C] now 40952400 ([3F74]=A240A380)
+GuidePreDraw: device 40952400 RT0=00000000 RT1=00000000 depth=00000000
+              [3F74]=A240A380
+```
+
+`GuidePreDraw` had read `[3F74]=00000000` in every previous run. So the
+null-front-buffer blocker is genuinely cleared - and the next one is reached.
+
+Crash: guest PC `819E567C`, `fault_addr 0000000100010007`. The instruction is
+
+```
+819ec6b8  lwzx r28,r27,r30     ; r28 = [device + 0x3308]   (r27=0x3308)
+...
+819ec868  cmplwi cr6,r28,0     ; null-checked...
+819ec86c  beq   +0xe8
+819ec870  lwz   r11,11036(r30) ; [device+0x2B1C]
+819ec87c  stw   r11,8(r28)     ; ...but stored through regardless
+```
+
+with `r28 = 0000FFFF`, so `0xFFFF + 8 = 0x10007` - exactly the fault address.
+
+`[title_dev+0x3308]` is a **0000FFFF sentinel**. xam's draw code indexes a
+per-device table that only a xam-created device has populated. It null-checks
+the slot but does not validate it, so dash's sentinel sails through.
+
+Conclusion: **device identity matters, the front buffer does not travel with
+it.** The Guide's own device `40870D00` has xam's tables but no buffer; the
+title's `40952400` has the buffer but not the tables. Swapping the whole
+device trades one missing half for the other.
+
+`guide_borrow_front_buffer` therefore copies only `[+0x3F74]` from the title
+device into the Guide's own device, leaving device identity alone. That keeps
+xam's table state intact, which is what `0x3308` needs.
+
+**Caveat to check in the result:** a front buffer is a surface object, and the
+Guide device's `[32A0]/[32B0]` (size/format, both `00000000`) may also need to
+agree with it. Lending one field may simply move the fault rather than clear
+it.

@@ -16,6 +16,8 @@ namespace xe {
 namespace kernel {
 namespace xboxkrnl {
 
+void GuideSetMode1Device(uint32_t dev);
+
 void VdQueryVideoMode(X_VIDEO_MODE* video_mode, bool is_internal_resolution);
 
 // Runs a guest function on the title's own render thread from inside

@@ -729,6 +729,22 @@ DEFINE_bool(lle_xam_heap_init, false,
             "directly. xam's heap descriptors are never built under our "
             "bootstrap because nothing outside the module drives that call.",
             "Kernel");
+DEFINE_bool(guide_borrow_front_buffer, false,
+            "Copy the title device's front buffer pointer [+0x3F74] into the "
+            "Guide's own device, rather than repointing the wrapper at the "
+            "title device. The title device has the only real front buffer "
+            "(A240A380) but faults in 819E5350 because [dev+0x3308] is a "
+            "0000FFFF sentinel there; the Guide device has xam's tables but "
+            "no buffer. This lends just the missing field.",
+            "Kernel");
+
+DEFINE_bool(guide_rebind_wrapper_device, false,
+            "Call the wrapper's SetDevice (8191BAC8) once to point it at the "
+            "device mode 1 set up, captured by guide_trace_devsetup. Needs "
+            "that flag on. The third argument is a 124-byte block memcpy'd "
+            "into wrapper+0x10, so it must be readable - the wrapper's own "
+            "+0x10 is used, making it a self-copy.",
+            "Kernel");
 DEFINE_bool(guide_trace_devsetup, false,
             "Breakpoint 81A0FE48, the device setup mode 1 runs and mode 2 "
             "skips, and log its first argument - the device it is setting "

@@ -702,6 +702,10 @@ static uint32_t guide_bs_obj_ = 0;
 static bool guide_bs_use_title_device_ = false;
 static uint32_t guide_bs_skin_module_ = 0;
 static uint32_t guide_title_surface_ = 0;
+// Set from the 81A0FE48 breakpoint: the device mode 1 sets up, which is never
+// published to any global and cannot be found by signature scan.
+static std::atomic<uint32_t> guide_mode1_device_{0};
+void GuideSetMode1Device(uint32_t dev) { guide_mode1_device_.store(dev); }
 static uint32_t guide_bs_scene_ = 0;
 static std::atomic<bool> guide_bs_ready_{false};
 
@@ -3001,6 +3005,75 @@ void VdSwap_entry(
           // the object the present reads (819DE8F8 takes it as its first
           // argument via wrapper vtable slot 11). Bind on that instead.
           uint32_t real_dev = dev ? rdw(dev + 0x0Cu) : 0;
+          // Point the wrapper at the device mode 1 actually set up. The two
+          // are different objects: the wrapper is bound around log line 5026,
+          // mode 1 runs at 21509, and nothing re-binds it - so the front
+          // buffer mode 1 allocates never reaches the emitter.
+          //
+          // 8191BAC8(wrapper, device, params) asserts device != 0, no-ops if
+          // unchanged, addrefs the new device, releases the old, stores it at
+          // +0x0C, and finally memcpy's 124 bytes from `params` into
+          // wrapper+0x10. So the third argument must be a readable 124-byte
+          // block, NOT zero - passing 0 here would memcpy from null, the same
+          // class of mistake that made the earlier 81A0FE48(dev, 0) call
+          // crash. The wrapper's own +0x10 is such a block, making the copy a
+          // self-copy and leaving those fields untouched.
+          // Lend the Guide's OWN device the title's front buffer, instead of
+          // swapping the whole device. Rebinding to the title device does get
+          // a front buffer into the draw path - GuidePreDraw went from
+          // [3F74]=00000000 to A240A380 for the first time - but it then
+          // faults in 819E5350 at `stw r11,8(r28)` with r28 = 0000FFFF, read
+          // by `lwzx r28,r27,r30` from [title_dev+0x3308]. That slot is a
+          // sentinel on dash's device: xam's draw code indexes a per-device
+          // table that only a xam-created device has populated, null-checks
+          // it, and stores through it.
+          //
+          // So the device identity matters and the front buffer does not.
+          // The Guide's device 40870D00 has the tables xam set up but no
+          // front buffer; the title's has the buffer but not the tables.
+          // Copy across only the one field that is missing.
+          if (::cvars::guide_borrow_front_buffer && dev) {
+            static bool lent = false;
+            uint32_t tdev = rdw(0x801E6FC4u);
+            uint32_t fb = tdev ? rdw(tdev + 0x3F74u) : 0;
+            if (!lent && real_dev && fb && !rdw(real_dev + 0x3F74u)) {
+              lent = true;
+              xe::store_and_swap<uint32_t>(
+                  mem->TranslateVirtual(real_dev + 0x3F74u), fb);
+              XELOGI("Guide: lent front buffer {:08X} from title device {:08X} "
+                     "to guide device {:08X}; [3F74] now {:08X}",
+                     fb, tdev, real_dev, rdw(real_dev + 0x3F74u));
+            }
+          }
+          if (::cvars::guide_rebind_wrapper_device && dev) {
+            static bool rebound = false;
+            // Prefer the TITLE's device. Measured: mode 1's device 407CB880
+            // has [3F74]=0 for the whole run - it never finishes init, so it
+            // never gets a front buffer, which was the premise of this rebind
+            // and was wrong. The only device with a real front buffer is
+            // VdGlobalDevice = 40952400, [3F74]=A240A380: dash's own device,
+            // the one actually presenting. That also matches how the Guide is
+            // supposed to work - it composites OVER the running title rather
+            // than owning a display of its own.
+            uint32_t title_dev = rdw(0x801E6FC4u);
+            uint32_t target = (title_dev && rdw(title_dev + 0x3F74u))
+                                  ? title_dev
+                                  : guide_mode1_device_.load();
+            if (!rebound && target && target != real_dev) {
+              rebound = true;
+              auto* rth = XThread::GetCurrentThread();
+              uint64_t rargs[] = {dev, target, dev + 0x10u};
+              uint64_t rr = rth ? kernel_state()->processor()->Execute(
+                                      rth->thread_state(), 0x8191BAC8u, rargs,
+                                      xe::countof(rargs))
+                                : 0;
+              XELOGI("Guide: rebound wrapper {:08X} from device {:08X} to "
+                     "{:08X} -> {:08X}; [wrapper+0C] now {:08X} "
+                     "([3F74]={:08X})",
+                     dev, real_dev, target, static_cast<uint32_t>(rr),
+                     rdw(dev + 0x0Cu), rdw(rdw(dev + 0x0Cu) + 0x3F74u));
+            }
+          }
           if (::cvars::guide_force_front_buffer && real_dev) {
             static bool fb_done = false;
             if (!fb_done && !rdw(real_dev + 0x3F74u)) {

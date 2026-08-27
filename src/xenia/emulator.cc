@@ -1356,6 +1356,8 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                         auto* c = th->thread_state()->context();
                         static std::atomic<uint32_t> n{0};
                         if (++n > 8) return;
+                        xe::kernel::xboxkrnl::GuideSetMode1Device(
+                            static_cast<uint32_t>(c->r[3]));
                         XELOGI("DevSetup #{}: device={:08X} arg2={:08X} "
                                "lr={:08X}",
                                static_cast<uint32_t>(n),
