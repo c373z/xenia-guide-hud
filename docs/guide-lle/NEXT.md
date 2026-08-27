@@ -15,8 +15,8 @@ what is known about the remaining gap, and what is not.
 > - `GuideMain.xur`, `GuideMainServer.xur` and `MiniMediaPlayer.xur` all load
 >   (`XuiSceneCreate -> 00000000`). They failed with `E_FAIL` for the whole
 >   history of this project until the string table was supplied.
-> - The composite draw loop runs continuously, ~13-16 draws per run and still
->   going when the harness kills the process.
+> - The composite draw loop runs continuously to draw #2700+ (the log samples
+>   it, so ~13 lines means thousands of draws, not thirteen).
 > - `ObInsertObject` is implemented (it was an unimplemented export, which is
 >   what made xam's notification listener fail and hud give up).
 > - xam is loaded once, not twice. The double load corrupted its `.text` and
@@ -34,15 +34,45 @@ what is known about the remaining gap, and what is not.
 > | The XUI resource provider is null and never installed | `[81D6D0AC]` now holds `81D22A54` |
 > | No element anywhere has a visual | True, but only established later on a scene that actually renders; the early measurement was on unattached scenes |
 >
-> **The two open questions**
+> **Solved since that list was written**
 >
-> 1. **No control has a visual**, including on the scene under active
->    composite draw. Confirmed on real controls (`btnB` is a button) across
->    several scenes.
-> 2. **The present reads a different device** from the one the render-target
->    bind targets: `[dc+0x1CC]` versus the wrapper's device. Binding on the
->    present's device stops the draw loop and is disabled behind
->    `XENIA_PRESENT_RT`.
+> - **Controls have visuals.** `GetVisual` returns `S_OK` with real handles
+>   (`btnJoinLive`, `btnB`, scene nodes) where it returned `80300017` with null
+>   for the entire history of this project. The visual registry at `81D6CF50`
+>   goes from empty to **281 entries**.
+> - The cause was three things together: `huduiskin.xex` is a **resource-only
+>   XEX** that Xenia rejected outright; xam's **skin loader `81795548`** has no
+>   callers and never ran; and the bootstrap built a **second XUI context** over
+>   the live one, freeing it under the device context that still pointed at it.
+> - Flags for it: `--lle_xam_skin_init=true --guide_reuse_xui_ctx=true`. Both
+>   default off.
+>
+> **The one open question now**
+>
+> The Guide builds a correct scene tree with visuals attached and never reaches
+> the screen, because the device it draws through has **no front buffer**:
+> `[device+0x3F74]` is null and the draw emitter `819F5D18` faults reading it.
+> The device is reached as `[[81D6C978]+0x08]+0x0C` - context, then a 140-byte
+> **wrapper**, then the device. `[dc+0x1CC]` is the *wrapper*, not the device;
+> that naming caused several wrong readings.
+>
+> Two ways in, both tested and both blocked:
+>
+> - **mode 2** (default creator `8178F748`, passes `2`): scenes, visuals and
+>   composite draws all work, but `819F4D28` skips the front-buffer setup for
+>   mode 2 by design. Driving the skipped routine `81A0FE48` directly crashes
+>   inside it - it depends on device state mode 2 never establishes.
+> - **mode 1** (`--guide_create_primary_device`, creator `8178E9F0`, passes
+>   `1`): the front buffer **is** allocated, but device init then stalls in
+>   `InsertAsyncCommandBufferCall` waiting for async calls that never retire.
+>   Cause unknown. It is **not** the stubbed system command buffer - handing the
+>   guest a real one via `guide_syscmdbuf_buffer_kb` changes nothing and the
+>   guest writes zero words into it.
+>
+> **Required flags for any Guide run** - without these you are measuring
+> nothing: `--break_on_debugbreak=false` (supplied by `press.ps1` now) and
+> `--guide_auto_press_seconds=N`. `press.ps1` injects no input despite its
+> name; the Guide is opened by that cvar alone.
 >
 > **Diagnostic switches added this session** (all env vars, all off by
 > default, so the normal path is unaffected)
