@@ -2102,3 +2102,40 @@ handle for it, and return the handle. Once it exists, re-run the scene census
 - `GuideMain`, `GuideMainServer` and `MiniMediaPlayer` should stop returning
 E_FAIL, and the queued question of why no element gets a visual becomes the
 next thing worth measuring.
+
+### Implementing `ObInsertObject`: constraints and the precedent to follow
+
+Signature, from the call site in xam (`8176EB10`): `r3` = object pointer,
+`r4` = attributes (0), `r5` = desired access (0), `r6` = out handle pointer.
+So `NTSTATUS ObInsertObject(PVOID Object, POBJECT_ATTRIBUTES, ACCESS_MASK,
+PHANDLE)`.
+
+Why it cannot simply reuse `ObOpenObjectByPointer`: that resolves through
+`XObject::GetNativeObject`, which only understands objects carrying a
+dispatcher header it recognises (Event, Mutant, Semaphore). xam's notification
+listener is not one of those - the same lookup already logs
+"unsupported dispatcher type" for it - so it returns null.
+
+Nor can it use `XObject::SetNativePointer`, which is how objects normally
+record their handle: that calls `StashHandle` into the object's dispatch
+header and carries an explicit `FIXME: This assumes the object has a dispatch
+header (some don't!)`. Writing there would corrupt the listener.
+
+**There is already precedent for exactly this problem in the same file.**
+`xobject.cc` keeps a `GuestTimerTable()` - a guest-address to handle map -
+introduced because adopted guest timers "cannot be stashed in the object
+itself". `ObInsertObject` should do the same: keep a side table keyed on the
+guest object pointer, so repeated inserts return a stable handle and nothing
+is written into guest memory.
+
+Remaining design question: `ObjectTable::AddHandle` needs an `XObject*`, and
+the natural candidate for this caller is `XNotifyListener` (the factory's pool
+tag is `'Notf'`). Whether to construct a real listener - which would also make
+Xenia's own notification broadcast deliver into it, alongside guest xam's own
+handling - or an inert placeholder is a semantics choice worth making
+deliberately rather than by accident.
+
+Risk assessment: the export is currently an *undefined extern*, so it does
+nothing and returns garbage today. Nothing can depend on its present
+behaviour, and no title that never calls it can regress. That makes this a
+low-risk addition.
