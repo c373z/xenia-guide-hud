@@ -2853,3 +2853,36 @@ both checkable:
 Next: log the device pointer and index `guide_bind_title_rt` actually passes,
 and compare against the device the present reads. That distinguishes the two
 without further static reading.
+
+### The RT0 bind guard skips silently when the slot holds junk
+
+`guide_bind_title_rt`'s bind is guarded by
+
+```cpp
+if (rdev && surf && !r2(rdev + 0x32A0u)) { ... bind ... }
+else if (!rdev || !surf) { XELOGW("cannot bind title RT ..."); }
+```
+
+so it binds only when RT0 is **zero**. Under the bootstrap RT0 reads
+`00000060` - not a pointer, but not zero either - so the first branch is false
+while the second is also false, and the bind is skipped with **no log at
+all**. Confirmed in a full run:
+
+    SetRenderTarget logged: 0
+    bound title RT logged:  0
+    cannot bind logged:     0
+    Guide device 4088B7A0: [32A0]=00000060 [32B0]=00000000
+
+That silence is why this went unnoticed: every other failure mode in this code
+logs something.
+
+The guard now treats RT0 as bound only if it looks like a real surface -
+mapped, and readable across the first 0x28 bytes - and warns when it replaces
+junk. That is strictly better than testing non-zero, since the present
+dereferences whatever is there as a surface.
+
+**It did not change the outcome**, though: RT0 still reads `00000060` and
+neither the new warning nor the bind logs appear. So the enclosing
+`guide_bind_title_rt` block is not being reached at all, which is a separate
+problem from the guard. A one-shot log at the top of that block is in flight
+to establish whether it runs.

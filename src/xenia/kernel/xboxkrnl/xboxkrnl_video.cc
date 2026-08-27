@@ -2084,6 +2084,13 @@ void VdSwap_entry(
         // Must run BEFORE guide_fake_front_buffer, which clones RT0
         // into +3F74 and does nothing while RT0 is null.
         static bool rt_done = false;
+        {
+          static uint32_t seen_rt = 0;
+          if (seen_rt++ < 3) {
+            XELOGI("Guide: bind_title_rt block entered (rt_done={})",
+                   rt_done);
+          }
+        }
         if (!rt_done) {
           auto* rm = kernel_state()->memory();
           auto r2 = [rm](uint32_t a) {
@@ -2169,7 +2176,24 @@ void VdSwap_entry(
                      tdev, seen);
             }
           }
-          if (rdev && surf && !r2(rdev + 0x32A0u)) {
+          // RT0 counts as already bound only if it looks like a real
+          // surface. Testing "non-zero" alone silently skipped the bind
+          // whenever the slot held junk - it reads 00000060 under the
+          // bootstrap, which is not a pointer, and the present then
+          // dereferences it as one.
+          uint32_t cur_rt0 = r2(rdev + 0x32A0u);
+          bool rt0_plausible = false;
+          if (cur_rt0 >= 0x10000u) {
+            auto* rh = rm->LookupHeap(cur_rt0);
+            rt0_plausible =
+                rh && rh->QueryRangeAccess(cur_rt0, cur_rt0 + 0x27u) !=
+                          xe::memory::PageAccess::kNoAccess;
+          }
+          if (cur_rt0 && !rt0_plausible) {
+            XELOGW("Guide: RT0 holds {:08X}, not a surface - rebinding",
+                   cur_rt0);
+          }
+          if (rdev && surf && !rt0_plausible) {
             rt_done = true;
             // Writing [dev+0x32A0] by hand does not stick: 819F4C00
             // walks RT0..RT3 and calls SetRenderTarget(dev, i, NULL) for
