@@ -3855,3 +3855,62 @@ so making it emit prints **the name of the missing visual and the control it
 belongs to**, which is the one fact the visual investigation still lacks. Note
 also the tail - `trying class defaults` - which says the failing lookup is not
 fatal by design and there is a documented fallback path behind it.
+
+### Ground truth at last: a zero page is real code, and we can now prove it
+
+The corrected addressing (`file offset = VA - ImageBase`, above) makes a check
+possible that was not reliable before: comparing what the emulator sees at a
+guest address against what the firmware image actually contains there, with no
+skew to argue about.
+
+Run it on the address that kills the current boot and the answer is
+unambiguous. `ResolveFunction` dies on guest `81747A00`, and the scanner's own
+log says why:
+
+    PPCScanner: 81747A00 begins with 0x00000000; not a function
+      (module=xam heap=yes access=3) reread 00000000 00000000 00000000
+      window[-16..+28]: 00000000 x12
+
+On disk that same address is:
+
+    81747A00: 7D8802A6 9181FFF8 9421FFA0 7C641B78 2B030040 40990008 ...
+
+a textbook `mfspr r12,8` prologue. It has an exact `.pdata` record - begin
+`81747A00`, length `0x84` - and **two static callers** (`81747D84`,
+`817483E8`). Only 4 of the 128 words around it are zero on disk.
+
+So the zero pages are **corruption of real code**, not padding, not alignment
+filler, and not the guest calling a bogus pointer. Every one of the three
+benign explanations is now ruled out for this instance, with ground truth
+rather than inference.
+
+Two further notes that narrow it:
+
+* `81747A00` is nowhere near the range the earlier one-shot population scan
+  reported (`81D14000`-`81D5F000`, longest run 35 pages). Either the zero set
+  moves between runs - consistent with this file's "it is a race" conclusion -
+  or there is more than one region affected. The scan reports a *count*; it has
+  never reported *which* pages, which is why this was not visible before.
+* `heap=yes access=3` in the scanner log says the page is mapped and readable.
+  The memory is there; the contents are not. That rules out a mapping failure
+  and points at the copy/decompress step or at something overwriting it after.
+
+**The obvious next move, now cheap:** have the population scan diff xam's
+loaded `.text` against `work/xam17489.pe` instead of merely counting zero
+pages, and log the mismatching ranges. That turns "3.1% of pages are zero" into
+an exact list of what is wrong and whether it moves run to run - which decides
+the race question outright and probably names the loader step responsible.
+
+### Two flags this investigation needs on every run
+
+Recorded together because both cost a wasted run this session:
+
+* `--break_on_debugbreak=false` - without it the guest's own `tw`/`twi` assert
+  trap becomes a fatal modal dialog about one second into boot and nothing
+  gets anywhere. `press.ps1` now passes it by default (`-BreakOnDebugBreak`
+  opts back in); the saved config is still left alone deliberately.
+* Building before running - see the harness note above.
+
+With the first flag the boot no longer dies in `TrapDebugBreak`; it dies a
+little later in `ResolveFunction` on the zero page above, which is the real
+blocker and the thing worth fixing.

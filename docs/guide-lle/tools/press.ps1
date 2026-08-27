@@ -3,7 +3,8 @@ param([int]$After = 25,
       [string]$Extra = '',
       [int]$Boot = 20,
       [string]$Title = '',
-      [switch]$NoBuild)
+      [switch]$NoBuild,
+      [switch]$BreakOnDebugBreak)
 $dir = 'C:\Users\Xx_Bootyslayer_xX\Documents\Claude\XeniaGuide&Hud\xenia-canary\build\bin\Windows\Release'
 $exe = Join-Path $dir 'xenia_canary.exe'
 $dash = 'C:\Users\Xx_Bootyslayer_xX\Documents\Claude\XeniaGuide&Hud\dashroot\dash.xex'
@@ -73,6 +74,13 @@ $log = Join-Path $dir 'xenia.log'
 Remove-Item $log -ErrorAction SilentlyContinue
 
 $argl = @()
+# The guest's own tw/twi assert trap becomes a fatal modal dialog about a
+# second into boot unless this is off, and then nothing reaches the Guide at
+# all. Passed on the command line rather than saved to the config, because
+# editing the config has broken plain launches before.
+if (-not $BreakOnDebugBreak -and $Extra -notmatch 'break_on_debugbreak') {
+  $argl += '--break_on_debugbreak=false'
+}
 if ($Extra) { $argl += $Extra.Split(' ') }
 $argl += "`"$xex`""
 $p = Start-Process $exe -ArgumentList $argl -WorkingDirectory $dir -PassThru
