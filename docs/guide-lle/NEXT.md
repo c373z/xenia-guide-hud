@@ -4721,3 +4721,50 @@ but that is a limitation of the scan rather than evidence - `81795548` builds
 `r31` roughly a hundred instructions before using it, well outside the
 64-instruction window that scan allows. The per-function base-register scan is
 the one to trust here.
+
+### Measured: skin init is not yet a net win - it registers, then costs the scenes
+
+With the bounded wait, the bootstrap completes and gets further into the Guide
+than it ever has:
+
+    LLE xam: init thread still running after 15s ... continuing anyway
+    LLE xam: init complete
+    Guide button: pressed (user 0), handler=913E69C0 buf=301B9000 out_sz=301BA000
+    Guide button: dispatching open to 913E69C0
+    Guide button: handler returned 00000000
+    Guide button: obj=401587E0 vtable=913E1CB4
+    Guide button: XuiInit returned 00000001, ctx now 40877DC0
+    Guide button: xam CreateDevice returned 00000000, device now 407CB880
+    Guide button: queued XUI bootstrap for the title thread (hud 913E0000, obj 401587E0)
+
+A real handler instead of zeros, a live Guide object and vtable, `XuiInit` and
+the device creator both returning, and the XUI bootstrap queued.
+
+**And then nothing.** Zero `GuideScene` lines, zero `Guide composite draw`
+lines, zero `visual ->` lines in the entire 18,947-line run. The queued
+bootstrap never executes on the title thread, and the log ends in the familiar
+storm - `GetNativeObject: refusing unmapped dispatch header` and
+`KeWaitForMultipleObjects ... will not resolve` across eight or more dash
+threads, counters in the hundreds of millions.
+
+So, stated plainly: **enabling `lle_xam_skin_init` currently makes things
+worse, not better.** The baseline without it loads four scenes, walks the tree
+and runs the draw loop to #3000 - with null visuals. With it, the visual
+registry gets populated but the scenes never get created at all. That is a
+regression on the axis that matters, and the flag should stay off by default
+until the underlying crash is fixed rather than timed out.
+
+The likely mechanism is the same null. `[81D43C50+0x28]` is a
+callback/notification manager; xam's init dies partway through creating its
+notification plumbing, and the objects the title threads then wait on
+(`KeWaitForMultipleObjects ... at 81D424A8, dispatch type 9`) never become
+resolvable. Timing out the wait lets our bootstrap proceed but does not repair
+the guest state it left behind.
+
+**Next step is therefore the null itself, not another workaround**: find what
+creates the object at `[81D43C50+0x28]`. It is read identically by four
+functions and written by none, which puts it in the same category as the skin
+loader (`81795548`) and the heap creator (`817BBD70`) - routines with no
+callers inside xam that something outside the module is expected to drive. Two
+of those three have already been found and driven from the bootstrap; this is
+the third of the same kind.
