@@ -1114,6 +1114,14 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
           XELOGI("GuideScene: xam ordinal 28A (XamNotifyCreateListener) -> "
                  "{:08X}",
                  nfn);
+          // hud's string table is loaded by XuiLoadStringTableFromFile with a
+          // locator from XamBuildDynamicResourceLocator; when that load fails
+          // the table stays null and hud dereferences it. Report where those
+          // live so they can be read.
+          for (auto ord : {0x342u, 0x31Eu, 0x31Bu}) {
+            XELOGI("GuideScene: xam ordinal {:03X} -> {:08X}", ord,
+                   xmn ? xmn->GetProcAddressByOrdinal(ord) : 0);
+          }
           // The listener creation ends in ObCreateObject with the object type
           // descriptor at 81D22460, and ObCreateObject calls that
           // descriptor's allocate_proc. 81D22460 sits inside the

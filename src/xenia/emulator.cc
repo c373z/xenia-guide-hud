@@ -3914,18 +3914,36 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
               XELOGI("Guide: hud handle={:08X} hmodule_ptr={:08X}",
                      hud->handle(), hud->hmodule_ptr());
               if (cvars::guide_static_locator) {
-                // hud picks the locator builder at 913EB994:
-                //   cmpwi cr6,r3,-1 ; bneq -> dynamic (module = [obj+8])
-                // [obj+8] is 0, giving "section://@0,...". Nopping the
-                // branch forces the static builder, which takes its
-                // module from [obj+4]. Patching hud itself covers the
-                // xam-driven path too - setting [obj+8] only works when
-                // our own bootstrap runs.
-                const uint32_t kBAddr = 0x913EB994u;
+                // hud chooses between the static and dynamic locator builders
+                // in more than one place, and every one of them looks the
+                // same:
+                //   lwz r3,8(rX) ; cmpwi cr6,r3,-1 ; bneq -> dynamic
+                // [obj+8] is 0 rather than -1 under our bootstrap, so the
+                // dynamic branch is taken and the locator comes out as
+                // "section://@0,...". Nopping the branch forces the static
+                // builder, which takes its module from [obj+4].
+                //
+                // 913EB994 is the scene path. 913EC75C is the string-table
+                // path: it feeds XamBuildDynamicResourceLocator into
+                // XuiLoadStringTableFromFile, whose result is assigned to
+                // [obj+0x4E8] by a helper that ignores the return value - so
+                // a failed load leaves hud's string table null and hud later
+                // copies from a null string (crash at 913FA204).
+                //
+                // Patching hud itself covers the xam-driven path too; setting
+                // [obj+8] only works when our own bootstrap runs.
+                static const uint32_t kLocatorSites[] = {0x913EB994u,
+                                                         0x913EC75Cu};
                 const uint32_t kBOrig = 0x409A0020u;
-                auto* bw = memory()->TranslateVirtual<uint32_t*>(kBAddr);
-                uint32_t bcur = xe::load_and_swap<uint32_t>(bw);
-                if (bcur == kBOrig) {
+                for (uint32_t addr : kLocatorSites) {
+                  auto* bw = memory()->TranslateVirtual<uint32_t*>(addr);
+                  uint32_t bcur = xe::load_and_swap<uint32_t>(bw);
+                  if (bcur != kBOrig) {
+                    XELOGW("Guide: NOT patching hud {:08X}: found {:08X}, "
+                           "expected {:08X}",
+                           addr, bcur, kBOrig);
+                    continue;
+                  }
                   void* bp2 = reinterpret_cast<void*>(
                       reinterpret_cast<uintptr_t>(bw) & ~uintptr_t(0xFFF));
                   xe::memory::PageAccess bold =
@@ -3937,12 +3955,8 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                     xe::memory::Protect(bp2, 0x1000, bold, nullptr);
                     XELOGI("Guide: patched hud {:08X} {:08X} -> 60000000 "
                            "(force static resource locator)",
-                           kBAddr, bcur);
+                           addr, bcur);
                   }
-                } else {
-                  XELOGW("Guide: NOT patching hud {:08X}: found {:08X}, "
-                         "expected {:08X}",
-                         kBAddr, bcur, kBOrig);
                 }
               }
               if (!cvars::guide_skin_path.empty()) {

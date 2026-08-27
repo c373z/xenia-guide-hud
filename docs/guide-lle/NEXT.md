@@ -2264,3 +2264,41 @@ because a wrong base silently disassembles the wrong instructions.
 Next: confirm what locator the dynamic builder actually produces for this
 call, and whether forcing the static builder here too - or supplying the
 module it wants - makes `XuiLoadStringTableFromFile` succeed.
+
+### A second locator chooser exists - patching it did NOT fix the crash
+
+hud picks between the static and dynamic locator builders in more than one
+place, and they are textually identical:
+
+```
+913EC748  lwz   r3,8(r31)        ; [obj+8], the dynamic module
+913EC754  cmpwi cr6,r3,-1
+913EC75C  bc    4,26 -> dynamic  ; != -1 takes XamBuildDynamicResourceLocator
+          (fallthrough          -> XamBuildResourceLocator, module [obj+4])
+```
+
+`913EC75C` holds the same `409A0020` as the already-patched `913EB994`, and it
+is the chooser on the **string-table** path - the one feeding
+`XuiLoadStringTableFromFile`. `guide_static_locator` now nops both sites, and
+both report success:
+
+    Guide: patched hud 913EB994 409A0020 -> 60000000
+    Guide: patched hud 913EC75C 409A0020 -> 60000000
+
+**The crash is unchanged.** Same PC `913FA204`, same `lr=913E8D38`, same
+unwind. So forcing the static builder on this path is not sufficient - stated
+plainly because the patch is being kept (it addresses the same documented
+defect at a site that was simply missed) and a later reader should not assume
+it helped.
+
+Why it probably still fails: the static builder takes its module from
+`[obj+4]`, and the bootstrap only sets that on the object it creates itself -
+`GuideBootstrap: [guide+4] = skin module 301B3000`. The object in this path is
+whatever `r31` holds when hud loads its string table, which need not be that
+one.
+
+Next: identify the object `r31` points to here and whether its `+4` carries a
+module at all. `XuiLoadStringTableFromFile` (runtime `81937AF0`) fails early -
+its first call, the resource resolve at runtime `8196BEC0`, returns a negative
+status and it bails - so confirming what locator string reaches that call is
+what settles it.
