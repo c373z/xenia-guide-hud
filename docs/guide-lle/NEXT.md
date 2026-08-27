@@ -5371,3 +5371,32 @@ is the plainest statement of the problem in this whole log.
 
 Which is the same `[dc+0x1CC]`-versus-wrapper-device question from the top of
 the file, now reached from a third direction.
+
+### Correction: `dc=00000000` was a diagnostic reading the wrong field
+
+Last section called `GuideFrame ... dc=00000000` "the plainest statement of the
+problem". That was wrong. `GuideFrame` reads `[guide_obj + 12]`, i.e.
+`[obj+0x0C]` - not the device context the draw path uses. A single run shows
+three distinct values:
+
+    GuideBootstrap: XuiRenderCreateDC -> 00000000 dc=408BE3A0   (the DC we create)
+    Guide composite draw #1 ... draw dc=407D4C80 [11C]=00000000 [134]=00000001 [1CC]=40877E00
+    GuideFrame 0: dc=00000000                                    ([guide_obj+0x0C])
+
+So the DC our bootstrap creates (`408BE3A0`) is **not** the one the composite
+draw runs against (`407D4C80`), and `[guide_obj+0x0C]` is neither - it is
+simply not a DC field. There is no "null device" in the sense claimed; there
+are several device contexts and we have been reading a field that never held
+one.
+
+What is true, from that same run: the DC that actually draws has
+**`[134] = 1`** - null-render set - and `[1CC] = 40877E00`, which is the XUI
+context plus `0x40` rather than the device the bootstrap created
+(`407CB880`).
+
+That makes the next question precise and cheap: does
+`guide_patch_null_render` - which nops the copy at `818FDF14` - actually reach
+`407D4C80`, or is that DC constructed by a path the patch does not cover? If
+the patch leaves `[134] = 1` on the drawing DC, then the earlier "patching it
+exposes a null device" result was measuring a different DC's behaviour
+entirely, and the flag has still never been properly tested.
