@@ -6096,3 +6096,52 @@ So the combination worth testing is mode 1 *plus* the working visual path:
 The known cost is that mode 1 stops the title swapping, so dash's own rendering
 is expected to suffer. That is acceptable for a measurement - the question is
 whether the Guide draws, not whether the dashboard survives.
+
+### Mode 1 with visuals: the front buffer is allocated, but the bootstrap stalls
+
+First run of `guide_create_primary_device` together with the working visual
+path. Results, all from one run:
+
+    device creator used: 8178E9F0        (mode 1, as intended)
+    81A0FA80 ran: yes                    (the front-buffer allocator)
+    819E7310 ran: yes                    (the allocation itself)
+    "Couldn't allocate front buffer": 0  (so it succeeded)
+    crashes: 0
+    visual registry: 0x119 = 281 entries (still populated)
+
+**The front buffer is allocated for the first time.** That is the field the
+draw emitter faults on, and mode 1 fills it exactly as the disassembly said it
+would.
+
+**But the Guide bootstrap does not get far enough to use it:**
+
+    Guide button: pressed ... handler=913E69C0
+    Guide button: handler returned 00000000
+    Guide button: XuiInit returned 00000001, ctx now 40877DC0
+    (nothing further)
+
+No `xam CreateDevice returned`, no `queued XUI bootstrap`, no `GuideScene`
+lines, zero composite draws, and the emitter never runs. The Guide thread's
+last activity is JIT-ing `819F3FC8`, inside the device-creation path - it is
+stuck there rather than crashing.
+
+So the two configurations each hold half of what is needed:
+
+| | mode 2 (default) | mode 1 |
+|---|---|---|
+| scenes created | yes | **no** |
+| visuals attached | yes (`S_OK` + handles) | n/a |
+| composite draws | yes, to #2700 | **none** |
+| front buffer | **null** | **allocated** |
+| emitter | faults on the null | never reached |
+
+Neither renders. The honest reading is that mode 1 sets up the device the way
+the draw path expects but breaks whatever the Guide bootstrap relies on
+afterwards - consistent with the older note that mode 1 reaches
+`VdInitializeRingBuffer` and disturbs the title.
+
+**Next question, and it is a narrow one:** what does the bootstrap do between
+`XuiInit` and `CreateDevice` that never returns under mode 1. That is a stall
+inside a known call, on a known thread, with a known last-JIT address - which
+is a far more tractable thing to chase than any of the five "nobody drives it"
+gaps that came before.
