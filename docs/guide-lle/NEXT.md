@@ -2818,3 +2818,38 @@ So the honest state is: the present path can now be driven end to end without
 faulting, on invalid surface state, once. Getting real output needs
 `[dev+0x32A0]` to hold an actual surface, and finding what writes it - since
 nothing in xam stores to it directly - is the open question.
+
+### `[dev+0x32A0]` is an array slot, and the bind routine does write it
+
+The earlier "no direct store anywhere" result was an artefact of scanning only
+literal-offset `stw`. The field is reached as an **indexed array**:
+
+    addi  r11,rIdx,3240      ; 3240 * 4 = 0x32A0
+    rlwinm r11,r11,2,0,29
+    lwzx  r30,r11,r31        ; [dev + (idx + 3240)*4]
+
+Searching for that index pattern finds 7 sites, all `lwzx` reads - hence "no
+stores". But scanning the bind routine `819F31A8` for **indexed** stores finds
+four, and the first is the one that matters:
+
+    819F331C   stwx r22,r27,r31      ; r27 = (r23 + 3240) * 4
+
+with `819F331C` sitting just past the read at `819F32A8` that releases the
+previous surface in the same slot. So `819F31A8(dev, index, surface)` is
+exactly the routine that populates `[dev + 0x32A0 + index*4]`, and
+`guide_bind_title_rt` already calls it with index 0.
+
+**So why does the present still see `[32A0] = 00000060`?** Two candidates,
+both checkable:
+
+- **Wrong device.** The present reads device `4088B7A0`. Under
+  `guide_create_primary_device` two xam devices exist - which is why
+  `guide_use_bound_device` exists at all - so the bind may be populating the
+  other one.
+- **Wrong index.** The store uses `r23`, not a literal 0; if the index the
+  routine ends up with is not 0 the surface lands in a different slot, and
+  `0x60` is what slot 0 happens to hold.
+
+Next: log the device pointer and index `guide_bind_title_rt` actually passes,
+and compare against the device the present reads. That distinguishes the two
+without further static reading.
