@@ -1839,6 +1839,40 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                            xc, cw);
                   }
                 }
+                // The context is well-formed here and text by the time the
+                // device context calls through [ctx+0x0C], so the overwrite
+                // happens inside the queued bootstrap. Poll the slot from a
+                // host thread and log the transition: that pins the moment
+                // against the surrounding log lines without perturbing the
+                // guest, the same trick XamTextWatch uses. Reads the context
+                // pointer fresh each time so a moved context is not missed.
+                if (std::getenv("XENIA_XUICTX_WATCH")) {
+                  auto* wmem = ks->memory();
+                  std::thread([wmem]() {
+                    xe::threading::set_name("XuiCtxWatch");
+                    uint32_t last = 0;
+                    bool primed = false;
+                    for (int i = 0; i < 240000; ++i) {
+                      uint32_t c = xe::load_and_swap<uint32_t>(
+                          wmem->TranslateVirtual(0x81D6C978u));
+                      if (c) {
+                        uint32_t v = xe::load_and_swap<uint32_t>(
+                            wmem->TranslateVirtual(c + 0x0C));
+                        if (primed && v != last) {
+                          XELOGE(
+                              "XuiCtxWatch: [{:08X}+0C] changed {:08X} -> "
+                              "{:08X}",
+                              c, last, v);
+                        }
+                        last = v;
+                        primed = true;
+                      }
+                      std::this_thread::sleep_for(
+                          std::chrono::microseconds(250));
+                    }
+                  }).detach();
+                  XELOGI("XuiCtxWatch: polling [xui_ctx+0C]");
+                }
                 XELOGI("Guide button: queued XUI bootstrap for the title "
                        "thread (hud {:08X}, obj {:08X})",
                        hud_base, obj);
