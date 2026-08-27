@@ -2187,3 +2187,42 @@ hud is being called back during scene construction and dereferences null.
 `913FA204` is hud RVA `0x1B004` (base `913DF200`), file VA `9801B004`.
 
 This is the expected shape of clearing one blocker and meeting the next.
+
+### Next blocker: `XuiLookupStringTableByIndex` returns null, hud copies it anyway
+
+The crash after the `ObInsertObject` fix is at hud `913FA204`:
+
+```
+913FA200  (loop entry)
+913FA204  lhz  r10,0(r4)      <<< faults, r4 = 0
+913FA210  addi r4,r4,2
+913FA214  bc   -> loop
+```
+
+That is a UTF-16 string copy called with a null source. The caller
+(`lr=913E8D38`) is:
+
+```
+913E8D20  addi r4,r0,40        ; string index 40
+913E8D24  lwz  r3,1256(r29)    ; the string table object
+913E8D28  bl   -> 913FE134     ; XuiLookupStringTableByIndex (ordinal 0x397)
+913E8D2C  or   r4,r3,r3        ; result used as the source...
+913E8D30  addi r3,r1,80        ; ...into a local buffer
+913E8D34  bl   -> 913FA200     ; wide strcpy - no null check
+```
+
+so hud asks for string 40, gets null, and copies from it without checking.
+
+The import is **bound to real xam**, not left as a stub: there is no
+"undefined extern call to 913FE134" in the log. The `!!` beside it in the
+import dump only means *Xenia* has no HLE implementation, which is irrelevant
+while LLE xam provides one. So real xam genuinely found no string at index 40.
+
+That points at hud's string table not being populated for this scene -
+`Strings.xus` is in the package and 23 scenes load through the
+`section://<module>,hud#strings.xus` locator, so the resource resolves; what
+is missing is whatever binds a string table to the object at `[r29+0x4E8]`.
+
+Note this is a real hud bug that hardware never hits, because on a console the
+lookup always succeeds. It cannot be worked around by making the lookup return
+an empty string without understanding what hud does with it next.
