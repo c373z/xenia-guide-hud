@@ -4616,3 +4616,72 @@ specific to the Guide.
 Two Xenia defects from one file, both of the same shape: code that is correct
 for an executable and wrong for a resource container, with no guard for the
 container case.
+
+---
+
+## MILESTONE: the skin loads and `XuiVisualRegister` runs
+
+With `is_resource_only()` accepted in `ReadImage`, `ReadPEHeaders` skipped for
+such modules, and `CalculateHash` guarded against code-less images:
+
+    LLE xam: calling skin loader 81795548
+    HostPathDevice::ResolvePath(\huduiskin.xex)
+    Module \Device\Harddisk0\Partition1\huduiskin.xex:
+      XEX_HEADER_BOUNDING_PATH: \Device\Flash\huduiskin.xex
+    XexGetModuleSection: module='huduiskin' section='skin' -> 00000000 size=75851
+    DemandFunction: enter 8193D238                        <-- XuiVisualRegister
+    XexGetModuleSection: module='huduiskin' section='xam' -> 00000000 size=152215
+
+Every part of that is a first for this project:
+
+* `huduiskin.xex` **loads** - a resource-only XEX that Xenia previously
+  rejected outright;
+* both of its resources resolve with `X_STATUS_SUCCESS` at exactly the sizes
+  the resource table declares (`0x1284B` = 75851, `0x25297` = 152215);
+* **`XuiVisualRegister` (`8193D238`) executes**, having never run once in the
+  entire history of this investigation.
+
+The path then continues into the shared resources it needs -
+`XexGetModuleSection: module='xam' section='xam' -> 00000000 size=65728` and
+`section='shrdres' -> 00000000 size=237951` - so the skin is being consumed,
+not merely opened.
+
+### What still fails, and what it is not
+
+The `LLE xam init` thread then dies:
+
+    GUEST CRASH: access violation at guest PC 8177B2F0 fault_addr ...00000030
+    r3=0  unwind (back chain): 81795940
+
+The crash site is `stw r5,48(r29)` with `r29 = r3 = 0` - the callee is handed a
+**null object** and has no null check on it (it asserts on `r5` only). The
+caller loads that pointer from `[r31+0x28]`, and `r31` throughout `81795548`
+is the skin context global at `81D43C50`. So a field of the skin context was
+never initialised.
+
+**This is not a regression from the fix.** The identical crash - same guest PC
+`8177B2F0`, same `fault_addr ...30`, same `81795940` in the unwind - occurs in
+the run *before* the loader change, when the skin failed to load entirely. So
+whatever leaves `[81D43C50+0x28]` null happens on both paths and is a separate
+missing initialisation, not a consequence of the skin now succeeding.
+
+Two candidates sit immediately before it in the log and are worth checking
+first, both pre-existing gaps rather than anything new:
+
+    ResolvePath(media:) failed - device not found
+    undefined extern call to 81D1027C DrvSetSysReqCallback
+
+`DrvSetSysReqCallback` is declared in `xboxkrnl_table.inc` as a `kFunction`
+with no implementation. The run has eight other undefined externs of the same
+kind (`NicGetLinkState`, `DumpGetRawDumpInfo`, `HalRegisterHdDvdRomNotification`
+and friends), so this class of gap is not unusual here - but this one fires on
+the skin path immediately before the null is used.
+
+### Where this leaves the render question
+
+The registry is no longer empty *by construction* - the function that fills it
+now runs. Whether it actually registered the visuals the scenes ask for
+(`graphic_metapane`, `legend_A`, `btn_oneline-icon`, ...) is **not yet known**,
+because the init thread dies before the Guide is opened at 30s, so no scene
+walk and no `GetVisual` results were produced in this run. That is the next
+measurement, and it needs the crash above cleared first.
