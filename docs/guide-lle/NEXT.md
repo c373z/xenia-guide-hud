@@ -6011,3 +6011,48 @@ whatever normally runs the mode-not-2 path presumably sets up more than this
 one field. The question is which of `8178E9F0` / `8191B9E8` runs on hardware
 and what drives it - the same shape as the four earlier gaps, and the same
 reason to identify it rather than fake it.
+
+### Mode 1 allocates, mode 2 does not - and both mode-1 callers are roots
+
+`819F4D28` has three call sites, and the mode each passes settles the picture:
+
+| caller | mode | runs? |
+|---|---|---|
+| `8178E9F0` @`8178EB64` | `addi r4,r0,1` | never |
+| `8191B9E8` @`8191BAA0` | `addi r4,r0,1` | never |
+| `8178F748` @`8178F7D0` | `addi r4,r0,2` | **RAN** (our bootstrap's device creator) |
+
+So **mode 1 is the front-buffer path** and mode 2 is the one that skips it. The
+only call site that executes under this bootstrap is the one that skips.
+
+Tracing the two mode-1 callers upward ends immediately: **both are roots with
+no callers anywhere in xam.**
+
+* `8178E9F0` - a root, `0x4DC` bytes, no strings.
+* `8191B9E8` - called only by `818FF140`, which is itself a root. `818FF140`
+  is also one of the three writers of the XUI context global `81D6C978`, so it
+  looks like the real context-and-device creation path.
+
+That is the fifth instance of this investigation's recurring shape - a real
+routine with no callers inside xam that something outside the module drives -
+after the skin loader, the heap creator, wrapper slot 21 and the wrapper's
+draw path.
+
+**But this one is harder than the others, and the difference matters.**
+`81795548` (the skin loader) took **no arguments**, which is why driving it was
+safe and worked. `818FF140` takes **two** (`r3`, `r4`) and immediately builds a
+36-byte descriptor on the stack. Driving it means reconstructing those
+arguments correctly, and getting them wrong would hand xam a malformed
+descriptor rather than simply doing nothing. The same caution applies to
+`8178E9F0`.
+
+So the state at the end of this line of work:
+
+* the complete path from "no pixels" to a single cause is measured, with no
+  inferred links;
+* the cause is that our device is created in mode 2, which by design has no
+  front buffer;
+* the routines that would create one in mode 1 are two roots that nothing in
+  xam calls;
+* driving either requires argument reconstruction, which is the first step that
+  cannot be done by reading alone.
