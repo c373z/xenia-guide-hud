@@ -84,12 +84,20 @@ what is known about the remaining gap, and what is not.
 > | `XENIA_EFAIL_TAG_HUD="lo-hi"` | same, applied to hud after its DllMain |
 > | `XENIA_TAG26=1` | same trick for the eight sites building `80300026` |
 > | `XENIA_XAM_TRACE=1` | set xam's per-thread trace gate `[r13+0x2B4]`. Necessary but **not** sufficient - no XUI output yet |
-> | `XENIA_PRESENT_RT=1` | bind RT0 on the present's device. **Harmful** - stops the draw loop; kept only because the device mismatch it addresses is real |
+> | `XENIA_PRESENT_RT=1` | bind RT0 on the present's device. Was **harmful** because it aimed at `[dc+0x1CC]`, the 140-byte wrapper, so `+0x32A0` landed 12KB out of bounds and the "junk `0x60`" it released was unrelated memory. Now retargeted to `[wrapper+0x0C]` |
+> | `XENIA_CRASH_PEEK_DEREF="31,1C8,8"` | follow the pointer at `r<reg>+<off>` and dump what it points at. Distinguishes "the field holds the wrong address" from "the address is right and its contents are wrong" - a distinction that produced one withdrawn conclusion when reasoned about instead of measured |
+> | `XENIA_XUICTX_WATCH=1` | poll the XUI context pointer and `[ctx+0x0C]`, logging changes **and** the pointer going null. The first version skipped null iterations, so a freed context looked like silence - which hid a use-after-free for a full round of analysis |
 >
-> The reusable tools are `tools/press.ps1` (run harness; detects the modal
-> crash dialog), `tools/sym.ps1` (symbolize an exe RVA via the PDB, no
-> debugger needed) and `tools/xuiz_extract.py` (unpack a XUIZ resource
-> container).
+> The reusable tools are `tools/press.ps1` (run harness; **builds first**, and
+> detects the modal crash dialog), `tools/sym.ps1` (symbolize an exe RVA via
+> the PDB, no debugger needed), `tools/xuiz_extract.py` (unpack a XUIZ
+> resource container) and `tools/pe360.py` (correct addressing for the
+> firmware PEs, `.pdata` function bounds, xrefs that assume neither
+> adjacency nor matching registers). `ppcdis.py` is **deprecated** - it
+> trusts `PointerToRawData` and prints every `.text` address 0x7200 high.
+>
+> New cvars this session, all default off: `lle_xam_skin_init`,
+> `guide_reuse_xui_ctx`, `guide_force_front_buffer`.
 >
 > **Method note that keeps paying off:** on this problem, plausible causal
 > stories have been wrong far more often than right - module-0 locators, patch
