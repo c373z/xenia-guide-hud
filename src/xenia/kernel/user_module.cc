@@ -1160,6 +1160,17 @@ void UserModule::CalculateHash() {
     return UINT32_MAX;
   };
 
+  // A module with no code sections at all - a resource-only XEX such as the
+  // dashboard's huduiskin.xex - makes find_code_section_page return
+  // UINT32_MAX, and multiplying that by the page size wraps: start_address
+  // lands one page *below* the image and the hash then reads unmapped memory.
+  // There is nothing to hash in that case anyway.
+  if (find_code_section_page(true) == UINT32_MAX) {
+    XELOGD("CalculateHash: {:08X} has no code sections; nothing to hash",
+           xex_module()->base_address());
+    return;
+  }
+
   const uint32_t start_address =
       xex_module()->base_address() + (find_code_section_page(true) * page_size);
   const uint32_t end_address =

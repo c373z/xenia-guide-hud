@@ -4585,3 +4585,34 @@ already known, `UserModule::GetSection` already serves sections straight out of
 This is a general Xenia gap rather than anything Guide-specific: any
 resource-only XEX hits it. If it holds up it belongs in the upstream patch set
 alongside the module-dedupe fix.
+
+### Second gap found by the same file: `CalculateHash` on a module with no code
+
+With `ReadImage` and `LoadContinue` fixed, the load got further and then took a
+host fault:
+
+    HOST FAULT: pc=...+25C63A fault_addr=190F8F000
+    frames: ... exe+25C63A exe+261AD2 exe+25E50F ...
+
+Symbolised: `XXH3_64bits_update` <- `UserModule::CalculateHash` <-
+`UserModule::Dump`. The arithmetic is worth writing down because the fault
+address names the bug exactly.
+
+`CalculateHash` locates the first and last **`XEX_SECTION_CODE`** page via a
+lambda that returns `UINT32_MAX` when it finds none, then does:
+
+    start_address = base_address + (find_code_section_page(true) * page_size)
+
+A resource-only XEX has **no code sections at all**, so that is
+`base + (UINT32_MAX * 0x1000)`, which wraps to `base - 0x1000`. With
+`base = 90F90000` that is `90F8F000` - precisely the `fault_addr` above, one
+page below the image, unmapped. The hash then walks from there and dies.
+
+Guarded: if there is no code section, log and return. There is nothing to hash
+in a module that contains no code. Like the `ReadImage` change this is a
+general robustness fix - any code-less module reaches it - not something
+specific to the Guide.
+
+Two Xenia defects from one file, both of the same shape: code that is correct
+for an executable and wrong for a resource container, with no guard for the
+container case.
