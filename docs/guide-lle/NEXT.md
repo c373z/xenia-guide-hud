@@ -4910,3 +4910,58 @@ the real object; it is gated behind `lle_xam_skin_init` with the rest.
 If that lets init finish, this would be the first run in which the scenes are
 created *and* the visual registry is populated at the same time - which is the
 configuration the whole visual investigation has been trying to reach.
+
+### The stand-in works: skin loader returns, init completes, 281 visuals live
+
+    LLE xam: skin callback manager stand-in at 30058000
+    LLE xam: skin loader returned 00000000        <- returns S_OK, does not fault
+    LLE xam: init complete                        <- no 15s timeout; init finished normally
+    LLE xam: visual registry @81D6CF50: 4089FD40 4089E740 00000119 00000119 ...
+
+Three firsts together: `81795548` **completes and returns success**, xam's init
+thread **finishes on its own** rather than being abandoned after a timeout, and
+the visual registry is populated at the same time. The bounded wait is no
+longer doing any work in this configuration - it simply is not needed.
+
+Downstream of that, the Guide bootstrap now runs to the end of its sequence:
+
+    Guide button: handler returned 00000000
+    Guide button: obj=401587E0 vtable=913E1CB4
+    Guide button: XuiInit returned 00000001, ctx now 40877DC0
+    Guide button: xam CreateDevice returned 00000000, device now 407CB880
+    Guide button: queued XUI bootstrap for the title thread
+
+### The failure has moved into XUI itself
+
+One crash, at log line 21,835 of 23,810, on a **dash** thread rather than ours:
+
+    GUEST CRASH: access violation at guest PC 81901EAC fault_addr 006E0065
+    unwind: 818FA4B0 81902630 8195BB20 8195C094 81966A40 81940390 8194A070
+            8194A374 8194A4BC 8194A898 8193C1E0 913EBA0C
+
+`913EBA0C` is inside hud, and everything below it is xam's XUI. So hud is
+driving XUI for real, deep into the visual machinery, which is only possible
+now that the registry has entries.
+
+The instruction is an **indirect call**:
+
+    819090A0  lwz   r3,460(r31)     ; [dc+0x1CC] - the device-context field
+    819090A4  mtspr 9,r11           ; CTR = r11
+    819090AC  bctr                  ; <- faults
+
+`r11` is `006E0065`, which is not a pointer at all - it is two UTF-16 code
+units, `'e'` and `'n'`. Something is reading a function pointer out of text
+data, or a slot that should hold a vtable holds a string. `[dc+0x1CC]` is the
+same device-context field this file already tracks in the present path.
+
+**Do not read this as the stand-in causing it.** The stand-in is written once,
+at `81D43C78`, and the only code that touches it stores a callback at `+0x30`
+and `+0x34`; `30058000` bears no relation to `006E0065`. The more likely
+reading is simply that XUI now gets far enough to instantiate visuals and hits
+a separate defect - but that is a hypothesis, and this file has a poor record
+with confident causal stories in this area, so it is written down as one.
+
+Still **no pixels**: zero `GuideScene` lines and zero composite draws in this
+run. The scene walk our bootstrap performs did not run; hud's own path did, and
+crashed first. What changed is the shape of the problem - from "controls have
+no visuals" to "XUI dispatches through a bad pointer while building them".
