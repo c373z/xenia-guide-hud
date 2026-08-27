@@ -2704,3 +2704,47 @@ described a state that no longer exists, which fits scenes loading.
    new.
 
 Neither alone explains a blank screen; both have to be cleared.
+
+## CORRECTION: the DC present gates were documented backwards
+
+The note reproduced through several sections above says `XuiRenderPresent`'s
+tail call bails when `[dc+11C] == 0`. Reading the function (runtime
+`818F9290`, file `81900490`) shows the opposite:
+
+```
+819004b0  lwz   r11,284(r31)      ; [dc+0x11C]
+819004b4  cmpwi cr6,r11,0
+819004b8  bc    12,26 -> 819004cc ; BO=12 BI=26: branch when cr6.EQ, i.e.
+                                  ; r11 == 0  ->  CONTINUE
+819004bc  (nop hint)
+819004c0  lis   r3,0x8000
+819004c4  ori   r3,r3,0xffff      ; r11 != 0  ->  return 8000FFFF
+819004c8  b     -> 81900524
+
+819004cc  lwz   r11,460(r31)      ; [dc+0x1CC]
+819004d4  bc    4,26 -> 819004dc  ; must be NON-zero, else the twi assert
+819004dc  lwz   r11,308(r31)      ; [dc+0x134]
+819004e4  bc    4,26 -> 8190051c  ; non-zero skips the present
+819004e8  lwz   r3,460(r31)       ; zero reaches the real present
+```
+
+So the gates are:
+
+| field | required | observed with `guide_patch_null_render` |
+|---|---|---|
+| `[dc+11C]` | **zero** | `00000000` ok |
+| `[dc+1CC]` | non-zero | `4088B7A0` ok |
+| `[dc+134]` | **zero** | `00000000` ok |
+
+**All three are already satisfied.** `[11C]` being zero was never a problem -
+it was the required state, misread as the failure. Several sections above
+treat clearing it as outstanding work; they are wrong.
+
+What is actually left on this path is different: with the patch applied the
+run produces **one** composite draw instead of the 600+ seen without it. So
+the present is reachable and something stops the loop after a frame - which
+matches CONFIG.md's warning that this configuration "stops the dashboard after
+one frame", written when the cause was unknown.
+
+Next: find why drawing stops after the first frame with the null-render patch
+applied, rather than treating the gates as the obstacle.
