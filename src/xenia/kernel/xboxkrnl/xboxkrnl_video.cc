@@ -1092,6 +1092,21 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
           reg2 += fmt::format("{:08X} ", rd(0x81D6D0D8u + w * 4));
         }
         XELOGI("GuideScene: table @81D6D0D8: {}", reg2);
+        // The lookup at runtime 8194A4E0 - whose null result is what makes
+        // XuiSceneCreate return E_FAIL - bounds-checks a class index against
+        // the word at [81D6D0D8 + 0x420] = 81D6D4F8 and then indexes a table
+        // from the same base. Log the count and the entries either side of
+        // it, since a class index at or past the count is exactly the
+        // "registered classes" failure this would produce.
+        uint32_t cls_count = rd(0x81D6D4F8u);
+        std::string tail;
+        for (uint32_t w = 0; w < 12; ++w) {
+          tail += fmt::format("{:08X}:{:08X} ", 0x81D6D4E0u + w * 4,
+                              rd(0x81D6D4E0u + w * 4));
+        }
+        XELOGI("GuideScene: class index bound [81D6D4F8] = {} ({:08X}); "
+               "neighbourhood {}",
+               cls_count, cls_count, tail);
         // XuiInit's normal (null-params) path consults [81D6D0A4], which
         // sits next to the resource provider at [81D6D0AC]. Read the
         // whole neighbourhood after the scene has loaded - this is the

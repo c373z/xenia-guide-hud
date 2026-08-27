@@ -1887,3 +1887,32 @@ then look something up with it - suggests a resource lookup returning null.
 Next: decode `8194A4E0` and what it puts at `+8` of that local. That is a
 lookup that succeeds for 23 scenes and fails for exactly three, so whatever it
 consults is the discriminator the file contents never revealed.
+
+### `8194A4E0` is a handle table lookup, and old registry counts are invalid
+
+Reading the bound the lookup checks:
+
+    GuideScene: class index bound [81D6D4F8] = 1024 (00000400)
+
+1024 is a **handle table capacity**, not a count of registered classes. So
+`8194A4E0` is the generic handle-to-object resolve (scene handles look like
+`00010116`, whose low 16 bits index well inside 1024), and the earlier reading
+of that code as "class index versus registered class count" was wrong. E_FAIL
+therefore means the object behind the handle does not exist - the failure is
+**upstream** of this lookup, not in it.
+
+**More important, and a caution about everything measured before the
+double-load fix:** the XUI registry now reports
+
+    GuideScene: XUI registry (38 non-null of 48)
+
+against **27** in the earlier survey. Same code, same dump, different number -
+because that survey ran while xam was being loaded twice over itself. Any
+conclusion drawn from guest state before commit `32508a6` is suspect and
+should be re-measured before being relied on, including the "class
+registration is healthy, 27 registered, all registrars report already
+registered" result that was used to close off that line of enquiry.
+
+Next: the second E_FAIL site (`8193B454`) and, more usefully, the code that
+was supposed to *create* the object whose handle fails to resolve - that is
+where the three failing scenes must diverge from the 23 that work.
