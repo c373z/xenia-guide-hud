@@ -2748,3 +2748,41 @@ one frame", written when the cause was unknown.
 
 Next: find why drawing stops after the first frame with the null-render patch
 applied, rather than treating the gates as the obstacle.
+
+### The patched configuration reaches new code and faults there
+
+`guide_patch_null_render` does not "stop drawing" - the bootstrap completes
+normally:
+
+    GuideBootstrap: render host -> 00000000, XUI ctx 4088A0A0, provider 81D22A54
+    GuideBootstrap: scene creator 913EB940 -> 00000000, scene=00010000
+    GuideBootstrap: DC present gates: [11C]=00000000 [134]=00000000 [1CC]=4088A0E0
+    GuideBootstrap: draw hook installed on title thread
+    GUEST CRASH: access violation at guest PC 819DE94C, fault_addr 0000000100000024
+
+The draw count is zero because the *first* draw now reaches the real present -
+which the unpatched build never did - and faults immediately. Reaching that
+code at all is new.
+
+The fault site (runtime `819DE94C`, file `819E5B4C`):
+
+```
+819e5b38  lwz   r8,12960(r31)    ; [dev+0x32A0]
+819e5b40  cmplwi r8,0
+819e5b44  bc    -> 819e5b4c      ; non-zero: use r8
+819e5b48  lwz   r11,12976(r31)   ; else fall back to [dev+0x32B0]
+819e5b4c  lwz   r9,36(r11)       ; [r11+0x24]   <-- faults, r11 == 0
+```
+
+So the present path wants a surface-ish object at **`[dev+0x32A0]`**, falling
+back to **`[dev+0x32B0]`**, and under the bootstrap both are null. The
+`fault_addr` of guest `0x24` confirms the null base.
+
+These are not the fields the existing render-target work touches -
+`guide_bind_title_rt` writes `[dev+0x3F78]` and `guide_fake_front_buffer`
+`[dev+0x3F74]`. `0x32A0`/`0x32B0` are a different pair and nothing in the
+bootstrap sets them.
+
+Next: find what normally populates `[dev+0x32A0]` / `[dev+0x32B0]` - most
+likely a SetRenderTarget-style call on xam's device - and whether the
+bootstrap can make that call rather than poking the fields directly.
