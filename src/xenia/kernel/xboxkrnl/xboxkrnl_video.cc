@@ -2952,11 +2952,17 @@ void VdSwap_entry(
         // appears later, on this device, by the time it would be used.
         XELOGI("Guide composite draw #{} -> {:08X}; draw dc={:08X} "
                "[11C]={:08X} [134]={:08X} [1CC]={:08X} "
-               "dev[0]={:08X} dev[32A0]={:08X} dev[32B0]={:08X}",
+               "wrap[0]={:08X} wrap[0C]={:08X} "
+               "realdev[32A0]={:08X} realdev[32B0]={:08X}",
                gn, static_cast<uint32_t>(gr), ddc, ddc ? rdw(ddc + 0x11Cu) : 0,
                ddc ? rdw(ddc + 0x134u) : 0, dev,
-               dev ? rdw(dev) : 0, dev ? rdw(dev + 0x32A0u) : 0,
-               dev ? rdw(dev + 0x32B0u) : 0);
+               dev ? rdw(dev) : 0, dev ? rdw(dev + 0x0Cu) : 0,
+               (dev && rdw(dev + 0x0Cu))
+                   ? rdw(rdw(dev + 0x0Cu) + 0x32A0u)
+                   : 0,
+               (dev && rdw(dev + 0x0Cu))
+                   ? rdw(rdw(dev + 0x0Cu) + 0x32B0u)
+                   : 0);
         // The real present path (819DE94C) picks a surface as
         //   r11 = [dev+32A0] ? [dev+32A0] : [dev+32B0]
         // and immediately does lwz r9,36(r11). Both null => null deref at

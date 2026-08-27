@@ -5605,3 +5605,38 @@ Two things worth noting about `+0x0C`:
   containing it can be found the same way `81640680` was.
 
 That is the next concrete step, and it is a search rather than a guess.
+
+### `X` identified: `[dc+0x1CC]` is the wrapper, and the device hangs off it
+
+`8191AFD0` - the frame that loads the present's device as `[X+0x0C]` - appears
+in `.rdata` at **`816406AC`**. That is `81640680 + 0x2C`, i.e. **slot 11 of the
+same vtable** as the 140-byte object sitting in `[dc+0x1CC]`.
+
+So `X` is that object, and the whole chain resolves:
+
+    [xui_ctx+0x08]  ->  40877E00   140-byte object, vtable 81640680   (the wrapper)
+    [wrapper+0x0C]  ->  40870D00   the actual device
+    [device+0x32A0] / [+0x32B0]    the surfaces - both zero
+
+Which is exactly what the note at the top of this file meant by *"bind targets:
+`[dc+0x1CC]` versus the wrapper's device"*. That phrasing has been in here the
+whole time; what was missing was that `[dc+0x1CC]` **is** the wrapper, not the
+device, and that the device is one more dereference away at `+0x0C`.
+
+It also explains, without contradiction, every confusing measurement of the
+last several sections:
+
+* `[dc+0x1CC]` is a real, properly constructed object - correct;
+* it is not a D3D device and `+0x32A0` is not a field of it - also correct;
+* `dev[32A0]=00000060` was an out-of-bounds read 12KB past a 140-byte object -
+  meaningless, as recorded;
+* the present's `r31 = 40870D00` is a *different* object because it is
+  `[wrapper+0x0C]`, fetched by slot 11 of the wrapper's own vtable.
+
+So the presentation problem, stated exactly: **the render target is bound on
+the wrapper, and the present draws into the wrapper's device, which has no
+surface.** The fix is one dereference: bind on `[wrapper+0x0C]`.
+
+Probe added to the composite-draw line to confirm the chain at runtime -
+`wrap[0]`, `wrap[0C]`, and the real device's two surface fields - so the
+identification is measured and not just inferred from a vtable offset.
