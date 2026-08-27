@@ -6619,3 +6619,47 @@ evidence it is about to. The useful reframing for whoever picks this up:
 * so the question worth attacking is *when* `818FCE38` runs relative to the
   device creator, not *what* it reads. That is answerable by timestamping both
   in one run, rather than by tracing another pointer.
+
+## The ordering, measured: the wrapper is wired up 16,000 lines before mode 1 runs
+
+The reframed question - *when* does `818FCE38` run relative to the device
+creator - is answerable from `DemandFunction: enter` lines already in the log,
+with no new run at all:
+
+| function | role | first entry (log line) |
+|---|---|---|
+| `819F4D28` | device creator core | 4074 |
+| `818FCE38` | reads `[X+0x08]`, calls the setter | 5010 |
+| `8191BAC8` | `wrapper->SetDevice` | **5026** |
+| `8178E9F0` | the mode-1 creator | **21509** |
+| `81A0FE48` | front-buffer setup | 21514 |
+| `81A0FA80` | front-buffer allocation | 21572 |
+
+**The wrapper receives its device at line 5026, during early boot. Mode 1 does
+not run until line 21509 - at the Guide button press, roughly 45 seconds and
+16,000 log lines later.**
+
+So mode 1 is not competing with the draw path for a device; it is arriving long
+after the draw path has already been wired to a different one, and nothing
+re-installs it. That single fact explains the whole cluster of observations:
+
+* mode 1 allocates a front buffer that the emitter never sees - different
+  device, and the wrapper was bound before it existed;
+* `[wrapper+0x0C]`'s device has a null `[+0x2B10]` - it was created by the
+  early path (`819F4D28` at 4074), which for mode 2 never sets those fields;
+* forcing `81A0FE48` on the wrapper's device crashed - that device was built by
+  a different creator run entirely.
+
+**Two ways forward, and both are now concrete rather than exploratory:**
+
+1. **Run the device creator during boot**, before `818FCE38` at line 5010, so
+   the wrapper is handed a mode-1 device in the first place. This branch
+   already has `guide_bootstrap_before_device` in the scaffolding list, which
+   suggests the ordering was suspected before.
+2. **Re-install the device afterwards** by calling the setter directly -
+   `8191BAC8(wrapper, device, x)` - which is identified and whose arguments are
+   known. The obstacle is that mode 1 stalls before returning its device, so
+   there is currently no pointer to install.
+
+Option 1 is the more faithful of the two: it puts the call where the ordering
+says it belongs rather than patching around the consequence.
