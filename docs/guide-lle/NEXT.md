@@ -6347,3 +6347,43 @@ Everything up to that boundary now works and is reproducible:
 skin loads, 281 visuals register, controls resolve visuals with `S_OK`,
 scenes build, the composite draw loop runs, and the device can be given a real
 front buffer. That is the state to build on.
+
+### Retracted: the stubbed system command buffer is not the blocker
+
+The previous section concluded that getting pixels most likely requires
+implementing the system command buffer in Xenia's GPU. **That is not
+supported, and testing it cost one run.**
+
+`guide_syscmdbuf_buffer_kb=64` allocates a real buffer and hands its address
+and size to the guest in the descriptor, instead of the `0xBEEF0000` constants.
+With mode 1 and that flag:
+
+    CreateDevice returned:  0      (still never returns - identical stall)
+    queued XUI bootstrap:   0
+    GuideScene lines:       0
+    composite draws:        0
+    crashes:                0
+    SysCmdBufAcq #1: guest has written 0 non-zero words into the buffer we handed it
+
+So the guest is given a real command buffer and **never writes a single word
+into it**. Handing over the facility changes nothing, which means the stub was
+not what the stall depends on.
+
+Two further details worth keeping:
+
+* the `SysCmdBufCaller` unwind is all `92xxxxxx` - **dash.xex**, not xam. The
+  system command buffer is being used by the title, not by the Guide path.
+* `GUIDE DRAW` scoped calls: **0**. The Guide's drawing never asks for a system
+  command buffer at all, which undercuts the assumption in that function's own
+  comment that the Guide's drawing is expected to reach the GPU through it.
+
+**So the mode-1 stall cause is once again unknown**, and the honest position is
+weaker than the last section claimed: `InsertAsyncCommandBufferCall` waits for
+async calls to retire, and *why* they do not retire is not established. The
+stub was a plausible culprit sitting right next to the evidence, and it is not
+the culprit.
+
+Recording this deliberately: the previous section came close to recommending a
+large emulator feature on the strength of a code comment plus correlation. One
+cvar that already existed refuted it in a single run. Test the cheap
+falsification before proposing the expensive fix.
