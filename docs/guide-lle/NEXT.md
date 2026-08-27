@@ -3535,3 +3535,40 @@ So the rule is narrower than this file has been treating it:
 
 Practically: when a disassembled instruction pair builds a pointer to a string
 constant, do not resolve it offline. Log it from the emulator.
+
+### Confirmed: the failing call is `XuiVisualCreateInstance`
+
+Reading the same operand from **guest memory** rather than computing a file
+offset:
+
+    string at runtime 816462C4 = "XuiVisualCreateInstance(%S)"
+
+against `'ice (0x%08X)'` from the offline read. Two completely different
+strings, so the `.rdata` caveat in the previous section is correct - and worth
+having tested, because the offline result was a plausible-looking fragment
+rather than obvious garbage, and a shared string suffix would have explained
+it innocently.
+
+**These trace strings name their functions.** That is a much better tool than
+disassembling blind: xam's XUI functions announce themselves at entry with a
+printf-style trace, so the identity of any function in this chain can be read
+out of guest memory instead of inferred. Use it.
+
+So the chain ends in:
+
+    XuiVisualCreateInstance(name)
+
+where `name` is the wide string derived from the control's class
+(`[obj+0]` -> `8193B370`). It finds nothing and returns `80300026`, the
+handler records the failure in `[obj+0x14]` bit 2, and the control has no
+visual.
+
+That reframes the remaining question precisely: **the visual class named after
+the control's class is not registered.** Not a missing skin, not an
+undelivered message, not an unregistered *control* class - a missing *visual*
+class registration.
+
+Next: log the actual name string passed to `XuiVisualCreateInstance`. It is a
+`%S` argument in a trace the function itself emits, so it can be read straight
+out of guest memory at the call - and it will say exactly which visual class
+is missing.

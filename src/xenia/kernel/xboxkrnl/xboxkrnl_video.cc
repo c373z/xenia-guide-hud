@@ -1190,6 +1190,25 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
           // control, which would explain the result being global.
           XELOGI("GuideScene: visual class global [81D6CDDC] = {:08X}",
                  rd(0x81D6CDDCu));
+          // Check whether computing .rdata file offsets as runtime + 0x7200
+          // is actually wrong, or whether the operand simply points at a
+          // shared string suffix. Read the same address from guest memory.
+          {
+            std::string a1;
+            auto* hp = memory->LookupHeap(0x816462C4u);
+            if (hp && hp->QueryRangeAccess(0x816462C4u, 0x816462C4u + 0x3Fu) !=
+                          xe::memory::PageAccess::kNoAccess) {
+              for (uint32_t i = 0; i < 48; ++i) {
+                uint8_t c = xe::load_and_swap<uint8_t>(
+                    memory->TranslateVirtual(0x816462C4u + i));
+                if (!c) break;
+                a1 += (c >= 0x20 && c < 0x7F) ? char(c) : '?';
+              }
+            } else {
+              a1 = "(unmapped)";
+            }
+            XELOGI("GuideScene: string at runtime 816462C4 = \"{}\"", a1);
+          }
           for (auto ord : {0x342u, 0x31Eu, 0x31Bu, 0x395u, 0x359u, 0x38Au, 0x35Fu}) {
             XELOGI("GuideScene: xam ordinal {:03X} -> {:08X}", ord,
                    xmn ? xmn->GetProcAddressByOrdinal(ord) : 0);
