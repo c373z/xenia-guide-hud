@@ -6387,3 +6387,39 @@ Recording this deliberately: the previous section came close to recommending a
 large emulator feature on the strength of a code comment plus correlation. One
 cvar that already existed refuted it in a single run. Test the cheap
 falsification before proposing the expensive fix.
+
+### Driving the skipped setup directly does not work either
+
+`guide_force_front_buffer` calls `81A0FE48(device, 0)` on the device the
+emitter reads, with the argument its own call site would have used. The routine
+runs and **crashes inside itself**:
+
+    GUEST CRASH at 81A04648  fault_addr ...4C  r3=0
+    unwind: 81A0FF7C            (= 81A0FE48 + 0x134, inside its 0x2CC body)
+
+So the call is reached and executes about a third of the way through before
+dereferencing a null. The "forced front-buffer" log line never prints, because
+the crash happens first.
+
+That is a clean negative and it settles something worth settling: **the
+front-buffer setup is not a self-contained step that can be lifted out of the
+mode-1 path.** It depends on device state that `819F4D28` establishes earlier
+when its mode argument is not 2 - the same suspicion recorded when this was
+first proposed, now confirmed rather than assumed.
+
+So the difference between the two creators is not one skipped call and one null
+field. Mode 1 and mode 2 build genuinely different device configurations, and
+the front buffer is downstream of that difference rather than being the
+difference itself.
+
+Where that leaves the two paths, with everything now tested rather than
+inferred:
+
+* **mode 2** - scenes, visuals, composite draws all work; no front buffer; the
+  emitter faults on the null; the setup cannot be driven in isolation.
+* **mode 1** - front buffer allocated; device init then stalls in
+  `InsertAsyncCommandBufferCall` waiting for calls that never retire; cause
+  unknown, and *not* the stubbed system command buffer.
+
+Both are behind cvars that default off, so the established baseline is
+unaffected either way.
