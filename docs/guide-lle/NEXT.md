@@ -5159,3 +5159,46 @@ Who frees it. Two concrete threads:
 The cheap instrument is the one already written, with the null case fixed:
 watch `[81D6C978]` itself and log when it changes **or goes to zero**, which
 brackets the free against the surrounding log lines.
+
+### Who owns `81D6C978`, and why our `XuiInit` takes no reference
+
+Two static results that shape the fix.
+
+**`XuiInit` does not refcount.** Our bootstrap calls it with null params, which
+takes the branch at `8195A9D4`:
+
+    lis  r30,0x81d7
+    lwz  r11,-12124(r30)      ; [81D6D0A4] - the "XUI initialised" flag
+    cmpwi r11,0 ; beq +0x4C   ; zero -> do the real init
+    ...                        ; non-zero -> trace and return 1
+
+When XUI is already up it traces and returns 1. **No counter is incremented**,
+so our extra call takes no ownership of the context - it only observes that
+someone else initialised it. Anything that later tears XUI down is free to do
+so while the device context still holds pointers into it, which is exactly the
+shape of the observed use-after-free.
+
+**The init flag is never cleared.** `81D6D0A4` has three accesses in all of
+xam: two reads and a single write, and that write is inside `XuiInit` itself.
+Nothing sets it back to zero, so "XUI was uninitialised" is not what happened.
+
+**But `81D6C978` has three writers**, all in the device-context region:
+
+    818FAD98   (write at 818FADD0)
+    818FF140   (write at 818FF278)
+    818FF2C8   (write at 818FF3F4)
+
+plus eleven readers. A global with several writers in the DC code, distinct
+from the init flag that is written once and never cleared, reads much more like
+a **current device context** pointer than the XUI global context - which would
+also explain why the bootstrap's label for it ("XUI ctx") has been misleading
+me. If that is right, the freed object is a device context being swapped or
+destroyed while `[dc+0x1C8]` still refers to it, and the three writers above
+are where to look.
+
+Stated as the reading it is, not as established fact - the watcher run that
+brackets the pointer change will say which.
+
+**Watcher fixed.** It now logs the pointer transition itself, including going
+to zero (`(CLEARED)`), rather than skipping null iterations. The previous
+version's silence was the bug that hid the free.

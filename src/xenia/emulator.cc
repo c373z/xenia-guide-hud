@@ -1850,23 +1850,35 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                   auto* wmem = ks->memory();
                   std::thread([wmem]() {
                     xe::threading::set_name("XuiCtxWatch");
-                    uint32_t last = 0;
+                    // Watch the context pointer itself as well as the slot.
+                    // The first version skipped the iteration when the global
+                    // read zero, so a context being destroyed - which clears
+                    // it - looked exactly like nothing happening. That false
+                    // negative cost a full round of analysis: the answer was a
+                    // use-after-free, and the watcher stayed silent through it.
+                    uint32_t last = 0, last_ctx = 0;
                     bool primed = false;
                     for (int i = 0; i < 240000; ++i) {
                       uint32_t c = xe::load_and_swap<uint32_t>(
                           wmem->TranslateVirtual(0x81D6C978u));
+                      if (primed && c != last_ctx) {
+                        XELOGE("XuiCtxWatch: ctx pointer {:08X} -> {:08X}{}",
+                               last_ctx, c, c ? "" : "  (CLEARED)");
+                      }
+                      uint32_t v = 0;
                       if (c) {
-                        uint32_t v = xe::load_and_swap<uint32_t>(
+                        v = xe::load_and_swap<uint32_t>(
                             wmem->TranslateVirtual(c + 0x0C));
-                        if (primed && v != last) {
+                        if (primed && c == last_ctx && v != last) {
                           XELOGE(
                               "XuiCtxWatch: [{:08X}+0C] changed {:08X} -> "
                               "{:08X}",
                               c, last, v);
                         }
-                        last = v;
-                        primed = true;
                       }
+                      last = v;
+                      last_ctx = c;
+                      primed = true;
                       std::this_thread::sleep_for(
                           std::chrono::microseconds(250));
                     }
