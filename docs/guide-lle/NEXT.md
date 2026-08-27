@@ -1833,3 +1833,57 @@ what `XuiSceneCreate` *does* with them. The remaining approach is the one that
 was blocked before by the freeze - breakpoint the `E_FAIL` construction sites
 inside `8193AFB8` now that runs are stable and reach 18-24k lines, which they
 never did when that was last attempted.
+
+### Breakpointing the scene loader is still not viable - now proven by control
+
+Worth settling, since the healthy build made it look worth retrying. It is
+not, and this time it is a controlled result rather than an impression - same
+flags, one variable:
+
+| Run | `guide_trace_stores` | Result |
+|---|---|---|
+| A | `8193AE40,8193B454` | `StoreTrace: installed 2 breakpoints`, **zero** `GuideScene:` lines - the press fires with a good handler and the path never reaches scene creation |
+| B | *(none)* | `XuiSceneCreate("GuideMain.xur") -> 80004005` as expected |
+
+Two breakpoints are enough to stop the code path being taken at all. Do not
+spend another tick on this approach.
+
+### Static read of the E_FAIL path
+
+Addressing note: the `.pdata`/ppcdis file VA is `runtime + 0x7200`, and xam's
+PE image base is **`0x815F0000`** (these are PE32, so `ImageBase` is at
+optional-header offset 28, not 24 - reading it at the PE32+ offset yields
+garbage). That base is corroborated twice over: it is exactly the
+`AllocFixed address=815F0000` seen at load, and `.text` then runs
+`81720000-81D13CE0`, ending precisely where the zero pages began.
+
+The two E_FAIL construction sites near the loader are, confirmed by scanning
+for `lis rX,0x8000` + `ori rX,rX,0x4005`: runtime **`8193AE40`** and
+**`8193B454`** (file `81942040`, `81942654`). 685 such sites exist in xam
+`.text` overall.
+
+The first one is reached like this:
+
+```
+81942014  addi r4,r1,96          ; r4 = local at sp+96
+81942018  or   r3,r31,r31
+8194201c  bl   819516e0          ; runtime 8194A4E0
+81942020  lwz  r11,104(r1)       ; read sp+96 +8
+81942024  cmpwi r11,0
+81942028  bc   -> 8194204c       ; non-zero -> r3 = 0, return S_OK
+8194202c  or   r3,r27,r27
+81942030  bl   819382f0          ; runtime 819310F0 (release/cleanup)
+81942038  stw  r11,0(r3)         ; null the out-param
+81942040  lis  r3,0x8000
+81942044  ori  r3,r3,0x4005      ; return E_FAIL
+```
+
+So **E_FAIL means the local at `sp+104` came back zero** from
+`819516e0`/`8194A4E0`, which is called with `r3` = an object and `r4` = a
+local buffer at `sp+96` that was just built by `8193AD10`/`8193AD60`
+(runtime `81933B10`/`81933B60`) from `sp+80`. That shape - build a string,
+then look something up with it - suggests a resource lookup returning null.
+
+Next: decode `8194A4E0` and what it puts at `+8` of that local. That is a
+lookup that succeeds for 23 scenes and fails for exactly three, so whatever it
+consults is the discriminator the file contents never revealed.
