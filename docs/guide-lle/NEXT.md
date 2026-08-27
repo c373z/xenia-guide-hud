@@ -2954,3 +2954,40 @@ after whatever tears the first device down has finished.
 (The `bound RT0 ...` line never prints because the `Execute` of `819F31A8` is
 still running when the run ends - the JIT is visibly still translating inside
 it - not because the call was skipped.)
+
+### The RT bind was destroying the device
+
+A/B on the base configuration, one flag apart:
+
+| configuration | composite draws | "currently finalizing" warnings |
+|---|---|---|
+| without `guide_bind_title_rt` | 14 | 0 |
+| with `guide_bind_title_rt` | 1 | 1 |
+
+So the device is not found dying - **binding is what kills it**, and the
+mechanism is in the setter's own code, already disassembled further up:
+
+```
+819fa4b0  lwzx  r30,r27,r31   ; r30 = whatever RT0 currently holds
+819fa4b8  bc    -> skip if zero
+819fa4cc  bl    819e6148      ; else release r30
+```
+
+`819F31A8` releases the previous contents of the slot before storing the new
+surface. RT0 holds `00000060`, which is not a refcounted surface, so that
+release corrupts state and tips the device into `D3DDevice_Release`.
+
+**This was self-inflicted.** Fixing the guard two sections above - so that a
+junk RT0 no longer counts as "already bound" - is what allowed the bind to run
+at all, and the bind then destroys the device. The guard fix is still right in
+principle (silently skipping with no log was worse), but it turned a no-op
+into an actively harmful call.
+
+The fix is to zero the slot before calling the setter, so its release path is
+skipped and only the store happens. That is now in place, with the clearing
+logged.
+
+Also worth noting: the base configuration produces **14** composite draws, not
+the 600+ recorded earlier in this file. The earlier figure came from runs with
+a different flag set; treat draw counts as comparable only within one
+configuration.

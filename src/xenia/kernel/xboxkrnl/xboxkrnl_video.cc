@@ -2811,6 +2811,21 @@ void VdSwap_entry(
             }
             if (!present_rt_done && !plausible) {
               present_rt_done = true;
+              // Zero the slot first. 819F31A8 releases whatever RT0 already
+              // holds before storing the new surface:
+              //   lwzx r30,r27,r31 ; if r30 != 0 -> release(r30)
+              // and RT0 holds 00000060 here, which is not a refcounted
+              // surface. Letting it release that is what tips the device into
+              // D3DDevice_Release - measured as draws dropping from 14 to 1
+              // and a "currently finalizing" warning appearing the moment the
+              // bind was allowed to run. With the slot zeroed the setter
+              // skips its release path.
+              if (cur) {
+                xe::store_and_swap<uint32_t>(
+                    kernel_state()->memory()->TranslateVirtual(dev + 0x32A0u),
+                    0u);
+                XELOGI("Guide: cleared junk RT0 {:08X} before binding", cur);
+              }
               auto* pth = XThread::GetCurrentThread();
               uint64_t pargs[] = {dev, 0ull, guide_title_surface_};
               uint64_t pres = pth ? kernel_state()->processor()->Execute(
