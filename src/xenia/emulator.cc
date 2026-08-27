@@ -2354,20 +2354,32 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
         // 30000 (60s), which never arrived inside the harness window - the
         // watcher starts at the press and the run ends well before then.
         if (i == 4000) {
-          int found = 0;
+          // The first version of this signature - two plausible pointers at
+          // +0x3F74 and +0x2B10 - matched 8 unrelated objects immediately,
+          // spaced 0xC0 apart with non-pointer [32A0]. Require a vtable in
+          // xam's .rdata at +0 as well, which every real device has, and that
+          // [32A0] itself looks like a surface pointer.
+          int found = 0, examined = 0;
           for (uint32_t a = 0x40000000u; a < 0x41000000u && found < 8;
                a += 0x40u) {
+            uint32_t vt = rd32(a);
+            if (vt < 0x815F0000u || vt >= 0x816F5200u) continue;
             uint32_t fb = rd32(a + 0x3F74u);
             if (fb < 0x10000000u || fb >= 0x50000000u) continue;
             uint32_t cp = rd32(a + 0x2B10u);
             if (cp < 0x10000000u || cp >= 0x50000000u) continue;
+            ++examined;
+            uint32_t rt = rd32(a + 0x32A0u);
+            if (rt && (rt < 0x10000000u || rt >= 0x50000000u)) continue;
             ++found;
             XELOGE("DevScan: candidate {:08X}  [3F74]={:08X} [2B10]={:08X} "
                    "[32A0]={:08X}",
                    a, fb, cp, rd32(a + 0x32A0u));
           }
-          XELOGE("DevScan: {} candidate(s); wrapper's device is {:08X}", found,
-                 dev);
+          XELOGE(
+              "DevScan: {} candidate(s) ({} passed the vtable+fields test); "
+              "wrapper's device is {:08X}",
+              found, examined, dev);
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
       }
