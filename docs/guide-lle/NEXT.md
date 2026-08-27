@@ -5873,3 +5873,47 @@ Worth noting this is the first blocker in the chain that is *not* "a routine
 nobody drives" - the routine runs, and reports failure. That makes it more
 tractable than the previous four, because there is a live execution to inspect
 rather than an absent one to arrange.
+
+### Correction: `81A0F768` always returns 1, and the "setup vs teardown" reading is unverified
+
+Two things from the last section are wrong and should not be built on.
+
+**1. `81A0F768` does not "run and report failure".** It is `0x5c` bytes with
+**no conditional branches**: it calls three routines, writes `-1` to
+`[dev+0x59C4]`, `[dev+0x59C8]` and `[dev+0x3FE0]`, then ends
+
+    addi r3,r0,1
+    blr
+
+It returns **1 unconditionally**. So the `bne` at `819F4E5C` always takes, and
+`81A0FE48` is never reached from `819F4D28` **by design** - not because
+something failed. Reading a non-zero return as an error was an assumption, and
+the disassembly contradicts it.
+
+**2. The other chain looks like teardown, not setup.** `8178F748` reaches
+`819F4A00` only through:
+
+    lwz  r3,0(r27)
+    cmplwi r3,0
+    beq  +0x3c            ; skip when null
+    bl   819F4A00
+    addi r3,r0,0
+    stw  r3,0(r27)        ; and clear the pointer afterwards
+
+Calling something and then nulling the pointer is the shape of a release path,
+not an initialise path. `[r27]` is null in our run, so the call is skipped -
+which would be *correct* behaviour if there is nothing to tear down.
+
+**What this means for the previous section:** I inferred that `81A0F1C8` and
+`81A0FA80` are "the device setup" because they are the only writers of
+`[dev+0x3F74]`. That does not follow. Writing a field is equally consistent
+with resetting it during teardown, and `81A0F768` writing `-1` into three
+neighbouring fields points the same way. The direction of all four routines is
+**unverified**.
+
+So the honest state: `[dev+0x3F74]` is null, the emitter needs it, and the two
+functions that write it never run - but whether they are supposed to run, and
+whether they would write a useful value or a `-1`, is not established. The next
+step is to determine what these routines actually are before arranging to call
+any of them, because arranging a call to a teardown routine would be worse than
+doing nothing.
