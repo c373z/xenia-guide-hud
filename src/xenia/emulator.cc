@@ -3369,7 +3369,19 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
         // is exactly the failure seen at 81747DDC.
         const uint32_t addrs[] = {0x8186E528u, 0x818936B8u, 0x81747D70u,
                                   0x818AE538u, 0x81D3F8A0u,
-                                  0x815FA1E0u, 0x815FA280u};
+                                  0x815FA1E0u, 0x815FA280u,
+                                  // 81D43C78 is [skin context + 0x28], the
+                                  // callback manager the skin loader calls
+                                  // through. Nothing in xam writes it - no
+                                  // store to that offset exists anywhere in
+                                  // .text - so either something outside the
+                                  // module creates it, or it is populated
+                                  // later than our bootstrap runs the loader.
+                                  // Watching it on the *default* path (skin
+                                  // init off) distinguishes the two: if it
+                                  // ever becomes non-null, the loader is
+                                  // simply being called too early.
+                                  0x81D43C78u};
         constexpr size_t kWatchCount = xe::countof(addrs);
         uint32_t last[kWatchCount] = {};
         bool primed = false;
@@ -3405,7 +3417,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
           std::this_thread::sleep_for(std::chrono::microseconds(500));
         }
       }).detach();
-      XELOGI("XamTextWatch: polling 7 xam addresses");
+      XELOGI("XamTextWatch: polling 8 xam addresses");
       // Opt-in (XENIA_XAM_RO=1): make xam's .text read-only at the host level
       // so whatever writes zeros over it traps instead of succeeding. The
       // existing fault logging then names the writer. Off by default because
