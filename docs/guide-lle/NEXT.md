@@ -6546,3 +6546,42 @@ instrumenting the wait itself - logging `[[dev+0x2B10]]` across the loop to see
 what the counter actually does - or accepting that mode 2 plus a front buffer
 obtained some other way is the more promising route. Both are real work rather
 than another flag combination.
+
+### The wrapper's device is not the device mode 1 creates
+
+`ProgressWatch` resolves the chain the draw path uses and finds the counter
+pointer empty:
+
+    ProgressWatch: ctx=40877DC0 wrap=40877E00 dev=40870D00 counter_ptr=00000000
+
+`[dev+0x2B10]` is **null**, so no progress values were observed - there was
+nothing to read. Taken with what is already established, that is more useful
+than a counter trace would have been.
+
+`[dev+0x2B10]` is written by exactly two functions, `81A0F858` and `81A0FE48`,
+both part of the mode-1 setup. Under mode 1 those routines **do** run - the
+front buffer is allocated, which is `81A0FA80` downstream of `81A0FE48`. Yet
+the device the wrapper points at still has a null counter pointer.
+
+The only consistent conclusion: **mode 1 sets up a different device object than
+the one `[wrapper+0x0C]` refers to.** The draw path and the mode-1 device
+creator are working on two separate devices.
+
+That retro-explains several things that were confusing on their own:
+
+* forcing `81A0FE48` on the wrapper's device crashed partway - it was being run
+  against a device that had not been through the rest of mode 1's setup;
+* mode 1 allocating a front buffer did not help the draw path - the buffer went
+  to mode 1's device, not to the one the emitter reads;
+* mode 2's device never gets `[+0x2B10]` either, which is consistent with it
+  simply never being set up as a render device at all.
+
+**Caveat, stated plainly:** this watcher followed the *draw path's* device. It
+did **not** observe the device the stalled thread is working on, because that
+object is not reachable from the context chain at that point. So this says
+nothing about why mode 1's own wait never progresses - it says the two devices
+are distinct, which is a different and previously unnoticed fact.
+
+The question that now matters more: **which device should the Guide be drawing
+through** - and if it is mode 1's, how the wrapper is meant to come to point at
+it.
