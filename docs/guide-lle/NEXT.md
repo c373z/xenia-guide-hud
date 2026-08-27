@@ -2405,3 +2405,34 @@ constructor's zeros, takes the dynamic path, and gets `section://@0,...`.
 So the open question is now sharp: is `401EAFB0` the bootstrap's own object or
 a different one? A run logging `guide_bs_obj_` alongside the crash registers
 answers it directly.
+
+### Refuted: it is the same object
+
+Logging the bootstrap's object alongside the crash registers settles it:
+
+    GuideBootstrap: guide object 401EAFB0, [guide+4] = skin module 301B3000
+    GUEST CRASH: r24-r31 ... 401EAFB0 401EBA30 401EBC28      (r29 = 401EAFB0)
+
+`r29` **is** `guide_bs_obj_`. So the wrong-instance hypothesis from the
+previous section is wrong, and with it the idea that some other instance keeps
+the constructor's zeros. On this exact object the bootstrap set `[+4]` to
+hud's hmodule and `[+8]` to `-1` (static path), both locator choosers are
+nopped, and `[+0x4E8]` is still null.
+
+That leaves only two possibilities, and they are now cleanly separated:
+
+1. the string-table load at `913EC798` **never runs** for this object, or
+2. it runs and **fails**, leaving the field the constructor's zero (the assign
+   helper ignores the return value, so a failure is silent).
+
+Distinguishing them does not need a breakpoint in the XUI path: the load site
+is in hud's own init, not the hot scene loader, so a counter on
+`XuiLoadStringTableFromFile` - or simply checking whether `[guide+0x4E8]` is
+ever non-null at any point, by polling it the way `XamTextWatch` polls xam -
+answers it. Polling is the safer of the two given how often breakpoints have
+perturbed this path.
+
+Note for whoever picks this up: three successive hypotheses here (module 0 via
+the HLE builder, patch timing, wrong instance) each explained every
+observation available at the time and were each refuted by one direct
+measurement. Measure before building on one.
