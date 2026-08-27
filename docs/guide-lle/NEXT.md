@@ -3572,3 +3572,33 @@ Next: log the actual name string passed to `XuiVisualCreateInstance`. It is a
 `%S` argument in a trace the function itself emits, so it can be read straight
 out of guest memory at the call - and it will say exactly which visual class
 is missing.
+
+### Two corrections to the previous section
+
+**The trace strings identify functions, but do not yield runtime values.**
+The previous section recommended reading xam's entry traces as a general tool.
+Half of that is right and half is not:
+
+- Reading the *format string* at a known address does name the function -
+  that is how `819428B0` was identified as `XuiVisualCreateInstance`, and it
+  works because the string is static data.
+- But the traces **never fire**. A full run has 31 `DbgPrint` lines and not
+  one from XUI, so xam's tracing is gated off at runtime. The `%S` argument -
+  the name of the missing visual class - cannot be obtained this way without
+  first finding and enabling xam's trace level.
+
+**The key-derivation reconstruction was wrong.** The attempt to compute the
+lookup key outside the handler assumed the function at `81960360` receives the
+control object, so that `[obj+0]` is its class. Running it says otherwise:
+
+    obj 408C3890  class 00010048  visual class name -> 00000000 ""
+
+`00010048` is the control's own **handle**, not a class pointer, and
+`81934170` returns 0 for it. So `r31` in that function is some other
+structure, and the derivation `[obj+0] -> 8193B370` cannot be reproduced from
+outside without knowing what that structure is.
+
+Net: the chain up to `XuiVisualCreateInstance(name)` still stands - that part
+was read from the code and confirmed by the tag - but **the identity of
+`name` is not yet known**, and neither of the two shortcuts tried this pass
+can produce it.

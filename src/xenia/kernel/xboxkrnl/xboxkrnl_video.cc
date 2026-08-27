@@ -1394,6 +1394,43 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
                       // and [msg+8] is an output slot the dispatcher clears.
                       // If sending it produces a visual, nothing is delivering
                       // message 9; if not, the gate at 81938BC8 is the target.
+                      // Name the visual class XUI is looking for. The
+                      // handler derives its key as 8193B370([obj+0]) - runtime
+                      // 81934170 - and hands it to XuiVisualCreateInstance as
+                      // a wide string, so doing the same here says exactly
+                      // which visual class is missing.
+                      if (child) {
+                        uint32_t ofh = xm2
+                                           ? xm2->GetProcAddressByOrdinal(0x346)
+                                           : 0;
+                        if (ofh) {
+                          std::memset(memory->TranslateVirtual(co2), 0, 16);
+                          uint64_t oa[] = {child, co2};
+                          processor->Execute(ts, ofh, oa, xe::countof(oa));
+                          uint32_t obj = rd(co2);
+                          uint32_t cls = obj ? rd(obj) : 0;
+                          if (cls) {
+                            uint64_t ka[] = {cls};
+                            uint32_t nm = uint32_t(processor->Execute(
+                                ts, 0x81934170u, ka, xe::countof(ka)));
+                            std::string cname;
+                            auto* nh = nm ? memory->LookupHeap(nm) : nullptr;
+                            if (nh && nh->QueryRangeAccess(nm, nm + 0x3Fu) !=
+                                          xe::memory::PageAccess::kNoAccess) {
+                              for (uint32_t i = 0; i < 48; ++i) {
+                                uint16_t c = xe::load_and_swap<uint16_t>(
+                                    memory->TranslateVirtual(nm + i * 2));
+                                if (!c) break;
+                                cname += (c >= 0x20 && c < 0x7F) ? char(c)
+                                                                 : '?';
+                              }
+                            }
+                            XELOGI("GuideScene:     obj {:08X} class {:08X} "
+                                   "visual class name -> {:08X} \"{}\"",
+                                   obj, cls, nm, cname);
+                          }
+                        }
+                      }
                       if (child && !vis2 && vr2 == 0x80300017u) {
                         uint32_t sm = xm2
                                           ? xm2->GetProcAddressByOrdinal(0x35F)
