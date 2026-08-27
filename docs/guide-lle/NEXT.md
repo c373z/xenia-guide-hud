@@ -6260,3 +6260,43 @@ front of me and each wrong. The pattern is that the GPU/device structures have
 several similarly-shaped pointers and this file names some of them
 optimistically. The rule that has actually worked is the boring one: read what
 the code stores, in one run, before saying what a field is.
+
+### The stall is `InsertAsyncCommandBufferCall` waiting for its calls to drain
+
+Reading the loop rather than theorising about it. `819F4488` is a
+**progress-with-timeout** wait, not a spin:
+
+    cmplw r9,r8                  ; last-seen vs current progress counter
+    beq   -> no progress this pass
+    stw   r11,8(r31)             ; else record the new value and a timestamp
+    ...
+    lwz   r10,12(r31) ; subf r10,r10,r30    ; elapsed since last progress
+    lwz   r11,[81D31D60]                    ; threshold = 0x1388 = 5000
+    cmplw r10,r11 ; bnlt -> timeout path
+
+And the timeout path names itself. The strings it reaches for are:
+
+    8165DC80: "A deadlock has occurred in InsertAsyncCommandBufferCall,
+               because 64 Async Command Buffer Call objects have been inserted,"
+    8165DD00: a "+++..." separator
+
+So the Guide's device is inside **`InsertAsyncCommandBufferCall`**, waiting for
+previously inserted async command-buffer calls to complete, and it gives up
+after 5 seconds without progress. The `64` in the message is the queue depth
+that triggers the wait in the first place.
+
+The message does **not** appear in our logs (`0` occurrences against 28
+`DbgPrint` lines overall), because the print is gated on `[r31+4] == 19` -
+`lwz r11,4(r31) ; cmpwi r11,19 ; bne +0x34` - so a different type takes a
+different path. Absence of the message is therefore not evidence the timeout
+did not fire.
+
+This is a much better-formed statement of the mode-1 stall than "the thread is
+stuck": the Guide's device queues async command-buffer calls and nothing
+retires them. Whether that is because Xenia never signals their completion, or
+because the Guide never submits the work that would retire them, is the open
+question - and both are checkable against `[r29+0x2B10]`, the progress counter
+this loop actually watches.
+
+**Operational note:** grepping the 20MB `xenia.log` without a tight pattern and
+`head` produced a 20MB tool result. Always constrain both.
