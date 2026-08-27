@@ -2368,13 +2368,16 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
             if (fb < 0x10000000u || fb >= 0x50000000u) continue;
             uint32_t cp = rd32(a + 0x2B10u);
             if (cp < 0x10000000u || cp >= 0x50000000u) continue;
+            // The [32A0] filter rejected the single object that passed
+            // everything else, so it was too strict - RT0 can legitimately
+            // hold a non-pointer here (the junk 0x60 this file records). Keep
+            // the vtable and the two field tests, report [32A0] rather than
+            // filtering on it.
             ++examined;
-            uint32_t rt = rd32(a + 0x32A0u);
-            if (rt && (rt < 0x10000000u || rt >= 0x50000000u)) continue;
             ++found;
-            XELOGE("DevScan: candidate {:08X}  [3F74]={:08X} [2B10]={:08X} "
-                   "[32A0]={:08X}",
-                   a, fb, cp, rd32(a + 0x32A0u));
+            XELOGE("DevScan: candidate {:08X}  vt={:08X} [3F74]={:08X} "
+                   "[2B10]={:08X} [32A0]={:08X}",
+                   a, vt, fb, cp, rd32(a + 0x32A0u));
           }
           XELOGE(
               "DevScan: {} candidate(s) ({} passed the vtable+fields test); "
