@@ -701,6 +701,7 @@ static uint32_t guide_bs_hud_base_ = 0;
 static uint32_t guide_bs_obj_ = 0;
 static bool guide_bs_use_title_device_ = false;
 static uint32_t guide_bs_skin_module_ = 0;
+static uint32_t guide_title_surface_ = 0;
 static std::atomic<bool> guide_bs_ready_{false};
 
 bool GuideBootstrapReady() { return guide_bs_ready_; }
@@ -2190,6 +2191,10 @@ void VdSwap_entry(
                           xe::memory::PageAccess::kNoAccess;
           }
           {
+            // Remember the surface: the bind below targets the device
+            // reached through the wrapper, which is NOT the device the
+            // present uses ([dc+0x1CC]). The draw path binds it there too.
+            if (surf) guide_title_surface_ = surf;
             static uint32_t rtlog = 0;
             if (rtlog++ < 3) {
               XELOGI("Guide: RT bind sees dev {:08X} RT0 {:08X} "
@@ -2781,6 +2786,43 @@ void VdSwap_entry(
         if (dev) {
           XELOGI("Guide device {:08X}: [32A0]={:08X} [32B0]={:08X}", dev,
                  rdw(dev + 0x32A0u), rdw(dev + 0x32B0u));
+          // guide_bind_title_rt binds RT0 on the device it reaches through
+          // the render wrapper, which is a different object from the one the
+          // present reads out of [dc+0x1CC] - measured as 40883A80 versus
+          // 4088B7A0, the first already carrying a valid RT0 and the second
+          // holding 00000060. Bind the same surface here, where the present's
+          // own device is in hand.
+          {
+            static uint32_t dbg = 0;
+            if (dbg++ < 3) {
+              XELOGI("Guide: present-device bind check: flag={} cached surf "
+                     "{:08X} dev {:08X}",
+                     ::cvars::guide_bind_title_rt, guide_title_surface_, dev);
+            }
+          }
+          if (::cvars::guide_bind_title_rt && guide_title_surface_) {
+            static bool present_rt_done = false;
+            uint32_t cur = rdw(dev + 0x32A0u);
+            bool plausible = false;
+            if (cur >= 0x10000u) {
+              auto* ph = kernel_state()->memory()->LookupHeap(cur);
+              plausible = ph && ph->QueryRangeAccess(cur, cur + 0x27u) !=
+                                    xe::memory::PageAccess::kNoAccess;
+            }
+            if (!present_rt_done && !plausible) {
+              present_rt_done = true;
+              auto* pth = XThread::GetCurrentThread();
+              uint64_t pargs[] = {dev, 0ull, guide_title_surface_};
+              uint64_t pres = pth ? kernel_state()->processor()->Execute(
+                                        pth->thread_state(), 0x819F31A8u,
+                                        pargs, xe::countof(pargs))
+                                  : 0;
+              XELOGI("Guide: bound RT0 {:08X} on the present's device {:08X} "
+                     "-> {:08X}; [32A0] now {:08X}",
+                     guide_title_surface_, dev,
+                     static_cast<uint32_t>(pres), rdw(dev + 0x32A0u));
+            }
+          }
         }
       }
       in_guide_draw = false;

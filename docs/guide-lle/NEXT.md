@@ -2886,3 +2886,41 @@ neither the new warning nor the bind logs appear. So the enclosing
 `guide_bind_title_rt` block is not being reached at all, which is a separate
 problem from the guard. A one-shot log at the top of that block is in flight
 to establish whether it runs.
+
+## The render target is bound to the wrong device
+
+Measured directly, with both pointers side by side in one run:
+
+    Guide: RT bind sees dev 40883A80 RT0 4088B3E0 (plausible=true) surf 40958CD0
+    Guide device 4088B7A0: [32A0]=00000060 [32B0]=00000000
+
+`guide_bind_title_rt` reaches its device through the render wrapper
+(`[wrapper+12]`, with fallbacks) and finds **`40883A80`**, whose RT0 already
+holds a valid surface - so it correctly does nothing. The present takes its
+device from the draw DC instead, `dev = [dc+0x1CC]` = **`4088B7A0`**, and
+*that* one has RT0 = `00000060`.
+
+So the bind has never been binding anything relevant. Two devices, and the
+flag has been pointed at the one that did not need it. This is what
+`guide_use_bound_device` was written for, and it is set in these runs without
+fixing the mismatch.
+
+The surface the scan finds (`40958CD0`) is now cached and the draw path binds
+it on `[dc+0x1CC]`, where the present's own device is in hand, via the same
+`819F31A8` setter.
+
+**That code does not fire yet.** The `Guide device ...` line immediately above
+it prints, so execution reaches the condition, and the bind block that
+populates the cache logs *earlier* in the same run (line 20721 vs 21102) - so
+on the face of it the cached surface should be set. A log of the condition's
+own inputs is in flight rather than another guess about why.
+
+Two guard bugs found on the way, both worth keeping regardless of this:
+
+- The original RT0 test bound only when the slot was **exactly zero**, so a
+  junk value like `0x60` silently skipped the bind *and* the else-branch
+  warning - no log at all. It now requires the slot to look like a mapped,
+  readable surface.
+- `guide_bind_title_rt` being enabled therefore did nothing in earlier runs,
+  which means the earlier claim that enabling it "moved the crash" was wrong;
+  the other deepest-reach flags did that.
