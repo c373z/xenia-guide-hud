@@ -1787,6 +1787,27 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                          rd(0x801E6FC8u));
                 }
               }
+              {
+                // The present path picks its surface as
+                //   [dev+0x32A0] ? [dev+0x32A0] : [dev+0x32B0]
+                // and faults because both are zero on the device it uses
+                // (40870D00), while the bootstrap binds a different one
+                // (407CB880). Survey every device pointer we know about and
+                // report which of them actually has a surface - that says
+                // which device the present should be looking at, instead of
+                // guessing between them.
+                struct { const char* name; uint32_t at; } devs[] = {
+                    {"VdGlobalDevice   801E6FC4", 0x801E6FC4u},
+                    {"VdGlobalXamDevice 801E6FC8", 0x801E6FC8u},
+                    {"xam device global 81D43684", 0x81D43684u},
+                };
+                for (auto& d : devs) {
+                  uint32_t dev = rd(d.at);
+                  XELOGI("DevSurvey: {} -> {:08X}  [32A0]={:08X} [32B0]={:08X}",
+                         d.name, dev, dev ? rd(dev + 0x32A0u) : 0,
+                         dev ? rd(dev + 0x32B0u) : 0);
+                }
+              }
               if (cvars::guide_bootstrap_on_title_thread &&
                   !cvars::guide_bootstrap_before_device) {
                 kernel::xboxkrnl::QueueGuideBootstrap(
