@@ -44,6 +44,23 @@ what is known about the remaining gap, and what is not.
 >    present's device stops the draw loop and is disabled behind
 >    `XENIA_PRESENT_RT`.
 >
+> **Diagnostic switches added this session** (all env vars, all off by
+> default, so the normal path is unaffected)
+>
+> | variable | what it does |
+> |---|---|
+> | `XENIA_CRASH_PEEK="29,4E8,8"` | on a guest crash, dump N words at `r<reg> + <hex offset>` - for when the interesting value is a field of an object a register points at |
+> | `XENIA_EFAIL_TAG="lo-hi"` | rewrite every `ori rX,rX,0x4005` in a range so each group of E_FAIL sites returns a distinct HRESULT; narrows by quartering. This is what located the scene failure in hud |
+> | `XENIA_EFAIL_TAG_HUD="lo-hi"` | same, applied to hud after its DllMain |
+> | `XENIA_TAG26=1` | same trick for the eight sites building `80300026` |
+> | `XENIA_XAM_TRACE=1` | set xam's per-thread trace gate `[r13+0x2B4]`. Necessary but **not** sufficient - no XUI output yet |
+> | `XENIA_PRESENT_RT=1` | bind RT0 on the present's device. **Harmful** - stops the draw loop; kept only because the device mismatch it addresses is real |
+>
+> The reusable tools are `tools/press.ps1` (run harness; detects the modal
+> crash dialog), `tools/sym.ps1` (symbolize an exe RVA via the PDB, no
+> debugger needed) and `tools/xuiz_extract.py` (unpack a XUIZ resource
+> container).
+>
 > **Method note that keeps paying off:** on this problem, plausible causal
 > stories have been wrong far more often than right - module-0 locators, patch
 > timing, wrong object instance, case sensitivity, section lookups, and the
