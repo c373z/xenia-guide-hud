@@ -3914,3 +3914,66 @@ Recorded together because both cost a wasted run this session:
 With the first flag the boot no longer dies in `TrapDebugBreak`; it dies a
 little later in `ResolveFunction` on the zero page above, which is the real
 blocker and the thing worth fixing.
+
+### The population scan was measuring the wrong 6 MB
+
+`ReportXamTextPopulation` scanned `81770000-81D60000`. xam's `.text` is
+`81720000-81D13CE0`, from the section table of the decrypted image. The scan
+bounds are wrong at **both** ends:
+
+* it started **320 KB inside** `.text`, so `81720000-81770000` was never
+  looked at - and that is exactly where `81747A00` lives, the address the boot
+  currently dies on;
+* it ran **304 KB past** the end of `.text`, into the inter-section gap and
+  into `.data`.
+
+Every zero page the scan has ever reported was in that overrun. With ranges
+now logged rather than just counted, they are:
+
+    zero ranges (after xam load):   81D14000-81D1FFFF (12)  81D3D000-81D5FFFF (35)
+    zero ranges (after title load): 81D14000-81D1FFFF (12)  81D3D000-81D5FFFF (35)
+
+- `81D14000-81D1FFFF` is the padding between `.text` (ends `81D13CE0`) and
+  `.data` (starts `81D20000`). No section covers it.
+- `81D3D000-81D5FFFF` is inside `.data`.
+
+Both are supposed to be zero. So the familiar "**47 of 1520 mapped pages of
+xam `.text` are entirely zero (3.1%)**" figure, quoted repeatedly in this file,
+never described `.text` at all - it described alignment padding and
+zero-initialised data. The figure is retired.
+
+The earlier reading of those pages as "ordinary uninitialised data, not a load
+failure" was right about what they *are*. What did not follow, and was assumed,
+is the sentence after it: "**the `.text` code region is fully populated**".
+That was never tested for `81720000-81770000`, because the scan could not see
+it. Bounds corrected and `81747A00` added to the probe list.
+
+What this does **not** touch: the `XamTextWatch` result further up - xam `.text`
+reading zero and coming back to the identical value, region-wide - sampled
+specific addresses directly rather than going through this scan, so it stands
+unaffected. The transient-zero phenomenon is still real and still unexplained;
+only the page-census evidence around it is withdrawn.
+
+### `LLE xam: loaded at 30013000` is not a second copy
+
+Recorded because this file flags it as "worth understanding before theorising
+further, since it may mean there are two copies of the image". It does not.
+That log line prints `xam_module->hmodule_ptr()`, and `hmodule_ptr_` is
+documented in `xmodule.h` as pointing to the `LDR_DATA_TABLE_ENTRY` - a
+system-heap allocation describing the module, not the image. `30013000` is
+that descriptor, which is also why resource lookups pass `module=30013000` as
+the handle. There is one image, mapped where the section table says.
+
+**And `81747A00` is not a new site.** It shares a page with `81747D70`
+(`81747A00 & ~0xFFF == 81747D70 & ~0xFFF == 81747000`), which is one of the
+four addresses `XamTextWatch` already caught going zero and coming back. So
+the boot-killing read is the *same* transient phenomenon, not a second
+independent one - the contribution here is only the disk-side ground truth
+that the bytes involved are real code (prologue, own `.pdata` record, two real
+callers, 954 KB of contiguous non-zero code around it), which rules out the
+"it is padding / a bogus pointer" readings for good.
+
+That the flips are **page-granular** is itself a clue worth keeping: a
+region-wide transition that restores identical bytes, observed at page
+granularity, looks far more like a mapping or protection operation than like
+anything writing data.

@@ -2766,10 +2766,32 @@ static std::string format_version(xex2_version version) {
 // point: a page that is populated at load and zero later means something is
 // clobbering the image, which is a different bug from it never being loaded.
 static void ReportXamTextPopulation(Memory* memory, const char* when) {
-  const uint32_t kTextStart = 0x81770000u;
-  const uint32_t kTextEnd = 0x81D60000u;
+  // xam's .text is 81720000..81D13CE0 - taken from the section table of the
+  // decrypted image, where a section's bytes live at file offset
+  // (VA - ImageBase). The bounds used here before were 81770000..81D60000,
+  // which is wrong at BOTH ends and invalidated everything this scan has ever
+  // reported:
+  //   * it began 320 KB into .text, so it never looked at 81720000-81770000 -
+  //     the region containing 81747A00, the address the boot actually dies on;
+  //   * it ran 304 KB past the end of .text, into the inter-section gap and
+  //     into .data.
+  // Every "zero page" it found lived in that overrun: 81D14000-81D1FFFF is the
+  // padding between .text and .data, and 81D3D000-81D5FFFF is zero-initialised
+  // .data. Both are supposed to be zero. The long-standing "47 of 1520 pages
+  // of xam .text are entirely zero" result was therefore measuring alignment
+  // padding and .bss, not missing code.
+  const uint32_t kTextStart = 0x81720000u;
+  const uint32_t kTextEnd = 0x81D14000u;
   uint32_t zero_pages = 0, total_pages = 0, run = 0, best_run = 0;
   uint32_t best_start = 0, first_zero = 0, last_zero = 0;
+  // A count says how much is missing but never *what*, and "what" is the
+  // question: guest 81747A00 reads as zero here while the firmware image on
+  // disk holds a real function there (mfspr prologue, its own .pdata record,
+  // two callers). Logging the ranges says whether the same pages are lost
+  // every run - which decides whether this is a race or a fixed hole - and
+  // makes each one directly checkable against the image.
+  uint32_t run_start = 0;
+  std::vector<std::pair<uint32_t, uint32_t>> zero_runs;
   for (uint32_t pg = kTextStart; pg < kTextEnd; pg += 0x1000) {
     auto* hp = memory->LookupHeap(pg);
     if (!hp || hp->QueryRangeAccess(pg, pg + 0xFFF) ==
@@ -2789,19 +2811,35 @@ static void ReportXamTextPopulation(Memory* memory, const char* when) {
       ++zero_pages;
       if (!first_zero) first_zero = pg;
       last_zero = pg;
+      if (!run) run_start = pg;
       if (++run > best_run) {
         best_run = run;
-        best_start = pg - (run - 1) * 0x1000;
+        best_start = run_start;
       }
     } else {
+      if (run) zero_runs.emplace_back(run_start, pg - 0x1000);
       run = 0;
     }
+  }
+  if (run) zero_runs.emplace_back(run_start, kTextEnd - 0x1000);
+  if (!zero_runs.empty()) {
+    std::string ranges;
+    size_t shown = 0;
+    for (auto& r : zero_runs) {
+      if (shown++ == 24) break;
+      ranges += fmt::format("{:08X}-{:08X}({}) ", r.first, r.second + 0xFFF,
+                            (r.second - r.first) / 0x1000 + 1);
+    }
+    XELOGI("xam .text zero ranges ({}): {} run(s){}: {}", when,
+           zero_runs.size(),
+           zero_runs.size() > 24 ? " [first 24]" : "", ranges);
   }
   // Whole-page counting misses a hole inside an otherwise populated page,
   // which is exactly what a bogus function start landing in inter-function
   // padding would look like. Dump the specific addresses the scanner has
   // tripped on so they can be diffed against the image on disk.
-  for (uint32_t probe_addr : {0x8186E528u, 0x818936B8u, 0x81747D70u}) {
+  for (uint32_t probe_addr :
+       {0x8186E528u, 0x818936B8u, 0x81747D70u, 0x81747A00u}) {
     auto* hp = memory->LookupHeap(probe_addr);
     if (!hp || hp->QueryRangeAccess(probe_addr, probe_addr + 31) ==
                    xe::memory::PageAccess::kNoAccess) {
