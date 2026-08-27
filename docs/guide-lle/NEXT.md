@@ -2038,3 +2038,21 @@ two actually runs before fixing anything.
 That is a small, concrete target compared with everything that preceded it,
 and it is on the bootstrap/kernel side rather than in XUI - which matches what
 the Aurora experiment was intended to distinguish.
+
+### Confirmed: the failing call reaches real xam, not Xenia's shim
+
+Instrumenting Xenia's HLE `XamNotifyCreateListener_entry` to log every call
+(with mask, max_version, process type, returned handle and caller `lr`) gives
+**zero calls** across a full run in which `GuideMain.xur` still fails with
+`80004005`.
+
+So the guess in the previous section is right, and it matters: hud's import is
+redirected to the guest implementation under `lle_xam_scope="hud.xex"`, so
+**real xam's `XamNotifyCreateListener` is what returns 0**. Fixing Xenia's HLE
+shim would have changed nothing - it is never invoked on this path.
+
+That also means the failure is guest-side behaviour inside real xam, reached
+with `mask=0x20, max_version=10`, and the question becomes why xam's own
+implementation refuses. Worth checking first whether it depends on
+notification state that our bootstrap never sets up, since that would fit the
+"three scenes that need hud-side setup" pattern.

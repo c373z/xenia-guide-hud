@@ -15,6 +15,8 @@
 #include "xenia/kernel/xthread.h"
 #include "xenia/xbox.h"
 
+#include <atomic>
+
 namespace xe {
 namespace kernel {
 namespace xam {
@@ -42,7 +44,20 @@ dword_result_t XamNotifyCreateListener_entry(qword_t mask,
   auto thread = kernel::XThread::GetCurrentThread();
   auto ctx = thread->thread_state()->context();
   auto type = xboxkrnl::xeKeGetCurrentProcessType(ctx);
-  return xeXamNotifyCreateListener(mask, type == 2, max_version);
+  uint32_t handle = xeXamNotifyCreateListener(mask, type == 2, max_version);
+  // hud returns E_FAIL from XuiSceneCreate when this comes back zero, so
+  // record whether the HLE shim is even the thing being called - with LLE xam
+  // the import may be redirected to the guest implementation instead.
+  static std::atomic<uint32_t> calls{0};
+  uint32_t n = ++calls;
+  if (n <= 12) {
+    XELOGI(
+        "XamNotifyCreateListener[HLE] #{}: mask={:016X} max_version={} "
+        "type={} -> handle {:08X} (caller lr={:08X})",
+        n, uint64_t(mask), uint32_t(max_version), type, handle,
+        uint32_t(ctx->lr));
+  }
+  return handle;
 }
 DECLARE_XAM_EXPORT1(XamNotifyCreateListener, kNone, kImplemented);
 

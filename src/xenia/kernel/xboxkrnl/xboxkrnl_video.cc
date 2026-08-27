@@ -1104,6 +1104,17 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
           tail += fmt::format("{:08X}:{:08X} ", 0x81D6D4E0u + w * 4,
                               rd(0x81D6D4E0u + w * 4));
         }
+        // hud returns E_FAIL from XuiSceneCreate when
+        // XamNotifyCreateListener (ordinal 0x28A) hands back 0, and the HLE
+        // shim is never called, so the guest implementation is the one that
+        // runs. Report where it lives so it can be read.
+        {
+          auto xmn = kernel_state()->GetModule("xam.xex", true);
+          uint32_t nfn = xmn ? xmn->GetProcAddressByOrdinal(0x28A) : 0;
+          XELOGI("GuideScene: xam ordinal 28A (XamNotifyCreateListener) -> "
+                 "{:08X}",
+                 nfn);
+        }
         XELOGI("GuideScene: class index bound [81D6D4F8] = {} ({:08X}); "
                "neighbourhood {}",
                cls_count, cls_count, tail);
