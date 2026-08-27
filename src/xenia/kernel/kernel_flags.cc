@@ -729,6 +729,14 @@ DEFINE_bool(lle_xam_heap_init, false,
             "directly. xam's heap descriptors are never built under our "
             "bootstrap because nothing outside the module drives that call.",
             "Kernel");
+DEFINE_bool(guide_force_front_buffer, false,
+            "Call 81A0FE48(device, 0) once, the front-buffer setup that "
+            "mode 2 skips. 819F4D28 runs it only when its mode argument "
+            "is not 2, and the creator this bootstrap reaches passes 2 as "
+            "a literal, so [device+0x3F74] stays null and the draw "
+            "emitter faults on it. The second argument mirrors r7 at that "
+            "call site, which is zero.",
+            "Kernel");
 DEFINE_bool(guide_reuse_xui_ctx, false,
             "Skip the render-host init (8178DC58) when a XUI context "
             "already exists. Calling it a second time builds a new "

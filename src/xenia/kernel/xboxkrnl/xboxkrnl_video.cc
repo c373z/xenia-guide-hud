@@ -3001,6 +3001,22 @@ void VdSwap_entry(
           // the object the present reads (819DE8F8 takes it as its first
           // argument via wrapper vtable slot 11). Bind on that instead.
           uint32_t real_dev = dev ? rdw(dev + 0x0Cu) : 0;
+          if (::cvars::guide_force_front_buffer && real_dev) {
+            static bool fb_done = false;
+            if (!fb_done && !rdw(real_dev + 0x3F74u)) {
+              fb_done = true;
+              auto* fth = XThread::GetCurrentThread();
+              uint64_t fargs[] = {real_dev, 0ull};
+              uint64_t fr = fth ? kernel_state()->processor()->Execute(
+                                      fth->thread_state(), 0x81A0FE48u,
+                                      fargs, xe::countof(fargs))
+                                : 0;
+              XELOGI("Guide: forced front-buffer setup on {:08X} -> {:08X};"
+                     " [3F74] now {:08X}",
+                     real_dev, static_cast<uint32_t>(fr),
+                     rdw(real_dev + 0x3F74u));
+            }
+          }
           if (std::getenv("XENIA_PRESENT_RT") &&
               ::cvars::guide_bind_title_rt && guide_title_surface_ && real_dev) {
             static bool present_rt_done = false;
