@@ -3,6 +3,54 @@
 The Guide's software runs to completion; nothing reaches the screen. This is
 what is known about the remaining gap, and what is not.
 
+> ## READ THIS FIRST - current state
+>
+> This file is append-only and roughly 3000 lines. Several early sections were
+> **later proved wrong** and corrected much further down, so reading a section
+> in isolation will mislead you. What follows is the state as of the latest
+> entry; where it conflicts with anything below, this wins.
+>
+> **Verified working now**
+>
+> - `GuideMain.xur`, `GuideMainServer.xur` and `MiniMediaPlayer.xur` all load
+>   (`XuiSceneCreate -> 00000000`). They failed with `E_FAIL` for the whole
+>   history of this project until the string table was supplied.
+> - The composite draw loop runs continuously, ~13-16 draws per run and still
+>   going when the harness kills the process.
+> - `ObInsertObject` is implemented (it was an unimplemented export, which is
+>   what made xam's notification listener fail and hud give up).
+> - xam is loaded once, not twice. The double load corrupted its `.text` and
+>   caused every kind of intermittent failure recorded in the middle of this
+>   file.
+> - The DC present gates are all satisfied in the patched configuration.
+>
+> **Known wrong, corrected later in this file**
+>
+> | Early claim | Reality |
+> |---|---|
+> | `[dc+11C] == 0` bails out of the present | `== 0` is the **required** state; non-zero returns `8000FFFF` |
+> | The emulator freezes / deadlocks loading hud.xex | It crashed and showed a **modal dialog**; the harness could not see it |
+> | Scene files differ structurally, explaining `E_FAIL` | Nothing in the files distinguishes them; the cause was a missing kernel export |
+> | The XUI resource provider is null and never installed | `[81D6D0AC]` now holds `81D22A54` |
+> | No element anywhere has a visual | True, but only established later on a scene that actually renders; the early measurement was on unattached scenes |
+>
+> **The two open questions**
+>
+> 1. **No control has a visual**, including on the scene under active
+>    composite draw. Confirmed on real controls (`btnB` is a button) across
+>    several scenes.
+> 2. **The present reads a different device** from the one the render-target
+>    bind targets: `[dc+0x1CC]` versus the wrapper's device. Binding on the
+>    present's device stops the draw loop and is disabled behind
+>    `XENIA_PRESENT_RT`.
+>
+> **Method note that keeps paying off:** on this problem, plausible causal
+> stories have been wrong far more often than right - module-0 locators, patch
+> timing, wrong object instance, case sensitivity, section lookups, and the
+> gate polarity above were each consistent with all evidence at the time. Every
+> one fell to a single direct measurement. Measure the thing; do not reason
+> about it.
+
 ## The gap in one paragraph
 
 xam creates a D3D device (runtime address logged as `device now 40877380`), and
