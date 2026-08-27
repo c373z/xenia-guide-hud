@@ -2226,3 +2226,41 @@ is missing is whatever binds a string table to the object at `[r29+0x4E8]`.
 Note this is a real hud bug that hardware never hits, because on a console the
 lookup always succeeds. It cannot be worked around by making the lookup return
 an empty string without understanding what hud does with it next.
+
+### Where hud's string table comes from - and why it stays null
+
+Tracing the field hud dereferences (`[obj+0x4E8]`):
+
+- **48 loads, 2 stores** in hud `.text`, and *both stores write zero* -
+  `913EC608` is the constructor zeroing it, `913EC69C` the cleanup path. So
+  nothing assigns the table by direct store.
+- Exactly one place takes its address: `913EC798  addi r3,r31,1256` followed
+  by `bl 913EA7D8`, a smart-pointer assign helper (release old, then store
+  new).
+- That helper's payload is `XuiLoadStringTableFromFile` (ordinal `0x342`),
+  called as `(locator, &field)`, and the locator it is handed was built
+  immediately before by **`XamBuildDynamicResourceLocator`** (ordinal `0x31E`)
+  at `913EC790`, into the local at `sp+96`.
+
+So the field is only ever non-null if `XuiLoadStringTableFromFile` succeeds,
+and its return value is **not checked** by the helper. A failed load leaves the
+field zero, which is exactly the state the crash exposes.
+
+This lands next to a defect the project already knows about. `guide_static_locator`
+exists because hud's *dynamic* locator builder yields `section://@0,...` with
+a module of 0. hud imports **both** builders - `XamBuildDynamicResourceLocator`
+(`913FE8B4`) and `XamBuildResourceLocator` (`913FE8C4`) - and the string-table
+path calls the dynamic one. The existing patch at `913EB994` forces the static
+builder at a *different* decision point, and the log confirms it applied
+(`Guide: patched hud 913EB994 409A0020 -> 60000000`), so it does not cover
+this call site.
+
+**hud's runtime base is `913DF200`.** Confirmed twice over: the tagging tool's
+logged addresses, and now that the `913EB994` patch matched its expected
+opcode, which lands at RVA `0xC794` only under this base (under the earlier
+`913E0000` guess that RVA holds `38610050` instead). Worth stating plainly
+because a wrong base silently disassembles the wrong instructions.
+
+Next: confirm what locator the dynamic builder actually produces for this
+call, and whether forcing the static builder here too - or supplying the
+module it wants - makes `XuiLoadStringTableFromFile` succeed.
