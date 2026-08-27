@@ -5640,3 +5640,38 @@ surface.** The fix is one dereference: bind on `[wrapper+0x0C]`.
 Probe added to the composite-draw line to confirm the chain at runtime -
 `wrap[0]`, `wrap[0C]`, and the real device's two surface fields - so the
 identification is measured and not just inferred from a vtable offset.
+
+**Confirmed at runtime**, stable across the whole draw loop:
+
+    draw dc=407D4C80 [1CC]=40877E00 wrap[0]=81640680 wrap[0C]=40870D00
+                     realdev[32A0]=00000000 realdev[32B0]=00000000
+
+`[wrapper+0x0C]` is `40870D00`, which is exactly the `r31` the present faults
+on, and the real device's two surface fields are both zero. The chain is now
+measured end to end rather than argued from a vtable offset:
+
+    dc 407D4C80 --[+0x1CC]--> wrapper 40877E00 --[+0x0C]--> device 40870D00 --> no surface
+
+### The remaining step, stated precisely
+
+**Nothing binds a render target on `40870D00`.** That is the entire remaining
+gap between a scene tree with 281 registered visuals attached and pixels.
+
+What is *not* the problem, all now ruled out by measurement rather than
+argument: the skin (loads, 281 visuals registered), the visual lookup
+(`GetVisual` returns `S_OK` with handles), the XUI context (well-formed, and
+no longer freed under `guide_reuse_xui_ctx`), the class registry (38 of 48
+populated), and `[dc+0x11C]` (zero, the required state).
+
+What remains open is narrow but not trivial, and this file's own warning
+applies to it directly: the `create_primary_device`, `fake_front_buffer` and
+`use_bound_device` scaffolding hands the guest state the system would normally
+have built, and results measured against hand-assembled state are not facts
+about xam. Binding a surface onto `40870D00` by hand would be more of the same
+unless it is done the way the console does it.
+
+So the question to answer first is **what would normally put a surface in
+`[device+0x32A0]`** - i.e. which call the system makes that we are not making -
+rather than writing a pointer there and seeing what happens. That is the same
+class of question as the skin loader and the heap creator, both of which turned
+out to be real routines nobody was driving.
