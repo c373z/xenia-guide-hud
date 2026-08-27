@@ -5958,3 +5958,56 @@ takes a different path entirely. Both are checkable; neither is established.
 Ruled out this tick, so nobody repeats it: `81A0F1C8` is not a candidate to
 drive. Calling it would null the front buffer pointer, which is the opposite of
 what is needed.
+
+### Why the front buffer is never allocated: a hardcoded mode argument
+
+Correcting the gate identified two sections ago, and then finding the real one.
+
+**The `81A0F768` branch is not the gate.** Its `bne` jumps to `819F4E9C`, past
+the setup call at `819F4E8C` - but the setup region is *entered* from
+elsewhere, so falling past it proves nothing. Mapping every branch that lands
+in `819F4E6C..819F4E90` finds exactly one way in:
+
+    819F4E38  bc -> 819F4E6C
+
+and the condition immediately before it is:
+
+    819F4E34  cmpwi cr6,r29,2
+    819F4E38  bne  +0x34          ; r29 != 2  ->  take the front-buffer path
+
+So the allocation runs **when `r29 != 2`**. `r29` is assigned once, at
+`819F4D38`: `or r29,r4,r4` - it is the function's **second argument**. So
+`819F4D28(device, mode)` allocates a front buffer for every mode except `2`.
+
+**And our path passes 2, hardcoded:**
+
+    8178F7C8  addi r4,r0,2
+    8178F7CC  addi r3,r0,0
+    8178F7D0  bl   819F4D28
+
+`8178F748` - the device creator this bootstrap calls, reached from xam's
+DllMain - invokes `819F4D28(0, 2, ...)` with the mode as a literal. Mode 2 is
+exactly the case that skips the allocation. Nothing is failing; this call site
+is simply not the one that builds a front buffer.
+
+`819F4D28` has three callers. The other two - `8178E9F0` (a root with no
+callers) and `8191B9E8` (whose only caller `818FF140` also never runs) - never
+execute. One of those is presumably the path that passes a different mode.
+
+So the chain from "no pixels" to a single cause is now complete:
+
+    8178F748 calls 819F4D28 with mode 2
+      -> front-buffer allocation (81A0FE48 -> 81A0FA80 -> 819E7310) skipped
+        -> [dev+0x3F74] stays null
+          -> wrapper slot 24 -> 819FEB78 reads it as r6
+            -> 819F7F20 passes it as arg 6
+              -> draw emitter 819F5D18 takes it in r14 and faults on r14+0x20
+
+Every link measured or disassembled, none inferred.
+
+**What not to do:** call `819F4D28` again with a different mode, or write a
+front buffer into `[dev+0x3F74]` by hand. The mode-2 call is deliberate, and
+whatever normally runs the mode-not-2 path presumably sets up more than this
+one field. The question is which of `8178E9F0` / `8191B9E8` runs on hardware
+and what drives it - the same shape as the four earlier gaps, and the same
+reason to identify it rather than fake it.
