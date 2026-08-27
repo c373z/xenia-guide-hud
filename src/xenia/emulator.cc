@@ -3859,6 +3859,26 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
               // visual (80300017) while laying out correctly. It has no
               // callers inside xam and takes no arguments, so drive it here.
               if (cvars::lle_xam_skin_init) {
+                // The loader's tail loads [81D43C50+0x28] and calls through
+                // it to register a skin-change callback. Nothing in xam ever
+                // writes that field - no store to it exists anywhere in
+                // .text - so the call gets null and faults storing at +0x30,
+                // *after* the visuals have already been registered. Give it a
+                // zeroed block to write into so the loader can finish and
+                // return, instead of dying two instructions from the end.
+                //
+                // This is deliberately a stand-in, not the real object: the
+                // callee only stores the callback at +0x30/+0x34, and since
+                // nothing else in xam creates or reads this manager, nothing
+                // else can be misled by it.
+                uint32_t mgr = ks->memory()->SystemHeapAlloc(0x100, 16);
+                if (mgr) {
+                  std::memset(ks->memory()->TranslateVirtual(mgr), 0, 0x100);
+                  xe::store_and_swap<uint32_t>(
+                      ks->memory()->TranslateVirtual(0x81D43C78u), mgr);
+                  XELOGI("LLE xam: skin callback manager stand-in at {:08X}",
+                         mgr);
+                }
                 uint64_t sargs[] = {0};
                 XELOGI("LLE xam: calling skin loader 81795548");
                 uint64_t sr = ks->processor()->Execute(ts, 0x81795548u, sargs,

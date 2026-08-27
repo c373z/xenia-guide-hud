@@ -4863,3 +4863,50 @@ and only the crash stands between it and a scene walk; if it does not, the
 registrations are failing for a separate reason and the crash is a red herring.
 That is one probe and one run, and it decides where the remaining effort
 belongs.
+
+---
+
+## Confirmed: the skin registers 281 visuals. The crash is in the tail, after them.
+
+The question from the last section - do the registrations actually land - is
+answered, and the answer is yes. Two runs, same probe, same build, differing
+only in `lle_xam_skin_init`:
+
+    skin init OFF: visual registry @81D6CF50: 00000000 x12   (and 8193D238 never entered)
+    skin init ON : visual registry @81D6CF50: 4089FD40 4089E740 00000119 00000119
+                                              4089DE20 00000008 00000007 00000000
+                                              00000004 00000000 00000000 00000000
+
+Three live heap pointers and **`0x119` = 281** twice, which reads as
+count-and-capacity. So the skin path really does fill the collection that
+`XuiVisualCreateInstance` searches, with 281 entries, from an empty start.
+
+**First, a correction to the plan I wrote last tick.** I proposed checking "the
+XUI registry at `81D6D508`". That is the wrong table - it is the **class**
+registry (48 slots, 38 non-null), which this file already records as
+populated, and it says nothing about visuals. The visual registry is
+`81D6CF50`, named by `XuiVisualRegister`'s own prologue: it builds `81D6CE5C`
+as the lock and `81D6CF50` as the object it passes in `r3` to its insert
+helper. Checking the first would have produced a confident, meaningless
+answer.
+
+**What this changes.** The ordering is now established:
+
+1. the skin loads;
+2. 281 visuals get registered;
+3. *then* the loader's tail loads `[81D43C50+0x28]`, gets null, and faults
+   storing at `+0x30` - about `0x2C` from the end of its `0x424` body.
+
+So the crash is not preventing registration; it happens after it. The only
+thing it costs is the loader returning cleanly, and with it xam's init
+completing - which is what currently costs us the scenes.
+
+**Stand-in applied.** Since the callee only stores the callback at `+0x30` and
+`+0x34`, and nothing else in xam creates *or* reads that manager, a zeroed
+`SystemHeapAlloc(0x100)` block is written to `81D43C78` before the loader runs.
+That is explicitly a stand-in to let the tail complete, not a reconstruction of
+the real object; it is gated behind `lle_xam_skin_init` with the rest.
+
+If that lets init finish, this would be the first run in which the scenes are
+created *and* the visual registry is populated at the same time - which is the
+configuration the whole visual investigation has been trying to reach.
