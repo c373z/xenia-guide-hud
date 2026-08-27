@@ -3512,3 +3512,26 @@ Where this leaves the visual question: it is **not** a missing skin file
 class global, and **not** an undelivered message. It is an empty per-class
 registration that something during normal xam/hud startup would populate and
 our bootstrap does not.
+
+### Addressing caveat: `+0x7200` is a `.text` relationship, not an image-wide one
+
+Reading the string operand of `819428B0` by computing
+`runtime + 0x7200 -> file offset` yields `'ice (0x%08X)'`, sitting sixty-odd
+bytes inside `'...tusChangedNotification: Device status stopped from firing
+tw...'`. That is mid-string, i.e. the computed address is wrong.
+
+This is the **second** time this has happened, both in `.rdata`: the same
+approach produced `'rpOutputLocation'` and `'ontroller.xur'` for hud, and that
+was resolved by reading the strings out of **guest memory** instead, which
+gave the correct `"hud"` and `"strings.xus"`.
+
+So the rule is narrower than this file has been treating it:
+
+- `runtime + 0x7200 = file VA` is reliable for **`.text`** - it has been
+  cross-checked repeatedly against live disassembly and against the successful
+  `913EB994` patch.
+- For **`.rdata`** it does not hold. Read string constants from guest memory
+  at the runtime address rather than computing a file offset.
+
+Practically: when a disassembled instruction pair builds a pointer to a string
+constant, do not resolve it offline. Log it from the emulator.
