@@ -5483,3 +5483,41 @@ The next question should be **what sets `[dc+0x1CC]` when a DC is built**,
 since every path here depends on that field holding a real device and it
 demonstrably does not. That is a construction-time question about
 `XuiRenderCreateDC`, not a runtime one about surfaces.
+
+### Correction: `[dc+0x1CC]` is `[xui_ctx+0x08]`, and that is a real object
+
+The DC constructor is `818FDE98`, and it settles what these fields are:
+
+    81905098  DC ctor(r3 = dc, r4 = xui_ctx)
+      or   r30,r3        ; the dc
+      or   r27,r4        ; the XUI context
+      ...
+      stw  r27,456(r30)  ; [dc+0x1C8] = the XUI context
+      lwz  r3,8(r27)     ; r3 = [ctx+0x08]
+      stw  r3,460(r30)   ; [dc+0x1CC] = [ctx+0x08]
+      lwz  r11,0(r3)     ; its vtable
+      lwz  r11,0(r11)    ; slot 0
+      mtspr 9,r11 ; bctr ; and calls it
+
+So `[dc+0x1CC]` is not "the device" by definition - it is whatever
+`[xui_ctx+0x08]` holds, and the constructor **immediately calls vtable slot 0
+on it**. An object whose slot 0 is called successfully is a real object with a
+real vtable.
+
+**That retracts the previous section's conclusion.** I argued `40877E00` could
+not be a device because it is the XUI context plus `0x40` and therefore "past a
+44-byte object". Adjacency proves nothing - heap allocations sit next to each
+other routinely, and a 44-byte context followed by another block at `+0x40` is
+exactly what a heap does. The reasoning was wrong even though the observation
+was right.
+
+Also worth recording from the context constructor `818FD0E8`: it allocates
+**44 bytes**, sets `[+0x04] = 1` and `[+0x1C] = 1` from literals, and sets
+`[+0x08] = 0` along with every other field. So `[ctx+0x08]` is **zero at
+construction** and `40877E00` is written into it later by something else -
+which is the thing to identify, since `[dc+0x1CC]` is a straight copy of it.
+
+Probe added: the composite-draw line now logs `[dev+0]`, the object's vtable
+pointer. That identifies the class and says whether `+0x32A0` is even a
+meaningful offset for it, instead of assuming it is a D3D device because this
+file calls the field "the device".
