@@ -2139,3 +2139,51 @@ Risk assessment: the export is currently an *undefined extern*, so it does
 nothing and returns garbage today. Nothing can depend on its present
 behaviour, and no title that never calls it can regress. That makes this a
 low-risk addition.
+
+## `ObInsertObject` implemented - hud now gets its handle
+
+Two changes:
+
+- `xobject.h`: `set_guest_object_no_stash()`. `SetNativePointer` is the normal
+  way an XObject records which guest object it wraps, but it stashes the handle
+  *into the object's dispatch header*, and it carries an upstream `FIXME`
+  admitting not every object has one. xam's notification listener does not, so
+  stashing would corrupt it.
+- `xboxkrnl_ob.cc`: `ObInsertObject(Object, Attributes, DesiredAccess, Handle)`.
+  Creates an `XObject` wrapper, records the guest pointer without touching
+  guest memory, allocates a handle via `ObjectTable::AddHandle`, and keeps a
+  guest-pointer -> handle side table so re-inserting the same object returns
+  the same handle instead of accumulating wrappers. The side table follows the
+  `GuestTimerTable` precedent already in `xobject.cc`.
+
+It deliberately does **not** go through `XObject::GetNativeObject` the way
+`ObOpenObjectByPointer` does: that reads a dispatcher type out of the object's
+first bytes, so for a header-less object it would interpret arbitrary bytes as
+a type and could quietly build an `XEvent` around something that is not an
+event.
+
+Verified working:
+
+    ObInsertObject: guest object 301C9018 -> handle F8000308
+    ObInsertObject: guest object 301CD018 -> handle F8000310
+    ObInsertObject: guest object 401EC9B0 -> handle F8000318
+
+`301C9018` is the same object `ObCreateObject` reported creating, and the
+import table no longer marks `ObInsertObject` with `!!`, with zero
+"undefined extern call" lines for it.
+
+### The next blocker (progress, not regression)
+
+hud no longer gives up early. It now runs *into* scene creation and faults:
+
+    GUEST CRASH: access violation at guest PC 913FA204, fault_addr 0000000100000000
+    lr=913E8D38
+    unwind: 913E9520 913E9AEC 913E8858 913E87BC 8194A070 8194A5A0
+            81935040 81937D9C 8193B2BC 8193B3A4
+
+`fault_addr` is the membase, i.e. a guest null dereference. The unwind runs
+from xam's XUI scene loader (`8193B3A4` down through `8194A070`) into hud, so
+hud is being called back during scene construction and dereferences null.
+`913FA204` is hud RVA `0x1B004` (base `913DF200`), file VA `9801B004`.
+
+This is the expected shape of clearing one blocker and meeting the next.

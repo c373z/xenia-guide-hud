@@ -7,6 +7,8 @@
  ******************************************************************************
  */
 
+#include <unordered_map>
+
 #include "xenia/kernel/xboxkrnl/xboxkrnl_ob.h"
 #include "xenia/base/logging.h"
 #include "xenia/cpu/processor.h"
@@ -419,6 +421,83 @@ uint32_t NtClose(uint32_t handle) {
 
 dword_result_t NtClose_entry(dword_t handle) { return NtClose(handle); }
 DECLARE_XBOXKRNL_EXPORT1(NtClose, kNone, kImplemented);
+
+// Guest object pointer -> handle, for objects the guest built itself with
+// ObCreateObject. Their handle cannot live in the object the way
+// SetNativePointer does it, because such an object need not carry a dispatch
+// header - xam's notification listener does not - and writing one there would
+// corrupt it. xobject.cc already takes this approach for adopted guest timers.
+static std::unordered_map<uint32_t, uint32_t>& InsertedObjectTable() {
+  static std::unordered_map<uint32_t, uint32_t> table;
+  return table;
+}
+
+// ObInsertObject(PVOID Object, POBJECT_ATTRIBUTES, ACCESS_MASK, PHANDLE)
+//
+// Turns an object created by ObCreateObject into a handle. Without this, xam's
+// XamNotifyCreateListener creates its listener successfully and then has no
+// way to return a handle for it, so it hands back 0 - which makes hud fail
+// every XuiSceneCreate that needs a notification listener, and the Guide's
+// GuideMain, GuideMainServer and MiniMediaPlayer scenes never load.
+//
+// Deliberately does not route through XObject::GetNativeObject the way
+// ObOpenObjectByPointer does. That reads a dispatch header out of the object,
+// and for an object without one it would interpret arbitrary bytes as a
+// dispatcher type - quietly producing, say, an XEvent wrapper around something
+// that is not an event.
+dword_result_t ObInsertObject_entry(lpvoid_t object_ptr,
+                                    lpvoid_t obj_attributes_ptr,
+                                    dword_t desired_access,
+                                    lpdword_t out_handle_ptr) {
+  if (out_handle_ptr.guest_address()) {
+    *out_handle_ptr = 0;
+  }
+  uint32_t guest_ptr = object_ptr.guest_address();
+  if (!guest_ptr) {
+    return X_STATUS_INVALID_PARAMETER;
+  }
+
+  auto global_lock = xe::global_critical_region::AcquireDirect();
+  auto& table = InsertedObjectTable();
+
+  // Inserting the same object twice hands back the same handle rather than
+  // accumulating wrappers.
+  auto it = table.find(guest_ptr);
+  if (it != table.end()) {
+    auto existing = kernel_state()->object_table()->LookupObject<XObject>(
+        it->second);
+    if (existing) {
+      existing->RetainHandle();
+      if (out_handle_ptr.guest_address()) {
+        *out_handle_ptr = it->second;
+      }
+      return X_STATUS_SUCCESS;
+    }
+    table.erase(it);
+  }
+
+  auto object = object_ref<XObject>(
+      new XObject(kernel_state(), XObject::Type::NotifyListener));
+  object->set_guest_object_no_stash(guest_ptr);
+
+  X_HANDLE handle = X_INVALID_HANDLE_VALUE;
+  X_STATUS result =
+      kernel_state()->object_table()->AddHandle(object.get(), &handle);
+  if (XFAILED(result)) {
+    XELOGE("ObInsertObject: no handle for guest object {:08X} ({:08X})",
+           guest_ptr, result);
+    return result;
+  }
+
+  table.emplace(guest_ptr, handle);
+  if (out_handle_ptr.guest_address()) {
+    *out_handle_ptr = handle;
+  }
+  XELOGI("ObInsertObject: guest object {:08X} -> handle {:08X}", guest_ptr,
+         handle);
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XBOXKRNL_EXPORT1(ObInsertObject, kNone, kImplemented);
 
 dword_result_t ObCreateObject_entry(
     pointer_t<X_OBJECT_TYPE> object_factory,

@@ -182,6 +182,15 @@ class XObject {
   const std::string& name() const { return name_; }
   uint32_t guest_object() const { return guest_object_ptr_; }
 
+  // Record which guest object this handle refers to *without* writing anything
+  // into that object. SetNativePointer is the usual route, but it stashes the
+  // handle into a dispatch header - and objects the guest builds through
+  // ObCreateObject need not have one (xam's notification listener does not),
+  // so stashing there would corrupt them.
+  void set_guest_object_no_stash(uint32_t native_ptr) {
+    guest_object_ptr_ = native_ptr;
+  }
+
   // Has this object been created for use by the host?
   // Host objects are persisted through reloads/etc.
   bool is_host_object() const { return host_object_; }
