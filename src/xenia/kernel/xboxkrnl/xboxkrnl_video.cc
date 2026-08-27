@@ -975,8 +975,9 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   if (guide_bs_skin_module_) {
     xe::store_and_swap<uint32_t>(
         memory->TranslateVirtual(guide_bs_obj_ + 4), guide_bs_skin_module_);
-    XELOGI("GuideBootstrap: [guide+4] = skin module {:08X}",
-           guide_bs_skin_module_);
+    XELOGI("GuideBootstrap: guide object {:08X}, [guide+4] = skin module "
+           "{:08X}",
+           guide_bs_obj_, guide_bs_skin_module_);
   }
   if (::cvars::guide_static_locator) {
     // The dynamic locator builder is handed [guide+8] as its module and

@@ -2363,3 +2363,45 @@ That is testable without breakpoints: the two stores that zero the field are
 at `913EC608` (constructor) and `913EC69C` (cleanup), so counting constructor
 runs against string-table loads would show whether more objects exist than
 tables.
+
+### The table pointer really is null, and the object is the right class
+
+`XENIA_CRASH_PEEK` (new, env-gated) dumps a register-relative window from the
+guest-crash handler, for when the interesting value is a *field* of an object
+a register points at rather than the register itself. Format
+`"<reg>,<hexoffset>,<words>"`, e.g. `29,4E8,8`.
+
+At the crash, `r29 = 401EAFB0` and:
+
+    GUEST CRASH: peek r29+4E8 = 401EB498: 00000000 00000000 00000000 00000000
+                                          000004C7 00000000 00000000 401EBA30
+
+Two things follow:
+
+- **`[r29+0x4E8]` is genuinely null.** So the alternative reading - table
+  present, index 40 simply absent - is refuted. hud really does look up a
+  string in a null table.
+- **`r29` is an instance of the right class.** `+0x4F8` holds `0x4C7` (1223),
+  which is exactly what the constructor at `913EC5E4`/`913EC610` writes
+  (`addi r9,r0,1223 ; stw r9,1272(r31)`). So this is the same type as the
+  object whose string table is loaded at `913EC798` - just, apparently, a
+  different instance.
+
+### Why the locator patches were always beside the point for this object
+
+The bootstrap already forces the static path *by data*, not by patching:
+
+```cpp
+xe::store_and_swap<uint32_t>(... guide_bs_obj_ + 4, guide_bs_skin_module_);
+xe::store_and_swap<uint32_t>(... guide_bs_obj_ + 8, 0xFFFFFFFFu);  // static
+```
+
+Setting `[obj+8] = -1` makes the `cmpwi r3,-1` chooser fall through to the
+static builder, and `[obj+4]` supplies its module. That is the same effect the
+`913EB994`/`913EC75C` nops produce - but it is applied to
+**`guide_bs_obj_` only**. Any other instance of the class keeps the
+constructor's zeros, takes the dynamic path, and gets `section://@0,...`.
+
+So the open question is now sharp: is `401EAFB0` the bootstrap's own object or
+a different one? A run logging `guide_bs_obj_` alongside the crash registers
+answers it directly.

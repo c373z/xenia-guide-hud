@@ -9,6 +9,7 @@
 
 #include <ranges>
 
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <thread>
@@ -2539,6 +2540,34 @@ bool Emulator::ExceptionCallback(Exception* ex) {
                static_cast<uint32_t>(ectx->r[base + 5]),
                static_cast<uint32_t>(ectx->r[base + 6]),
                static_cast<uint32_t>(ectx->r[base + 7]));
+      }
+      // Optional peek at a register-relative address, for when the interesting
+      // value is a field of an object a register points at rather than the
+      // register itself. XENIA_CRASH_PEEK="29,4E8,8" dumps 8 words starting at
+      // r29 + 0x4E8. Off unless the variable is set.
+      if (const char* peek = std::getenv("XENIA_CRASH_PEEK")) {
+        uint32_t reg = 0, off = 0, count = 4;
+        if (std::sscanf(peek, "%u,%x,%u", &reg, &off, &count) >= 2 &&
+            reg < 32) {
+          if (count > 32) count = 32;
+          uint32_t addr = static_cast<uint32_t>(ectx->r[reg]) + off;
+          auto* mm2 = kernel_state() ? kernel_state()->memory() : nullptr;
+          auto* hp = mm2 ? mm2->LookupHeap(addr) : nullptr;
+          if (hp && hp->QueryRangeAccess(addr, addr + count * 4 - 1) !=
+                        xe::memory::PageAccess::kNoAccess) {
+            std::string words;
+            for (uint32_t i = 0; i < count; ++i) {
+              words += fmt::format(
+                  "{:08X} ", xe::load_and_swap<uint32_t>(
+                                 mm2->TranslateVirtual(addr + i * 4)));
+            }
+            XELOGE("GUEST CRASH: peek r{}+{:X} = {:08X}: {}", reg, off, addr,
+                   words);
+          } else {
+            XELOGE("GUEST CRASH: peek r{}+{:X} = {:08X}: unmapped", reg, off,
+                   addr);
+          }
+        }
       }
       // LR here is the function's own __savegprlr return, not the caller.
       // That helper stores the real LR at [r1-8] of the caller's frame before
