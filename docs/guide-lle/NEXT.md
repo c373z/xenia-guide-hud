@@ -3706,3 +3706,90 @@ and needs no such caveat.
 Excluded on purpose: the matching `ExceptionCallback` stack-walk bounds fix in
 `emulator.cc`. It is correct and it is general, but that file is heavily
 Guide-modified on this branch and the fix does not separate cleanly.
+
+---
+
+## The `+0x7200` rule was a bug in `ppcdis.py`, not a property of the image
+
+This supersedes the "Addressing caveat" section above, and retires the whole
+runtime-vs-file-VA distinction. **These converted firmware PEs are memory
+images: the bytes for any VA live at file offset `VA - ImageBase`, in every
+section.** There is no per-section fudge and no skew to apply.
+
+`ppcdis.py` maps a VA through the section header's `PointerToRawData`. For
+xam's `.text` that field is 0x7200 too low, so every address `ppcdis` prints
+for `.text` is 0x7200 higher than the real one. The constant then got recorded
+as an image-wide rule and applied to `.rdata`, where there is no such error -
+which is precisely why `.rdata` reads came out as `'rpOutputLocation'`,
+`'ontroller.xur'` and `'ice (0x%08X)'`. Those were not a mysterious section
+quirk; they were the fudge being applied where nothing needed fixing.
+
+How it was caught: `.text`'s raw data begins with exactly 0x7200 bytes of zero,
+and `.text` raw pointer `0x128E00 + 0x7200 = 0x130000`, which is `.text`'s own
+RVA. Checking `.rdata` gives the same identity - the string logged by the
+emulator at runtime `816462C4` sits at file offset `0x562C4`, and
+`0x562C4 = 816462C4 - 815F0000`.
+
+Three independent confirmations of the corrected mapping:
+
+* `.pdata` function begins now land on real prologues (`7D8802A6`,
+  `mfspr r12,8`) and tile `.text` contiguously - each record's length reaches
+  the next record's begin. Under the old mapping they landed mid-instruction.
+* `.rdata` strings read correctly at the addresses the emulator logs.
+* The `.pdata` record for `XuiVisualCreateInstance` begins exactly at the
+  prologue found by other means.
+
+Practical consequence for reading this file: every address recorded here as a
+**runtime** address is correct and needs no adjustment. Every address recorded
+as a **"file VA"** is 0x7200 too high; subtract 0x7200 and it becomes both the
+true VA and the runtime address, which are the same thing.
+
+`tools/pe360.py` replaces the ad-hoc scripts and does this correctly. It also
+carries the `.pdata` bitfield layout (`PrologLen:8 | FunctionLen:22 | flags:2`,
+read from the low bits up - reading it from the high bits gives every function
+a 64-instruction prologue and wildly overlapping bounds, which is how the first
+attempt failed) and an xref scanner that assumes neither adjacency nor matching
+registers, because xam emits `lis r8,0x8164` ... `addi r11,r8,0x6938` with the
+halves dozens of instructions apart. `ppcdis.py` is kept only because older
+sections quote its output; it has a warning header now.
+
+### What this immediately bought: the visual registration path, named
+
+Searching xam for `Xui*` strings turns up 116 distinct names, three of which
+settle the visual question:
+
+| string | at | referenced from |
+|---|---|---|
+| `XuiVisualCreateInstance(%S)` | `816462C4` | `8193B6D0` |
+| `XuiVisualRegister: visual %S already registered` | `81646374` | `8193D298` |
+| `XuiControlAttachVisual: Visual='%ls' specified on hObj=0x%08x ID='%ls' not found` | `81647BA0` | `81959240` |
+
+which gives, in runtime addresses:
+
+* `XuiVisualCreateInstance` = **`8193B6B0`**
+* `XuiVisualRegister` = **`8193D238`**
+* `XuiControlAttachVisual` = **`81959160`**
+
+The third is the function this file already identified by other means as the
+one whose search fails, and `XuiVisualCreateInstance` is called from exactly
+that function (`bl` at `819591E0` and `819592B8`). Two independent routes
+agreeing on both identifications is the strongest confirmation the visual work
+has had.
+
+`XuiVisualRegister` has exactly one caller, and the chain above it is short:
+
+```
+8193D238  XuiVisualRegister
+  <- 8193D4B8            (bl at 8193D6D4)
+       <- 817923A0       (no callers - a root)
+       <- 81795548       (no callers - a root)
+       <- 8193D740 <- 8193F7C0 <- 8193F838        (root)
+                                <- 81AA5A60 <- 81AA5AD8 <- 8178DE50
+```
+
+**Next, and it is a cheap decisive test rather than more reversing:** run and
+check whether `8193D238` is ever entered. Xenia JITs on first call, so a
+`DemandFunction: enter 8193D238` line is proof of execution and its absence is
+proof of the opposite - no breakpoint needed, no perturbation of the path.
+If it never runs, the empty per-class collection is explained outright, and the
+three roots above name the small set of entry points that would populate it.

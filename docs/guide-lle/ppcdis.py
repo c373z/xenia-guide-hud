@@ -1,3 +1,13 @@
+"""DEPRECATED - see tools/pe360.py.
+
+This script maps a VA through the section header PointerToRawData, which for
+xam .text is 0x7200 too low, so every .text address it prints is 0x7200 higher
+than the real one. That error is the origin of the "runtime + 0x7200 = file VA"
+rule quoted in older parts of NEXT.md. The images are memory images: the
+correct mapping is simply file offset = VA - ImageBase.
+
+Kept only so older NEXT.md sections that quote its output remain reproducible.
+"""
 import struct,sys
 d=open('work/xam17489.pe','rb').read()
 def dec(w):
