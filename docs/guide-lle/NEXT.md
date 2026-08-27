@@ -6738,3 +6738,37 @@ device, and the wrapper is wired ~16,000 log lines before that device exists.
 The setter `8191BAC8(wrapper, device, x)` is identified, so the missing piece
 is a device pointer to pass it - which mode 1 does not return, because it never
 returns at all.
+
+### Mode 1's device is never published, which bounds the remaining work
+
+Watching both device globals across a full mode-1 run:
+
+    ProgressWatch: xam dev global 00000000 -> 40870D00 ([2B10]=00000000 [3F74]=00000000)
+    ProgressWatch: ctx=40877DC0 wrap=40877E00 dev=40870D00 counter_ptr=00000000
+
+`81D43684` receives `40870D00` - the **same** device the wrapper already has,
+with both `[+0x2B10]` and `[+0x3F74]` null - and then never changes again.
+`801E6FC8` never changes at all. So the device mode 1 builds, the one that gets
+a front buffer and a progress counter, is **never published to either global**.
+
+That settles the question this watcher was added to answer, and it bounds what
+is left:
+
+* the setter `8191BAC8(wrapper, device, x)` is identified and its arguments are
+  known;
+* the wrapper's device and the mode-1 device are both identified as *concepts*;
+* but there is **no pointer to the mode-1 device available anywhere** outside
+  the thread that is stalled inside its creator.
+
+So connecting the halves is not a matter of calling one more function with
+values already in hand. It needs the pointer extracted from the creator itself
+- hooking `81A0FE48`'s entry to capture `r3`, or recognising the device by its
+signature (`[+0x3F74]` and `[+0x2B10]` both non-null) with a memory scan. Both
+are real instrumentation work rather than another flag.
+
+**Worth stating plainly at this point:** every remaining route to pixels now
+requires building something rather than discovering something. The discovery
+phase of this line has ended - the mechanism is mapped end to end, from the
+skin through the visual registry to the wrapper, the device, the front buffer
+and the draw emitter, with each link measured. What is left is engineering
+against that map.
