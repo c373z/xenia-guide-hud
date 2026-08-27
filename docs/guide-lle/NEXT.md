@@ -5242,3 +5242,57 @@ of this file, which is very likely this same bug seen from the other end.
 **Fix under test:** `guide_reuse_xui_ctx` skips the render-host init when
 `81D6C978` already holds a context, logging what it reused. Default **off**, so
 the established baseline is untouched until this is shown to be better.
+
+---
+
+## CONTROLS HAVE VISUALS
+
+`--lle_xam_skin_init=true --guide_reuse_xui_ctx=true`:
+
+    GuideBootstrap: render host skipped, reusing live XUI ctx 40877DC0
+    GuideScene: depth 2 node 000100B1 visual -> 00000000: 000100E5  (bootstrap scene)
+    GuideScene:     child [+C] 000100B7 "btnJoinLive" visual -> 00000000: 000100EB
+    GuideScene:     child [+10] 000100BD "btnB"       visual -> 00000000: 000100FA
+    GuideScene:   000100B1 GetVisual -> 00000000: 000100E5
+    GuideScene: depth 3 node 000100E2 visual -> 00000000: 00010129
+
+Every one of those was `80300017: 00000000` in every previous run in this
+project's history. They now return **`S_OK` with real visual handles**.
+
+Run totals:
+
+| | before | now |
+|---|---|---|
+| `GetVisual` | always `80300017`, null | `00000000` with handles |
+| guest crashes / host faults | 1+ | **0** |
+| composite draws | to #3000, drawing nothing | to #2700, with visuals attached |
+| `SwapDraws` | - | **156,109 draws over 5,400 swaps** |
+| log lines | ~23,000 | **372,545** |
+
+The 16x jump in log volume is itself a signal: the run is doing far more work
+per frame than it ever did with empty visuals.
+
+One node still fails - `0001012D visual -> 8030000A` - which is a different
+error from the old one (`8030000A` is the "handle does not resolve" code from
+`XuiSendMessage`, not "no visual"). Two of three `GetVisual` calls succeed.
+
+### What the fix actually was
+
+Three things had to be true at once, and each was found by measurement rather
+than inference:
+
+1. **the skin has to load** - `huduiskin.xex` is a resource-only XEX that
+   Xenia rejected outright (`ReadImage` requires a PE);
+2. **the skin loader has to be driven** - `81795548` has no callers inside xam
+   and never ran, so the visual registry stayed empty by construction;
+3. **the bootstrap must stop replacing the XUI context** - calling the
+   render-host init a second time freed the context the live device context
+   still pointed at, and the resulting use-after-free killed the run just as
+   XUI started using the visuals.
+
+(3) is the one that had been latent longest. It was harmless while the registry
+was empty, because XUI never got far enough to dereference the stale pointer.
+
+**Not yet claimed: pixels.** Visuals resolving and 156k GPU draws are strong
+indirect evidence, but this file has been wrong before about things that looked
+conclusive in a log. A window capture is being taken to settle it by looking.
