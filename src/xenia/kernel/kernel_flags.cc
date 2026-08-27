@@ -729,6 +729,14 @@ DEFINE_bool(lle_xam_heap_init, false,
             "directly. xam's heap descriptors are never built under our "
             "bootstrap because nothing outside the module drives that call.",
             "Kernel");
+DEFINE_bool(guide_trace_devsetup, false,
+            "Breakpoint 81A0FE48, the device setup mode 1 runs and mode 2 "
+            "skips, and log its first argument - the device it is setting "
+            "up. That device gets a front buffer at +0x3F74 and is never "
+            "published to any global, so this is the only way to obtain a "
+            "pointer to it. The wrapper is bound to a different device "
+            "around log line 5026, long before mode 1 runs.",
+            "Kernel");
 DEFINE_bool(guide_force_front_buffer, false,
             "Call 81A0FE48(device, 0) once, the front-buffer setup that "
             "mode 2 skips. 819F4D28 runs it only when its mode argument "

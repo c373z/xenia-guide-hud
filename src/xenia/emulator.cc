@@ -1344,6 +1344,28 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                   ks->processor()->AddBreakpoint(srt_bp.get());
                   XELOGI("SetRenderTarget trace installed at 819F31A8");
                 }
+                static std::unique_ptr<cpu::Breakpoint> devsetup_bp;
+                if (cvars::guide_trace_devsetup && !devsetup_bp) {
+                  devsetup_bp = std::make_unique<cpu::Breakpoint>(
+                      ks->processor(), cpu::Breakpoint::AddressType::kGuest,
+                      0x81A0FE48ull,
+                      [](cpu::Breakpoint* bp, cpu::ThreadDebugInfo* ti,
+                         uint64_t host_pc) {
+                        auto* th = kernel::XThread::GetCurrentThread();
+                        if (!th) return;
+                        auto* c = th->thread_state()->context();
+                        static std::atomic<uint32_t> n{0};
+                        if (++n > 8) return;
+                        XELOGI("DevSetup #{}: device={:08X} arg2={:08X} "
+                               "lr={:08X}",
+                               static_cast<uint32_t>(n),
+                               static_cast<uint32_t>(c->r[3]),
+                               static_cast<uint32_t>(c->r[4]),
+                               static_cast<uint32_t>(c->lr));
+                      });
+                  ks->processor()->AddBreakpoint(devsetup_bp.get());
+                  XELOGI("DevSetup trace installed at 81A0FE48");
+                }
                 // 819F7F20 passes its 4th argument (r6) down to 819F5D18 as
                 // r8, which becomes r14 there and is dereferenced at +32
                 // without a guard. 819F7F20 itself guards the same read. Log
