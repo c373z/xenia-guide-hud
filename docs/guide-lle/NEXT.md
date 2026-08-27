@@ -4343,3 +4343,61 @@ see whether `XuiVisualRegister` starts executing and controls acquire visuals.
 not automatically the same as XUI being told to use it as a skin, so if the
 registrations still do not happen, the next question is what call turns a
 loaded skin module into registered visuals.
+
+### Result: the skin is a resource-only XEX, so `LoadUserModule` cannot load it
+
+Ran with `--guide_skin_path=SYS:\huduiskin.xex`. The file is found -
+`HostPathDevice::ResolvePath(\huduiskin.xex)` - and then the load fails on
+every key:
+
+    XEX load failed with code 3, trying with devkit encryption key...
+    XEX load failed with code 3, trying with xex1 retail encryption key...
+    XEX load failed with code 3, trying with xex1 devkit encryption key...
+    XEX load failed with code 3
+
+No `Guide: skin override` line follows, because that only logs when
+`LoadUserModule` returns non-null. Visuals stayed `80300017` and the draw loop
+kept running to #3000, exactly as before - so **this run changed nothing**, and
+`guide_skin_path` as it stands cannot be the mechanism.
+
+Code 3 is not a decryption failure. In `XexModule::ReadImage` it is the last
+return: *"Not a patch and image doesn't have proper PE header"* - decryption
+and decompression are fine, the payload simply is not a PE. Comparing the XEX2
+optional headers says why:
+
+| file | flags | optional header ids |
+|---|---|---|
+| `huduiskin.xex` | `DLL_MODULE` | `0002 0003 0080 0400` |
+| `hud.xex` | `DLL_MODULE` | `0002 0003 0080 `**`0100 0101 0102 0103 0180 0183 0200`**` 0400` |
+| `dash.xex` | `TITLE_MODULE` | 16 ids |
+
+`huduiskin.xex` carries **RESOURCE_INFO** (`0002`) and **FILE_FORMAT_INFO**
+(`0003`) and nothing else of substance - no entry point, no image base address,
+no import libraries. It is a **resource-only XEX**: a data package in a XEX
+wrapper, with no executable image at all. `LoadUserModule` is the wrong tool
+for it by construction, and the `call_entry` question is moot since there is no
+entry point to call.
+
+So the shape of the remaining work is clearer than it has been:
+
+* the visual names the scenes ask for (`graphic_metapane`, `legend_A`,
+  `btn_oneline-icon`, ...) are skin data;
+* that data is in `huduiskin.xex`, as resources;
+* nothing currently reads it, and `XuiVisualRegister` is never called by
+  anyone, so the registry stays empty and every `AttachVisual` misses.
+
+Two things worth knowing before the next attempt:
+
+1. Xenia *does* decrypt and decompress the file successfully - it only rejects
+   it afterwards for lacking a PE header. So the resource bytes are reachable;
+   the loader throws them away rather than failing to produce them.
+2. This project already has a parser for the container format these resources
+   use (`tools/xuiz_extract.py`, which handled hud's 34 scenes and xam's seven
+   containers). If the skin's resources are XUIZ, the same parser should read
+   them once they can be got at.
+
+The open question is no longer "where is the skin" but "**what call turns skin
+resources into registered visuals**" - i.e. what the console invokes that
+eventually reaches `8193D4B8`, the single caller of `XuiVisualRegister`, whose
+own callers are `817923A0`, `81795548` and `8193D740`. Those three are the
+concrete next targets, and none of them currently executes.
