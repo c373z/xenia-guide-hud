@@ -3253,3 +3253,32 @@ earlier pass at the same area.
 Next: identify which message id reaches `8196BDA0`, and whether anything is
 sending it. That is a jump-table index away, and it is measurable rather than
 guessable.
+
+### The message that attaches a visual is id 9
+
+The dispatch at `8196BD00` is a compare chain on the message id, not a jump
+table, and the branch to the `AttachVisual` path is explicit:
+
+```
+8196bd00  cmplwi r11,0x46   -> 8196c1ec / 8196c188
+8196bd14  cmplwi r11,0x21   -> 8196bfc8 / 8196bf74
+8196bd20  cmplwi r11,0x0c   -> 8196be94 / 8196be3c
+8196bd2c  cmplwi r11,0x00   -> 8196be0c
+8196bd34  cmplwi r11,0x09   -> 8196bda0     <-- AttachVisual path
+8196bd3c  cmplwi r11,0x0a   -> 8196bd94
+8196bd44  cmplwi r11,0x0b   -> 8196c68c
+```
+
+So a control attaches its visual on receiving **message `0x9`**, and the
+handler at `8196BDA0` sets `[obj+8] = 1` before calling
+`81938BC8`; only if that returns zero does it call `AttachVisual`.
+
+This is directly testable rather than another inference: `XuiSendMessage`
+(`0x35F`) is exported, so message 9 can be sent to a control that currently
+reports no visual, and the visual re-queried immediately afterwards. If it
+appears, the missing step is that nothing delivers message 9; if it does not,
+the `81938BC8` gate is what fails and that becomes the target.
+
+Read the export's prologue before calling it. That discipline is what made the
+`NavigateFirst` call safe - it revealed the host argument is only dereferenced
+for one transition value, so `(0, scene, 0)` could not fault.

@@ -1190,7 +1190,7 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
           // control, which would explain the result being global.
           XELOGI("GuideScene: visual class global [81D6CDDC] = {:08X}",
                  rd(0x81D6CDDCu));
-          for (auto ord : {0x342u, 0x31Eu, 0x31Bu, 0x395u, 0x359u, 0x38Au}) {
+          for (auto ord : {0x342u, 0x31Eu, 0x31Bu, 0x395u, 0x359u, 0x38Au, 0x35Fu}) {
             XELOGI("GuideScene: xam ordinal {:03X} -> {:08X}", ord,
                    xmn ? xmn->GetProcAddressByOrdinal(ord) : 0);
           }
