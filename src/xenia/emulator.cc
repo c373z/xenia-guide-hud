@@ -1498,6 +1498,57 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                   ks->processor()->AddBreakpoint(wrapdev_bp.get());
                   XELOGI("WrapRender trace installed at 8191AFD0");
                 }
+                // Localise the vtable[20] hang. With [dc+134] cleared the
+                // draw call never returns: WrapRender fires at 8191AFD0 and
+                // then the title thread spins in KeWaitForMultipleObjects.
+                // The frames below it are 819DEA70 and 819DE8F8 (the crash's
+                // own unwind), so whichever is the LAST to log bounds the
+                // hang to one function. Breakpoint overhead is what makes the
+                // race hang instead of crash, so tracing is the right regime
+                // for this question rather than a distortion of it.
+                struct HangSite { uint32_t addr; const char* name; };
+                // Neither 819DEA70 nor 819DE8F8 fired while WrapRender did,
+                // and 8191AFD0 is straight-line from entry to its call:
+                //   8191B004  lwz r3,12(r31)
+                //   ...       register moves
+                //   8191B020  bl 819DEA70
+                // Nothing there can block, so bracket the inside of the
+                // function too. If B004 fires and B020 does not, the hang is
+                // in code that cannot hang - which would instead indict the
+                // breakpoint mechanism, and that is worth knowing before any
+                // more of this path is read.
+                static const HangSite kHangSites[] = {
+                    {0x8191B004u, "8191B004-lwz"},
+                    {0x8191B020u, "8191B020-call"},
+                    {0x819DEA70u, "819DEA70"},
+                    {0x819DE8F8u, "819DE8F8"}};
+                static std::vector<std::unique_ptr<cpu::Breakpoint>> hang_bps;
+                if (cvars::guide_trace_hang && hang_bps.empty()) {
+                  for (const auto& site : kHangSites) {
+                    const char* nm = site.name;
+                    auto bp = std::make_unique<cpu::Breakpoint>(
+                        ks->processor(), cpu::Breakpoint::AddressType::kGuest,
+                        static_cast<uint64_t>(site.addr),
+                        [nm](cpu::Breakpoint* bp, cpu::ThreadDebugInfo* ti,
+                             uint64_t host_pc) {
+                          auto* th = kernel::XThread::GetCurrentThread();
+                          if (!th) return;
+                          auto* c = th->thread_state()->context();
+                          static std::atomic<uint32_t> n{0};
+                          if (++n > 24) return;
+                          XELOGI("HangSite {} #{}: r3={:08X} r4={:08X} "
+                                 "lr={:08X}",
+                                 nm, static_cast<uint32_t>(n),
+                                 static_cast<uint32_t>(c->r[3]),
+                                 static_cast<uint32_t>(c->r[4]),
+                                 static_cast<uint32_t>(c->lr));
+                        });
+                    ks->processor()->AddBreakpoint(bp.get());
+                    hang_bps.push_back(std::move(bp));
+                  }
+                  XELOGI("Hang trace installed at {} sites",
+                         hang_bps.size());
+                }
                 // 819F7F20 passes its 4th argument (r6) down to 819F5D18 as
                 // r8, which becomes r14 there and is dereferenced at +32
                 // without a guard. 819F7F20 itself guards the same read. Log
@@ -4004,6 +4055,28 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
         uint32_t ctx = rdv(0x81D6C978u);
         uint32_t wrap = rdv(ctx + 0x08u);
         uint32_t gdev = rdv(wrap + 0x0Cu);
+        // Watch [wrapper+0x0C]. With [dc+0x134]=0 and no breakpoints, the
+        // guest faults at 819DE94C with r3=0, and r3 traces back through
+        // 819DEA70's callee-saved r29 to `lwz r3,12(r31)` in 8191AFD0 - i.e.
+        // that slot is null at DC construction. It cannot be observed with a
+        // cpu::Breakpoint: hitting one on the title thread wedges it (see the
+        // correction above), so watch it from here instead, where the only
+        // cost is a read.
+        static uint32_t last_gdev = 0;
+        if (gdev) last_gdev = gdev;
+        if (wrap && !rdv(wrap + 0x0Cu) && last_gdev) {
+          static int nulls = 0;
+          if (++nulls <= 6) {
+            XELOGW("GuideLendFB: [wrapper {:08X} +0C] is NULL at iteration {} "
+                   "(last known device {:08X})",
+                   wrap, i, last_gdev);
+          }
+          if (cvars::guide_repair_wrapper_device) {
+            if (auto* ws = lmem->TranslateVirtual(wrap + 0x0Cu)) {
+              xe::store_and_swap<uint32_t>(ws, last_gdev);
+            }
+          }
+        }
         uint32_t tdev = rdv(0x801E6FC4u);
         // VdGlobalDevice holds garbage until dash publishes its device: the
         // first poll read tdev=FFCAE000, and lending from that produced a

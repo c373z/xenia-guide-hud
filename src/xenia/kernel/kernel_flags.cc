@@ -756,6 +756,21 @@ DEFINE_bool(guide_rebind_wrapper_device, false,
             "into wrapper+0x10, so it must be readable - the wrapper's own "
             "+0x10 is used, making it a self-copy.",
             "Kernel");
+DEFINE_bool(guide_repair_wrapper_device, false,
+            "When [wrapper+0x0C] reads 0, write the last known device back into "
+            "it from the GuideLendFB poller. The 819DE94C crash with "
+            "[dc+0x134]=0 passes that slot down two frames and faults on it. "
+            "Requires guide_borrow_front_buffer (the poller). Warns whenever "
+            "the slot is null even when off.",
+            "Kernel");
+
+DEFINE_bool(guide_trace_hang, false,
+            "Trace 819DEA70 and 819DE8F8, the frames below 8191AFD0 in the "
+            "vtable[20] path, to bound where the draw call hangs when "
+            "[dc+0x134] is cleared. The last site to log is the one that "
+            "does not return.",
+            "Kernel");
+
 DEFINE_bool(guide_trace_emitter, false,
             "Log the arguments the draw emitter 819F5D18 is called with. It "
             "executes but the frame carries only xam's own begin word, so the "

@@ -7981,3 +7981,243 @@ the Guide's geometry being set up.
 
 **The real remaining blocker is vtable[20]'s hang**, not the present gate,
 not the device, not the buffers. That is where the next work goes.
+
+### Localising the vtable[20] hang
+
+The blocker is now `vtable[20]`, so the question is where inside it execution
+stops. The crash's own unwind gives the frames below `8191AFD0`:
+
+```
+819DEB30 (in 819DEA70)   8191B024 (in 8191AFD0)   818FDE60   818F8374
+```
+
+`guide_trace_hang` traces `819DEA70` and `819DE8F8`. Whichever logs **last**
+bounds the hang to a single function, which is enough to start reading it.
+
+One methodological note: breakpoint overhead is what turns this race from a
+crash into a hang, so running the trace is not distorting the phenomenon -
+the traced regime *is* the hang regime. That is the opposite of
+`guide_coverage_fn`, whose instrumentation destroyed the configuration it was
+meant to measure.
+
+Running with `guide_patch_null_render` (so `[dc+134]` is genuinely 0 and
+vtable[20] executes) on top of the otherwise-working stack. Note this
+configuration is expected to produce 0 composite draws - that is the known
+cost of letting vtable[20] run, and is not a regression.
+
+### The hang is not where the unwind says it should be
+
+Both traces installed (`Hang trace installed at 2 sites`) and **neither
+fired**, while `WrapRender #1` at `8191AFD0` did. There was also no composite
+draw at all, so the hang precedes the draw entirely rather than occurring
+inside it.
+
+That is hard to reconcile with the code. `8191AFD0` runs straight from entry
+to its only call:
+
+```
+8191B004  lwz r3,12(r31)     ; [wrapper+0x0C]
+...       register moves only
+8191B020  bl  819DEA70
+```
+
+There is nothing between entry and `8191B020` that can block - no loop, no
+call except the prologue register-save helper. Yet `819DEA70` never logs,
+even though the *crash* run's unwind contains `819DEB30`, a return address
+inside it.
+
+Two candidate explanations, and they need separating before any more of this
+path is read:
+
+1. Execution really does stop inside `8191AFD0` - which would mean the stall
+   is in the prologue helper `81814960` or in the JIT, not in xam's logic.
+2. The breakpoint mechanism itself is implicated: hooking these addresses
+   perturbs or halts the thread, in which case the "hang" is partly an
+   artifact and the earlier "breakpoints turn the crash into a hang"
+   observation has a simpler explanation than a race.
+
+(2) would be a significant correction - several ticks have treated the
+crash/hang duality as evidence of a timing race in xam. Bracketing the inside
+of the function (`8191B004`, `8191B020`) distinguishes them: if the `lwz`
+fires and the `bl` does not, the hang sits in code that provably cannot hang,
+which indicts the instrument rather than the guest.
+
+## Tooling correction: what cpu::Breakpoint can and cannot measure
+
+Four sites installed, **none fired** - including `8191B004`, only 0x34 bytes
+past the entry at `8191AFD0` where `WrapRender` fires reliably every run.
+That is not a statement about the guest.
+
+Reading the implementation:
+
+* `Breakpoint::Install()` -> `X64Backend::InstallBreakpoint(bp)` patches
+  `0x0F0B` at each host address found for the guest address.
+* The per-function overload uses
+  `GuestFunction::MapGuestAddressToMachineCode(guest_address)`, and when that
+  returns 0 it does `assert_always()` - which in a **Release** build is a
+  no-op, so the breakpoint silently never installs.
+* `Processor::OnFunctionDefined` re-installs breakpoints for functions
+  compiled *after* the breakpoint was added.
+
+So a mid-function guest address only works if the JIT emitted a distinct host
+address for that exact instruction. `8191B004` evidently has no mapping, and
+Release swallows the failure. **Mid-function breakpoints are unreliable and
+their silence means nothing.**
+
+`819DEA70` *is* a genuine function entry (`in function 819DEA70`, len 0x104,
+9 callers), so its silence is more meaningful - but it is not conclusive
+either, given the same silent-install failure mode exists.
+
+### What this invalidates
+
+The previous tick's reasoning - "neither hang site fired, and 8191AFD0 is
+straight-line, therefore the hang is inside 8191AFD0" - does not hold. The
+premise was an instrument artifact.
+
+More importantly, it puts a caveat on several ticks of reasoning that treated
+the crash-vs-hang duality as evidence of a **timing race in xam**. That
+conclusion came from observing that installing breakpoints changed the
+outcome. Breakpoints patch `0x0F0B` into generated code and re-install on
+recompilation, so they change codegen as well as timing - "a race whose
+outcome breakpoint overhead decides" is one explanation, but so is "the
+patched code behaves differently". Neither has been separated from the other,
+and the race story should not be treated as established.
+
+Solid ground, unaffected by any of this: the emitter/DrawFn traces at
+`819F5D18` and `819F7F20` are **function-entry** hooks that did fire, and
+their argument dumps (`r4=r5=0`, one call per run, caller chain resolving to
+`XuiRenderPresent`) stand.
+
+## MAJOR CORRECTION: the "vtable[20] hang" was my own breakpoint
+
+Demand-JIT (breakpoint-free, so unaffected by the instrument) shows all three
+functions in the path DO execute, and the ordering shows when:
+
+```
+21454  DemandFunction: enter 8191AFD0     thread 01000028
+21461  DemandFunction: enter 819DEA70     thread 01000028
+21463  DemandFunction: enter 819DE8F8     thread 01000028
+21465  Hang trace installed at 4 sites
+22509  WrapRender #1 ... lr=818FDE60      thread F8000144  (title thread)
+```
+
+The whole chain runs cleanly on thread `01000028` **before** the traces exist.
+Afterwards, on the **title** thread, `8191AFD0` is entered, `WrapRender`
+fires, and nothing past it ever executes.
+
+The correlation across every run is exact:
+
+| runs | guide_trace_devsetup | composite draws |
+|------|----------------------|-----------------|
+| b3aucwe9o, bwrhbtdln, b0kzn8zxw, bw5e1pe5i | ON | **0** |
+| bf1j59rg9, bt6cxdttc | OFF | **600+** |
+
+So the breakpoint at `8191AFD0` wedges the title thread when it is hit. The
+"hang" is an artifact of the instrument, and last tick's suspicion - that
+breakpoints might be causing rather than revealing it - is confirmed.
+
+### What this invalidates, precisely
+
+* "vtable[20] hangs" - **withdrawn**. There is no evidence xam hangs there.
+* "The crash and the hang are one defect with two faces, and breakpoint
+  overhead decides which side of the race wins" - **withdrawn**. There is no
+  race. There is a crash, and separately there is my breakpoint stopping the
+  thread.
+* "guide_trace_devsetup makes the crash disappear, so it is timing-dependent"
+  - **withdrawn**: the crash disappears because execution never reaches the
+  crashing code, having stopped at the breakpoint.
+
+### What survives
+
+* The genuine crash at `819DE94C` with `[dc+0x134]=0` and **no** traces.
+  That is a real guest fault and is still the blocker.
+* The crash-free 600+ draw pipeline with `[134]=1` (no traces involved).
+* The emitter/DrawFn argument findings - those hooks fired and returned data,
+  and the run still produced its normal draw counts.
+
+### Rule going forward
+
+**Never leave a `cpu::Breakpoint` installed on a function that runs inside the
+title's frame.** Hooks are for one-shot identification on paths that are
+already stalled, not for observing a working pipeline. Any run that has both
+a trace flag and a draw-count expectation is measuring two different systems.
+
+### Chasing the real crash without breakpoints
+
+With the hang retired as an artifact, the blocker is the genuine fault at
+`819DE94C` (`[dc+0x134]=0`, no traces). Tracing r3 back, using only
+disassembly:
+
+```
+8191AFD0  lwz r3,12(r31)   ; [wrapper+0x0C] -> arg1 of 819DEA70
+819DEA70  or  r29,r3,r3    ; r29 is callee-saved, set once at entry
+          or  r3,r29,r29
+          bl  819DE8F8     ; [r3+0x24] faults with r3=0
+```
+
+Nothing between reassigns `r29` (the intervening `bl 81753710` cannot - r29
+is callee-saved), so `[wrapper+0x0C]` really is **0** at that call.
+
+`WrapRender` reported it non-null, but that observation is from the
+invocation where the thread then wedged, so it says nothing about later
+constructions.
+
+Since a `cpu::Breakpoint` on the title thread wedges it, this is watched from
+the `GuideLendFB` poller instead - host-side, no patched code, no thread
+suspension. It warns whenever `[wrapper+0x0C]` reads 0, and
+`guide_repair_wrapper_device` (default off) writes the last known device back.
+
+The warning is deliberately independent of the repair flag: **first establish
+that the slot really does go null**, then try repairing it. Inverting that
+order would make a working run indistinguishable from a wrong diagnosis.
+
+## The 819DE94C crash is gone - and vtable[20] running changes nothing
+
+Best configuration so far, with **no breakpoints anywhere**:
+
+```
+lle_xam_skin_init + guide_reuse_xui_ctx + guide_borrow_front_buffer
++ guide_bind_title_rt + guide_second_context_kb=64
++ guide_patch_cmdbuf_reset + guide_patch_null_render
+```
+
+```
+Guide composite draw #600 -> 00000000; [11C]=00000000 [134]=00000000
+    [1CC]=40877E00 wrap[0C]=40870D00 realdev[32A0]=40958CD0
+GuideCtx2 #600: submitted 1 words ... GPU draws +0
+GUEST CRASH   none
+"is NULL at iteration"   none
+```
+
+Two results:
+
+1. **The `819DE94C` crash no longer reproduces.** Every run that hit it
+   predates `guide_bind_title_rt`, `guide_second_context_kb` and
+   `guide_patch_cmdbuf_reset`; with those present, `[dc+0x134]=0` is
+   survivable. So the crash was a *consequence* of the missing render target
+   or command buffer, not an independent defect - and the whole "the crash is
+   the blocker" framing of the last few ticks was chasing a symptom that the
+   plumbing work had already removed.
+2. **`[dc+0x134]` is now genuinely 0**, so `XuiRenderBegin` does **not** skip
+   `dc->vtable[20]` - and the Guide still emits one word with 0 GPU draws.
+
+### That refutes the synthesis from two ticks ago
+
+The claim was: "`[134]=1` means Begin skips vtable[20], which is where
+render-target setup happens, so skipping it is exactly why the scene emits
+nothing." vtable[20] now runs, with a real RT bound and a real command
+buffer, and the output is byte-identical to when it was skipped.
+
+So vtable[20] is not the reason there is no geometry. Nor is the present
+gate, the device, the front buffer, the render target, or the command buffer
+- each has now been made correct and none changed the payload.
+
+Also worth noting: the wrapper-slot warning never fired, so the
+`[wrapper+0x0C]==0` inference drawn from the crash registers was never
+confirmed, and the crash it explained no longer exists. `guide_repair_wrapper_device`
+stays off and unused.
+
+**Everything downstream of the scene is now demonstrably working and empty.**
+The remaining question is entirely upstream: why hud's draw walks a populated
+scene (`btnJoinLive`, `btnB`, `labelHeading`, all with visuals) and produces
+no geometry.
