@@ -5108,3 +5108,54 @@ than with a null.
 **Correct procedure from here, and it is now running:** take the peek and the
 watch *in the same run*, so the two numbers describe the same objects. Any
 future claim about these structures should come from a single run's log.
+
+## DIAGNOSED: use-after-free of the XUI context
+
+`XENIA_CRASH_PEEK_DEREF="31,1C8,8"` settles it in one line:
+
+    GUEST CRASH: deref r31+1C8 -> 40877DC0:
+        00580075 00690053 00630065 006E0065 0000FEED FEEDFEED FEEDFEED FEEDFEED
+
+Read as UTF-16 halfwords that is `X u i S c e n e` - the wide string
+**`"XuiScene"`** - followed by `FEEDFEED`, the freed-heap fill pattern.
+
+So the XUI context at `40877DC0` is **freed**, and its block has been reused to
+hold a class-name string. `[r31+0x1C8]` is a **dangling pointer**. The value
+that ends up in CTR, `006E0065`, is nothing more exotic than the `"ne"` of
+`"XuiScene"`.
+
+Everything now fits without contradiction:
+
+* the context is genuinely well-formed at `XuiInit` and still well-formed when
+  the XUI bootstrap is queued - both dumps were correct;
+* it is freed somewhere after that;
+* the device context keeps its stale `[+0x1C8]`/`[+0x1CC]` pointers and calls
+  through them;
+* `[dc+0x1CC] = 40877E00` = `40877DC0 + 0x40` is stale for the same reason -
+  it pointed into the same freed block.
+
+**And it explains the false negative that cost a tick.** `XuiCtxWatch` reads
+the context pointer from the global at `81D6C978` each iteration and skips when
+it is zero. If the context is destroyed and the global cleared, the watcher
+goes quiet rather than reporting a change - so "no change line" meant "the
+global went to zero", not "nothing happened". A watcher that treats a
+disappearing pointer as nothing to report will lie to you in exactly this
+situation; it should log the pointer going null too. Recorded because the same
+watcher is used elsewhere in this file.
+
+### What to look at next
+
+Who frees it. Two concrete threads:
+
+1. `XuiInit` returned **1** = "already initialised", meaning xam had initialised
+   XUI before our bootstrap called it. If the count is a refcount and our extra
+   `XuiInit` did not take a reference, then a matching uninit elsewhere can drop
+   the last one while the device context is still holding pointers. The
+   bootstrap calls `XuiInit` at `81953760` - whether there is a paired uninit
+   being reached is unknown.
+2. Whatever runs inside the queued XUI bootstrap on the title thread, since the
+   context is intact when it is queued and dead by the time it is used.
+
+The cheap instrument is the one already written, with the null case fixed:
+watch `[81D6C978]` itself and log when it changes **or goes to zero**, which
+brackets the free against the surrounding log lines.
