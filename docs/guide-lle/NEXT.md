@@ -6481,3 +6481,33 @@ here is the correct result, not a regression - it is populated only under
 Worth doing explicitly because several of this session's changes touch code the
 default path runs through (`LoadUserModule`, `ReadImage`, `CalculateHash`), not
 just code behind flags.
+
+### Mode-1 stall: two more explanations eliminated
+
+**The wait's structures are properly initialised.** `[dev+0x2B10]`, the pointer
+the stalled loop dereferences to read GPU progress, is written by exactly two
+functions - `81A0F858` and `81A0FE48` - which are the *same* mode-1 setup
+routines that allocate the front buffer. So under mode 1 the counter pointer is
+valid; the counter simply never advances. The stall is not "waiting on an
+uninitialised field".
+
+That also explains cleanly why forcing `81A0FE48` in mode 2 crashed partway
+through: it initialises several device fields, not just `[dev+0x3F74]`, and
+mode 2's device is not in the state it expects.
+
+**Graphics notifications are being delivered.** The obvious candidate for what
+retires async command-buffer calls is the GPU notification callback, and it is
+running: **2 actual `VdCallGraphicsNotificationRoutines` calls** in the mode-1
+run (distinct from the 5 import-table lines, which are not calls). Front buffer
+allocated, notifications delivered, and `CreateDevice` still never returns.
+
+So neither "the structures are not set up" nor "no notifications arrive"
+accounts for it. What remains untested is whether **enough** notifications
+arrive - two is a small number, and if the title's swapping is disturbed under
+mode 1 the callback may simply fire far less often than the wait needs. That
+would be measurable by comparing the notification count against a mode-2 run,
+which is one run rather than a new line of reverse engineering.
+
+Running tally of eliminated explanations for this stall: the stubbed system
+command buffer, ring ownership, uninitialised wait structures, and absent
+notifications. None of them.
