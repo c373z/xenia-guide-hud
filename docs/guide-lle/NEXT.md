@@ -3282,3 +3282,45 @@ the `81938BC8` gate is what fails and that becomes the target.
 Read the export's prologue before calling it. That discipline is what made the
 `NavigateFirst` call safe - it revealed the host argument is only dereferenced
 for one transition value, so `(0, scene, 0)` could not fault.
+
+### `XuiSendMessage` decoded - and `8030000A` does not mean "no visual"
+
+`XuiSendMessage` (`0x35F`) resolves to runtime **`8194A4E0`**, which is the
+same function analysed much earlier in this file as a "generic handle-to-object
+lookup" reached from the scene loader. Both readings are half right: it
+resolves the handle and then dispatches.
+
+```
+81951700  cmplwi r30,0        ; message struct null      -> 80070057
+81951708  lwz    r11,4(r30)
+8195170c  cmplwi r11,0xa      ; [msg+4] == 0xA           -> 80070057
+   ... handle table lookup on r31 ...
+81951774  lwz    r3,4(r11)    ; object out of the slot
+81951780  cmplwi r3,0
+81951790  ori    r3,r3,0xa    ; slot empty               -> 8030000A
+8195179c  bl     81951150     ; else dispatch(object, msg)
+```
+
+and the dispatcher clears a result field at `[msg+8]` before running.
+
+**This corrects an earlier conflation.** `8030000A` is *handle resolution
+failure*, not "this control has no visual". The two codes seen in the element
+survey mean different things:
+
+| code | meaning |
+|---|---|
+| `80300017` | object resolved; no visual child of the searched class |
+| `8030000A` | the handle did not resolve to an object at all |
+
+So `imgHeadsetBattery` and `artPanel`, which returned `8030000A`, were not
+reporting a missing visual - their handles did not resolve. Only the
+`80300017` cases (`btnB`, `btnA`, `btnOnlineStatus`, `Header`, `txtMessage`)
+are genuine missing-visual results. That does not change the headline - real
+controls still lack visuals - but any future count of "how many elements lack
+visuals" has to separate them.
+
+Still needed to send message 9: the offset of the id within the message
+struct. `[msg+4]` is a type-ish field that must not be `0xA` and `[msg+8]` is
+an output slot, so `[msg+0]` is the obvious candidate but is not yet
+confirmed - and constructing the struct wrongly is exactly the kind of guess
+that has cost time here.
