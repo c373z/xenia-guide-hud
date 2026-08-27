@@ -3441,3 +3441,43 @@ the class registry. The failing search is
 Recording the negative because it is the kind that saves time later: two
 sessions could easily be spent looking for a skin to load, and there is not
 one to find.
+
+### The visual-attach call chain, consolidated
+
+All addresses below are **file VAs** as printed by `ppcdis` (runtime = file -
+`0x7200`).
+
+```
+XuiSendMessage (ord 35F, runtime 8194A4E0 / file 819516E0)
+  validates [msg+4] != 0xA, resolves the handle
+  -> 8030000A if the handle does not resolve
+  -> dispatch 81951150(object, msg)      ; clears [msg+8]
+       -> handler, compare chain at 8196BD00 on [msg+4]
+            id 9 -> 8196BDA0             ; the visual-attach case
+                 sets [obj+8] = 1
+                 calls 81938BC8; attaches only if it returns 0
+                 -> AttachVisual 8193CE70
+```
+
+and the case that actually runs ends in a search that finds nothing:
+
+```
+81960494  bl 81949D58(x)            ; getter; calls 819490B0(x, &out) and
+                                    ; derives a value from the result
+81946428(src, &desc)                ; memcpy 40 bytes into desc, [desc+0] = 40
+819428B0(container, r27, &out, r26) ; container = [desc+4]
+   nothing found -> set [obj+0x14] |= 4, return 80300026
+```
+
+So message 9 is delivered and handled correctly; the handler looks something
+up in a collection reached through a 40-byte descriptor and the collection
+does not contain it.
+
+**Next step is `r27`/`r26`, not the container.** Knowing *what* is being
+searched for identifies the missing item directly, whereas naming the
+collection only says where it should have been. Both are one disassembly away,
+but the search key is the more useful of the two.
+
+Descending one call per pass has been giving diminishing returns, so this is
+recorded as a map rather than continued blind - anyone resuming can jump
+straight to `819428B0`'s arguments.
