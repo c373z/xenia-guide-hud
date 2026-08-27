@@ -1366,6 +1366,35 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                   ks->processor()->AddBreakpoint(devsetup_bp.get());
                   XELOGI("DevSetup trace installed at 81A0FE48");
                 }
+                // And the wrapper's SetDevice itself. Before calling
+                // 8191BAC8(wrapper, device, x) by hand, learn the triple it is
+                // actually invoked with - guessing 81A0FE48's second argument
+                // as 0 was wrong (it is a stack pointer) and that call
+                // crashed. r5 here is unknown and worth reading rather than
+                // assuming.
+                static std::unique_ptr<cpu::Breakpoint> setdev_bp;
+                if (cvars::guide_trace_devsetup && !setdev_bp) {
+                  setdev_bp = std::make_unique<cpu::Breakpoint>(
+                      ks->processor(), cpu::Breakpoint::AddressType::kGuest,
+                      0x8191BAC8ull,
+                      [](cpu::Breakpoint* bp, cpu::ThreadDebugInfo* ti,
+                         uint64_t host_pc) {
+                        auto* th = kernel::XThread::GetCurrentThread();
+                        if (!th) return;
+                        auto* c = th->thread_state()->context();
+                        static std::atomic<uint32_t> n{0};
+                        if (++n > 8) return;
+                        XELOGI("SetDevice #{}: wrapper={:08X} device={:08X} "
+                               "r5={:08X} lr={:08X}",
+                               static_cast<uint32_t>(n),
+                               static_cast<uint32_t>(c->r[3]),
+                               static_cast<uint32_t>(c->r[4]),
+                               static_cast<uint32_t>(c->r[5]),
+                               static_cast<uint32_t>(c->lr));
+                      });
+                  ks->processor()->AddBreakpoint(setdev_bp.get());
+                  XELOGI("SetDevice trace installed at 8191BAC8");
+                }
                 // 819F7F20 passes its 4th argument (r6) down to 819F5D18 as
                 // r8, which becomes r14 there and is dereferenced at +32
                 // without a guard. 819F7F20 itself guards the same read. Log
