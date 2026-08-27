@@ -3837,6 +3837,23 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                                          xe::countof(hargs));
                 XELOGI("LLE xam: heap init returned");
               }
+              // Same shape of gap, and the one that matters for rendering:
+              // 81795548 is xam's skin loader. Its string constants are
+              // "\SystemRoot\huduiskin.xex", L"skin.xur", L"skin" and
+              // L"skin://", and it is the only route that reaches
+              // XuiVisualRegister (via 8193D4B8). A demand-JIT trace shows it
+              // never runs under our bootstrap, which is exactly why the
+              // visual registry is empty and every control reports a null
+              // visual (80300017) while laying out correctly. It has no
+              // callers inside xam and takes no arguments, so drive it here.
+              if (cvars::lle_xam_skin_init) {
+                uint64_t sargs[] = {0};
+                XELOGI("LLE xam: calling skin loader 81795548");
+                uint64_t sr = ks->processor()->Execute(ts, 0x81795548u, sargs,
+                                                       0);
+                XELOGI("LLE xam: skin loader returned {:08X}",
+                       static_cast<uint32_t>(sr));
+              }
               return 0;
             },
             ks->GetSystemProcess()));

@@ -729,6 +729,14 @@ DEFINE_bool(lle_xam_heap_init, false,
             "directly. xam's heap descriptors are never built under our "
             "bootstrap because nothing outside the module drives that call.",
             "Kernel");
+DEFINE_bool(lle_xam_skin_init, false,
+            "After xam's DllMain, call its skin loader (81795548) "
+            "directly. That routine opens \\SystemRoot\\huduiskin.xex, "
+            "reads its skin.xur, and is the only path that ever reaches "
+            "XuiVisualRegister - without it the visual registry stays "
+            "empty and every control gets a null visual. It takes no "
+            "arguments and has no callers inside xam.",
+            "Kernel");
 DEFINE_bool(lle_xam_heap_patch, false,
             "Patch out the trap in xam's heap selector (817BAE38) so title "
             "threads whose app id differs from the current one still resolve "

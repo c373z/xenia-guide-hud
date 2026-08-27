@@ -4401,3 +4401,69 @@ resources into registered visuals**" - i.e. what the console invokes that
 eventually reaches `8193D4B8`, the single caller of `XuiVisualRegister`, whose
 own callers are `817923A0`, `81795548` and `8193D740`. Those three are the
 concrete next targets, and none of them currently executes.
+
+---
+
+## `81795548` is xam's skin loader, and it is the only road to `XuiVisualRegister`
+
+Found by dumping the string constants each of the three registration roots
+materialises, rather than by reading them:
+
+    81795548:  "\SystemRoot\huduiskin.xex"   L"skin.xur"   L"skin"   L"skin://"   "Device"
+    817923A0:  (no strings)
+    8193D4B8:  ":DrawText -- TRUNCATION + ELLIPSIS : '%S'"
+    8193D740:  (no strings)
+
+`81795548` opens **`\SystemRoot\huduiskin.xex`**, goes after a `skin` section
+and a `skin.xur` inside it, and works in the `skin://` namespace. It is xam's
+skin loader, it sits above `8193D4B8` - the single caller of
+`XuiVisualRegister` - and the demand-JIT trace says **it never runs**. That is
+the whole explanation for the empty visual registry.
+
+Its shape makes it easy to drive:
+
+* it takes **no arguments** - the prologue reads no parameter register, it
+  calls a helper, asserts the result, then initialises a global structure at
+  `81D43C50` (the same global `817923A0` later reads `[+0x80]` from);
+* it has **no callers anywhere in xam** and no data references, so on hardware
+  something outside the module drives it.
+
+That is exactly the shape of `817BBD70`, the heap-creation routine this project
+already discovered had no callers and now drives from the bootstrap under
+`lle_xam_heap_init`. Added the same treatment: **`lle_xam_skin_init`** calls
+`81795548` right after xam's DllMain, on the same system-process thread.
+
+`\SystemRoot` resolves correctly in our runs, so the path should be reachable:
+
+    System title: registering SystemRoot -> '\Device\Harddisk0\Partition1'
+    (exe '\Device\Harddisk0\Partition1\dash.xex')
+
+which is `dashroot`, where `huduiskin.xex` lives.
+
+### Supporting facts established along the way
+
+**Neither hud nor dash loads the skin.** hud imports 77 XUI functions -
+including `XuiControlGetVisual` (ordinal `395`) and `XuiControlAttachVisual`
+(`38A`) - and not one skin or visual-registration entry point. dash imports 802
+functions with no XUI skin entry either. So the skin is not the app's job under
+this firmware; xam does it internally, which is consistent with the loader
+having no importable callers.
+
+**Correction to an earlier identification.** This file recorded
+`XuiControlAttachVisual = 81959160`, from the `Visual='%ls' ... not found`
+string xref. The import table gives ordinal `38A` = `XuiControlAttachVisual`,
+and our own bootstrap resolves `38A -> 81935C70`. `81935C70` is a 0x5c wrapper
+whose only `bl` targets are `819339D8` and `81959160`. So **the export is
+`81935C70` and `81959160` is its implementation** - the earlier identification
+was of the right code, labelled one level too high. `XuiVisualCreateInstance`
+= `8193B6B0` and `XuiVisualRegister` = `8193D238` are unaffected.
+
+**Reading Xenia's import dumps is the practical way to name xam functions.**
+The `F <thunk> <target> <ordinal> (<n>) <name>` lines in the log give ordinal
+and name for every import a module resolves; combined with our
+`xam ordinal N -> addr` logging that maps names to addresses without needing an
+export table, which the converted PE does not usefully carry.
+
+Result of running with `lle_xam_skin_init=true` is pending at the time of
+writing. If the loader runs but fails, the string constants above say exactly
+which file and section to check next.
