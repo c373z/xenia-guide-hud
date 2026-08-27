@@ -7642,3 +7642,342 @@ problem is fixed by the skin init - but at least one node still returns
 no geometry at all is the next question, and it is a *content* question
 rather than a device/plumbing one - a different class of problem from
 everything solved so far.
+
+### The emitter runs; the content is empty
+
+Demand-JIT confirms every stage of the draw path actually executes in the
+crash-free configuration:
+
+```
+DemandFunction: enter 819F5D18   (draw emitter)        1
+DemandFunction: enter 819F7F20   (its caller)          1
+DemandFunction: enter 81A015B8   (PM4 word emit)       1
+DemandFunction: enter 819F31A8   (SetRenderTarget)     1
+```
+
+So "1 word per frame" is not a path that fails to run - it is a path that
+runs and has nothing to say. `0000200E` parses as a type-0 PM4 header
+(bits 30-31 = 00) for register index `0x200E` with count 0, and no data word
+follows it.
+
+That makes this a **content** problem, and `guide_inject_label_text` exists
+as the direct test for it:
+
+> "if draws appear, the render path works and the content was empty; if not,
+> the emitter is failing for another reason entirely"
+
+Worth noting the premise of that flag has partly changed since it was
+written: it says `XuiControlGetVisual` returns `80300017` with a null visual,
+but with `lle_xam_skin_init` the label `000100E2` now resolves to a real
+visual `00010129`. Only `0001012D` still fails, with `8030000A`. So the test
+is now "the label has a visual but no text" rather than "no visual at all",
+which is a strictly better starting point than when the flag was authored.
+
+### The label test failed to inject, and the scene is empty by design
+
+`guide_inject_label_text` did not prove anything about the emitter, because
+the injection itself failed on every node tried:
+
+```
+GuideScene: 0001012D SetText -> 80300016
+GuideScene: 000100B1 SetText -> 80300016
+GuideScene: 000100E2 SetText -> 80300016
+GuideCtx2 #600: submitted 1 words ... GPU draws +0
+```
+
+`XuiTextElementSetText` refuses with `80300016` even on `labelHeading`
+(`000100E2`), which *does* have a real visual now. So the diagnostic is
+inconclusive rather than negative - the content stayed empty for a different
+reason than the flag assumed, and its "if not, the emitter is failing for
+another reason entirely" branch does **not** apply.
+
+Two flag descriptions then explain the empty payload without any guessing:
+
+* `guide_register_all_classes`: xam has **39** per-class registrars but the
+  registry ends up with only **16** entries. "GuideMain.xur,
+  GuideMainServer.xur and MiniMediaPlayer.xur all fail with E_FAIL while 20
+  leaf scenes load - the shape of a scene asking for a control class that is
+  not registered." A control whose class is unregistered plausibly also
+  rejects `SetText` with `80300016`.
+* `guide_scene_override`: "hud always creates InfoUpsellLive.xur - the 'no
+  Xbox Live' upsell page - which is a **nearly empty page even when it
+  works**."
+
+That second point reframes the milestone. The crash-free pipeline has been
+faithfully rendering a scene that is almost empty by design - so "1 word per
+frame" may be the correct output for the content being drawn, not evidence of
+a broken emitter.
+
+Now testing both together: all classes registered + `GuideMain.xur` loaded
+directly, on top of the working stack.
+
+## guide_register_all_classes fixes the scene load
+
+```
+GuideBootstrap: called 39 class registrars, returns: 80070057 80300005
+                80300005 80300005 ... (80300005 = already registered)
+GuideScene: override XuiSceneCreate("GuideMain.xur") -> 00000000,
+            scene 00010135
+```
+
+**`GuideMain.xur` now loads with S_OK.** It previously failed with `E_FAIL`,
+and the flag's diagnosis - "a scene asking for a control class that is not
+registered" - is confirmed: register all 39 and the load succeeds. This also
+retires the 16-of-39 registry gap as an open issue.
+
+### But it still emits 1 word, for a reason one level deeper
+
+```
+GuideScene: override last child 0001039A
+GuideScene: override child 0001039A "" visual -> 8030000A: 00000000
+GuideCtx2 #600: submitted 1 words ... GPU draws +0
+```
+
+Two separate things are now clear, and they should not be conflated:
+
+1. `guide_scene_override` **creates and reports** a scene; it does not attach
+   or render it. The draw path still walks hud's own `InfoUpsellLive`, so
+   loading `GuideMain.xur` cannot by itself change what is emitted. Nothing
+   in the flag set (`guide_step_scene`, `guide_scene_off_thread`,
+   `guide_create_scene`, `guide_system_root`) attaches a scene either.
+2. Even inside `GuideMain.xur`, the child's visual fails: `8030000A` with an
+   empty name - the same failure as `0001012D` in hud's own scene. So visual
+   resolution is broken for a class of elements *regardless* of which scene
+   is loaded.
+
+(2) is the more fundamental of the two: attaching a scene whose elements have
+no visuals would still emit nothing. `lle_xam_skin_init` fixed visuals for
+*some* nodes (`000100B1`, `000100E2` resolve) but not these.
+
+So the next question is what distinguishes a node that resolves from one that
+returns `8030000A`, and that is a question about the visual registry rather
+than about devices, buffers or gates - none of which are in the way any more.
+
+### Resource requests: still none from the Guide
+
+```
+xam://          0 occurrences
+.png            4  - all XamBuildResourceLocator, all lr=92181B34 (DASH)
+strings.xus     5
+```
+
+The four `.png` locators are the **title's**, not the Guide's:
+`section://30013000,shrdres#loadingRing.png`, `B-Button_32.png`, etc., all
+requested from `92181B34` in dash's code range. So the earlier measured
+absence still holds even with `lle_xam_skin_init` on and 281 visuals in the
+registry: **the Guide never requests any imagery.**
+
+### Unifying hypothesis for the two open items
+
+A scene that is created but never *shown* would explain both symptoms at
+once:
+
+* `XuiSceneCreate("GuideMain.xur")` returns S_OK and the object exists, but
+  nothing attaches it - `guide_scene_override` is a reporter, and no flag in
+  the set attaches a scene.
+* Element visuals return `8030000A` because per-class visual instantiation
+  happens on show/attach, not on create - which would also explain why no
+  `xam://` image is ever requested (nothing has asked to be rasterised yet)
+  and why `XuiTextElementSetText` returns `80300016` on elements whose
+  visuals do not exist yet.
+
+This is a hypothesis, not a finding. It is attractive because it explains
+four separate observations with one cause, which is exactly the kind of
+reasoning that has been wrong twice in this file already (the "null
+[wrapper+0x0C]" inference and the front-buffer ordering theory). It needs the
+same treatment those got: find hud's scene show/navigate entry point, hook it,
+and see whether it is ever called - rather than building attachment machinery
+on the strength of the story.
+
+Note `lle_xam_skin_init` *did* populate 281 visuals and `000100B1` /
+`000100E2` resolve, so visual creation is not globally broken - which is
+evidence against the strongest form of this hypothesis and should not be
+explained away.
+
+### The "empty content" story does not survive contact with hud's own scene
+
+`GuideMain.xur`'s scene `00010135` has exactly one child, `0001039A`:
+
+```
+override child 0001039A "" visual -> 8030000A: 00000000
+0001039A GetId -> 00000000: 00000000 ""      (empty name)
+0001039A GetPosition -> all zeros
+depth 2 child of 0001039A -> 00000000        (no children)
+0001039A object 4015A190 head 00:816847DC 08:0001039A 0C:00010135 10:00000064
+```
+
+So the override-created scene really is unpopulated, consistent with "created
+but never shown".
+
+**But that cannot be the explanation for the single emitted word.** hud's own
+`InfoUpsellLive` scene is populated and its elements DO have visuals:
+
+```
+000100B1 "scnInfoUpsellLive"  -> 000100E5
+000100B7 "btnJoinLive"        -> 000100EB
+000100BD "btnB"               -> 000100FA
+000100E2 "labelHeading"       -> 00010129
+```
+
+That is a scene with named controls and real visuals, and drawing it still
+produces `1 word, GPU draws +0`. So "the content is empty" is refuted for the
+scene actually being drawn, and the unifying hypothesis from the previous
+tick is weakened exactly where it was most attractive.
+
+Rather than reason further about it, using the tool built for this question.
+`guide_coverage_fn` exists precisely to answer it:
+
+> "Reports the furthest instruction reached, which is how to find where
+> 819F5D18 stops instead of building a draw packet - its draw construction
+> sites are reachable but sit behind ~390 branch points, too many to read."
+
+Running with `guide_coverage_fn=0x819F5D18`, `trace_function_coverage=true`
+and a `trace_function_data_path`. This should say where in the emitter
+execution stops, instead of another inference about why.
+
+### guide_coverage_fn is unusable here; the draw emits ZERO words
+
+Coverage instrumentation crashed the run at 14,634 lines (a healthy run is
+~2M) in the skin-init path:
+
+```
+GUEST CRASH at 81812FB0, lr=81907408, unwind ... 8179576C  (skin loader)
+```
+
+`trace_function_coverage` makes the JIT emit a counter per guest instruction,
+which changes codegen enough to break `lle_xam_skin_init`. So the tool built
+for "where does 819F5D18 stop" cannot be used in the one configuration where
+the emitter actually runs. Worth recording so it is not retried blind.
+
+A scan of the emitter's whole range for the emitted word is also negative:
+
+```
+instructions with immediate 0x200E in 819F5D18..+0x2208:  0
+```
+
+`0x0000200E` is therefore not built by the draw. Since `guide_second_context_kb`
+"resets the cursor, calls xam's own begin (81A01358), runs the Guide's draw,
+then submits whatever was emitted", that single word is almost certainly
+**begin's**, which means the Guide's draw emits **zero** words - not one.
+
+That is a sharper statement than "1 word per frame" and it rules out the
+reading that the emitter builds a malformed packet.
+
+Next measurement rather than inference: `guide_trace_emitter` hooks
+`819F5D18` and logs `r3..r7`. If a count or geometry-list argument arrives as
+0, there is nothing for the emitter to build and the ~390 branch points never
+need reading.
+
+## The emitter is called ONCE, with no geometry
+
+```
+Emitter #1: r3=40870D00 r4=00000000 r5=00000000 r6=00000000 r7=00000000
+            lr=819F7FB4
+```
+
+Two facts, both new:
+
+1. **Only one call in the entire run**, against 600+ composite draws (the
+   hook allows 8 and only #1 appeared). So the draw path reaches the emitter
+   once and never again - "the emitter runs" from the DemandFunction check
+   meant *once*, which is much weaker than it looked.
+2. **No geometry.** Every argument but the device is zero.
+
+Reading the call site rather than guessing which zeros matter:
+
+```
+819FF190  addi r7,r0,0     ; r7 hardcoded 0
+819FF198  addi r6,r0,0     ; r6 hardcoded 0
+819FF1A4  or   r5,r28,r28
+819FF1A8  or   r4,r29,r29
+819FF1AC  or   r3,r30,r30  ; device
+819FF1B0  bl   819F5D18
+```
+
+So `r6`/`r7` being zero is normal - they are constants, not missing data.
+Only `r4`/`r5` carry information, and in `819F7F20`:
+
+```
+819FF138  or r29,r4,r4     ; r29 = arg2
+819FF13C  or r28,r5,r5     ; r28 = arg3
+```
+
+they are simply that function's own arguments, arriving as 0. `819F7F20` has
+**8 callers**, so the next step is to determine which one is on the Guide's
+path (`lr` at the emitter was `819F7FB4`, i.e. the call inside `819F7F20`
+itself, so that does not disambiguate the caller of `819F7F20`).
+
+The productive question is no longer "why does the emitter build nothing" -
+it builds nothing because it is handed nothing, exactly once. It is "what
+should be passing a geometry list, and why is it passing 0".
+
+### Candidate caller: 8191B250
+
+`819F7F20`'s 8 call sites include `8191B2BC` in `8191B250`, which is in the
+same wrapper/render region as `8191AFD0` (the `vtable[20]` path). What it
+passes:
+
+```
+819224A0  or r7,r27,r27
+819224A8  or r6,r28,r28
+819224B0  or r5,r29,r29
+819224B4  or r4,r30,r30
+819224BC  bl 819F7F20
+```
+
+So this site forwards `r30` -> arg2 and `r29` -> arg3, which become the
+emitter's `r4`/`r5`. If those are 0 at this level, the emptiness originates
+at or above `8191B250` rather than anywhere in the emitter.
+
+`guide_trace_emitter` now also hooks `819F7F20` itself and logs `lr`, which
+identifies which of the 8 callers is actually on the Guide's path - the
+emitter's own `lr` (`819F7FB4`) could not, since it points inside
+`819F7F20`.
+
+## The only emitter call comes from Present, not from the Guide's draw
+
+`guide_trace_emitter` on `819F7F20` identified the caller, and it is **not**
+the `8191B2BC` candidate I picked by region - a reminder that a
+plausible-looking call site is not evidence:
+
+```
+DrawFn #1: r3=40870D00 r4=00000000 r5=00000000 r6=A240A380 lr=819FEC68
+```
+
+`r6` is the front buffer, and `pe360` resolves the chain uniquely (each of
+these functions has exactly one caller):
+
+```
+818F930C   XuiRenderPresent
+  8191B438   in 8191B418
+    819FEC68   in 819FEB78   (len 0x158, 1 caller)
+      819F7FB4   in 819F7F20
+        819F5D18   the emitter
+```
+
+So the single emitter call in the whole run is **Present compositing the
+front buffer**. hud's scene draw never reaches the emitter at all. Every
+earlier statement of the form "the emitter runs" was about this one
+present-path call.
+
+### This forces an uncomfortable synthesis
+
+The working configuration deliberately keeps `[dc+0x134]` set so that
+`XuiRenderBegin` skips `dc->vtable[20]`. That is what avoids the crash/hang
+and yields 600+ draws. But `guide_clear_null_render`'s own description says
+vtable[20] is "where any render-target setup would happen".
+
+So the two states are:
+
+* `[134]=1` - Begin skips vtable[20]; present works; **the scene draw emits
+  nothing**, because the render setup it needs never ran.
+* `[134]=0` - vtable[20] runs and either crashes at `819DE94C` (fast path) or
+  hangs the draw call (with breakpoints installed).
+
+The present-gate split was still the right call - it is what got Present
+working independently, and it produced the crash-free pipeline. But it cannot
+by itself produce pixels, because skipping vtable[20] is precisely what stops
+the Guide's geometry being set up.
+
+**The real remaining blocker is vtable[20]'s hang**, not the present gate,
+not the device, not the buffers. That is where the next work goes.

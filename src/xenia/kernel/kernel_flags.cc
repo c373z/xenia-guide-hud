@@ -756,6 +756,13 @@ DEFINE_bool(guide_rebind_wrapper_device, false,
             "into wrapper+0x10, so it must be readable - the wrapper's own "
             "+0x10 is used, making it a self-copy.",
             "Kernel");
+DEFINE_bool(guide_trace_emitter, false,
+            "Log the arguments the draw emitter 819F5D18 is called with. It "
+            "executes but the frame carries only xam's own begin word, so the "
+            "draw emits nothing; guide_coverage_fn would say where it stops "
+            "but its per-instruction counters crash the skin-init path.",
+            "Kernel");
+
 DEFINE_bool(guide_trace_devsetup, false,
             "Breakpoint 81A0FE48, the device setup mode 1 runs and mode 2 "
             "skips, and log its first argument - the device it is setting "

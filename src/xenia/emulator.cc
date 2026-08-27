@@ -1397,6 +1397,71 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                   ks->processor()->AddBreakpoint(setdev_bp.get());
                   XELOGI("SetDevice trace installed at 8191BAC8");
                 }
+                // The emitter runs (DemandFunction confirms 819F5D18,
+                // 819F7F20, 81A015B8 and 819F31A8 all execute) but the frame
+                // carries 1 word - and no literal 0x200E exists anywhere in
+                // 819F5D18's 0x2208 bytes, so that word is xam's begin, not
+                // the draw. The draw emits ZERO. guide_coverage_fn is the
+                // tool for "where does it stop", but per-instruction counters
+                // destabilise the JIT badly enough to crash the skin-init
+                // path at 81812FB0, so read the arguments instead: if a
+                // count/geometry argument arrives as 0 there is nothing to
+                // build and the ~390 branch points do not need reading.
+                static std::unique_ptr<cpu::Breakpoint> emit_bp;
+                if (cvars::guide_trace_emitter && !emit_bp) {
+                  emit_bp = std::make_unique<cpu::Breakpoint>(
+                      ks->processor(), cpu::Breakpoint::AddressType::kGuest,
+                      0x819F5D18ull,
+                      [](cpu::Breakpoint* bp, cpu::ThreadDebugInfo* ti,
+                         uint64_t host_pc) {
+                        auto* th = kernel::XThread::GetCurrentThread();
+                        if (!th) return;
+                        auto* c = th->thread_state()->context();
+                        static std::atomic<uint32_t> n{0};
+                        if (++n > 8) return;
+                        XELOGI("Emitter #{}: r3={:08X} r4={:08X} r5={:08X} "
+                               "r6={:08X} r7={:08X} lr={:08X}",
+                               static_cast<uint32_t>(n),
+                               static_cast<uint32_t>(c->r[3]),
+                               static_cast<uint32_t>(c->r[4]),
+                               static_cast<uint32_t>(c->r[5]),
+                               static_cast<uint32_t>(c->r[6]),
+                               static_cast<uint32_t>(c->r[7]),
+                               static_cast<uint32_t>(c->lr));
+                      });
+                  ks->processor()->AddBreakpoint(emit_bp.get());
+                  XELOGI("Emitter trace installed at 819F5D18");
+                }
+                // 819F7F20 hands the emitter r4/r5 straight from its own
+                // arg2/arg3, and both arrive 0. It has 8 callers and the
+                // emitter's lr (819F7FB4) is inside 819F7F20 itself, so it
+                // cannot say which one is on the Guide's path. Log lr here to
+                // identify the caller, and the args to see whether the zeros
+                // originate at this level or above it.
+                static std::unique_ptr<cpu::Breakpoint> drawfn_bp;
+                if (cvars::guide_trace_emitter && !drawfn_bp) {
+                  drawfn_bp = std::make_unique<cpu::Breakpoint>(
+                      ks->processor(), cpu::Breakpoint::AddressType::kGuest,
+                      0x819F7F20ull,
+                      [](cpu::Breakpoint* bp, cpu::ThreadDebugInfo* ti,
+                         uint64_t host_pc) {
+                        auto* th = kernel::XThread::GetCurrentThread();
+                        if (!th) return;
+                        auto* c = th->thread_state()->context();
+                        static std::atomic<uint32_t> n{0};
+                        if (++n > 12) return;
+                        XELOGI("DrawFn #{}: r3={:08X} r4={:08X} r5={:08X} "
+                               "r6={:08X} lr={:08X}",
+                               static_cast<uint32_t>(n),
+                               static_cast<uint32_t>(c->r[3]),
+                               static_cast<uint32_t>(c->r[4]),
+                               static_cast<uint32_t>(c->r[5]),
+                               static_cast<uint32_t>(c->r[6]),
+                               static_cast<uint32_t>(c->lr));
+                      });
+                  ks->processor()->AddBreakpoint(drawfn_bp.get());
+                  XELOGI("DrawFn trace installed at 819F7F20");
+                }
                 // The vtable[20] crash is a null [wrapper+0x0C]: 8191AFD0
                 // does `lwz r3,12(r31)` with r31 = its first argument and
                 // hands that straight to 819DEA70, which passes it on to
