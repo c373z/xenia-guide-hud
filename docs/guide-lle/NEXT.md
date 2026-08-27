@@ -5917,3 +5917,44 @@ whether they would write a useful value or a `-1`, is not established. The next
 step is to determine what these routines actually are before arranging to call
 any of them, because arranging a call to a teardown routine would be worse than
 doing nothing.
+
+### `[dev+0x3F74]` is the front buffer, and the direction question is settled
+
+Reading the *values* the two writers store answers what disassembling their
+call sites could not.
+
+**`81A0F1C8` is teardown.** It reads `[dev+0x3F74]`, releases it when non-null,
+and then stores `r29` - which is set by `addi r29,r0,0`, i.e. **zero**. It
+nulls the field. Same shape for `+0x3F78` immediately after.
+
+**`81A0FA80` is the setup**, and it names the field outright:
+
+    bl    819E7310            ; allocate
+    cmplwi r3,0
+    bne   +0x1c               ; success -> store it
+    lis   r11,0x8166 ; addi r3,r11,13264
+    bl    81A052A8            ; "Couldn't allocate front buffer.\n"
+    addi  r3,r0,0 ; b exit    ; failure -> return 0
+    stw   r3,16244(r29)       ; [dev+0x3F74] = the allocation
+
+So **`[dev+0x3F74]` is the device's front buffer**, allocated by `819E7310`
+(len `0x218`), and the draw emitter faults because the device has none.
+
+That is the first time this blocker has a name in domain terms rather than as
+an offset. It also explains why this file already carries a
+`guide_fake_front_buffer` cvar: an earlier session evidently reached the same
+conclusion from the other direction and reached for a substitute. The scaffolding
+warning applies - a cloned colour surface is not what `819E7310` produces - but
+the instinct was right about *what* is missing.
+
+**Still open, and I am not going to guess it:** why `81A0FA80` never runs. The
+gate analysis says `819F4D28` always skips `81A0FE48`, because `81A0F768`
+returns `1` unconditionally - and if that were the whole story the front buffer
+would never be allocated on hardware either, which cannot be right. So either
+`81A0FE48` is reached another way that the `bl` scan does not see (an indirect
+call, as several routines here are), or the device we have is of a kind that
+takes a different path entirely. Both are checkable; neither is established.
+
+Ruled out this tick, so nobody repeats it: `81A0F1C8` is not a candidate to
+drive. Calling it would null the front buffer pointer, which is the opposite of
+what is needed.
