@@ -2004,3 +2004,37 @@ Mistakes worth not repeating:
 Next: read the exact hud site the tag identifies, and work out which
 precondition hud is testing that holds for the 23 working scenes and fails for
 GuideMain, GuideMainServer and MiniMediaPlayer.
+
+## ROOT CAUSE of the scene E_FAIL: `XamNotifyCreateListener` returns 0
+
+Narrowing the tag ranges pins it to a single instruction. hud's runtime base
+is **`913DF200`** (not `913E0000` - derive it from the tool's logged addresses,
+not by hand; two hand calculations were wrong). Group 1 held two sites,
+`913EC9BC` and `913F2810`; tagging only `913EC9BC` left the result untagged,
+so the source is **`913F2810`**:
+
+```
+913F27F4  addi r4,r0,10        ; max_version = 10
+913F27F8  addi r3,r0,32        ; mask = 0x20
+913F27FC  bl   -> 913FE6E4     ; XamNotifyCreateListener (ordinal 0x28A)
+913F2800  stw  r3,1076(r31)    ; [r31+0x434] = returned handle
+913F2804  cmplwi r3,0
+913F2808  bc   -> +12          ; non-zero: carry on
+913F280C  lis  r30,0x8000
+913F2810  ori  r30,r30,0x4005  ; zero: E_FAIL   <-- the failure
+```
+
+So `XuiSceneCreate` does not fail inside XUI at all. **hud asks for a
+notification listener, gets 0 back, and gives up.** The three failing scenes
+are the ones whose hud-side setup takes this path.
+
+Xenia's HLE `XamNotifyCreateListener` (xam_notify.cc:22) always constructs an
+`XNotifyListener` and returns its handle, so it should not return 0 - which
+suggests the call is reaching **real xam** rather than the HLE shim (hud's
+imports are redirected under `lle_xam_scope="hud.xex"`), and guest xam's
+implementation is failing for its own reason. Worth confirming which of the
+two actually runs before fixing anything.
+
+That is a small, concrete target compared with everything that preceded it,
+and it is on the bootstrap/kernel side rather than in XUI - which matches what
+the Aurora experiment was intended to distinguish.
