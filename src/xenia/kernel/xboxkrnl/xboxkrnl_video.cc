@@ -2992,10 +2992,18 @@ void VdSwap_entry(
           // first, so the setter skips releasing the junk it holds, does not
           // help either. Kept behind a switch because the diagnosis of *why*
           // is unfinished, not because it works.
+          // [dc+0x1CC] is the *wrapper*, a 140-byte object of class
+          // 81640680 - not a device. Its +0x32A0 is 12KB past the end of it,
+          // so every earlier attempt here bound RT0 into unrelated memory and
+          // the "junk 00000060" it tried to release was simply whatever lived
+          // there. The real device hangs off the wrapper at +0x0C, and that is
+          // the object the present reads (819DE8F8 takes it as its first
+          // argument via wrapper vtable slot 11). Bind on that instead.
+          uint32_t real_dev = dev ? rdw(dev + 0x0Cu) : 0;
           if (std::getenv("XENIA_PRESENT_RT") &&
-              ::cvars::guide_bind_title_rt && guide_title_surface_) {
+              ::cvars::guide_bind_title_rt && guide_title_surface_ && real_dev) {
             static bool present_rt_done = false;
-            uint32_t cur = rdw(dev + 0x32A0u);
+            uint32_t cur = rdw(real_dev + 0x32A0u);
             bool plausible = false;
             if (cur >= 0x10000u) {
               auto* ph = kernel_state()->memory()->LookupHeap(cur);
@@ -3015,20 +3023,20 @@ void VdSwap_entry(
               // skips its release path.
               if (cur) {
                 xe::store_and_swap<uint32_t>(
-                    kernel_state()->memory()->TranslateVirtual(dev + 0x32A0u),
+                    kernel_state()->memory()->TranslateVirtual(real_dev + 0x32A0u),
                     0u);
                 XELOGI("Guide: cleared junk RT0 {:08X} before binding", cur);
               }
               auto* pth = XThread::GetCurrentThread();
-              uint64_t pargs[] = {dev, 0ull, guide_title_surface_};
+              uint64_t pargs[] = {real_dev, 0ull, guide_title_surface_};
               uint64_t pres = pth ? kernel_state()->processor()->Execute(
                                         pth->thread_state(), 0x819F31A8u,
                                         pargs, xe::countof(pargs))
                                   : 0;
               XELOGI("Guide: bound RT0 {:08X} on the present's device {:08X} "
                      "-> {:08X}; [32A0] now {:08X}",
-                     guide_title_surface_, dev,
-                     static_cast<uint32_t>(pres), rdw(dev + 0x32A0u));
+                     guide_title_surface_, real_dev,
+                     static_cast<uint32_t>(pres), rdw(real_dev + 0x32A0u));
             }
           }
         }
