@@ -5713,3 +5713,40 @@ what argument - `819F38C8` takes the surface in `r29`, so the caller supplies
 it. Driving the slot blindly would hand it a surface we invented, which is
 exactly the scaffolding this file warns produces numbers that are not facts
 about xam. The argument matters as much as the call.
+
+### RT0 binds after all - it only needed `guide_bind_title_rt`
+
+Running with `--guide_bind_title_rt=true` alongside the skin and reuse-ctx
+flags gives, stable across the whole draw loop:
+
+    draw dc=407D4C80 [1CC]=40877E00 wrap[0]=81640680 wrap[0C]=40870D00
+                     realdev[32A0]=40958CD0 realdev[32B0]=00000000
+
+`[realdev+0x32A0]` holds a surface where it was `00000000` in every previous
+run. Zero crashes, `GetVisual` still returning `S_OK`, 156k draws over 5.4k
+swaps.
+
+**Attribution, carefully:** this was **not** my retarget of the
+`XENIA_PRESENT_RT` block - that code did not run at all (no `bound RT0` line).
+The bind came from the pre-existing path at `~2382`, which registers the
+surface as the device's default target (`[rdev+0x3F78] = surf`) and then calls
+xam's real setter `819F31A8(rdev, 0, surf)`. It simply needed the cvar, which
+no run in this session had been passing.
+
+The retarget is still a correct fix for the block it touches - that block
+genuinely did aim at `[dc+0x1CC]`, the 140-byte wrapper, and its `+0x32A0` is
+12KB out of bounds - but it is not what produced this result and should not be
+credited with it.
+
+**Screen: still the dashboard's sign-in UI, no Guide.** Which is expected, and
+now for a precisely known reason: `[dc+0x134]` is still `1`, so
+`XuiRenderPresent` returns without presenting. The composite draws run and go
+nowhere.
+
+**The next combination is the interesting one.** Patching `[dc+0x134]` to zero
+was tested earlier and crashed at `819DE94C` - reading
+`[dev+0x32A0] ? ... : [dev+0x32B0]` when **both were zero**. That is exactly
+the condition that has now changed. So the two flags that each failed alone
+fail for reasons the other fixes: the null-render patch needed a surface, and
+the surface needs the null-render gate open to be presented through. Testing
+them together is the obvious next step and is running now.
