@@ -5675,3 +5675,41 @@ So the question to answer first is **what would normally put a surface in
 rather than writing a pointer there and seeing what happens. That is the same
 class of question as the skin loader and the heap creator, both of which turned
 out to be real routines nobody was driving.
+
+### Found: the surface setter is wrapper vtable slot 21, and nothing calls it
+
+Scanning xam for stores to the two surface fields:
+
+* `+0x32A0` (RT0): **no `stw` anywhere**. It is written through a computed
+  offset - an indexed `SetRenderTarget` - so a fixed-displacement scan cannot
+  see it. Worth knowing before anyone repeats the search.
+* `+0x32B0` (the fallback the present uses when RT0 is zero): **exactly one**,
+  in `819F38C8` at `819F3A24`, guarded by an `lwarx`/`stwcx` update:
+
+        stw r29,12976(r31)     ; [dev+0x32B0] = r29
+
+`819F38C8` is therefore the routine that would give the present something to
+draw into. It **never executes** - zero `DemandFunction` entries - and neither
+does any of its nine caller functions, nor their callers. The entire
+surface-binding subtree is dead in our environment.
+
+One of those callers is the interesting one. `8191B338` has no `bl` callers at
+all, and it appears in `.rdata` at **`816406D4`** - which is
+`81640680 + 0x54`, **slot 21 of the wrapper's own vtable**, the same vtable
+whose slot 11 (`8191AFD0`) is the frame that fetches the device for the
+present.
+
+So the wrapper class has a method that binds the surface, sitting right beside
+the method that reads it, and **nothing invokes it**.
+
+That is the third instance of the same pattern in this investigation, after the
+skin loader (`81795548`) and the heap creator (`817BBD70`): a real routine with
+no callers inside xam, which something outside the module is expected to drive.
+Both of the earlier ones turned out to be genuinely missing calls rather than
+dead code, and driving them was correct.
+
+**Next step:** establish what invokes wrapper slot 21 on hardware, and with
+what argument - `819F38C8` takes the surface in `r29`, so the caller supplies
+it. Driving the slot blindly would hand it a surface we invented, which is
+exactly the scaffolding this file warns produces numbers that are not facts
+about xam. The argument matters as much as the call.
