@@ -2345,6 +2345,27 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
         }
         last = val;
         primed = true;
+        // Once, well after the creator has run: find the device mode 1 built.
+        // It is never published to either global, but it is recognisable -
+        // 81A0FE48 gives it a front buffer at +0x3F74 and a progress counter
+        // pointer at +0x2B10, and the wrapper's device has both null. Scan the
+        // guest heap the devices live in for that signature.
+        if (i == 30000) {
+          int found = 0;
+          for (uint32_t a = 0x40000000u; a < 0x41000000u && found < 8;
+               a += 0x40u) {
+            uint32_t fb = rd32(a + 0x3F74u);
+            if (fb < 0x10000000u || fb >= 0x50000000u) continue;
+            uint32_t cp = rd32(a + 0x2B10u);
+            if (cp < 0x10000000u || cp >= 0x50000000u) continue;
+            ++found;
+            XELOGE("DevScan: candidate {:08X}  [3F74]={:08X} [2B10]={:08X} "
+                   "[32A0]={:08X}",
+                   a, fb, cp, rd32(a + 0x32A0u));
+          }
+          XELOGE("DevScan: {} candidate(s); wrapper's device is {:08X}", found,
+                 dev);
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
       }
     }).detach();
