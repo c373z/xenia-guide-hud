@@ -4268,3 +4268,25 @@ This supersedes the earlier "xam was being loaded twice (path-based dedupe
 missed `SYS:` vs `GAME:`)" note, which recorded the problem and applied a
 dashboard-only path workaround while leaving the general fix pending. The
 workaround did not cover this path.
+
+### Three flags, not two: the Guide never opens without `guide_auto_press_seconds`
+
+Added to the list above after losing several runs to it. `press.ps1` does not
+press anything - there is no key injection in it at all, despite the name. The
+Guide open is driven entirely from inside the emulator by
+
+    --guide_auto_press_seconds=N
+
+which **defaults to 0**, i.e. no press ever fires. Without it a run boots
+cleanly to 18-20k lines, loads xam and hud, runs both DllMains, allocates the
+Guide buffers - and then simply sits there, with no `Guide button:` line, no
+scene creation and no draws. That looks exactly like a regression in the Guide
+path and is nothing of the kind.
+
+So a meaningful Guide run needs all three:
+
+    press.ps1 -Extra '--guide_auto_press_seconds=30' -Boot 35 -After 45
+
+with `--break_on_debugbreak=false` now supplied by the harness automatically.
+If a run shows no `Guide button:` line, check this flag before concluding
+anything about the Guide code.
