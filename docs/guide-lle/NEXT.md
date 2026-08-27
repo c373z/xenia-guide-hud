@@ -6056,3 +6056,43 @@ So the state at the end of this line of work:
   xam calls;
 * driving either requires argument reconstruction, which is the first step that
   cannot be done by reading alone.
+
+### Correction: mode 1 vs mode 2 was already known, and already has a cvar
+
+I spent several sections re-deriving something this branch already documents.
+`kernel_flags.cc` carries `guide_create_primary_device`, whose description
+states it plainly:
+
+> Call xam's OTHER device creator, `8178E9F0`, instead of `8178F748`.
+> `8178F748` passes 2 and `8178E9F0` passes 1 ...
+
+and `emulator.cc` selects between them at `1545`. There is also a comment at
+the call site recording what happened when mode 1 was tried:
+
+    // Snapshot the ring before the creator: mode 1 reaches
+    // VdInitializeRingBuffer and the title stops swapping.
+
+So the mode argument, the two creators, and the consequence of switching were
+all established before this session. The trace from the emitter's `r14` down to
+`addi r4,r0,2` is still correct and the intermediate links (the wrapper, the
+front buffer, `819E7310`) are new, but the conclusion at the end of it was not.
+
+**Lesson for anyone resuming:** before tracing a chain to its root here, grep
+`kernel_flags.cc` for the addresses involved. The cvar descriptions in that
+file are unusually detailed and several of them contain findings that are not
+repeated in this document.
+
+### What is actually new, and is being tested
+
+Every previous mode-1 attempt ran with an **empty visual registry** - the skin
+had never loaded, so no control had a visual and nothing could have been drawn
+regardless of how the device was created. That is no longer true.
+
+So the combination worth testing is mode 1 *plus* the working visual path:
+
+    --lle_xam_skin_init --guide_reuse_xui_ctx --guide_bind_title_rt
+    --guide_create_primary_device
+
+The known cost is that mode 1 stops the title swapping, so dash's own rendering
+is expected to suffer. That is acceptable for a measurement - the question is
+whether the Guide draws, not whether the dashboard survives.
