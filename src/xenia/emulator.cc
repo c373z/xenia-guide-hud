@@ -3276,6 +3276,46 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                ok ? "armed" : "FAILED");
       }
     }
+    // Opt-in (XENIA_EFAIL_TAG=1). Every E_FAIL site returns the same
+    // 0x80004005, so a failing XuiSceneCreate cannot say where it came from,
+    // and breakpointing the loader stops the path being taken at all. Give
+    // each of the 18 E_FAIL construction sites in xam's XUI region its own
+    // low word instead: the HRESULT that comes back then names the site.
+    // Tag N corresponds to index N below, i.e. 0x80004010 + N.
+    if (std::getenv("XENIA_EFAIL_TAG")) {
+      static const uint32_t kOriSites[] = {
+          0x81938128u, 0x81939A9Cu, 0x8193AE44u, 0x8193B458u, 0x8193C098u,
+          0x8193CCFCu, 0x8193D2D0u, 0x819560B4u, 0x819577D8u, 0x8195D85Cu,
+          0x8195D8ECu, 0x8195E360u, 0x81963758u, 0x81968B7Cu, 0x8196BD30u,
+          0x8196CA5Cu, 0x8196ED70u, 0x8196FB74u,
+      };
+      uint32_t tagged = 0;
+      for (uint32_t i = 0; i < xe::countof(kOriSites); ++i) {
+        auto* w = memory()->TranslateVirtual<uint32_t*>(kOriSites[i]);
+        uint32_t cur = xe::load_and_swap<uint32_t>(w);
+        // Match any "ori rX,rX,0x4005" - the constant is built into r29,
+        // r30 and r31 as well as r3 - and rewrite only the immediate so the
+        // destination register is preserved.
+        if ((cur & 0xFC00FFFFu) != 0x60004005u) {
+          XELOGW("EFailTag: NOT patching {:08X}: found {:08X}", kOriSites[i],
+                 cur);
+          continue;
+        }
+        void* pg = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(w) &
+                                           ~uintptr_t(0xFFF));
+        xe::memory::PageAccess old_access = xe::memory::PageAccess::kReadOnly;
+        if (xe::memory::Protect(pg, 0x1000,
+                                xe::memory::PageAccess::kReadWrite,
+                                &old_access)) {
+          xe::store_and_swap<uint32_t>(w, (cur & 0xFFFF0000u) |
+                                                (0x4010u + i));
+          xe::memory::Protect(pg, 0x1000, old_access, nullptr);
+          ++tagged;
+        }
+      }
+      XELOGI("EFailTag: tagged {} of {} XUI E_FAIL sites (0x80004010 + index)",
+             tagged, xe::countof(kOriSites));
+    }
     if (cvars::guide_patch_null_render) {
       // 818FDEF0  lwz r11,0x1C(r27)   ; XUI context's null-render flag
       // 818FDF14  stw r11,0x134(r30)  ; over the device context's copy

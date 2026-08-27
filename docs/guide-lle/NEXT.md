@@ -1916,3 +1916,48 @@ registered" result that was used to close off that line of enquiry.
 Next: the second E_FAIL site (`8193B454`) and, more usefully, the code that
 was supposed to *create* the object whose handle fails to resolve - that is
 where the three failing scenes must diverge from the 23 that work.
+
+### The E_FAIL does not come from xam's XUI code at all
+
+Tagging trick, since breakpoints stop the path being taken: every E_FAIL site
+builds `0x80004005` with `lis rX,0x8000` + `ori rX,rX,0x4005`, so rewriting
+just the `ori` immediate gives each site a distinct HRESULT without moving any
+code. `XENIA_EFAIL_TAG=1` does this for all 18 sites in xam's XUI region
+(`81920000-81980000`), tagging them `0x80004010 + index`.
+
+Result: **18 of 18 tagged, and `XuiSceneCreate` still returns `80004005`.**
+So none of xam's XUI-region E_FAIL sites produces it. The error is either from
+one of the other 667 sites elsewhere in xam, built some other way (a constant
+load rather than lis/ori), or - worth checking first - returned by **Xenia's
+own HLE**, since LLE xam still calls HLE kernel exports.
+
+Note the constant is built into `r29`/`r30`/`r31` as well as `r3`; an early
+version of the patch only matched `ori r3,r3` and silently skipped 5 sites.
+
+### Aurora as a differential (user's suggestion)
+
+`D:\USB\Aurora\Aurora.xex`. Aurora boots fine (17k lines on HLE xam), and with
+LLE xam it is *healthier than dash*:
+
+| | dash.xex (SYS: paths) | Aurora |
+|---|---|---|
+| `AllocFixed 815F0000` | 2 (double load) | **1** |
+| `LLE xam: init complete` | yes | yes |
+| `Guide: buffers` (handler) | yes | yes |
+| reaches `XuiSceneCreate` | **yes** | **no** |
+
+The double-load is dash-specific, which fits the diagnosis exactly: dash's own
+directory contains `xam.xex`, so hud's import resolves to a second copy;
+Aurora's directory does not.
+
+But the test is **inconclusive on the Guide question**, because Aurora does
+not get far enough to attempt scene creation. The press fires with a good
+handler (`handler=913E69C0`) and then the guest sits in xam's
+`KeWaitForMultipleObjects` retry loop against unmapped objects
+(`81D42450`, `81D424A8`) - 1647 rate-limited spin lines in a 95s run, pressing
+at 50s. Under dash the same press reaches `XuiSceneCreate`.
+
+So Aurora does not yet answer "bootstrap or xam/XUI". To make it answer, the
+wait-object spin has to be dealt with first - those two globals are in the
+`81D14000-81D5F000` region that is legitimately zero at load and filled in as
+xam initialises, so under Aurora something that populates them never runs.
