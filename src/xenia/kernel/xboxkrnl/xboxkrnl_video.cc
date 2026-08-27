@@ -1297,6 +1297,39 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
                                     : 0;
                 uint32_t gvi2 = xm2 ? xm2->GetProcAddressByOrdinal(0x395)
                                     : 0;
+                // Query elements by id. GetLastChild only follows one
+                // branch, and the scene has far more objects than that path
+                // reaches; these ids come from GuideMain's own STRN section.
+                {
+                  uint32_t gcbi = xm2 ? xm2->GetProcAddressByOrdinal(0x32A)
+                                      : 0;
+                  uint32_t idb = memory->SystemHeapAlloc(128, 16);
+                  if (gcbi && idb) {
+                    for (const char* want :
+                         {"Blade_Center", "txt_Games", "Label_Head",
+                          "ringOfLight_Group", "btnB", "imgHeadsetBattery",
+                          "Header", "Tab1", "Blade3"}) {
+                      std::memset(memory->TranslateVirtual(idb), 0, 128);
+                      std::memset(memory->TranslateVirtual(co2), 0, 16);
+                      wide(idb, want);
+                      uint64_t ca[] = {nsc, idb, co2};
+                      uint32_t cr = uint32_t(processor->Execute(
+                          ts, gcbi, ca, xe::countof(ca)));
+                      uint32_t child = rd(co2);
+                      uint32_t vr2 = 0xFFFFFFFFu, vis2 = 0;
+                      if (child && gvi2) {
+                        std::memset(memory->TranslateVirtual(co2), 0, 16);
+                        uint64_t va2[] = {child, co2};
+                        vr2 = uint32_t(processor->Execute(ts, gvi2, va2,
+                                                          xe::countof(va2)));
+                        vis2 = rd(co2);
+                      }
+                      XELOGI("GuideScene:   byId \"{}\" -> {:08X} handle "
+                             "{:08X}; visual -> {:08X}: {:08X}",
+                             want, cr, child, vr2, vis2);
+                    }
+                  }
+                }
                 // Walk down the tree with repeated GetLastChild. hud imports
                 // no sibling accessor, but recursing the last child is enough
                 // to show whether the scene has real depth and where visuals

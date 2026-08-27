@@ -2604,3 +2604,36 @@ Two cautions before this becomes the next theory:
 Next: query known ids from GuideMain's string table and check visuals on
 elements that are actually controls, before concluding anything about why
 nothing draws.
+
+### Elements do exist, and they genuinely have no visual
+
+Querying by id with `XuiElementGetChildById` (ordinal `0x32A`) against ids
+taken from GuideMain's own `STRN`, on the now-loading scene:
+
+| id | lookup | handle | `XuiControlGetVisual` |
+|---|---|---|---|
+| `btnB` | `00000000` | `00010091` | `80300017` |
+| `imgHeadsetBattery` | `00000000` | `0001009E` | `8030000A` |
+| `Header` | `00000000` | `000100B5` | `80300017` |
+| `Blade_Center` | `80300017` | - | not found |
+| `txt_Games`, `Label_Head`, `ringOfLight_Group`, `Tab1`, `Blade3` | `80300017` | - | not found |
+
+Two things this settles, and one it opens:
+
+- **The scene has real elements.** `btnB`, `imgHeadsetBattery` and `Header`
+  resolve to live handles. Earlier readings of "the scene is empty" or "one
+  childless node" were artefacts of walking a single `GetLastChild` branch.
+- **The no-visual result is real this time.** `btnB` is a button - an actual
+  control - so `80300017` from `XuiControlGetVisual` is not the "asked a
+  non-control" case that made the earlier evidence weak. A genuine control in
+  a properly loaded scene has no visual.
+- **The blade and tab ids are absent.** `Blade_Center`, `Tab1`, `Blade3`,
+  `txt_Games` all fail lookup, while the outer chrome resolves. Those are the
+  parts backed by nested scenes (`Tab1` -> `GamesTabScene`, and so on), which
+  suggests the child scenes are not instantiated - a separate question from
+  the missing visuals, and the more likely reason the Guide would still be
+  blank even with visuals working.
+
+So the remaining chain to pixels is now two concrete questions rather than one
+vague one: why controls get no visual, and why the nested tab scenes are not
+built.
