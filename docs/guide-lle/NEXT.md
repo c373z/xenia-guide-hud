@@ -2325,3 +2325,41 @@ side.
 That also explains why the `913EC75C` patch changed nothing observable here:
 whichever builder hud selects, the call lands in guest xam, not in the code
 being logged.
+
+### Two more eliminations on the null string table
+
+**The HLE locator route is closed.** Every call into Xenia's
+`XamBuildResourceLocator` carries `lr=92181B34`, an address in the `0x92......`
+range - that is **dash.xex**, the title. hud never reaches it. So its imports
+are bound to real xam on this path, and nothing about hud's locator can be
+observed or fixed from the HLE side. The module-0 behaviour in Xenia's builder
+is real but irrelevant here.
+
+**Patch timing was not the problem either.** The locator patches used to be
+applied *after* hud's DllMain returned, so if hud loaded its string table
+during initialisation they would have arrived too late. They now run before
+DllMain - confirmed in the log:
+
+    17329  Guide: patched hud 913EB994 ...
+    17330  Guide: patched hud 913EC75C ...
+    17331  Guide: DllMain entry=913F9D00
+
+and the crash is **byte-identical**: same PC `913FA204`, same `lr=913E8D38`,
+same registers. The reordering is kept because patching before the patched
+code can run is plainly more correct, but it fixed nothing and should not be
+recorded as having done so.
+
+### Leading hypothesis now: wrong object, not a failed load
+
+Worth stating because the last three attempts all assumed the string table
+*load* fails. There is a simpler possibility that fits every observation: the
+load succeeds onto one object, and the crashing code reads `+0x4E8` from a
+**different instance**. The crash site takes its table from `[r29+0x4E8]`
+where `r29` is whatever object is being constructed for the scene, while the
+initialisation at `913EC7xx` populates `[r31+0x4E8]` on hud's own object.
+Nothing so far establishes those are the same object.
+
+That is testable without breakpoints: the two stores that zero the field are
+at `913EC608` (constructor) and `913EC69C` (cleanup), so counting constructor
+runs against string-table loads would show whether more objects exist than
+tables.

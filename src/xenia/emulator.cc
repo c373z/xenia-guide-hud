@@ -3895,24 +3895,9 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
               // "no module for hmodule F8000494".
               uint64_t args[] = {hud->hmodule_ptr(), 1 /* PROCESS_ATTACH */,
                                  0};
-              XELOGI("Guide: DllMain entry={:08X}", hud->entry_point());
-              ks->processor()->Execute(ts, hud->entry_point(), args,
-                                       xe::countof(args));
-              XELOGI("Guide: DllMain returned");
-              if (const char* hspec = std::getenv("XENIA_EFAIL_TAG_HUD")) {
-                TagEFailSites(ks->memory(), hspec, "hud");
-              }
-
-              // Load hud's XUI skin package. hud asks
-              // XamBuildResourceLocator for a locator into this module; with
-              // no module the locator comes back empty and no scene loads.
-              // hud.xex carries its own XUI skin as a resource section named
-              // "hud" (91401000, 167581b in the XEX resource table), which is
-              // exactly the container it passes to XamBuildResourceLocator.
-              // So the module it wants is itself, not a separate package.
-              guide_skin_module_ = hud->hmodule_ptr();
-              XELOGI("Guide: hud handle={:08X} hmodule_ptr={:08X}",
-                     hud->handle(), hud->hmodule_ptr());
+              // Patch the locator choosers *before* DllMain runs. hud loads
+              // its string table during initialisation, so patching after
+              // DllMain returned was always too late for that path.
               if (cvars::guide_static_locator) {
                 // hud chooses between the static and dynamic locator builders
                 // in more than one place, and every one of them looks the
@@ -3959,6 +3944,24 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                   }
                 }
               }
+              XELOGI("Guide: DllMain entry={:08X}", hud->entry_point());
+              ks->processor()->Execute(ts, hud->entry_point(), args,
+                                       xe::countof(args));
+              XELOGI("Guide: DllMain returned");
+              if (const char* hspec = std::getenv("XENIA_EFAIL_TAG_HUD")) {
+                TagEFailSites(ks->memory(), hspec, "hud");
+              }
+
+              // Load hud's XUI skin package. hud asks
+              // XamBuildResourceLocator for a locator into this module; with
+              // no module the locator comes back empty and no scene loads.
+              // hud.xex carries its own XUI skin as a resource section named
+              // "hud" (91401000, 167581b in the XEX resource table), which is
+              // exactly the container it passes to XamBuildResourceLocator.
+              // So the module it wants is itself, not a separate package.
+              guide_skin_module_ = hud->hmodule_ptr();
+              XELOGI("Guide: hud handle={:08X} hmodule_ptr={:08X}",
+                     hud->handle(), hud->hmodule_ptr());
               if (!cvars::guide_skin_path.empty()) {
                 auto skin = ks->LoadUserModule(cvars::guide_skin_path, false);
                 if (skin) {
