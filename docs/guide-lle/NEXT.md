@@ -4768,3 +4768,54 @@ loader (`81795548`) and the heap creator (`817BBD70`) - routines with no
 callers inside xam that something outside the module is expected to drive. Two
 of those three have already been found and driven from the bootstrap; this is
 the third of the same kind.
+
+---
+
+## Ready to upstream: upstream-module-loading-fix.patch
+
+`docs/guide-lle/upstream-module-loading-fix.patch`, cut against
+`origin/canary_experimental` and verified to apply to a pristine checkout of it
+(59 insertions, 2 deletions, four files). Third of these, after
+`upstream-monitor-fix.patch` and `upstream-jit-bounds-fix.patch`, and the same
+rationale: general Xenia defects this branch happened to expose.
+
+**1. `LoadUserModule` deduplicates by path only.** `Matches(path)` is passed
+the full path, and `XModule::Matches` compares its argument against the
+existing module's basename, its name, and its path - so a second path to an
+already-loaded module matches none of the three. Both copies take their image
+base from the xex header, so the second `AllocFixed` lands on the first,
+zeroing the range the first copy is executing from, writing the same bytes
+back, and re-applying section protections. Measured here as xam `.text`
+"going zero and coming back identical", with intermittent translation failures
+and crashes for whatever happened to be JIT'd inside the window. Fix passes
+the basename to `Matches` as well and logs both paths when it fires.
+
+**2. Resource-only XEX images are rejected.** `ReadImage` ends with "not a
+patch and image doesn't have proper PE header" - correct for an executable,
+wrong for a resource container. `huduiskin.xex` (the 360 dashboard's HUD skin)
+carries `RESOURCE_INFO` with a `skin` and an `xam` resource, no entry point and
+no import libraries, and cannot pass that check by construction. Adds
+`is_resource_only()` - has `RESOURCE_INFO`, lacks `ENTRY_POINT` - accepts such
+images, and skips `ReadPEHeaders` for them in `LoadContinue`. Their load
+address comes from the security info and is already correct, and
+`UserModule::GetSection` already serves sections from `RESOURCE_INFO` without
+touching a PE.
+
+**3. `CalculateHash` walks off the front of a code-less module.** It locates
+the first and last `XEX_SECTION_CODE` page with a lambda returning
+`UINT32_MAX` when there is none, then computes
+`base + (find_code_section_page(true) * page_size)`. With no code sections that
+is `base + (UINT32_MAX * 0x1000)`, which wraps to `base - 0x1000` - one page
+below the image, unmapped - and the hash faults there. Observed at `90F8F000`
+for an image based at `90F90000`. Fix returns early when there is no code
+section.
+
+(1) and (3) are unambiguous bugs. (2) is a missing capability rather than a
+bug, but it is the reason the third one is reachable at all.
+
+Not included, deliberately: the `lle_xam_*` import-rebinding in
+`xex_module.cc`, the `DllMain` guest-thread guard in `kernel_state.cc`, and
+everything under `lle_xam_skin_init` - all Guide-specific or still
+experimental. The patch was built by applying only these edits to a clean
+worktree rather than by diffing this branch, since those files carry unrelated
+changes.

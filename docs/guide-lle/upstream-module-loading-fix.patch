@@ -1,0 +1,116 @@
+diff --git a/src/xenia/cpu/xex_module.cc b/src/xenia/cpu/xex_module.cc
+index 0796b53..daa9c25 100644
+--- a/src/xenia/cpu/xex_module.cc
++++ b/src/xenia/cpu/xex_module.cc
+@@ -560,6 +560,14 @@ int XexModule::ReadImage(const void* xex_addr, size_t xex_length,
+     return 0;
+   }
+ 
++  // A resource-only XEX has no PE image by design, so the check above can
++  // never pass for one. Accept it rather than reporting a load failure.
++  if (is_resource_only()) {
++    XELOGD("XEX {:08X} is resource-only; skipping PE validation",
++           base_address_);
++    return 0;
++  }
++
+   // Not a patch and image doesn't have proper PE header, return 3
+   return 3;
+ }
+@@ -1037,7 +1045,10 @@ bool XexModule::LoadContinue() {
+ 
+   finished_load_ = true;
+ 
+-  if (ReadPEHeaders()) {
++  // Resource-only modules have no PE headers to read. Everything below that
++  // matters for them - the page-descriptor walk and memory protection - works
++  // off the security info, and imports/exports simply are not present.
++  if (!is_resource_only() && ReadPEHeaders()) {
+     XELOGE("Failed to load XEX PE headers!");
+     return false;
+   }
+diff --git a/src/xenia/cpu/xex_module.h b/src/xenia/cpu/xex_module.h
+index c24b6d9..a89f52e 100644
+--- a/src/xenia/cpu/xex_module.h
++++ b/src/xenia/cpu/xex_module.h
+@@ -229,6 +229,22 @@ class XexModule : public xe::cpu::Module {
+     return *(uint32_t*)buffer == 0x905A4D;
+   }
+ 
++  // A resource-only XEX carries RESOURCE_INFO but no code at all: no entry
++  // point, no import libraries, and nothing PE-shaped at its load address.
++  // Such a file is valid and must not be rejected for failing
++  // is_valid_executable().
++  bool is_resource_only() const {
++    if (!xex_header()) {
++      return false;
++    }
++    xex2_opt_resource_info* resources = nullptr;
++    if (!GetOptHeader(xex_header(), XEX_HEADER_RESOURCE_INFO, &resources)) {
++      return false;
++    }
++    xe::be<uint32_t>* entry_point = nullptr;
++    return !GetOptHeader(xex_header(), XEX_HEADER_ENTRY_POINT, &entry_point);
++  }
++
+   bool is_patch() const {
+     assert_not_null(xex_header());
+     if (!xex_header()) {
+diff --git a/src/xenia/kernel/kernel_state.cc b/src/xenia/kernel/kernel_state.cc
+index a870b76..19b231d 100644
+--- a/src/xenia/kernel/kernel_state.cc
++++ b/src/xenia/kernel/kernel_state.cc
+@@ -580,11 +580,31 @@ object_ref<UserModule> KernelState::LoadUserModule(
+   {
+     auto global_lock = global_critical_region_.Acquire();
+ 
+-    // See if we've already loaded it
++    // See if we've already loaded it.
++    //
++    // Matching on the full path alone is not enough: the same module reached
++    // by a different path - SYS:\xam.xex and \Device\Flash\xam.xex, say - fails every
++    // comparison in Matches(path) and gets loaded a second time. Both copies
++    // take their image base from the xex header, so the second load's
++    // AllocFixed lands on top of the first: it zeroes the range the first
++    // copy is already executing from, writes the same bytes back, and
++    // re-applies the section protections. Anything translated during that
++    // window sees zeros.
++    //
++    // Matches() already compares the basename and the module's own name, so
++    // passing the name as well makes this dedupe by module name - which is
++    // what the console does, and what fixed image bases require.
+     for (auto& existing_module : user_modules_) {
+       if (existing_module->Matches(path)) {
+         return existing_module;
+       }
++      if (existing_module->Matches(name)) {
++        XELOGW(
++            "LoadUserModule: {} is already loaded as {}; returning the "
++            "existing module rather than loading a second copy over it",
++            path, existing_module->path());
++        return existing_module;
++      }
+     }
+ 
+     global_lock.unlock();
+diff --git a/src/xenia/kernel/user_module.cc b/src/xenia/kernel/user_module.cc
+index a660ade..740cc0d 100644
+--- a/src/xenia/kernel/user_module.cc
++++ b/src/xenia/kernel/user_module.cc
+@@ -1160,6 +1160,16 @@ void UserModule::CalculateHash() {
+     return UINT32_MAX;
+   };
+ 
++  // A module with no code sections at all - a resource-only XEX - makes
++  // find_code_section_page return UINT32_MAX, and multiplying that by the page
++  // size wraps: start_address lands one page *below* the image and the hash
++  // then reads unmapped memory. There is nothing to hash in that case anyway.
++  if (find_code_section_page(true) == UINT32_MAX) {
++    XELOGD("CalculateHash: {:08X} has no code sections; nothing to hash",
++           xex_module()->base_address());
++    return;
++  }
++
+   const uint32_t start_address =
+       xex_module()->base_address() + (find_code_section_page(true) * page_size);
+   const uint32_t end_address =
