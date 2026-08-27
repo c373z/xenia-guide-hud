@@ -4290,3 +4290,56 @@ So a meaningful Guide run needs all three:
 with `--break_on_debugbreak=false` now supplied by the harness automatically.
 If a run shows no `Guide button:` line, check this flag before concluding
 anything about the Guide code.
+
+---
+
+## The visual registry is empty because nothing ever registers: `huduiskin.xex`
+
+Three results, in order, that close the loop on the visual question.
+
+**1. `XuiVisualRegister` never executes.** With boot stable after the
+double-load fix, the demand-JIT test finally ran cleanly. Xenia JITs on first
+call, so a `DemandFunction: enter` line is proof of execution and its absence
+is proof of the opposite:
+
+    DemandFunction: enter 81959160     <- XuiControlAttachVisual   (runs)
+    DemandFunction: enter 8193B6B0     <- XuiVisualCreateInstance  (runs)
+    (nothing for 8193D238)             <- XuiVisualRegister        (never runs)
+
+and nothing in its caller chain (`8193D4B8`, `8193D740`, `8193F7C0`,
+`817923A0`, `81795548`, `81AA5A60`) runs either. So the collection
+`XuiVisualCreateInstance` searches is not merely missing an entry for one
+class - **it is empty, because nothing ever puts anything in it.**
+
+**2. The scenes name the visuals they want, and they are skin names.**
+Dumping `InfoUpsellLive.xur` (the scene actually on screen -
+`scnInfoUpsellLive`) gives its control classes and, separately, the visual
+names it references:
+
+    classes:  XuiLabel  XuiImage  XuiButton  XuiNavButton  XuiBackButton  XuiFigure
+    visuals:  graphic_metapane  RightPanelShader  btn_oneline-icon  artPanel
+              legend_A  legend_B  shade  shine
+    assets:   xam://livelogo_upsell.png  sharedres://ico_64x_xboxlive.png ...
+
+Those visual names are what goes into `XuiControlAttachVisual`'s
+`Visual='%ls' ... not found`.
+
+**3. The skin exists, as its own module, and has never been loaded.**
+`dashroot` contains **`huduiskin.xex`**. This corrects a conclusion recorded
+earlier in this file: "neither module ships a skin" was established by scanning
+the XUIZ containers *inside* `hud.xex` and `xam.xex`, and that much is true -
+hud's container holds 34 `.xur` scenes and nothing skin-shaped. But the skin
+was never inside either module. It is a **separate xex sitting next to them**,
+and this project has been running with `guide_skin_path` deliberately blank on
+the reasoning that "hud carries its own skin as a resource section" - which the
+container scan itself had already refuted.
+
+The plumbing is already there: `guide_skin_path` loads the named module and
+sets `guide_skin_module_`. It has simply never been pointed at anything.
+
+Next: run with `--guide_skin_path=SYS:\huduiskin.xex` (SYS: is `dashroot`) and
+see whether `XuiVisualRegister` starts executing and controls acquire visuals.
+**In flight at the time of writing - not yet a result.** Loading the module is
+not automatically the same as XUI being told to use it as a skin, so if the
+registrations still do not happen, the next question is what call turns a
+loaded skin module into registered visuals.
