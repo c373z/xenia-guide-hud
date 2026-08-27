@@ -3207,3 +3207,49 @@ VAs, and so do the branch targets it prints.** A target like `-> 81938d20` is
 already a file VA; adding the usual `+0x7200` lands mid-function and produces
 convincing but meaningless output. Only runtime addresses - those logged by
 the emulator - need the offset.
+
+### Navigation works now - and does not attach visuals
+
+With the bootstrap's scene as the host:
+
+    GuideScene: NavigateFirst(host 00010000, 00010042, 0) -> 00000000
+
+That is a real capability gained: scenes can now be navigated, where every
+attempt before returned `8030000B`. The host had to be an XUI handle, and the
+bootstrap's scene is one.
+
+**But the visuals are unchanged** - `btnB`, `btnA`, `btnOnlineStatus` all still
+report `80300017`. So the hypothesis that navigation attaches visuals is
+**refuted**. Worth stating plainly: navigation was a reasonable guess that fit
+the evidence, and it is wrong.
+
+### Where visuals actually come from
+
+`XuiControlAttachVisual` (file `8193CE70`) has exactly three internal callers
+in xam:
+
+    81770B88   (runtime 81769988)
+    8196BDB8   (runtime 81964BB8)
+    81982358   (runtime 8197B158)
+
+The XUI-region one sits inside a dispatch switch - the surrounding code is a
+run of `b -> 8196c68c` tails, the shape of a message handler jump table - and
+is gated on a helper returning zero:
+
+```
+8196bda4  stw  r11,8(r30)      ; mark something on the object
+8196bda8  bl   81938bc8
+8196bdb0  bc   -> skip if non-zero
+8196bdb4  lwz  r3,0(r31)
+8196bdb8  bl   8193ce70        ; AttachVisual
+```
+
+So a control gets its visual **when it is sent a particular message**, not when
+its scene is created, and not when the scene is navigated to. That points at
+the message pump rather than at scene setup - hud imports `XuiSendMessage`
+(`0x35F`), and this project already has a `guide_trace_pump` cvar from an
+earlier pass at the same area.
+
+Next: identify which message id reaches `8196BDA0`, and whether anything is
+sending it. That is a jump-table index away, and it is measurable rather than
+guessable.
