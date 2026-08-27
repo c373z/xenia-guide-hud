@@ -1305,6 +1305,25 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
                                     : 0;
                 uint32_t gvi2 = xm2 ? xm2->GetProcAddressByOrdinal(0x395)
                                     : 0;
+                // Navigate to the scene before inspecting it. Visuals are
+                // attached explicitly (XuiControlAttachVisual), and nothing
+                // in this project ever navigates - it only creates - so a
+                // created-but-never-current scene plausibly has no visuals by
+                // construction. NavigateFirst(a, scene, transition) touches
+                // its first argument only when the transition byte is 0xFD
+                // (checked at 81943334), so passing 0 there is safe; the
+                // scene handle must be non-null, which it is here.
+                {
+                  uint32_t nav = xm2 ? xm2->GetProcAddressByOrdinal(0x359)
+                                     : 0;
+                  if (nav && nsc) {
+                    uint64_t na[] = {0ull, nsc, 0ull};
+                    uint32_t nr = uint32_t(processor->Execute(
+                        ts, nav, na, xe::countof(na)));
+                    XELOGI("GuideScene: NavigateFirst(0, {:08X}, 0) -> {:08X}",
+                           nsc, nr);
+                  }
+                }
                 // Query elements by id. GetLastChild only follows one
                 // branch, and the scene has far more objects than that path
                 // reaches; these ids come from GuideMain's own STRN section.

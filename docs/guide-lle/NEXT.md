@@ -3140,3 +3140,43 @@ does.
 Next: resolve `XuiSceneNavigateFirst` (`0x359`) and read its prologue to
 establish its argument count before calling it - guessing an arity on a guest
 export risks a fault, and this path has punished guesswork repeatedly.
+
+### Navigation needs a host, and our scenes have no parent
+
+`XuiSceneNavigateFirst` resolves to runtime `8193C0D0`. Reading it before
+calling it (worth doing - guessing an arity on a guest export risks a fault):
+
+- Three arguments: `r3` host, `r4` scene, `r5` transition.
+- The transition byte is validated as `< 4` or `0xFD`/`0xFE`/`0xFF`, else
+  `E_INVALIDARG`.
+- **`r3` is only dereferenced when the transition is `0xFD`** (checked at
+  `81943334`), so `(0, scene, 0)` is safe to call.
+
+Calling it that way on a freshly created scene:
+
+    GuideScene: NavigateFirst(0, 00010042, 0) -> 8030000B
+
+and the visuals are unchanged. The rejection path is explicit:
+
+```
+81943380  bl     81938df0     ; fetch the scene's parent into sp+80
+81943388  cmplwi r11,0
+8194338c  bc     -> proceed if non-null
+81943390  cmplwi r28,0        ; otherwise fall back to arg1, the host
+81943394  bc     -> use it if non-null
+8194339c  lis    r3,0x8030
+819433a0  ori    r3,r3,0xb    ; 8030000B: no parent and no host given
+```
+
+So navigation requires either a scene that already has a parent, or an
+explicit host in `r3`. Scenes created here have neither: `XuiSceneCreate` is
+called standalone, so they are detached from the navigation tree entirely.
+
+That is consistent with the visuals result rather than a separate problem - a
+scene that is not part of any navigation tree is never made current, and
+nothing attaches visuals to controls in it.
+
+Open: what object is the host. `r3` is passed to `81938D20(host, scene)` at
+`819433AC`, so reading that call is the way to identify what it expects -
+candidates are hud's guide object (`guide_bs_obj_`) and the bootstrap's own
+scene (`00010000`), but neither should be guessed at.
