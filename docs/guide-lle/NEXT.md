@@ -4819,3 +4819,47 @@ everything under `lle_xam_skin_init` - all Guide-specific or still
 experimental. The patch was built by applying only these edits to a clean
 worktree rather than by diffing this branch, since those files carry unrelated
 changes.
+
+### Refuted: the skin loader is not simply being called too early
+
+The obvious benign explanation for the null at `[81D43C50+0x28]` was ordering -
+that our bootstrap drives `81795548` before whatever populates the field. It
+does not hold.
+
+`81D43C78` is now in the `XamTextWatch` poll set. On a **default-path** run
+(skin init off, 22,943 lines, scenes loading and the draw loop running to
+#3000 as usual) the watcher produces **no change line for it at all**. Combined
+with the crash itself showing `r3=0` at the point the loader reads it, the
+field is null from load through the entire run. Nothing populates it at any
+point, early or late.
+
+That leaves "a routine we never invoke creates it", the same category as the
+skin loader and the heap creator. Enumerating candidates does not narrow it
+usefully, though: xam has **4,477 functions with no `bl` caller** anywhere in
+its `.text` - most reached through vtables, dispatch tables or exports - and 46
+of those contain a store to `+0x28` of some register. That is not a shortlist,
+it is a haystack, and picking from it would be guesswork dressed up as
+analysis.
+
+What is established, and worth not re-deriving:
+
+* nothing in xam's `.text` stores to `[81D43C50+0x28]` through the context
+  register - checked across all 49 functions that materialise `81D43C50`, and
+  the offset appears in load lists and in no store list;
+* `r31` in `81795548` is assigned once at `8179556C` and never reassigned, so
+  the faulting load genuinely reads that address;
+* `81790758` is reference-counted (`lwarx`/`stwcx` on `[ctx+0x24]`, init on
+  first reference) but **asserts** `[ctx+0x28] != 0` and calls through it, so
+  it consumes the manager rather than creating it;
+* `81790FD0` and `81795970` are reached from xam's init region (`817512D8` and
+  `81750FA8`; `DllMain` is `817519D8`), and `81750FA8` does execute in our
+  runs - so on hardware the manager exists before those run.
+
+**Suggested next step is a runtime one, not more disassembly.** The cheap
+question still unanswered is whether the registrations that *did* happen before
+the crash actually landed - i.e. whether the XUI registry at `81D6D508` holds
+entries after a skin run. If it does, the skin path is fundamentally working
+and only the crash stands between it and a scene walk; if it does not, the
+registrations are failing for a separate reason and the crash is a red herring.
+That is one probe and one run, and it decides where the remaining effort
+belongs.
