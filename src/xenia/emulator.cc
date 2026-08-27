@@ -2350,7 +2350,10 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
         // 81A0FE48 gives it a front buffer at +0x3F74 and a progress counter
         // pointer at +0x2B10, and the wrapper's device has both null. Scan the
         // guest heap the devices live in for that signature.
-        if (i == 30000) {
+        // 2ms per iteration, so this fires ~8s after the Guide press. It was
+        // 30000 (60s), which never arrived inside the harness window - the
+        // watcher starts at the press and the run ends well before then.
+        if (i == 4000) {
           int found = 0;
           for (uint32_t a = 0x40000000u; a < 0x41000000u && found < 8;
                a += 0x40u) {
