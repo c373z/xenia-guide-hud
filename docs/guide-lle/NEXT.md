@@ -5521,3 +5521,44 @@ Probe added: the composite-draw line now logs `[dev+0]`, the object's vtable
 pointer. That identifies the class and says whether `+0x32A0` is even a
 meaningful offset for it, instead of assuming it is a D3D device because this
 file calls the field "the device".
+
+### Settled: `[dc+0x1CC]` is a ~140-byte object, not a D3D device
+
+The composite draw logs `dev[0]=81640680`, and that vtable is referenced twice
+in xam - `8191AD00` and `8191ADC0`, a constructor/destructor pair. The
+constructor sizes the class:
+
+    81921F00  ctor(r3 = this)
+      lis  r11,0x8164 ; addi r11,r11,1664   ; 81640680 - the vtable
+      stw  r30,4(r31)                       ; [this+0x04] = 0
+      addi r3,r31,16 ; addi r5,r0,124       ; clear 124 bytes from +0x10
+      stw  r11,0(r31)                       ; [this+0x00] = vtable
+
+`0x10 + 124` = **140 bytes**. `+0x32A0` is 12,960 bytes in - nowhere near
+inside it.
+
+So both of my last two readings were half right, and neither was usable:
+
+* the object **is** real, with a genuine vtable, constructed properly - so
+  "it's just ctx+0x40, therefore stray memory" was wrong;
+* but it is **not** a D3D device, and `+0x32A0`/`+0x32B0` are not fields of it
+  - so `dev[32A0]=00000060` is an out-of-bounds read whose value means nothing,
+  and reporting it as a surface was wrong too.
+
+The `0x60` that this file records as "junk in the RT0 slot" is, at least here,
+simply memory 12KB past a 140-byte object.
+
+**What this leaves, stated carefully:**
+
+* `[dc+0x1CC]` = `[xui_ctx+0x08]` = a 140-byte object of class `81640680`.
+  Whatever the render path wants from `[dc+0x1CC]`, it is not surfaces.
+* The **present** path (`819DE94C`) uses a different object entirely -
+  `r31 = 40870D00` at the fault - and *that* one is read at `+0x32A0` and
+  `+0x32B0`, both zero. That object is the plausible device, and it is the one
+  with no surface.
+* So the two are not the same thing and should stop being conflated: the DC's
+  `[+0x1CC]` and the present's `r31` are different objects reached by different
+  paths.
+
+The useful next question is where the present's `r31` comes from - which is a
+question about its caller, not about `[dc+0x1CC]` at all.
