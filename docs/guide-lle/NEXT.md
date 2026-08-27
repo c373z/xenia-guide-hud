@@ -6697,3 +6697,44 @@ session has used:
 
 which should give the bootstrap (scenes, visuals) *and* a mode-1 device that
 binds render targets - the two halves that have never been available together.
+
+### Both halves in one run - but not wired to each other
+
+`--lle_xam_skin_init --guide_reuse_xui_ctx --guide_bind_title_rt
+--guide_create_primary_device --guide_bootstrap_before_device`:
+
+    GuideScene lines:      38          (scenes built)
+    GetVisual -> S_OK:     2           (visuals attached)
+    front buffer alloc:    yes         (81A0FA80 ran)
+    crashes:               0
+    composite draws:       2           (vs #2700 under mode 2)
+
+So for the first time the bootstrap **and** the mode-1 device both come up in
+the same run - the reordering does what its cvar says. But the two draws that
+do happen show the halves are not connected:
+
+    draw dc=407D5FD0 [134]=00000001 [1CC]=40877E00
+                     wrap[0C]=40870D00 realdev[32A0]=40958CD0
+
+* `wrap[0C]` is still **40870D00** - the wrapper is on the device it was given
+  at line 5026, not on the one mode 1 just built. Reordering the *bootstrap*
+  does not reorder the **wrapper's** binding, which happens during early boot
+  regardless.
+* `[134]` is still `1`, so the present is still gated off.
+* the draw loop stops after 2 iterations, because the Guide thread goes into
+  the mode-1 creator and never returns - expected per that cvar, but it means
+  the loop that would draw is not running.
+
+Screen unchanged: dash's sign-in UI.
+
+Also captured, and worth keeping: the title device carries a
+**surface-shaped field at `+0x3210` = `40958CD0`, `1280x720`** - the same
+surface our RT bind installs. So the title's real front-buffer-sized surface is
+identifiable on the device, which is the thing a correct binding would need.
+
+**State:** the two halves exist simultaneously and are still bound to different
+devices. Connecting them means getting `[wrapper+0x0C]` to point at the mode-1
+device, and the wrapper is wired ~16,000 log lines before that device exists.
+The setter `8191BAC8(wrapper, device, x)` is identified, so the missing piece
+is a device pointer to pass it - which mode 1 does not return, because it never
+returns at all.
