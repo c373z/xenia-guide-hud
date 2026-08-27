@@ -5443,3 +5443,43 @@ or the present has to be pointed at the bound device.
 
 That is a much smaller question than "why are there no pixels", and it is the
 last one between a scene tree with attached visuals and something on screen.
+
+### The DC's device field is not a device, so the surface question was malformed
+
+Sampling the surface fields per frame rather than at bootstrap gives, for all
+2700 composite draws:
+
+    draw dc=407D4C80 [11C]=00000000 [134]=00000001 [1CC]=40877E00
+                     dev[32A0]=00000060 dev[32B0]=00000000
+
+Two things follow, and the second undoes the framing of the last two sections.
+
+**`0x60` is not a surface.** This session's notes already record `0x60` as junk
+in the RT0 slot - treating it as "bound" once tipped the device into
+`D3DDevice_Release` and collapsed the draw loop from 14 log lines to 1. It is
+the same value here, stable across every frame.
+
+**And `40877E00` is not a device.** It is the XUI context (`40877DC0`) plus
+`0x40`. Reading `+0x32A0` from it lands roughly 12KB past a 44-byte object, so
+`0x60` is simply whatever happens to be in that memory - it is not a broken
+surface pointer, it is not a surface field at all.
+
+So "which device has a surface" was the wrong question. The device survey
+answered it honestly - all three known device globals have both fields zero -
+but the composite draw's `[dc+0x1CC]` was never one of those devices to begin
+with. Three separate readings of these numbers have now been wrong in the same
+way: treating `[dc+0x1CC]` as a device pointer because this file names it one.
+
+What is solid, and worth keeping:
+
+* the DC the Guide draws through is `407D4C80`, with `[134] = 1`;
+* its `[+0x1CC]` points into the XUI context, not at a device;
+* the present path (`819DE94C`) uses a *different* object, `40870D00`, whose
+  `[32A0]`/`[32B0]` really are both zero;
+* all three named device globals - `801E6FC4`, `801E6FC8`, `81D43684` - had
+  both fields zero at Guide-button time.
+
+The next question should be **what sets `[dc+0x1CC]` when a DC is built**,
+since every path here depends on that field holding a real device and it
+demonstrably does not. That is a construction-time question about
+`XuiRenderCreateDC`, not a runtime one about surfaces.
