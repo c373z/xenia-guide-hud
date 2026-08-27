@@ -5400,3 +5400,46 @@ That makes the next question precise and cheap: does
 the patch leaves `[134] = 1` on the drawing DC, then the earlier "patching it
 exposes a null device" result was measuring a different DC's behaviour
 entirely, and the flag has still never been properly tested.
+
+### Located: the present path's device has no surface bound
+
+One run, `--lle_xam_skin_init --guide_reuse_xui_ctx --guide_patch_null_render`:
+
+    Guide: patched 818FDF14 917E0134 -> 60000000 (null-render copy removed)
+    GetVisual -> 00000000 (x2)          <- visuals still resolve
+    composite draws: 0                  <- none happen at all
+    GUEST CRASH at 819DE94C  fault_addr ...24
+    r24-r31: ... r31 = 40870D00
+    SwapDraws: 74891 / 2600 swaps = 28.8 per swap (the dashboard constant)
+
+So the flag is a real gate, and the two states are:
+
+* **unpatched** - `[dc+0x134] = 1`, composite draws run (to #2700) and emit
+  nothing;
+* **patched** - the present path runs instead, and faults immediately, so no
+  composite draws happen either.
+
+The faulting code is exactly the sequence this file already sketched:
+
+    819E5B38  lwz r8,12960(r31)    ; [dev+0x32A0]
+    819E5B40  cmplwi r8,0
+    819E5B44  bne   +8             ; use it when non-null
+    819E5B48  lwz r11,12976(r31)   ; else [dev+0x32B0]
+    819E5B4C  lwz r9,36(r11)       ; <- faults, r11 = 0
+
+**Both** `[dev+0x32A0]` and `[dev+0x32B0]` are zero. The device has no surface,
+primary or fallback, so the present has nothing to present to.
+
+And the device is named: **`r31 = 40870D00`**, while the device the bootstrap
+creates and binds is **`407CB880`**. Two different objects. That is exactly the
+question recorded at the top of this file - *"bind targets: `[dc+0x1CC]` versus
+the wrapper's device"* - and `40870D00` is the same `dev=40870D00` that appears
+in the older trace beside `[dc+1CC]=40883A70`.
+
+So the presentation blocker is now located rather than described: **the render
+target is bound on `407CB880`, and the present reads `40870D00`, which has no
+surface.** Either the bind has to target the device the present actually uses,
+or the present has to be pointed at the bound device.
+
+That is a much smaller question than "why are there no pixels", and it is the
+last one between a scene tree with attached visuals and something on screen.
