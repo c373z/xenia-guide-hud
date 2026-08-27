@@ -3110,3 +3110,33 @@ Correction to an earlier speculation: the unnamed `XUIB` block in hud's
 package that looked like it might be a skin was an artefact of the wrong
 container mapping. The corrected extractor finds exactly 34 blocks for 34
 directory entries with no orphan, so there is no hidden skin there.
+
+### The visual class global is fine; visuals are simply never attached
+
+    GuideScene: visual class global [81D6CDDC] = 40881270
+
+Non-null and a plausible heap pointer, so the "the class global is null, hence
+nothing can ever match" theory is dead. `XuiControlGetVisual` has a valid class
+to search for and finds no child of it - the controls genuinely have no visual
+attached.
+
+Since visuals are attached explicitly (`XuiControlAttachVisual`), something
+has to do the attaching, and the likely trigger is that a scene must be
+**navigated to**, not merely created. hud imports the whole navigation family:
+
+    358  XuiSceneNavigateBack        35B  XuiScenePlayBackFromTransition
+    359  XuiSceneNavigateFirst       35C  XuiScenePlayBackToTransition
+    35A  XuiSceneNavigateForward     35D  XuiScenePlayFromTransition
+    39E  XuiSceneInterruptTransitions
+    3B9  XuiTabSceneGoto
+
+Everything this project does creates scenes - `XuiSceneCreate` directly, or
+hud's scene creator - and nothing navigates to one. That would explain why
+controls are inert in *both* the ad-hoc override scenes and the bootstrap's
+own scene, which is otherwise awkward: the bootstrap scene is being drawn, so
+"never rendered" does not account for it, but "created but never made current"
+does.
+
+Next: resolve `XuiSceneNavigateFirst` (`0x359`) and read its prologue to
+establish its argument count before calling it - guessing an arity on a guest
+export risks a fault, and this path has punished guesswork repeatedly.
