@@ -2391,10 +2391,11 @@ void VdSwap_entry(
                           xe::countof(sargs))
                     : 0;
             XELOGI("Guide: SetRenderTarget(dev {:08X}, 0, {:08X} "
-                   "fc={:08X}) -> {:08X}; RT0 now {:08X} [3F78]={:08X}",
+                   "fc={:08X}) -> {:08X}; RT0 now {:08X} [3F78]={:08X} "
+                   "[3F74]={:08X}",
                    rdev, surf, r2(surf + 0x24u),
                    static_cast<uint32_t>(sres), r2(rdev + 0x32A0u),
-                   r2(rdev + 0x3F78u));
+                   r2(rdev + 0x3F78u), r2(rdev + 0x3F74u));
             XELOGI("Guide: bound title RT {:08X} (fc={:08X}) as RT0 on "
                    "device {:08X}",
                    surf, r2(surf + 0x24u), rdev);

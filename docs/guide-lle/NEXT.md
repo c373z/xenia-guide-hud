@@ -5786,3 +5786,37 @@ the failure has walked from "no visuals" to "no skin" to "no surface" to
 "inside the draw emitter". That is real movement along a single path rather
 than a set of separate problems - but it is still **not pixels**, and the
 honest summary is that the Guide has never yet drawn a frame.
+
+### The emitter's missing argument is `[device+0x3F74]`
+
+Traced the null all the way back, one frame at a time:
+
+    emitter 819F5D18   r14 = r8, the 6th argument       (819FCF50: or r14,r8,r8)
+      <- 819F7F20      r8 = r31 = its own 4th arg (r6)  (819FF188: or r8,r31,r31)
+        <- 819FEB78    r6 = [r31 + 0x3F74]              (81A05E24: lwz r6,16244(r31))
+          <- 8191B418  = **wrapper vtable slot 24**
+
+So the value the draw emitter faults on is **`[device+0x3F74]`**, and the whole
+draw path turns out to be wrapper methods:
+
+| wrapper vtable slot | function | role |
+|---|---|---|
+| 11 | `8191AFD0` | fetches `[wrapper+0x0C]`, the device, for the present |
+| 21 | `8191B338` | binds a surface: `819F38C8` -> `[dev+0x32B0]` |
+| 24 | `8191B418` | drives the draw emitter |
+
+And the near-miss is worth stating precisely: the existing bind code writes
+**`[rdev+0x3F78]`** - the device's default render target, which it sets so that
+`819F4C00` does not immediately unbind RT0 again. The emitter reads
+**`[rdev+0x3F74]`**, the adjacent word, which nothing in our bootstrap writes.
+Four bytes apart, one filled, one empty.
+
+That is not proof that `+0x3F74` should hold the same surface - it is a
+different field and may want a different object entirely (the assert near the
+call, `[r6+0x20] & 0x3F == 0x3D`, says it is a typed object, so whatever goes
+there has to be of that type). Logging both is the cheap first step, and the
+bind log now reports `[3F74]` beside `[3F78]`.
+
+If `+0x3F74` is genuinely never populated, it joins the skin loader, the heap
+creator and wrapper slot 21 as the fourth thing in this investigation that
+hardware sets up and our bootstrap does not.
