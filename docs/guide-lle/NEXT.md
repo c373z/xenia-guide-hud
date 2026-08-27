@@ -3977,3 +3977,126 @@ That the flips are **page-granular** is itself a clue worth keeping: a
 region-wide transition that restores identical bytes, observed at page
 granularity, looks far more like a mapping or protection operation than like
 anything writing data.
+
+### The boot crash, fully traced: a XAM feature lookup that misses
+
+With the scan bounds fixed, `xam .text population` reports **0 of 1524 mapped
+pages zero (0.0%)** at both checkpoints, and the probe at `81747A00` returns
+bytes identical to the image on disk. So `.text` is fully and correctly
+populated - the last remnant of the "missing pages" story is gone, and this
+also independently confirms the corrected addressing (guest bytes at a guest
+VA == image bytes at `VA - ImageBase`, no skew).
+
+The crash itself now decodes end to end.
+
+**`81747A00` is xam's feature lookup.** It searches a table of 13 32-byte
+records at `815FA1E0` for one whose `+8` word matches the requested id, and
+returns the record, or NULL after printing `'Unknown XAM feature %d\n'`. The
+loop bound confirms the shape: it runs while the offset is `< 0x1A0`, and
+`815FA1E0 + 0x1A0 = 815FA380`, exactly where that string starts.
+
+| key | feature | key | feature |
+|---|---|---|---|
+| 1 | `PRELOADED_HUD` | 33 | `DEVKIT_HEAP` |
+| 2 | `MESSENGER` | 34 | `PIX_STREAM` |
+| 3 | `XMP` | 35 | `ETX_BOOST` |
+| 4 | `COMMUNITY` | 36 | `XS_LOGS` |
+| 5 | `XIME` | 38 | `TESTXEX` |
+| 6 | `XSTUDIO` | 39 | `XAMUIAUTOMATION` |
+| 7 | `WIRELESS_WAVEA` | | |
+
+(Records 7-12 carry `1` in their first word, the retail/devkit split.)
+
+**`81747D70` is its caller**, and the fault falls out of it exactly:
+
+    81747D70(feature_id, ptr):
+      or   r31,r4              ; save ptr
+      bl   81747A00            ; -> r3 = record, or NULL
+      cmplwi r3,0 ; bne +8 ; twi     <- the guest assert
+      ... four more null-checks, each guarded the same way ...
+      lwz  r6,16(r3)           <- 81747DDC: faults on r3 = 0, addr 0x10
+
+which is precisely the reported crash: `guest PC 81747DDC`,
+`fault_addr ...00000010`, `r3=0`, `lr=81747D88` - and `81747D84` is one of the
+two static call sites of `81747A00` found earlier.
+
+**The requested id is 6.** `81747A00` starts with `or r4,r3,r3` and never
+rewrites `r4`, so the `r4=00000006` in the crash dump is the key that was
+looked up. Key 6 is `XSTUDIO`, and it **is** in the table on disk.
+
+So the lookup missed on a key that exists.
+
+My first reading was that the table must therefore have read wrong, and that
+since `815FA1E0` is in `.rdata` rather than `.text`, the transient-zero
+phenomenon would need rescoping. **Measurement does not support that.** Probes
+on the table now report, at both checkpoints:
+
+    xam probe 815FA1E0 (after xam load):   00000000 815FA1CC 00000001 ...
+    xam probe 815FA280 (after xam load):   00000000 815FA1C4 00000006 ...
+
+byte-identical to the image on disk - rec0 carrying key 1 and rec5 key 6,
+exactly as they should. The table is intact. It could still be corrupt at the
+instant of the lookup, which these two checkpoints cannot see, but there is no
+evidence for that and it should not be asserted.
+
+**So the honest state is: the code is right, the table is right, the key is
+present, and the lookup returned NULL anyway. The cause is not established.**
+Two candidates worth testing, neither yet tested:
+
+* A translation defect around the search loop. The loop body contains a `twi`
+  (guarded, and never taken for these keys, but present), and this project has
+  already found one real JIT bug. Whether Xenia's handling of a trap
+  instruction inside a loop body preserves the loop's control flow is
+  unverified.
+* The same intermittency that produces everything else here. The very next run
+  died somewhere else entirely - `ResolveFunction: no function for guest
+  817B9C28` - so which address fails is not stable between runs, and this may
+  be one more face of the transient-zero behaviour rather than anything
+  specific to the feature table.
+
+Recorded as a question rather than an answer, per the standing warning above
+that this area has already produced three plausible-and-wrong causal stories.
+
+Two practical notes:
+
+* This code is dense with defensive `twi` asserts - five in `81747D70` alone.
+  `--break_on_debugbreak=false` does not fix anything; it converts an
+  informative assert into a null dereference several instructions later. When
+  a crash looks like a null deref in xam, check whether an assert fired first.
+* `0FE00019` is `twi 31,r0,25`, an unconditional trap. `ppcdis` renders it as
+  `.long`, so these asserts are invisible in its output - worth knowing when
+  reading any xam disassembly in this file.
+
+### What XStudio is, and why xam is asking at all
+
+Worth recording because it makes the failing path legible rather than
+arbitrary. The requester is `817CE3C8`, reached via
+`bl` at `817CE440` - which is exactly the `817CE444` in the crash's unwind
+chain. It does:
+
+    r3 = 6                       ; XSTUDIO
+    bl 81747D20                  ; "is this feature enabled?"
+    if (!enabled) -> report 'XSTUDIO: XStudio feature disabled', return 80004005
+    ...
+    r3 = '\Device\Flash\xstudio.xex' ; open it
+    if (open failed) skip
+    r3 = 6; r4 = 81D4FDB0
+    bl 81747D70                  ; <- the call that crashes
+
+So this is the **XStudio devkit feature** bringing itself up: it asks whether
+the feature is enabled, and if so loads `\Device\Flash\xstudio.xex`. Two
+things follow that are worth knowing before anyone "fixes" this:
+
+* On a retail console this path should not run at all - the enabled check
+  should say no and the function should return `80004005` down the
+  `'XStudio feature disabled'` branch. That it proceeds means the enabled
+  check is answering **yes** in our environment.
+* It only reaches the crashing call if the open **succeeded**, since the code
+  branches away when the open returns negative. So `\Device\Flash\xstudio.xex`
+  is apparently opening successfully here.
+
+Either of those is a more promising thing to investigate than the lookup
+itself: the cleanest outcome is that XStudio should never have been enabled,
+in which case the whole path - assert, null deref and all - simply does not
+execute. `81D4FDB0`, the pointer passed in `r4`, is also the `81D4FDB0(+54)`
+in the crash's stack code refs.

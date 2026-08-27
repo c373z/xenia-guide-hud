@@ -2838,8 +2838,17 @@ static void ReportXamTextPopulation(Memory* memory, const char* when) {
   // which is exactly what a bogus function start landing in inter-function
   // padding would look like. Dump the specific addresses the scanner has
   // tripped on so they can be diffed against the image on disk.
-  for (uint32_t probe_addr :
-       {0x8186E528u, 0x818936B8u, 0x81747D70u, 0x81747A00u}) {
+  // 815FA1E0 is xam's feature table (13 x 32-byte records, key at +8,
+// names PRELOADED_HUD/MESSENGER/XMP/...). 81747A00 searches it and
+// returns NULL on a miss; 81747D70 then asserts and, with the assert
+// suppressed, faults dereferencing NULL+0x10. The failing lookup asked
+// for key 6 (XSTUDIO), which IS in the table on disk - so the table
+// itself must be reading wrong. rec0 should show key 1 at +8 and rec5
+// key 6, which is what these two probes check. Note this is .rdata,
+// not .text: if it is also affected, the transient-zero phenomenon is
+// not confined to the code section.
+for (uint32_t probe_addr : {0x8186E528u, 0x818936B8u, 0x81747D70u,
+                            0x81747A00u, 0x815FA1E0u, 0x815FA280u}) {
     auto* hp = memory->LookupHeap(probe_addr);
     if (!hp || hp->QueryRangeAccess(probe_addr, probe_addr + 31) ==
                    xe::memory::PageAccess::kNoAccess) {
