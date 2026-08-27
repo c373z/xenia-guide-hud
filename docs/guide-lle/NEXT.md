@@ -2480,3 +2480,41 @@ than at anything Xenia provides.
 Next: attribute that single lookup to a caller (log `lr` alongside it). If it
 belongs to the scene path, the string-table load never reaches the section at
 all, and the failure is upstream in xam's handling of the locator string.
+
+### Correction, and two more theories killed
+
+**Correction to the previous section.** Attributing the section lookups with a
+caller `lr` shows both come from the same xam resolver:
+
+    XexGetModuleSection: module='hud' section='hud' -> 00000000 size=167581 lr=8196ED90
+    XexGetModuleSection: module='xam' section='xam' -> 00000000 size=65728  lr=8196ED90
+
+So the earlier inference - that only one `hud` lookup means the string-table
+load never reaches the section - was wrong. A single lookup is what a resolver
+that **caches** the container looks like, and the caller is xam's resource
+code either way. The section is reached and resolves cleanly.
+
+**Case sensitivity is not the problem.** The XUIZ directory holds
+`Strings.xus` with a capital S while hud asks for `strings.xus`, which looked
+like a strong candidate - and a plausible mechanism existed (a case-insensitive
+compare needing an upcase table that an uninitialised xam might not have).
+Testing it directly with the scene override:
+
+    ("Options.xur") -> 00000000, scene 00010042
+    ("options.xur") -> 00000000, scene 00010074
+    ("OPTIONS.XUR") -> 00000000, scene 000100A6
+
+All three load. The lookup is case-insensitive, so the theory is dead.
+
+### Where this stands
+
+Everything checkable about the inputs now checks out: same object, module set
+before the load, correct container and resource strings, section resolves at
+the right size, lookup case-insensitive, loader definitely executed. And
+`XuiLoadStringTableFromFile` still fails, leaving `[guide+0x4E8]` null.
+
+The one thing still *assumed* rather than observed is the locator string
+itself. It has been inferred as `section://301B3000,hud#strings.xus` from the
+static builder's inputs, never read. That is the next thing to measure, and
+the honest next step - given that on this problem every inferred step has
+eventually turned out to be the wrong one.

@@ -13,6 +13,7 @@
 #include "xenia/kernel/user_module.h"
 #include "xenia/kernel/util/shim_utils.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_private.h"
+#include "xenia/kernel/xthread.h"
 #include "xenia/xbox.h"
 
 namespace xe {
@@ -93,8 +94,18 @@ dword_result_t XexGetModuleSection_entry(lpvoid_t hmodule, lpstring_t name,
       *data_ptr = section_data;
       *size_ptr = section_size;
     }
-    XELOGI("XexGetModuleSection: module='{}' section='{}' -> {:08X} size={}",
-           module->name(), name.value(), result, section_size);
+    {
+      // Attribute the caller: hud's scene path and its string-table path both
+      // need this section, so knowing which one asked says whether the
+      // string-table load ever gets this far.
+      auto* th = XThread::GetCurrentThread();
+      auto* c = th && th->thread_state() ? th->thread_state()->context()
+                                         : nullptr;
+      XELOGI("XexGetModuleSection: module='{}' section='{}' -> {:08X} size={} "
+             "lr={:08X}",
+             module->name(), name.value(), result, section_size,
+             c ? static_cast<uint32_t>(c->lr) : 0);
+    }
   } else {
     XELOGE("XexGetModuleSection: no module for hmodule {:08X} (section '{}')",
            hmodule.guest_address(), name.value());
