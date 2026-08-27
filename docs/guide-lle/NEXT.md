@@ -3656,3 +3656,53 @@ reads, left unpopulated. Whether it bears on the visual path is unknown and
 should not be assumed; it is noted because an unpopulated global that guest
 code branches on is exactly the class of problem that has produced several of
 the failures in this file.
+
+---
+
+## Ready to upstream: upstream-jit-bounds-fix.patch
+
+`docs/guide-lle/upstream-jit-bounds-fix.patch`, cut against
+`origin/canary_experimental` @ `9090088` and verified to apply cleanly to it in
+a scratch worktree (174 insertions, 0 deletions, four files). Same rationale as
+`upstream-monitor-fix.patch`: these are general Xenia bugs that this branch
+happened to expose, not Guide work, and they do not depend on anything else
+here.
+
+Two of them are one bug seen from both ends. `PPCScanner::Scan` backs up by one
+instruction when it reads a zero opcode, but did not special-case the *first*
+instruction being zero - that sets `end_address = start_address - 4`.
+`PPCHIRBuilder::Emit` then computes `(end - start) / 4 + 1` in **unsigned**
+arithmetic, which underflows to ~2^30, and the `memset`s sized from it run over
+gigabytes and fault inside `memcpy`. The reported crash is therefore nowhere
+near the cause, which is what made this expensive to find. The patch fixes the
+scanner (don't produce the bad range) *and* the builder (don't trust the range;
+`Emit` returning false is already a supported outcome). Either alone would have
+stopped the crash; both are worth having, since the builder guard turns any
+future source of corrupt bounds into a log line instead of a wild memset.
+
+The `assert_true(address <= end_address)` already sitting above that
+computation is compiled out in release, so it never fired.
+
+The other two files add `ObInsertObject`, which was declared but unimplemented.
+Guest code that creates an object and asks the kernel for a handle to it got
+nothing back. The implementation deliberately does **not** go through
+`XObject::GetNativeObject`: for a guest object with no dispatch header that
+reads a type field out of arbitrary bytes. It keeps its own pointer->handle
+table instead, and `xobject.h` gains `set_guest_object_no_stash` because
+`SetNativePointer` writes the handle into a dispatch header that such objects
+do not have (its own upstream `FIXME` says as much).
+
+Verified here: `ObInsertObject: guest object 301C9018 -> handle F8000308`, and
+with it xam's notification listener finally receives a handle. Before it,
+`XuiSceneCreate` returned `E_FAIL` for every scene that needed one.
+
+Caveat worth stating plainly for anyone upstreaming this: the two JIT fixes are
+robustness fixes, and the path that triggered them here is the LLE Guide
+bootstrap. I have not produced a stock-Xenia repro. The argument for them is
+that the underflow is real and reachable from any corrupt bound, not that a
+shipping title is known to hit it. `ObInsertObject` is a plain missing export
+and needs no such caveat.
+
+Excluded on purpose: the matching `ExceptionCallback` stack-walk bounds fix in
+`emulator.cc`. It is correct and it is general, but that file is heavily
+Guide-modified on this branch and the fix does not separate cleanly.

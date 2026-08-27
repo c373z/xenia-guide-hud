@@ -1,0 +1,250 @@
+diff --git a/src/xenia/cpu/ppc/ppc_hir_builder.cc b/src/xenia/cpu/ppc/ppc_hir_builder.cc
+index 42d996c..38c082d 100644
+--- a/src/xenia/cpu/ppc/ppc_hir_builder.cc
++++ b/src/xenia/cpu/ppc/ppc_hir_builder.cc
+@@ -82,6 +82,10 @@ void PPCHIRBuilder::Reset() {
+   HIRBuilder::Reset();
+ }
+ 
++// A single guest function larger than this is not plausible; xex sections are
++// smaller than this in their entirety. Used only to catch corrupt bounds.
++static constexpr uint32_t kMaxFunctionSpan = 0x400000;
++
+ bool PPCHIRBuilder::Emit(GuestFunction* function, uint32_t flags) {
+   SCOPE_profile_cpu_f("cpu");
+ 
+@@ -93,6 +97,23 @@ bool PPCHIRBuilder::Emit(GuestFunction* function, uint32_t flags) {
+   // precompile twice i've also seen ones with a start and end address that are
+   // the same...
+   assert_true(function_->address() <= function_->end_address());
++  // That assert is compiled out in release, and the subtraction below is
++  // unsigned: an end address before the start underflows to a count near
++  // 2^30, so the memsets a few lines down run over gigabytes and fault deep
++  // inside memcpy with no indication of where it came from. Reject the
++  // function instead - Emit returning false is already a supported outcome.
++  if (function_->end_address() < function_->address() ||
++      function_->end_address() - function_->address() > kMaxFunctionSpan) {
++    XELOGE(
++        "PPCHIRBuilder: refusing to translate {} {:08X} \"{}\": end address "
++        "{:08X} is before the start or implausibly far past it "
++        "(behavior={} status={})",
++        function_->module() ? function_->module()->name() : "?",
++        function_->address(), function_->name(), function_->end_address(),
++        static_cast<int>(function_->behavior()),
++        static_cast<int>(function_->status()));
++    return false;
++  }
+   instr_count_ = (function_->end_address() - function_->address()) / 4 + 1;
+ 
+   with_debug_info_ = (flags & EMIT_DEBUG_COMMENTS) == EMIT_DEBUG_COMMENTS;
+diff --git a/src/xenia/cpu/ppc/ppc_scanner.cc b/src/xenia/cpu/ppc/ppc_scanner.cc
+index 47193c5..2e2898b 100644
+--- a/src/xenia/cpu/ppc/ppc_scanner.cc
++++ b/src/xenia/cpu/ppc/ppc_scanner.cc
+@@ -69,6 +69,17 @@ bool PPCScanner::Scan(GuestFunction* function, FunctionDebugInfo* debug_info) {
+     // 'no really we meant to end after that bl' functions.
+     if (!code) {
+       LOGPPC("function end {:08X} (0x00000000 read)", address);
++      if (address == start_address) {
++        // The very first instruction is zero, so there is no function here at
++        // all. Backing up would set end_address = start_address - 4, and
++        // PPCHIRBuilder computes its instruction count as an *unsigned*
++        // (end - start) / 4 + 1: that underflows to ~2^30 and the memsets
++        // sized from it run over gigabytes, faulting inside memcpy far from
++        // the actual cause. Refuse the scan instead.
++        XELOGE("PPCScanner: {:08X} begins with 0x00000000; not a function",
++               start_address);
++        return false;
++      }
+       // Don't include the 0's.
+       address -= 4;
+       break;
+diff --git a/src/xenia/kernel/xboxkrnl/xboxkrnl_ob.cc b/src/xenia/kernel/xboxkrnl/xboxkrnl_ob.cc
+index 02e7763..fc5c9cb 100644
+--- a/src/xenia/kernel/xboxkrnl/xboxkrnl_ob.cc
++++ b/src/xenia/kernel/xboxkrnl/xboxkrnl_ob.cc
+@@ -7,6 +7,8 @@
+  ******************************************************************************
+  */
+ 
++#include <unordered_map>
++
+ #include "xenia/kernel/xboxkrnl/xboxkrnl_ob.h"
+ #include "xenia/base/logging.h"
+ #include "xenia/cpu/processor.h"
+@@ -16,6 +18,8 @@
+ #include "xenia/kernel/xthread.h"
+ #include "xenia/xbox.h"
+ 
++#include <atomic>
++
+ namespace xe {
+ namespace kernel {
+ namespace xboxkrnl {
+@@ -418,6 +422,83 @@ uint32_t NtClose(uint32_t handle) {
+ dword_result_t NtClose_entry(dword_t handle) { return NtClose(handle); }
+ DECLARE_XBOXKRNL_EXPORT1(NtClose, kNone, kImplemented);
+ 
++// Guest object pointer -> handle, for objects the guest built itself with
++// ObCreateObject. Their handle cannot live in the object the way
++// SetNativePointer does it, because such an object need not carry a dispatch
++// header - xam's notification listener does not - and writing one there would
++// corrupt it. xobject.cc already takes this approach for adopted guest timers.
++static std::unordered_map<uint32_t, uint32_t>& InsertedObjectTable() {
++  static std::unordered_map<uint32_t, uint32_t> table;
++  return table;
++}
++
++// ObInsertObject(PVOID Object, POBJECT_ATTRIBUTES, ACCESS_MASK, PHANDLE)
++//
++// Turns an object created by ObCreateObject into a handle. Without this, xam's
++// XamNotifyCreateListener creates its listener successfully and then has no
++// way to return a handle for it, so it hands back 0 - which makes hud fail
++// every XuiSceneCreate that needs a notification listener, and the Guide's
++// GuideMain, GuideMainServer and MiniMediaPlayer scenes never load.
++//
++// Deliberately does not route through XObject::GetNativeObject the way
++// ObOpenObjectByPointer does. That reads a dispatch header out of the object,
++// and for an object without one it would interpret arbitrary bytes as a
++// dispatcher type - quietly producing, say, an XEvent wrapper around something
++// that is not an event.
++dword_result_t ObInsertObject_entry(lpvoid_t object_ptr,
++                                    lpvoid_t obj_attributes_ptr,
++                                    dword_t desired_access,
++                                    lpdword_t out_handle_ptr) {
++  if (out_handle_ptr.guest_address()) {
++    *out_handle_ptr = 0;
++  }
++  uint32_t guest_ptr = object_ptr.guest_address();
++  if (!guest_ptr) {
++    return X_STATUS_INVALID_PARAMETER;
++  }
++
++  auto global_lock = xe::global_critical_region::AcquireDirect();
++  auto& table = InsertedObjectTable();
++
++  // Inserting the same object twice hands back the same handle rather than
++  // accumulating wrappers.
++  auto it = table.find(guest_ptr);
++  if (it != table.end()) {
++    auto existing = kernel_state()->object_table()->LookupObject<XObject>(
++        it->second);
++    if (existing) {
++      existing->RetainHandle();
++      if (out_handle_ptr.guest_address()) {
++        *out_handle_ptr = it->second;
++      }
++      return X_STATUS_SUCCESS;
++    }
++    table.erase(it);
++  }
++
++  auto object = object_ref<XObject>(
++      new XObject(kernel_state(), XObject::Type::NotifyListener));
++  object->set_guest_object_no_stash(guest_ptr);
++
++  X_HANDLE handle = X_INVALID_HANDLE_VALUE;
++  X_STATUS result =
++      kernel_state()->object_table()->AddHandle(object.get(), &handle);
++  if (XFAILED(result)) {
++    XELOGE("ObInsertObject: no handle for guest object {:08X} ({:08X})",
++           guest_ptr, result);
++    return result;
++  }
++
++  table.emplace(guest_ptr, handle);
++  if (out_handle_ptr.guest_address()) {
++    *out_handle_ptr = handle;
++  }
++  XELOGI("ObInsertObject: guest object {:08X} -> handle {:08X}", guest_ptr,
++         handle);
++  return X_STATUS_SUCCESS;
++}
++DECLARE_XBOXKRNL_EXPORT1(ObInsertObject, kNone, kImplemented);
++
+ dword_result_t ObCreateObject_entry(
+     pointer_t<X_OBJECT_TYPE> object_factory,
+     pointer_t<X_OBJECT_ATTRIBUTES> optional_attributes,
+@@ -429,10 +510,62 @@ dword_result_t ObCreateObject_entry(
+       xeObCreateObject(object_factory, optional_attributes,
+                        object_size_sans_headers, &out_object_tmp, context);
+   *out_object = out_object_tmp;
++  // The Guide's scene creation ends here: xam's notification listener is made
++  // with ObCreateObject, and hud returns E_FAIL from XuiSceneCreate when it
++  // gets nothing back. Log the calls so the failing one can be seen directly
++  // rather than inferred from the disassembly.
++  static std::atomic<uint32_t> obn{0};
++  uint32_t on = ++obn;
++  if (on <= 40 || result != 0 || !out_object_tmp) {
++    XELOGI(
++        "ObCreateObject #{}: factory={:08X} tag={:08X} size={} -> status "
++        "{:08X} object {:08X} (lr={:08X})",
++        on, object_factory.guest_address(),
++        uint32_t(object_factory->pool_tag), uint32_t(object_size_sans_headers),
++        result, out_object_tmp, uint32_t(context->lr));
++  }
+   return result;
+ }
+ DECLARE_XBOXKRNL_EXPORT1(ObCreateObject, kNone, kImplemented);
+ 
++// Creates a namespace directory object (e.g. \SystemNamedObjects). Xenia has
++// no guest object namespace, so hand back a handle to a plain object and let
++// name-based lookups resolve through the existing object table.
++dword_result_t NtCreateDirectoryObject_entry(
++    lpdword_t handle_out, pointer_t<X_OBJECT_ATTRIBUTES> obj_attributes) {
++  if (!handle_out) {
++    return X_STATUS_INVALID_PARAMETER;
++  }
++  auto directory = object_ref<XObject>(
++      new XObject(kernel_state(), XObject::Type::Undefined));
++  if (obj_attributes) {
++    directory->SetAttributes(obj_attributes);
++  }
++  *handle_out = directory->handle();
++  return X_STATUS_SUCCESS;
++}
++DECLARE_XBOXKRNL_EXPORT1(NtCreateDirectoryObject, kNone, kSketchy);
++
++// Resolves an object-namespace symbolic link (e.g. \Device\Flash) to its
++// target path via the VFS symbolic link table.
++dword_result_t ObTranslateSymbolicLink_entry(pointer_t<X_ANSI_STRING> link_name,
++                                             pointer_t<X_ANSI_STRING> out_target) {
++  if (!link_name || !out_target) {
++    return X_STATUS_INVALID_PARAMETER;
++  }
++  std::string name(
++      kernel_memory()->TranslateVirtual<const char*>(link_name->pointer),
++      link_name->length);
++  std::string target;
++  if (!kernel_state()->file_system()->FindSymbolicLink(name, target)) {
++    XELOGD("ObTranslateSymbolicLink: no link for {}", name);
++    return X_STATUS_OBJECT_NAME_NOT_FOUND;
++  }
++  XELOGD("ObTranslateSymbolicLink: {} -> {}", name, target);
++  return X_STATUS_SUCCESS;
++}
++DECLARE_XBOXKRNL_EXPORT1(ObTranslateSymbolicLink, kNone, kSketchy);
++
+ }  // namespace xboxkrnl
+ }  // namespace kernel
+ }  // namespace xe
+diff --git a/src/xenia/kernel/xobject.h b/src/xenia/kernel/xobject.h
+index 780dfc7..c4d3fa3 100644
+--- a/src/xenia/kernel/xobject.h
++++ b/src/xenia/kernel/xobject.h
+@@ -182,6 +182,15 @@ class XObject {
+   const std::string& name() const { return name_; }
+   uint32_t guest_object() const { return guest_object_ptr_; }
+ 
++  // Record which guest object this handle refers to *without* writing anything
++  // into that object. SetNativePointer is the usual route, but it stashes the
++  // handle into a dispatch header - and objects the guest builds through
++  // ObCreateObject need not have one (xam's notification listener does not),
++  // so stashing there would corrupt them.
++  void set_guest_object_no_stash(uint32_t native_ptr) {
++    guest_object_ptr_ = native_ptr;
++  }
++
+   // Has this object been created for use by the host?
+   // Host objects are persisted through reloads/etc.
+   bool is_host_object() const { return host_object_; }
