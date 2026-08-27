@@ -2283,6 +2283,53 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
   XELOGI("Guide button: user={} lle_xam={} hud={}", user_index,
          cvars::lle_xam.empty() ? "off" : "on",
          cvars::guide_hud_path.empty() ? "not loaded" : "loaded");
+  // XENIA_PROGRESS_WATCH=1: follow the counter the mode-1 stall waits on.
+  // 819F4488 polls [[device+0x2B10]] and gives up after 5s without change;
+  // under mode 1 it never changes and CreateDevice never returns. Five
+  // explanations have been eliminated by measuring around this loop
+  // (system command buffer, ring ownership, wait structures, absent
+  // notifications, notification frequency), so watch the counter itself.
+  // The device is reached the way the draw path reaches it:
+  //   [81D6C978] -> xui ctx -> [+0x08] wrapper -> [+0x0C] device
+  // and each link is re-read every pass so a late-built chain is not missed.
+  if (std::getenv("XENIA_PROGRESS_WATCH")) {
+    auto* pmem = memory();
+    std::thread([pmem]() {
+      xe::threading::set_name("ProgressWatch");
+      auto rd32 = [pmem](uint32_t a) -> uint32_t {
+        if (!a) return 0;
+        auto* hp = pmem->LookupHeap(a);
+        if (!hp || hp->QueryRangeAccess(a, a + 3) ==
+                       xe::memory::PageAccess::kNoAccess) {
+          return 0;
+        }
+        return xe::load_and_swap<uint32_t>(pmem->TranslateVirtual(a));
+      };
+      uint32_t last = 0, last_dev = 0;
+      bool primed = false;
+      for (int i = 0; i < 240000; ++i) {
+        uint32_t ctx = rd32(0x81D6C978u);
+        uint32_t wrap = rd32(ctx + 0x08u);
+        uint32_t dev = rd32(wrap + 0x0Cu);
+        uint32_t cptr = rd32(dev + 0x2B10u);
+        uint32_t val = rd32(cptr);
+        if (dev != last_dev) {
+          XELOGE("ProgressWatch: ctx={:08X} wrap={:08X} dev={:08X} "
+                 "counter_ptr={:08X}",
+                 ctx, wrap, dev, cptr);
+          last_dev = dev;
+          primed = false;
+        }
+        if (primed && val != last) {
+          XELOGE("ProgressWatch: [{:08X}] {:08X} -> {:08X}", cptr, last, val);
+        }
+        last = val;
+        primed = true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+      }
+    }).detach();
+    XELOGI("ProgressWatch: polling the async-call progress counter");
+  }
   if (cvars::guide_hud_path.empty()) {
     XELOGI(
         "Guide button: no hud.xex configured - set guide_hud_path to load it");
