@@ -6585,3 +6585,37 @@ are distinct, which is a different and previously unnoticed fact.
 The question that now matters more: **which device should the Guide be drawing
 through** - and if it is mode 1's, how the wrapper is meant to come to point at
 it.
+
+### How the wrapper gets its device, and a note on descending further
+
+`[wrapper+0x0C]` is not set at construction - `8191AD00` stores `r30 = 0` into
+it. Three functions in the wrapper's class write that field and have run:
+
+* `8191AD00` - the constructor, writing zero;
+* `8191AD70` - a small helper, called from `8191ADC0` and `8191BAC8`;
+* `8191BAC8` - **the setter**: `8191BAC8(wrapper, device, x)` keeps `r4` in
+  `r30` and stores it to `[wrapper+0x0C]`.
+
+The setter's only caller is `818FCE38`, which **does run** (indirectly - it has
+no `bl` callers), and it takes the device from its own object:
+
+    or  r3,r29,r29     ; the wrapper
+    lwz r4,8(r31)      ; the device, from [X+0x08]
+    bl  8191BAC8       ; wrapper->SetDevice
+
+So the wrapper is handed whatever `[X+0x08]` holds when `818FCE38` runs, and in
+our runs that is `40870D00` - not the device mode 1 creates.
+
+**A note on method, since this is the fifth consecutive link in one chain.**
+Each tick of this descent costs a run or a disassembly and yields one more
+"...and that comes from `[Y+0x08]`". The chain has not converged and there is no
+evidence it is about to. The useful reframing for whoever picks this up:
+
+* the *mechanism* is now well mapped - context -> wrapper -> device, with the
+  setter and its caller both identified;
+* what is missing is not another link but an **ordering**: mode 1 builds a
+  device that never enters this chain, and nothing observed so far installs it
+  into `[X+0x08]` before `818FCE38` reads it;
+* so the question worth attacking is *when* `818FCE38` runs relative to the
+  device creator, not *what* it reads. That is answerable by timestamping both
+  in one run, rather than by tracing another pointer.
