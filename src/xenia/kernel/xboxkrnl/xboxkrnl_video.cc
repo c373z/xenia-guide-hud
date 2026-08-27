@@ -2800,7 +2800,16 @@ void VdSwap_entry(
                      ::cvars::guide_bind_title_rt, guide_title_surface_, dev);
             }
           }
-          if (::cvars::guide_bind_title_rt && guide_title_surface_) {
+          // OFF by default (XENIA_PRESENT_RT=1 to try it). Binding RT0 on
+          // the present's device makes things worse, not better: without it
+          // the draw loop runs continuously - 16 composite draws still going
+          // when the run is killed - and with it the loop stops after a
+          // single draw and xam reports the device finalizing. Zeroing RT0
+          // first, so the setter skips releasing the junk it holds, does not
+          // help either. Kept behind a switch because the diagnosis of *why*
+          // is unfinished, not because it works.
+          if (std::getenv("XENIA_PRESENT_RT") &&
+              ::cvars::guide_bind_title_rt && guide_title_surface_) {
             static bool present_rt_done = false;
             uint32_t cur = rdw(dev + 0x32A0u);
             bool plausible = false;

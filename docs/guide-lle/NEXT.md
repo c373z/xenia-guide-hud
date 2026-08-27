@@ -2991,3 +2991,41 @@ Also worth noting: the base configuration produces **14** composite draws, not
 the 600+ recorded earlier in this file. The earlier figure came from runs with
 a different flag set; treat draw counts as comparable only within one
 configuration.
+
+### Resolved: binding RT0 on the present's device is harmful; path disabled
+
+Sorting out a claim I got wrong twice in a row, so the reasoning is on record.
+
+First I concluded the bind *destroys* the device, from the A/B where enabling
+it produced a "currently finalizing" warning. That inference was unsound: the
+warning is emitted **by our own call** into `VALIDATE_DEVICE`, so a run that
+never calls in cannot produce it. Absence of the warning without the bind is
+not evidence the device was healthy.
+
+The measurement that actually settles it is the draw loop, not the warning:
+
+| configuration | composite draws | last draw | log end |
+|---|---|---|---|
+| no bind | 16 | line 23295 | 23463 |
+| bind | 1 | - | - |
+
+Without the bind the loop is still running when the process is killed - only
+168 lines separate the last draw from the end of the log. With it, drawing
+stops after one. So calling `819F31A8` on the present's device really does
+break the loop, and zeroing RT0 first (so the setter skips releasing the junk
+it holds) does **not** avoid it.
+
+The path is now behind `XENIA_PRESENT_RT`, off by default. With it off:
+
+    draws=13 finalizing=0 crashes=0
+
+which matches the behaviour before any of this was added. Kept rather than
+deleted because the *reason* it breaks the loop is still unknown, and the
+device mismatch it was written to address is real:
+`guide_bind_title_rt` binds on `40883A80` while the present reads
+`[dc+0x1CC]`, a different device.
+
+Lesson worth keeping: a diagnostic that only fires when you poke something
+cannot tell you whether poking it caused the problem. Prefer a signal that
+exists in both arms of the comparison - here, whether the draw loop keeps
+running.
