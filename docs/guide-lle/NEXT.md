@@ -1778,3 +1778,58 @@ The actual fix is to make the de-duplication find the already-loaded xam
 regardless of the path it was loaded from - match `xam.xex` by module name, or
 register the LLE xam under the path a title's imports will resolve to. Until
 then, `GAME:` is a dashboard-only workaround.
+
+## The scene load-order question, finally answered
+
+With the double-load fixed the Guide button path works end to end -
+`Guide button: pressed (user 0), handler=913E69C0` instead of the
+`handler=00000000` that blocked every attempt before - so the queued
+experiment could finally run.
+
+**The failure is scene-specific, not positional.** Putting the three failing
+scenes *first* in the load order changes nothing:
+
+    XuiSceneCreate("GuideMain.xur")        -> 80004005, scene 00000000
+    XuiSceneCreate("GuideMainServer.xur")  -> 80004005, scene 00000000
+    XuiSceneCreate("MiniMediaPlayer.xur")  -> 80004005, scene 00000000
+    XuiSceneCreate("Options.xur")          -> 00000000, scene 00010206
+    XuiSceneCreate("Status.xur")           -> 00000000, scene 00010238
+
+So resource exhaustion partway through a list is ruled out.
+
+### Complete runtime census, 27 scenes
+
+| Result | Scenes |
+|---|---|
+| `80004005` E_FAIL | GuideMain, GuideMainServer, MiniMediaPlayer |
+| `8007013D` resource not found | QuickLaunch |
+| `00000000` S_OK | the other 23 |
+
+`QuickLaunch` failing with a *different* code is new information: `8007013D`
+is a missing resource, and QuickLaunch is one of the scenes whose strings
+reference `sharedres://` items absent from hud's package. That is a separate
+failure from the E_FAIL trio.
+
+Also confirmed on this healthy build: elements of scenes that *do* load still
+have no visual - `child "labelHeading" visual -> 80300017: 00000000`,
+`child "txtMessage" visual -> 80300017: 00000000`. So the missing-visual
+problem is independent of the scene-creation failure and survives all of the
+fixes above.
+
+### Still no discriminator for the E_FAIL trio
+
+Re-running the string-table diff against the *confirmed* sets (the earlier
+pass used a `startswith("Xui")` filter that would have missed lowercase class
+names such as `xuiButtonImageCenteredMusic`) finds **no string present in all
+three failing scenes and absent from all 23 loading ones**.
+
+A "these are host scenes that embed child scenes" idea did not survive
+checking: the test keyed on each scene's second string as its class name, but
+that string is often a control name (`battery`, `btnAchievements`), so it
+flagged 16 loading scenes too. Not evidence either way.
+
+What is left, given the files themselves look ordinary: the difference is in
+what `XuiSceneCreate` *does* with them. The remaining approach is the one that
+was blocked before by the freeze - breakpoint the `E_FAIL` construction sites
+inside `8193AFB8` now that runs are stable and reach 18-24k lines, which they
+never did when that was last attempted.
