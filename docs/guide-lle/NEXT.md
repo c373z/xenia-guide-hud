@@ -5007,3 +5007,27 @@ the top: *"bind targets: `[dc+0x1CC]` versus the wrapper's device"*. It has
 been latent all along; the skin work simply made XUI travel far enough to
 dereference it. So the two open threads - the visual registry and the device
 mismatch - turn out to be the same road, and the second one is now the blocker.
+
+**Refinement from `XENIA_CRASH_PEEK="31,1C0,8"`** - the fields, read at the
+fault:
+
+    peek r31+1C0 = 40879A20: 00000000 3F800000 40877DC0 40877E00
+                             40879B10 40879B70 4087A040 4087A0A0
+
+    [dc+0x1C0] = 00000000
+    [dc+0x1C4] = 3F800000   (1.0f)
+    [dc+0x1C8] = 40877DC0   <- the XUI context itself, not a vtable
+    [dc+0x1CC] = 40877E00   <- XUI ctx + 0x40
+
+So the earlier reading of `[dc+0x1C8]` as "the device's vtable" was wrong.
+It holds the **XUI context** (`40877DC0`, the value the bootstrap logs as
+`XUI ctx`), and the crashing code fetches `[XUIctx + 0x0C]` and calls it. The
+`this` it passes, `[dc+0x1CC]`, is that context plus `0x40`. Both fields point
+into the XUI context; neither points at the device the bootstrap created
+(`407CB880`).
+
+Also worth recording, because it removes a false lead: `XuiInit returned
+00000001` is **not** a failure. The bootstrap's own comment states XuiInit
+returns 1 when XUI was already initialised, and `XUI ctx before` is already
+`40877DC0` - so xam had initialised XUI itself before we called it. The context
+is real; the question is why `[ctx+0x0C]` holds text.

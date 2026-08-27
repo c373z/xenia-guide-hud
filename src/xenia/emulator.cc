@@ -1253,6 +1253,20 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                                                        xe::countof(xa));
                 XELOGI("Guide button: XuiInit returned {:08X}, ctx now {:08X}",
                        static_cast<uint32_t>(xr), rd(0x81D6C978u));
+                // The XUI device context reaches this object through
+                // [dc+0x1C8] and calls [it+0x0C] as a function pointer.
+                // At the crash that slot held 006E0065 - two UTF-16 code
+                // units, not code - so dump the head of the context to see
+                // whether it is a real object with a bad slot or simply not
+                // the thing [dc+0x1C8] should be pointing at.
+                uint32_t xctx = rd(0x81D6C978u);
+                if (xctx) {
+                  std::string cw;
+                  for (uint32_t i = 0; i < 12; ++i) {
+                    cw += fmt::format("{:08X} ", rd(xctx + i * 4));
+                  }
+                  XELOGI("Guide button: XUI ctx @{:08X}: {}", xctx, cw);
+                }
               }
                 // Armed early instead (see ArmGuideThreadProbe): a probe
                 // armed from this handler cannot fire on a freeze that
