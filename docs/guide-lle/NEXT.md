@@ -6663,3 +6663,37 @@ re-installs it. That single fact explains the whole cluster of observations:
 
 Option 1 is the more faithful of the two: it puts the call where the ordering
 says it belongs rather than patching around the consequence.
+
+### The mode-1 stall is expected behaviour, and already has a lever
+
+Several sections above investigate why the mode-1 creator never returns,
+eliminating five explanations in the process. That work was not needed:
+`guide_bootstrap_before_device`'s own cvar description states it outright.
+
+> Queue the Guide bootstrap onto the title thread BEFORE calling xam's device
+> creator, instead of after. Only matters with `guide_create_primary_device`:
+> **the mode-1 creator never returns**, so in the normal order the queue call
+> is never reached and the bootstrap never runs at all. Reversing it lets the
+> mode-1 device come up - **it does bind render targets, which mode 2 never
+> does** - while the bootstrap proceeds on the title thread.
+
+So "mode 1 stalls" is known, expected, and worked around by reordering rather
+than fixed. The eliminations recorded above are still worth keeping - they rule
+out five wrong explanations for anyone who assumes the stall is a bug - but the
+question they were answering was already settled here.
+
+**This is the second time in this session that `kernel_flags.cc` contained the
+answer.** The first was mode 1 versus mode 2 itself. The lesson recorded
+earlier bears repeating in stronger terms: *grep `kernel_flags.cc` for the
+addresses and the behaviour before starting any investigation.* Its
+descriptions are effectively an undocumented second findings file, and they are
+not summarised anywhere else.
+
+Testing the combination that description implies but which no run in this
+session has used:
+
+    --lle_xam_skin_init --guide_reuse_xui_ctx --guide_bind_title_rt
+    --guide_create_primary_device --guide_bootstrap_before_device
+
+which should give the bootstrap (scenes, visuals) *and* a mode-1 device that
+binds render targets - the two halves that have never been available together.
