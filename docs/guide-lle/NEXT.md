@@ -3077,3 +3077,36 @@ Lesson worth keeping: a diagnostic that only fires when you poke something
 cannot tell you whether poking it caused the problem. Prefer a signal that
 exists in both arms of the comparison - here, whether the draw loop keeps
 running.
+
+### What `XuiControlGetVisual` actually does
+
+Resolved to runtime `81935B60` (file `8193CD60`):
+
+```
+8193cd78  cmplwi r29,0            ; out pointer null -> 80070057
+8193cd98  stw    r31,0(r29)       ; *out = 0
+8193cda0  lwz    r4,-12836(r11)   ; r4 = [81D6CDDC]  - the visual class
+8193cda4  bl     -> 81943378      ; find(control, class)
+8193cda8  cmplwi r3,0
+8193cdac  bc     -> continue if non-zero
+8193cdb4  lis    r3,0x8030        ; null -> 803000xx, the code we keep seeing
+```
+
+So "no visual" means `81943378(control, [81D6CDDC])` found nothing. The
+visual is a **child object of a particular class**, and the class is taken
+from the global at `[81D6CDDC]`.
+
+Two consequences worth separating:
+
+- Visuals are **attached**, not implicit. hud imports exactly two visual APIs:
+  `XuiControlAttachVisual` (`0x38A`) and `XuiControlGetVisual` (`0x395`). A
+  control has a visual only because something called Attach for it.
+- If `[81D6CDDC]` is itself null, the search cannot match anything and every
+  control reports no visual regardless of what the scene contains. That would
+  explain the result being uniform across every scene tested, which is
+  otherwise a strange coincidence. A log of that global is in flight.
+
+Correction to an earlier speculation: the unnamed `XUIB` block in hud's
+package that looked like it might be a skin was an artefact of the wrong
+container mapping. The corrected extractor finds exactly 34 blocks for 34
+directory entries with no orphan, so there is no hidden skin there.

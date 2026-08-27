@@ -1181,7 +1181,14 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
           // locator from XamBuildDynamicResourceLocator; when that load fails
           // the table stays null and hud dereferences it. Report where those
           // live so they can be read.
-          for (auto ord : {0x342u, 0x31Eu, 0x31Bu}) {
+          // XuiControlGetVisual (81935B60) resolves the visual by calling
+          // 81943378(control, [81D6CDDC]) and returns 0x803000xx when that
+          // comes back null. [81D6CDDC] is the visual class it searches for;
+          // if the global itself is null the lookup can never succeed for any
+          // control, which would explain the result being global.
+          XELOGI("GuideScene: visual class global [81D6CDDC] = {:08X}",
+                 rd(0x81D6CDDCu));
+          for (auto ord : {0x342u, 0x31Eu, 0x31Bu, 0x395u}) {
             XELOGI("GuideScene: xam ordinal {:03X} -> {:08X}", ord,
                    xmn ? xmn->GetProcAddressByOrdinal(ord) : 0);
           }
