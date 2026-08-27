@@ -1961,3 +1961,46 @@ So Aurora does not yet answer "bootstrap or xam/XUI". To make it answer, the
 wait-object spin has to be dealt with first - those two globals are in the
 `81D14000-81D5F000` region that is legitimately zero at load and filled in as
 xam initialises, so under Aurora something that populates them never runs.
+
+## The E_FAIL comes from hud.xex, not xam
+
+The tagging tool (`TagEFailSites`) rewrites the immediate of every
+`ori rX,rX,0x4005` in a range so each group of sites returns a distinct
+HRESULT. No code moves, so unlike a breakpoint it does not stop the path being
+taken. Ranges are given by env var; `XENIA_EFAIL_TAG` tags xam at xam load and
+`XENIA_EFAIL_TAG_HUD` tags hud right after its DllMain returns.
+
+Elimination, in order:
+
+| Range tagged | Sites | `XuiSceneCreate("GuideMain.xur")` |
+|---|---|---|
+| xam XUI region only | 18 | `80004005` (untagged) |
+| **all** of xam `.text` | 886 | `80004005` (untagged) |
+| hud `.text` | 11 | **`80004011`** |
+
+So it is hud's own code that produces the error. That reframes the whole
+question: `XuiSceneCreate` is failing because **hud refuses**, not because xam
+cannot load the scene - consistent with the three failing scenes being the
+ones backed by hud-implemented classes, and with the user's suggestion that
+the fault is likely on the bootstrap side rather than in xam/XUI.
+
+Mistakes worth not repeating:
+
+- The first sweep required `lis rX,0x8000` **adjacent** to the `ori`. That
+  misses 201 of xam's 886 sites, because the compiler schedules instructions
+  between the pair. Match the `ori` alone.
+- The constant is built into `r29`/`r30`/`r31` as well as `r3`; matching
+  `ori r3,r3` exactly skipped 5 of 18 sites silently.
+- `E_FAIL` appears nowhere as a stored constant in xam's `.rdata`/`.data`, and
+  there is no `li rX,0x4005` + `oris` form, so the `ori` sweep is complete.
+- xam's `.text` is `81718E00-81D0CAE0` at runtime (the PE gives file VAs;
+  runtime is `file - 0x7200`). hud loads at runtime base `913E0000` with
+  `.text` `913E6000-913FF094`, derived from its entry RVA against the observed
+  `DllMain entry=913F9D00` and cross-checked against two known hud addresses.
+- Do not compute which site a group tag corresponds to by hand - two attempts
+  at that arithmetic disagreed with the file. The tool now logs each tagged
+  address with its group.
+
+Next: read the exact hud site the tag identifies, and work out which
+precondition hud is testing that holds for the 23 working scenes and fails for
+GuideMain, GuideMainServer and MiniMediaPlayer.

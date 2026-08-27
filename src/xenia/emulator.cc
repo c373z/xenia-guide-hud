@@ -9,6 +9,7 @@
 
 #include <ranges>
 
+#include <cstring>
 #include <mutex>
 #include <thread>
 
@@ -1118,6 +1119,7 @@ X_STATUS Emulator::CreateZarchivePackage(
 
 static void InstallGuideStoreTraces(xe::kernel::KernelState* ks);
 static void ArmGuideThreadProbe(xe::kernel::KernelState* ks, int pdelay);
+static void TagEFailSites(Memory* memory, const char* spec, const char* what);
 static void ReportXamTextPopulation(Memory* memory, const char* when);
 
 void Emulator::on_guide_button_pressed(uint8_t user_index) {
@@ -2794,6 +2796,54 @@ static void ReportXamTextPopulation(Memory* memory, const char* when) {
       best_start, first_zero, last_zero);
 }
 
+// Give each E_FAIL construction site its own HRESULT so a failing call can
+// say where its error came from. Every site builds 0x80004005 with an
+// "ori rX,rX,0x4005"; rewriting just the immediate leaves the code layout
+// untouched, which matters because breakpointing these paths stops them being
+// taken at all. Sites are split into 4 groups across the range and tagged
+// 0x80004010 + group, so one run identifies a quarter; narrow and repeat.
+// Match the ori alone - requiring an adjacent "lis rX,0x8000" misses 201 of
+// xam's 886 sites, since the compiler schedules instructions between them.
+static void TagEFailSites(Memory* memory, const char* spec, const char* what) {
+  uint32_t lo = 0, hi = 0;
+  const char* dash = std::strchr(spec, '-');
+  if (!dash) return;
+  lo = uint32_t(std::strtoul(spec, nullptr, 16));
+  hi = uint32_t(std::strtoul(dash + 1, nullptr, 16));
+  if (hi <= lo) return;
+  uint32_t span = hi - lo;
+  uint32_t counts[4] = {};
+  for (uint32_t a = lo; a + 4 <= hi; a += 4) {
+    auto* hp = memory->LookupHeap(a);
+    if (!hp || hp->QueryRangeAccess(a, a + 3) ==
+                   xe::memory::PageAccess::kNoAccess) {
+      continue;
+    }
+    auto* w = memory->TranslateVirtual<uint32_t*>(a);
+    uint32_t w2 = xe::load_and_swap<uint32_t>(w);
+    if ((w2 & 0xFC00FFFFu) != 0x60004005u) continue;
+    uint32_t group = uint32_t((uint64_t(a - lo) * 4) / span);
+    if (group > 3) group = 3;
+    void* pg = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(w) &
+                                       ~uintptr_t(0xFFF));
+    xe::memory::PageAccess old_access = xe::memory::PageAccess::kReadOnly;
+    if (xe::memory::Protect(pg, 0x1000, xe::memory::PageAccess::kReadWrite,
+                            &old_access)) {
+      xe::store_and_swap<uint32_t>(w, (w2 & 0xFFFF0000u) | (0x4010u + group));
+      xe::memory::Protect(pg, 0x1000, old_access, nullptr);
+      ++counts[group];
+      // Log the address with its group. Deriving which site a tag maps to by
+      // hand from the range arithmetic is error-prone; let the tool say it.
+      XELOGI("EFailTag[{}]: tagged {:08X} -> HRESULT 8000{:04X}", what, a,
+             0x4010u + group);
+    }
+  }
+  XELOGI(
+      "EFailTag[{}]: range {:08X}-{:08X}; tagged g0={} g1={} g2={} g3={} "
+      "(HRESULT 0x80004010 + group)",
+      what, lo, hi, counts[0], counts[1], counts[2], counts[3]);
+}
+
 static void ArmGuideThreadProbe(xe::kernel::KernelState* ks, int pdelay) {
   // Two threads, because enumerating the object table is exactly what a
   // freeze blocks on. The cacher keeps a fresh list of thread objects and
@@ -3276,45 +3326,8 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                ok ? "armed" : "FAILED");
       }
     }
-    // Opt-in (XENIA_EFAIL_TAG=1). Every E_FAIL site returns the same
-    // 0x80004005, so a failing XuiSceneCreate cannot say where it came from,
-    // and breakpointing the loader stops the path being taken at all. Give
-    // each of the 18 E_FAIL construction sites in xam's XUI region its own
-    // low word instead: the HRESULT that comes back then names the site.
-    // Tag N corresponds to index N below, i.e. 0x80004010 + N.
-    if (std::getenv("XENIA_EFAIL_TAG")) {
-      static const uint32_t kOriSites[] = {
-          0x81938128u, 0x81939A9Cu, 0x8193AE44u, 0x8193B458u, 0x8193C098u,
-          0x8193CCFCu, 0x8193D2D0u, 0x819560B4u, 0x819577D8u, 0x8195D85Cu,
-          0x8195D8ECu, 0x8195E360u, 0x81963758u, 0x81968B7Cu, 0x8196BD30u,
-          0x8196CA5Cu, 0x8196ED70u, 0x8196FB74u,
-      };
-      uint32_t tagged = 0;
-      for (uint32_t i = 0; i < xe::countof(kOriSites); ++i) {
-        auto* w = memory()->TranslateVirtual<uint32_t*>(kOriSites[i]);
-        uint32_t cur = xe::load_and_swap<uint32_t>(w);
-        // Match any "ori rX,rX,0x4005" - the constant is built into r29,
-        // r30 and r31 as well as r3 - and rewrite only the immediate so the
-        // destination register is preserved.
-        if ((cur & 0xFC00FFFFu) != 0x60004005u) {
-          XELOGW("EFailTag: NOT patching {:08X}: found {:08X}", kOriSites[i],
-                 cur);
-          continue;
-        }
-        void* pg = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(w) &
-                                           ~uintptr_t(0xFFF));
-        xe::memory::PageAccess old_access = xe::memory::PageAccess::kReadOnly;
-        if (xe::memory::Protect(pg, 0x1000,
-                                xe::memory::PageAccess::kReadWrite,
-                                &old_access)) {
-          xe::store_and_swap<uint32_t>(w, (cur & 0xFFFF0000u) |
-                                                (0x4010u + i));
-          xe::memory::Protect(pg, 0x1000, old_access, nullptr);
-          ++tagged;
-        }
-      }
-      XELOGI("EFailTag: tagged {} of {} XUI E_FAIL sites (0x80004010 + index)",
-             tagged, xe::countof(kOriSites));
+    if (const char* spec = std::getenv("XENIA_EFAIL_TAG")) {
+      TagEFailSites(memory(), spec, "xam");
     }
     if (cvars::guide_patch_null_render) {
       // 818FDEF0  lwz r11,0x1C(r27)   ; XUI context's null-render flag
@@ -3886,6 +3899,9 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
               ks->processor()->Execute(ts, hud->entry_point(), args,
                                        xe::countof(args));
               XELOGI("Guide: DllMain returned");
+              if (const char* hspec = std::getenv("XENIA_EFAIL_TAG_HUD")) {
+                TagEFailSites(ks->memory(), hspec, "hud");
+              }
 
               // Load hud's XUI skin package. hud asks
               // XamBuildResourceLocator for a locator into this module; with
