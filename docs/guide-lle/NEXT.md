@@ -6225,3 +6225,38 @@ second ring the command processor can service - not a further xam call to
 locate. That is a materially different kind of task from the five
 "nobody drives it" gaps, and worth being explicit about before spending more
 ticks looking for a call that may not exist.
+
+### Retracted: Xenia does follow the new ring, so the "two rings" reading is wrong
+
+Last section proposed that xam asks for two command streams and Xenia services
+one, so whichever ring is installed one consumer starves. That is not what the
+evidence shows, and it should not be carried forward.
+
+`GuideRingState` reads the **command processor's own fields**:
+
+    *ptr  = primary_buffer_ptr_;
+    *size = primary_buffer_size_;
+    *wb   = read_ptr_writeback_ptr_;
+
+So `GuideRing: CHANGED after 1s ptr 1F9CA000->1DE3C000` is not a report about
+guest memory - it is Xenia's CP saying **it switched to the Guide's ring**.
+`VdInitializeRingBuffer` is `kImplemented` and forwards straight to
+`graphics_system->InitializeRingBuffer`, so the switch is honoured.
+
+And the decisive comparison was already in hand: the **first** mode-1 run had
+`guide_restore_title_ring` **off**, so the CP stayed on the Guide's ring for
+the whole run - and the Guide stalled in `819F4488` in exactly the same way.
+A consumer starved of its ring and a consumer holding its ring both stall
+identically, so ring ownership is not the mechanism.
+
+What that leaves: the Guide's wait is not simply starved. Either it is waiting
+on progress it must first cause itself and never gets that far, or it is
+waiting on something other than ring progress. Both are open.
+
+**A note on this area specifically.** Four of my last several readings here -
+"the context is corrupted", "there is a null device", "`[dc+0x1CC]` is not a
+device", "Xenia follows one ring" - were each plausible from the evidence in
+front of me and each wrong. The pattern is that the GPU/device structures have
+several similarly-shaped pointers and this file names some of them
+optimistically. The rule that has actually worked is the boring one: read what
+the code stores, in one run, before saying what a field is.
