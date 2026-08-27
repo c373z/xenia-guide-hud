@@ -5296,3 +5296,38 @@ was empty, because XUI never got far enough to dereference the stale pointer.
 **Not yet claimed: pixels.** Visuals resolving and 156k GPU draws are strong
 indirect evidence, but this file has been wrong before about things that looked
 conclusive in a log. A window capture is being taken to settle it by looking.
+
+### But the screen is unchanged: the Guide still does not render
+
+Captured the emulator window twice, 75s in, same build, differing only in
+`--lle_xam_skin_init` / `--guide_reuse_xui_ctx`:
+
+* **with both flags**: the Xbox 360 "sign in or out" profile screen - avatars,
+  Create Profile / Download Profile, the `A Select` / `B Back` legend;
+* **without them**: **the same screen**, same layout, same text, same avatars.
+
+The two images differ only in incidental ways (a different frame, an artefact
+at one edge). So what is on screen is **dash.xex's own UI**, which was already
+rendering, and the Guide overlay is not being presented in either case.
+
+This is worth stating bluntly because the log made it look like a win. The A/B
+legend at the bottom of that screen even matches the skin's own visual names
+(`legend_A`, `legend_B`), which is exactly the kind of coincidence that invites
+a wrong conclusion - those glyphs are dash's, drawn the same way before any of
+this work.
+
+**What is genuinely new, and holds up:**
+
+* the visual registry goes from empty to 281 entries;
+* `GetVisual` returns `S_OK` with real handles instead of `80300017` with null;
+* the run is crash-free where it previously died in a use-after-free;
+* far more GPU work per frame (156k draws over 5.4k swaps).
+
+**What is still missing:** the Guide's output does not reach the screen. That
+is the present/composite path this file already documents at length -
+`[dc+0x11C]`, `[dc+0x134]`, the render-target binding, and the
+`[dc+0x1CC]`-versus-wrapper-device question. The scene tree is now built *and*
+has visuals attached; nothing is compositing it onto the front buffer.
+
+So the stop condition - pixels of the Guide on screen - is **not met**. The
+visual half of the problem is solved; the presentation half is not.
