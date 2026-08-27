@@ -4965,3 +4965,45 @@ Still **no pixels**: zero `GuideScene` lines and zero composite draws in this
 run. The scene walk our bootstrap performs did not run; hud's own path did, and
 crashed first. What changed is the shape of the problem - from "controls have
 no visuals" to "XUI dispatches through a bad pointer while building them".
+
+### The XUI crash decodes to a device-context mismatch already recorded here
+
+The faulting sequence at `81901EAC` (function `81901E40`, len `0xD0`, no
+callers - reached indirectly) is a virtual call:
+
+    lwz   r11,456(r31)   ; r11 = [dc+0x1C8]        - the device's vtable
+    lwz   r11,12(r11)    ; r11 = vtable[3]
+    cmplwi r11,0 ; bne   ; null-checked, and it passes
+    lwz   r3,460(r31)    ; r3  = [dc+0x1CC]        - the device itself
+    mtspr 9,r11 ; bctr   ; vtable[3](device, ...)  <- faults
+
+So it is `device->vtable[3](device, ...)`, with the vtable taken from
+`[dc+0x1C8]` and the `this` pointer from `[dc+0x1CC]`. `vtable[3]` holds
+`006E0065` - two UTF-16 code units, `'e'` and `'n'` - which is text, not code,
+yet passes the null check.
+
+The registers name the objects. The crash report already dumps **all 32 GPRs**
+in four lines; `press.ps1` only shows the first six crash lines, which is why
+`r31` was not visible at first - read the log directly for the rest.
+
+    r24-r31: 00000006 00000000 407FCF50 407FCEF0 407FCF54 7042F1F0 407FCEF0 40879860
+
+giving:
+
+| what | value |
+|---|---|
+| `r31` - the device context | `40879860` |
+| `[dc+0x1CC]` - the device it calls | `40877E00` |
+| `XUI ctx` (logged at bootstrap) | `40877DC0` |
+| device the bootstrap created | `407CB880` |
+
+`[dc+0x1CC]` is `40877E00`, which is **`XUI ctx + 0x40`** - inside the XUI
+context, not a device object - and it is **not** the device the bootstrap
+created (`407CB880`). Reading a vtable through it and calling slot 3 lands on
+whatever bytes happen to be there, which is why the target is text.
+
+That is the same discrepancy this file already lists as an open question near
+the top: *"bind targets: `[dc+0x1CC]` versus the wrapper's device"*. It has
+been latent all along; the skin work simply made XUI travel far enough to
+dereference it. So the two open threads - the visual registry and the device
+mismatch - turn out to be the same road, and the second one is now the blocker.
