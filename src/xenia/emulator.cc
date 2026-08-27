@@ -2305,9 +2305,29 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
         }
         return xe::load_and_swap<uint32_t>(pmem->TranslateVirtual(a));
       };
+      // Also watch the device globals. Mode 1 builds a device the wrapper
+      // never receives - the wrapper is bound around log line 5026 and mode 1
+      // runs at 21509 - and the creator never returns, so there is no pointer
+      // to hand the setter 8191BAC8. If the new device is published to one of
+      // these globals, that is where to get it.
+      uint32_t last_g1 = 0, last_g2 = 0;
       uint32_t last = 0, last_dev = 0;
       bool primed = false;
       for (int i = 0; i < 240000; ++i) {
+        uint32_t g1 = rd32(0x81D43684u);
+        uint32_t g2 = rd32(0x801E6FC8u);
+        if (g1 != last_g1) {
+          XELOGE("ProgressWatch: xam dev global {:08X} -> {:08X}"
+                 " ([2B10]={:08X} [3F74]={:08X})",
+                 last_g1, g1, rd32(g1 + 0x2B10u), rd32(g1 + 0x3F74u));
+          last_g1 = g1;
+        }
+        if (g2 != last_g2) {
+          XELOGE("ProgressWatch: VdGlobalXamDevice {:08X} -> {:08X}"
+                 " ([2B10]={:08X} [3F74]={:08X})",
+                 last_g2, g2, rd32(g2 + 0x2B10u), rd32(g2 + 0x3F74u));
+          last_g2 = g2;
+        }
         uint32_t ctx = rd32(0x81D6C978u);
         uint32_t wrap = rd32(ctx + 0x08u);
         uint32_t dev = rd32(wrap + 0x0Cu);
