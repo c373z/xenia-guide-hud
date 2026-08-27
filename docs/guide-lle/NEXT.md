@@ -3324,3 +3324,33 @@ struct. `[msg+4]` is a type-ish field that must not be `0xA` and `[msg+8]` is
 an output slot, so `[msg+0]` is the obvious candidate but is not yet
 confirmed - and constructing the struct wrongly is exactly the kind of guess
 that has cost time here.
+
+### Message 9 sends cleanly but is rejected: `80300026`
+
+The id offset is confirmed from two independent places: `XuiSendMessage`
+validates `[msg+4]` (rejecting `0xA`) and the dispatcher loads the id with
+`lwz r11,4(r30)` at `8196BCFC`, immediately before the compare chain. So the
+message struct is:
+
+| offset | meaning |
+|---|---|
+| `+0` | size (see below) |
+| `+4` | message id |
+| `+8` | output flag, cleared by the dispatcher at `81951170` |
+
+which is exactly XUI's documented `XUIMessage { dwSize, dwMessage, bHandled }`.
+
+Sending message 9 to `btnB`, `btnA` and `btnOnlineStatus` with the rest zeroed:
+
+    msg9 -> 80300026; visual now 80300017: 00000000
+
+No fault - the struct layout is safe - but rejected with `80300026`, and no
+visual attached. The obvious suspect is `dwSize` left at zero, so the probe
+now tries `0x0C`, `0x10`, `0x18`, `0x20` and stops at the first that returns
+`S_OK`.
+
+Worth noting what this experiment is worth either way: if some size makes the
+send succeed and a visual appears, the missing step is that nothing delivers
+message 9. If the send succeeds and no visual appears, the gate at `81938BC8`
+inside the handler is what fails. Both outcomes are informative, which is why
+this is being driven by a call rather than by more reading.

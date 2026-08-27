@@ -1368,6 +1368,46 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
                       XELOGI("GuideScene:   byId \"{}\" -> {:08X} handle "
                              "{:08X}; visual -> {:08X}: {:08X}",
                              want, cr, child, vr2, vis2);
+                      // A control attaches its visual when it receives
+                      // message 9 (the compare chain at 8196BD34 branches
+                      // there). The id sits at [msg+4] - both XuiSendMessage's
+                      // own validation and the dispatcher read that offset -
+                      // and [msg+8] is an output slot the dispatcher clears.
+                      // If sending it produces a visual, nothing is delivering
+                      // message 9; if not, the gate at 81938BC8 is the target.
+                      if (child && !vis2 && vr2 == 0x80300017u) {
+                        uint32_t sm = xm2
+                                          ? xm2->GetProcAddressByOrdinal(0x35F)
+                                          : 0;
+                        uint32_t msg = memory->SystemHeapAlloc(32, 16);
+                        if (sm && msg) {
+                          // Layout matches XUI's XUIMessage: dwSize at +0,
+                          // dwMessage at +4, bHandled at +8. Sending with
+                          // size 0 was rejected with 80300026, so try the
+                          // plausible sizes rather than assume one.
+                          uint32_t mr = 0;
+                          for (uint32_t sz : {0x0Cu, 0x10u, 0x18u, 0x20u}) {
+                            std::memset(memory->TranslateVirtual(msg), 0, 32);
+                            xe::store_and_swap<uint32_t>(
+                                memory->TranslateVirtual(msg), sz);
+                            xe::store_and_swap<uint32_t>(
+                                memory->TranslateVirtual(msg + 4), 9u);
+                            uint64_t ma[] = {child, msg};
+                            mr = uint32_t(processor->Execute(
+                                ts, sm, ma, xe::countof(ma)));
+                            XELOGI("GuideScene:     msg9 size {:02X} -> {:08X}",
+                                   sz, mr);
+                            if (!mr) break;
+                          }
+                          std::memset(memory->TranslateVirtual(co2), 0, 16);
+                          uint64_t rq[] = {child, co2};
+                          uint32_t vr3 = uint32_t(processor->Execute(
+                              ts, gvi2, rq, xe::countof(rq)));
+                          XELOGI("GuideScene:     msg9 -> {:08X}; visual now "
+                                 "{:08X}: {:08X}",
+                                 mr, vr3, rd(co2));
+                        }
+                      }
                     }
                   }
                 }
