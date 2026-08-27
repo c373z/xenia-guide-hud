@@ -978,6 +978,32 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
     XELOGI("GuideBootstrap: guide object {:08X}, [guide+4] = skin module "
            "{:08X}",
            guide_bs_obj_, guide_bs_skin_module_);
+    // hud's string-table load builds its locator from a container string at
+    // 913E1B24 and a resource pointer at [91400160]. Read them out of live
+    // guest memory - the extracted hud image has relocations applied, so
+    // file-offset arithmetic for its .rdata is not trustworthy.
+    {
+      auto wide_at = [&](uint32_t addr) {
+        std::string out;
+        auto* hp = memory->LookupHeap(addr);
+        if (!hp || hp->QueryRangeAccess(addr, addr + 1) ==
+                       xe::memory::PageAccess::kNoAccess) {
+          return std::string("(unmapped)");
+        }
+        for (uint32_t i = 0; i < 64; ++i) {
+          uint16_t c = xe::load_and_swap<uint16_t>(
+              memory->TranslateVirtual(addr + i * 2));
+          if (!c) break;
+          out += (c >= 0x20 && c < 0x7F) ? char(c) : '?';
+        }
+        return out;
+      };
+      uint32_t res_ptr = rd(0x91400160u);
+      XELOGI("GuideBootstrap: hud container@913E1B24 = \"{}\"; "
+             "[91400160] = {:08X} -> \"{}\"",
+             wide_at(0x913E1B24u), res_ptr,
+             res_ptr ? wide_at(res_ptr) : std::string("(null)"));
+    }
   }
   if (::cvars::guide_static_locator) {
     // The dynamic locator builder is handed [guide+8] as its module and

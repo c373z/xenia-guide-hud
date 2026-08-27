@@ -2436,3 +2436,47 @@ Note for whoever picks this up: three successive hypotheses here (module 0 via
 the HLE builder, patch timing, wrong instance) each explained every
 observation available at the time and were each refuted by one direct
 measurement. Measure before building on one.
+
+### The load runs, with the right inputs, and still fails
+
+Four measurements this round, each cheap and each closing something off.
+
+**The loader really is called.** Xenia JITs on first call, so a
+`DemandFunction: enter` is proof of execution - no breakpoint needed. Both
+`XuiLoadStringTableFromFile` (`81937AF0`) and its internal resource resolve
+(`8196BEC0`) appear. So the earlier "maybe it never runs" branch is closed:
+**it runs and fails.**
+
+**Timing is fine.** Ordering in one run:
+
+    17372  Guide: DllMain returned
+    17389  DemandFunction: enter 913EC578      (hud init function)
+    18849  GuideBootstrap: guide object 401EAFB0, [guide+4] = 301B3000
+    19209  DemandFunction: enter 81937AF0      (the loader, first call)
+
+The loader first runs at 19209, *after* the module was set at 18849. So it had
+the right `[obj+4]`.
+
+**The locator inputs are correct.** Read out of live guest memory rather than
+computed from the file (hud's extracted image has relocations applied, so
+file-offset arithmetic for its `.rdata` produced mid-string garbage):
+
+    hud container@913E1B24 = "hud"; [91400160] = 913E16AC -> "strings.xus"
+
+**The section itself resolves.** With `XexGetModuleSection` logging promoted
+from `XELOGD`:
+
+    XexGetModuleSection: module='hud' section='hud' -> 00000000 size=167581
+
+Status 0, and `167581` is exactly the XUIZ container size measured offline
+(`0x28E9D`). So hud's resource section is reachable and correctly sized.
+
+But note: that is the **only** `hud` section lookup in the run. If both the
+scene path and the string-table path needed it, there should be two. So the
+string-table load appears to fail *before* it gets as far as asking for the
+section - which points at xam's locator parsing or its container walk rather
+than at anything Xenia provides.
+
+Next: attribute that single lookup to a caller (log `lr` alongside it). If it
+belongs to the scene path, the string-table load never reaches the section at
+all, and the failure is upstream in xam's handling of the locator string.
