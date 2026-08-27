@@ -2786,3 +2786,35 @@ bootstrap sets them.
 Next: find what normally populates `[dev+0x32A0]` / `[dev+0x32B0]` - most
 likely a SetRenderTarget-style call on xam's device - and whether the
 bootstrap can make that call rather than poking the fields directly.
+
+### A chain of nulls in the present path, and what "one draw" is worth
+
+Working forward from the fault the null-render patch exposes:
+
+| configuration | outcome |
+|---|---|
+| `guide_patch_null_render` | crash at `819DE94C`, `fault_addr` guest `0x24` (`[dev+0x32A0]` and `[dev+0x32B0]` both null) |
+| + `guide_bind_title_rt` | crash moves to `819F5EC4`, `fault_addr` guest `0x20` - past the first null, into `lwz r11,32(r14)` with `r14` null |
+| deepest-reach set + `guide_bind_title_rt` | **no crash**; `Guide composite draw #1 -> 00000000` |
+
+`[dev+0x32B0]` has exactly one writer in all of xam, at runtime `819F3A24`,
+which sits inside the bind routine `819F31A8` that `guide_bind_title_rt`
+already calls - which is why enabling that flag moves the fault along.
+`[dev+0x32A0]` has **no** direct store anywhere in xam `.text` (26 loads, zero
+stores), so it is written some other way entirely.
+
+**The completed draw is not evidence of pixels.** The device diagnostic
+immediately after it reads:
+
+    Guide device 4088B7A0: [32A0]=00000060 [32B0]=00000000
+
+`0x60` is not a pointer. The present survives only because `0x60 + 0x24`
+lands on a low guest address that happens to be mapped, so it is reading
+garbage rather than a surface. This is exactly the trap the older note warns
+about - a `00000000` return from the composite draw says nothing about whether
+anything was presented.
+
+So the honest state is: the present path can now be driven end to end without
+faulting, on invalid surface state, once. Getting real output needs
+`[dev+0x32A0]` to hold an actual surface, and finding what writes it - since
+nothing in xam stores to it directly - is the open question.
