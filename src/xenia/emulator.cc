@@ -3358,6 +3358,36 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
     if (const char* spec = std::getenv("XENIA_EFAIL_TAG")) {
       TagEFailSites(memory(), spec, "xam");
     }
+    // XENIA_TAG26=1: the six places in xam that build 0x80300026, the code
+    // XuiSendMessage returns when message 9 is refused. Give each its own low
+    // byte so the returned HRESULT names the site, the same trick that found
+    // the scene E_FAIL in hud.
+    if (std::getenv("XENIA_TAG26")) {
+      // Eight, not six: requiring the "lis rX,0x8030" to sit immediately
+      // before the ori missed 819362CC and 81959304, the same adjacency trap
+      // that hid 201 of xam's 886 E_FAIL sites earlier.
+      static const uint32_t kSites[] = {0x819330BCu, 0x81934FBCu, 0x81936100u,
+                                        0x819362A8u, 0x819362CCu, 0x8193889Cu,
+                                        0x81957998u, 0x81959304u};
+      for (uint32_t i = 0; i < xe::countof(kSites); ++i) {
+        auto* w = memory()->TranslateVirtual<uint32_t*>(kSites[i]);
+        uint32_t cur = xe::load_and_swap<uint32_t>(w);
+        if ((cur & 0xFC00FFFFu) != 0x60000026u) {
+          XELOGW("Tag26: NOT patching {:08X}: found {:08X}", kSites[i], cur);
+          continue;
+        }
+        void* pg = reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(w) &
+                                           ~uintptr_t(0xFFF));
+        xe::memory::PageAccess old_access = xe::memory::PageAccess::kReadOnly;
+        if (xe::memory::Protect(pg, 0x1000,
+                                xe::memory::PageAccess::kReadWrite,
+                                &old_access)) {
+          xe::store_and_swap<uint32_t>(w, (cur & 0xFFFF0000u) | (0x30u + i));
+          xe::memory::Protect(pg, 0x1000, old_access, nullptr);
+          XELOGI("Tag26: {:08X} -> 803000{:02X}", kSites[i], 0x30u + i);
+        }
+      }
+    }
     if (cvars::guide_patch_null_render) {
       // 818FDEF0  lwz r11,0x1C(r27)   ; XUI context's null-render flag
       // 818FDF14  stw r11,0x134(r30)  ; over the device context's copy

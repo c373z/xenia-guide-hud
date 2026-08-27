@@ -3354,3 +3354,25 @@ send succeed and a visual appears, the missing step is that nothing delivers
 message 9. If the send succeeds and no visual appears, the gate at `81938BC8`
 inside the handler is what fails. Both outcomes are informative, which is why
 this is being driven by a call rather than by more reading.
+
+### Tagging `80300026`: the adjacency trap again
+
+Message 9 is rejected with `80300026` regardless of `dwSize` - `0x0C`, `0x10`,
+`0x18` and `0x20` all give the same code - so the size field is not the gate.
+
+Tagging the sites that build that constant, using the same immediate-rewrite
+trick that located the scene `E_FAIL` in hud: patch each site's `ori` to a
+distinct low byte and let the returned HRESULT name itself.
+
+First attempt found six sites by requiring `lis rX,0x8030` **immediately
+before** the `ori`. All six were tagged and the send still returned an
+untagged `80300026` - the same failure mode as the earlier E_FAIL hunt, where
+that adjacency requirement hid 201 of 886 sites.
+
+Dropping the requirement finds **eight** in the XUI region: the six already
+known plus `819362CC` and `81959304`. All eight are now tagged.
+
+This is worth writing down as a rule rather than a one-off: on this compiler's
+output, **never match a two-instruction constant build by adjacency**. Match
+the low half alone (`ori rX,rX,imm`) and accept the false positives - the
+scheduler routinely separates the pair.
