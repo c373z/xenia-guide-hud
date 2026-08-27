@@ -4467,3 +4467,76 @@ export table, which the converted PE does not usefully carry.
 Result of running with `lle_xam_skin_init=true` is pending at the time of
 writing. If the loader runs but fails, the string constants above say exactly
 which file and section to check next.
+
+### Driving the skin loader works, and lands on a concrete Xenia gap
+
+`lle_xam_skin_init=true` and the loader runs, does exactly what its strings
+said it would, and xam itself narrates the failure:
+
+    LLE xam: calling skin loader 81795548
+    DemandFunction: enter 81795548
+    ...
+    HostPathDevice::ResolvePath(\huduiskin.xex)      (twice)
+    XEX load failed with code 3, trying with devkit encryption key...
+    XEX load failed with code 3, trying with xex1 retail encryption key...
+    XEX load failed with code 3, trying with xex1 devkit encryption key...
+    XEX load failed with code 3
+    (DbgPrint) WRN[XAM]: Failed to load huduiskin.xex.
+
+Three things worth separating out.
+
+**1. The identification is confirmed.** `81795548` is the skin loader. It was
+never called, calling it makes it run, and it goes straight for
+`huduiskin.xex`. No inference left in that chain.
+
+**2. XAM traces do fire.** `(DbgPrint) WRN[XAM]: Failed to load
+huduiskin.xex.` is the first XAM trace this investigation has ever produced,
+which retires the "the traces never fire" note recorded earlier. They fire when
+the code path that emits them actually executes - the silence was never about
+the trace level.
+
+**3. The blocker is a Xenia limitation, and a precise one.** Code 3 is
+`XexModule::ReadImage`'s last line - *"Not a patch and image doesn't have
+proper PE header"*. Comparing optional headers **with their values** shows why
+that gate is wrong for this file:
+
+| optional header | `hud.xex` | `huduiskin.xex` |
+|---|---|---|
+| `00010100` ENTRY_POINT | `913F9D00` | **absent** |
+| `00010201` IMAGE_BASE_ADDRESS | `913E0000` | **absent** |
+| `000103FF` IMPORT_LIBRARIES | present | **absent** |
+| `000002FF` RESOURCE_INFO | present | present |
+| `000003FF` FILE_FORMAT_INFO | present | present |
+
+`huduiskin.xex` is a **resource-only XEX**: no entry point, no imports, and -
+importantly - **no image base at all**. Xenia derives `base_address_` from
+`XEX_HEADER_IMAGE_BASE_ADDRESS` and falls back to the security info, so for
+this file there is no meaningful address to map it at, and it is then rejected
+for not looking like an executable. Both halves of that are reasonable for an
+executable loader and wrong for a resource container.
+
+So the remaining work is a genuine feature gap in Xenia rather than anything
+Guide-specific: **the loader cannot load a resource-only XEX**. What xam wants
+from it is not code but the `skin` section - the loader's other constants are
+`L"skin"`, `L"skin.xur"` and `L"skin://"` - which it would then fetch through
+the ordinary section lookup.
+
+A fix has to decide three things, none of them yet decided:
+
+* where to put the data, since the file names no base address (an ordinary
+  heap allocation would do - nothing executes from it);
+* how to signal "resource-only" rather than "corrupt" - the absence of
+  `XEX_HEADER_ENTRY_POINT` is the cleanest test available in the header;
+* that `XModule::GetSection` can then serve the `skin` section out of it.
+
+Note `ReadImage` already decrypts and decompresses this file successfully -
+only the final `is_valid_executable()` check rejects it - so the resource bytes
+are produced and then thrown away. Worth confirming where they are written
+before relying on that, because `base_address_` is garbage for this file and
+`ReadImage` calls `LookupHeap(base_address_)->Reset()` early.
+
+**Also fixed along the way:** the crash after the failed load. With the load
+failing, `81795548` dereferences the null result and faults at `8177B2F0`
+(`fault_addr ...30`, unwinding through `81795940`, inside the loader's `0x424`
+body). That is downstream of the failure, not a separate defect - it will go
+away when the load succeeds.
