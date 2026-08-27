@@ -702,6 +702,7 @@ static uint32_t guide_bs_obj_ = 0;
 static bool guide_bs_use_title_device_ = false;
 static uint32_t guide_bs_skin_module_ = 0;
 static uint32_t guide_title_surface_ = 0;
+static uint32_t guide_bs_scene_ = 0;
 static std::atomic<bool> guide_bs_ready_{false};
 
 bool GuideBootstrapReady() { return guide_bs_ready_; }
@@ -1117,6 +1118,7 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
     }
     uint64_t a2[] = {guide_bs_obj_, 0, scene_out};
     ir = processor->Execute(ts, scene_fn, a2, xe::countof(a2));
+    if (scene_out) guide_bs_scene_ = rd(scene_out);
     XELOGI("GuideBootstrap: scene creator {:08X} -> {:08X}, scene={:08X}",
            scene_fn, static_cast<uint32_t>(ir),
            scene_out ? rd(scene_out) : 0);
@@ -1317,11 +1319,17 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
                   uint32_t nav = xm2 ? xm2->GetProcAddressByOrdinal(0x359)
                                      : 0;
                   if (nav && nsc) {
-                    uint64_t na[] = {0ull, nsc, 0ull};
+                    // Host argument: NavigateFirst wants either a scene that
+                    // already has a parent or an explicit host, and returns
+                    // 8030000B given neither. The bootstrap's own scene is a
+                    // real XUI handle, which is what 81938240 needs to
+                    // resolve it (it answers 80300016 otherwise).
+                    uint64_t na[] = {guide_bs_scene_, nsc, 0ull};
                     uint32_t nr = uint32_t(processor->Execute(
                         ts, nav, na, xe::countof(na)));
-                    XELOGI("GuideScene: NavigateFirst(0, {:08X}, 0) -> {:08X}",
-                           nsc, nr);
+                    XELOGI("GuideScene: NavigateFirst(host {:08X}, {:08X}, 0)"
+                           " -> {:08X}",
+                           guide_bs_scene_, nsc, nr);
                   }
                 }
                 // Query elements by id. GetLastChild only follows one

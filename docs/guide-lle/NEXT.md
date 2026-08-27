@@ -3180,3 +3180,30 @@ Open: what object is the host. `r3` is passed to `81938D20(host, scene)` at
 `819433AC`, so reading that call is the way to identify what it expects -
 candidates are hud's guide object (`guide_bs_obj_`) and the bootstrap's own
 scene (`00010000`), but neither should be guessed at.
+
+### What the navigation host must be
+
+`81938D20(host, scene)` - the call `NavigateFirst` makes with its host
+argument - starts by converting the host:
+
+```
+81938d40  or   r3,r30          ; the host
+81938d44  bl   81938240        ; resolve it
+81938d48  cmplwi r3,0
+81938d4c  bc   -> proceed if non-zero
+81938d54  lis  r3,0x8030
+81938d58  ori  r3,r3,0x16      ; 80300016 if it does not resolve
+81938d60  or   r4,r31          ; else attach the scene to it
+81938d64  bl   8196e590
+```
+
+So the host must be a value `81938240` can resolve - an XUI **handle**, not an
+arbitrary object pointer. hud's guide object is a C++ object and would fail
+that; the bootstrap's own scene (`00010000`) is a real handle and is the
+obvious candidate, so it is now cached at creation and passed as the host.
+
+Addressing note, since this cost a wrong disassembly: **`ppcdis` prints file
+VAs, and so do the branch targets it prints.** A target like `-> 81938d20` is
+already a file VA; adding the usual `+0x7200` lands mid-function and produces
+convincing but meaningless output. Only runtime addresses - those logged by
+the emulator - need the offset.
