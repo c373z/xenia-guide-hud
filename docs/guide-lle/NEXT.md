@@ -5820,3 +5820,56 @@ bind log now reports `[3F74]` beside `[3F78]`.
 If `+0x3F74` is genuinely never populated, it joins the skin loader, the heap
 creator and wrapper slot 21 as the fourth thing in this investigation that
 hardware sets up and our bootstrap does not.
+
+### The device setup is skipped by a gate, and the gate is identified
+
+Measured, on the real device:
+
+    SetRenderTarget(dev 40870D00, 0, 40958CD0 fc=13FC1678) -> 40870D00;
+        RT0 now 40958CD0  [3F78]=40958CD0  [3F74]=00000000
+
+`[3F78]` holds the surface because our bind writes it. **`[3F74]` is null** -
+exactly the field the draw emitter faults on, confirmed at runtime rather than
+predicted.
+
+Both fields have the same two writers, and neither ever runs:
+
+    +0x3F74: 81A0F1C8 @81A0F244   81A0FA80 @81A0FCD4     both never executed
+    +0x3F78: 81A0F1C8 @81A0F258   81A0FA80 @81A0FD1C     likewise
+
+Those same two functions are also among the callers of `819F38C8`, the surface
+binder. So one pair of routines populates the device's render state and binds
+its surfaces, and neither is reached.
+
+**Walking up finds the exact boundary**, which is more useful than another dead
+subtree:
+
+    81A0FA80  never
+      <- 81A0FE48   never
+        <- 819F4D28 **RAN**
+          <- 8178F748 RAN   (the device creator our bootstrap calls)
+            <- 81751718 RAN <- 817519D8 RAN (xam DllMain)
+
+`819F4D28` executes and does **not** reach `81A0FE48`. The call sits at
+`819F4E8C`, and the branch that skips it is right there:
+
+    819F4E54  bl   81A0F768        ; runtime address
+    819F4E58  cmpwi r3,0
+    819F4E5C  bne  +0x50           ; non-zero -> jump past the setup entirely
+    ...
+    819F4E8C  bl   81A0FE48        ; the device setup - skipped
+
+`81A0F768` **ran** (one `DemandFunction` entry), so it returned non-zero and
+the setup was skipped. It is not a trivial predicate either - it writes
+`[dev+0x59C4]`, `[dev+0x59C8]` and `[dev+0x3FE0]` to `-1` and calls three
+further routines, so it is doing device reset/initialisation work and reporting
+a result.
+
+**So the presentation blocker is now a single question:** why does
+`81A0F768(device)` return non-zero? That return value is the difference between
+a device with render state and the null `[3F74]` the emitter dies on.
+
+Worth noting this is the first blocker in the chain that is *not* "a routine
+nobody drives" - the routine runs, and reports failure. That makes it more
+tractable than the previous four, because there is a live execution to inspect
+rather than an absent one to arrange.
