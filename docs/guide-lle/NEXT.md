@@ -6772,3 +6772,42 @@ phase of this line has ended - the mechanism is mapped end to end, from the
 skin through the visual registry to the wrapper, the device, the front buffer
 and the draw emitter, with each link measured. What is left is engineering
 against that map.
+
+### The signature scan does not find the mode-1 device, and why
+
+Three iterations, each informative:
+
+1. **Two plausible pointers at `+0x3F74` and `+0x2B10`** matched 8 unrelated
+   objects at once, uniformly spaced `0xC0` apart - a structure array, not
+   devices.
+2. **Adding a vtable-in-`.rdata` test at `+0`** cut that to `0 candidates
+   (1 passed the vtable+fields test)`. The two-counter reporting is what made
+   this readable: a bare `0` would have said "no such device", when in fact one
+   object passed everything and was rejected by an over-strict `[32A0]` filter.
+3. **Dropping that filter** surfaced the single survivor:
+
+        candidate 407FA7C0  vt=8163E814  [3F74]=3F800000  [2B10]=42820000  [32A0]=407FDD60
+
+   and it is a **false positive**. `3F800000` is `1.0f` and `42820000` is
+   `65.0f` - float bit patterns, not pointers. Its vtable is `8163E814`, not
+   the device class.
+
+The flaw is mine: a range test of `0x10000000..0x50000000` for "looks like a
+guest pointer" also accepts most single-precision floats, which are extremely
+common in a graphics object. Any future scan here needs either an alignment
+test, a vtable equality test against the known device class, or both.
+
+**So the mode-1 device is not findable this way**, at least not in
+`0x40000000..0x41000000` with these fields. Combined with the earlier result
+that it is never published to either device global, the pointer simply is not
+reachable from outside the creator.
+
+That leaves one route, and it is the more invasive one that was set aside
+earlier: **hook `81A0FE48`'s entry and capture `r3`**. That routine runs, on
+the mode-1 device, and its first argument *is* the device. Everything needed to
+use the pointer afterwards is already identified - the setter `8191BAC8`, the
+wrapper, and the arguments - so the hook is the only missing piece.
+
+Recorded as the concrete next step rather than attempted here, because
+instrumenting a guest function entry is a different class of change from
+anything else in this session and deserves to start from a clean context.
