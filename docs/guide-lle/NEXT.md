@@ -3481,3 +3481,34 @@ but the search key is the more useful of the two.
 Descending one call per pass has been giving diminishing returns, so this is
 recorded as a map rather than continued blind - anyone resuming can jump
 straight to `819428B0`'s arguments.
+
+### The search key is the control's class
+
+The function containing the failing search starts at file `81960360`
+(runtime `81959160`), and its key is built from the object itself:
+
+```
+8196036c  or   r31,r3            ; the control
+8196038c  lwz  r3,0(r31)         ; [obj+0] - its class / vtable
+81960390  bl   8193B370          ; derive the key from it
+81960398  or   r27,r3,r3         ; <-- r27, the search key
+```
+
+So the message-9 handler asks: *what is registered for this control's class?*
+and the answer is nothing - hence `80300026` and no visual.
+
+That is a different shape of problem from the ones ruled out. The **classes**
+themselves are registered (the XUI registry shows 38 non-null entries, and the
+registrars all report "already registered"), so what is missing is a per-class
+entry in whatever collection `819428B0` searches - the visual template for the
+class, in XUI terms.
+
+A string constant referenced at the top of the function turns out to be
+`' %d'`, a formatting fragment, so it does not name the function - noted only
+so nobody re-checks it.
+
+Where this leaves the visual question: it is **not** a missing skin file
+(neither module ships one), **not** an unregistered class, **not** a null
+class global, and **not** an undelivered message. It is an empty per-class
+registration that something during normal xam/hud startup would populate and
+our bootstrap does not.
