@@ -4685,3 +4685,39 @@ now runs. Whether it actually registered the visuals the scenes ask for
 because the init thread dies before the Guide is opened at 30s, so no scene
 walk and no `GetVisual` results were produced in this run. That is the next
 measurement, and it needs the crash above cleared first.
+
+### The crash wedges the bootstrap, so the wait is now bounded
+
+Worth spelling out because the symptom is misleading. After the skin loader
+faults, the run does not simply lose that thread:
+
+    LLE xam: waiting for init thread          <- and never "init complete"
+    Guide button: auto-press firing after 30s
+    Guide button: pressed (user 0), handler=00000000 buf=00000000 out_sz=00000000
+
+The bootstrap blocks forever on `xam_boot->Wait(0, 0, 0, nullptr)`, so the
+Guide never receives a handler and the auto-press fires against zeros. A second
+thread meanwhile spins in `KeWaitForMultipleObjects` on an unresolvable object,
+millions of iterations. A run in that state looks like "the Guide does nothing"
+when what actually happened is one guest thread died during init.
+
+The faulting thread apparently does not terminate cleanly enough for `Wait` to
+return, so the wait is now **bounded to 15s when `lle_xam_skin_init` is on**,
+logging when it expires. The default path keeps the original unbounded wait, so
+the established baseline is untouched.
+
+This is a workaround for measurement, not a fix. The real defect is that
+`[81D43C50+0x28]` is never populated. Searching xam for writes to it finds
+none: 49 functions materialise `81D43C50`, four of them **read** `+0x28`
+(`81790758`, `81790FD0`, `81795548` at `81795928`, `81795970`), and not one
+writes it. Every reader uses it the same way - `lwz r3,40(r31)` followed by a
+call taking a function pointer in `r5` and `1` in `r4` - so it is a
+callback/notification manager created outside the module, in the same class of
+"something on hardware drives this" gap as the skin loader itself and the heap
+creator before it.
+
+Caveat on the search: an absolute-address scan for `81D43C78` finds nothing,
+but that is a limitation of the scan rather than evidence - `81795548` builds
+`r31` roughly a hundred instructions before using it, well outside the
+64-instruction window that scan allows. The per-function base-register scan is
+the one to trust here.

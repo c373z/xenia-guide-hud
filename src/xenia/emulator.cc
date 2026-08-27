@@ -3860,7 +3860,24 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
     xam_boot->set_name("LLE xam init");
     if (XSUCCEEDED(xam_boot->Create())) {
       XELOGI("LLE xam: waiting for init thread");
-      xam_boot->Wait(0, 0, 0, nullptr);
+      if (cvars::lle_xam_skin_init) {
+        // The skin loader's tail loads [81D43C50+0x28] and calls through it.
+        // Nothing in xam ever writes that field under our bootstrap, so the
+        // call gets a null object and the thread dies there - after the
+        // registrations, but before returning. Waiting forever then wedges
+        // everything downstream: the Guide never receives a handler and the
+        // auto-press fires with handler=0. Bound the wait so the rest of the
+        // bootstrap still runs and what did get registered can be measured.
+        uint64_t timeout = static_cast<uint64_t>(-150000000LL);  // 15s
+        X_STATUS wait_result = xam_boot->Wait(0, 0, 0, &timeout);
+        if (wait_result == X_STATUS_TIMEOUT) {
+          XELOGW(
+              "LLE xam: init thread still running after 15s (the skin "
+              "loader's tail faults on a null); continuing anyway");
+        }
+      } else {
+        xam_boot->Wait(0, 0, 0, nullptr);
+      }
       XELOGI("LLE xam: init complete");
       // The tag->index mapper (817BA1D8) returns a single flag bit as the
       // index for the 0x10000000 request class, so requests like 0x18100000
