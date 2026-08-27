@@ -5331,3 +5331,43 @@ has visuals attached; nothing is compositing it onto the front buffer.
 
 So the stop condition - pixels of the Guide on screen - is **not met**. The
 visual half of the problem is solved; the presentation half is not.
+
+### Null-render patched, with visuals attached: still no Guide, and it says why
+
+The null-render flag was worth re-testing once the registry was populated -
+every earlier test of it ran against an empty registry, so there was nothing to
+draw even if presentation had worked. Tested now, with
+`--lle_xam_skin_init --guide_reuse_xui_ctx --guide_patch_null_render`:
+
+    Guide: patched 818FDF14 917E0134 -> 60000000 (null-render copy removed)
+    GuideFrame 0:   dc=00000000 [134]=FFFFFFFF gpu_draws +0  (total 12222)
+    GuideFrame 500: dc=00000000 [134]=FFFFFFFF gpu_draws +14072
+    SwapDraws: swap #2600 cumulative draws 74891
+
+(The startup cvar dump prints `guide_patch_null_render = false` because it
+shows config-file values, not command-line overrides; the patch line confirms
+it applied.)
+
+Screen: **identical to the baseline again** - dash's sign-in UI, no Guide.
+Draw rate is `74891 / 2600` = **28.8 per swap**, the dashboard's documented
+constant of ~29. So patching the flag adds **no draws**; the Guide is still
+contributing nothing.
+
+And it introduces a crash that is more informative than the flag itself:
+
+    GUEST CRASH at 819DE94C  r3=0  fault_addr ...24
+    unwind: 819DEB30 8191B024 818FDE60 818F8374 818FAEB8 913EAB4C
+
+`818FDE60` is immediately adjacent to the `818FDF14` we patched, and the chain
+runs back into hud. With `[dc+0x134]` forced to zero, `XuiRenderBegin` stops
+skipping its device call, proceeds - and dereferences a **null device**.
+
+**So the flag is a symptom, not the cause.** `[dc+0x134] = 1` was suppressing a
+render path that has no device to render into; clearing it does not create one,
+it just lets the path reach the null and fault. That redirects the remaining
+work away from `[xui_ctx+0x1C]` - which this file already called characterised
+and exhausted - and onto the device: `dc=00000000` in every `GuideFrame` line
+is the plainest statement of the problem in this whole log.
+
+Which is the same `[dc+0x1CC]`-versus-wrapper-device question from the top of
+the file, now reached from a third direction.
