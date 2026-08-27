@@ -580,9 +580,31 @@ object_ref<UserModule> KernelState::LoadUserModule(
   {
     auto global_lock = global_critical_region_.Acquire();
 
-    // See if we've already loaded it
+    // See if we've already loaded it.
+    //
+    // Matching on the full path alone is not enough. The same module reached
+    // by a different path - SYS:\xam.xex from the LLE bootstrap and
+    // \Device\Flash\xam.xex from an import, say - fails every comparison in
+    // Matches(path) and gets loaded a second time. Both copies use the image
+    // base out of the xex header, so the second load's AllocFixed lands on
+    // top of the first: it zeroes the range the first copy is already
+    // executing from, writes the same bytes back, and re-applies the section
+    // protections. Anything translated during that window sees zeros, which
+    // is why xam .text was observed "going zero and coming back identical"
+    // and why functions intermittently failed to translate at all.
+    //
+    // Matches() already compares the basename and the module's own name, so
+    // passing the name as well makes this dedupe by module name - which is
+    // what the console does, and what the fixed image bases require.
     for (auto& existing_module : user_modules_) {
       if (existing_module->Matches(path)) {
+        return existing_module;
+      }
+      if (existing_module->Matches(name)) {
+        XELOGW(
+            "LoadUserModule: {} is already loaded as {}; returning the "
+            "existing module rather than loading a second copy over it",
+            path, existing_module->path());
         return existing_module;
       }
     }

@@ -4193,3 +4193,78 @@ that log line is the practical way to map ordinals to addresses.
 The memory-image mapping remains verified for `.rdata`, `.pdata`, `.text` and
 `.data`, each against runtime probes. `.edata`'s section entry simply does not
 appear to describe what is at that address.
+
+---
+
+## ROOT CAUSE: xam is loaded twice, and the second load zeroes the first
+
+This is the thing behind the transient-zero behaviour, the intermittent
+translation failures, and most likely a good deal of the "impossible" guest
+behaviour recorded throughout this file. It is measured, not inferred.
+
+**Step 1 - the read-only guard says it is not a write.** Running with
+`XENIA_XAM_RO=1` arms a host-level `PAGE_READONLY` guard over
+`81740000-818C0000`. The guard armed, **no writer ever trapped**, and the four
+watched addresses still went to zero and came back. At the moment of the flip
+`VirtualQuery` reported `protect=4` - `PAGE_READWRITE`. The guard had been
+undone. Per the note already in that code: if the protection is found reset,
+the mapping was replaced rather than written through.
+
+**Step 2 - the region geometry names the range.** Each flipping address
+reports a different `RegionSize`, but added to its own page base they all give
+the same end:
+
+    18186E000 + 642000 = 181EB0000      181747000 + 769000 = 181EB0000
+    181893000 + 61D000 = 181EB0000      1818AE000 + 602000 = 181EB0000
+
+One region, ending at host `181EB0000` = guest `81EB0000`.
+
+**Step 3 - `XamRangeOp` names the operation.** That instrumentation already
+existed in `memory.cc` and had never been correlated against the flip. Doing so
+lines up exactly:
+
+| log line | event |
+|---|---|
+| 476 | `AllocFixed address=815F0000 size=008C0000` (first load) |
+| 477-479 | xam's import warnings: `UsbdDriverLoadRequiredEvent`, `XboxKrnlBaseVersion`, `StfsDeviceErrorEvent` |
+| **5565** | **`AllocFixed address=815F0000 size=008C0000` again** |
+| 5733-6169 | the four watched addresses read zero |
+| 6754-6762 | **the same three import warnings, again** |
+| 6775+ | 204 `Protect` calls re-applying 64 KB section protections from `81700000` up |
+
+`815F0000` is xam's ImageBase and `815F0000 + 8C0000 = 81EB0000` - precisely
+the region from step 2. The same allocation, the same imports, the same
+protections: **xam is loaded a second time, on top of itself, while the first
+copy is executing.**
+
+That accounts for every property of the phenomenon that made it so confusing:
+
+* memory reads **zero** - `AllocFixed` zeroes the range;
+* it comes back **byte-identical** - the same file is written back over it;
+* the **read-only guard is defeated without trapping** - the range is
+  re-allocated and re-protected, not written through;
+* it is **region-wide** across ~800 KB and restores together;
+* `.data` and `.rdata` outside the image were unaffected in the watch set;
+* it happens **once, mid-boot**, which is why every symptom is intermittent -
+  what breaks depends on which functions happen to be translated inside the
+  window.
+
+**Step 4 - the defect.** `KernelState::LoadUserModule` deduplicates with
+`existing_module->Matches(path)`, passing the **full path**. `XModule::Matches`
+compares the argument against the existing module's basename, its name, and
+its path - so given `SYS:\xam.xex` already loaded, a request for
+`\Device\Flash\xam.xex` matches none of the three and loads a second copy. Both
+copies take their image base from the xex header, so the second lands on the
+first.
+
+**Fix applied:** also test `Matches(name)`, where `name` is the basename
+`LoadUserModule` has already computed. That makes the dedupe name-based, which
+is what the console does and what fixed image bases require, and it uses the
+existing helper exactly as it was designed to be used. A `XELOGW` names the two
+paths whenever it fires, so a genuine same-name-different-file case would be
+visible rather than silent.
+
+This supersedes the earlier "xam was being loaded twice (path-based dedupe
+missed `SYS:` vs `GAME:`)" note, which recorded the problem and applied a
+dashboard-only path workaround while leaving the general fix pending. The
+workaround did not cover this path.
