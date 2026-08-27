@@ -2189,6 +2189,14 @@ void VdSwap_entry(
                 rh && rh->QueryRangeAccess(cur_rt0, cur_rt0 + 0x27u) !=
                           xe::memory::PageAccess::kNoAccess;
           }
+          {
+            static uint32_t rtlog = 0;
+            if (rtlog++ < 3) {
+              XELOGI("Guide: RT bind sees dev {:08X} RT0 {:08X} "
+                     "(plausible={}) surf {:08X}",
+                     rdev, cur_rt0, rt0_plausible, surf);
+            }
+          }
           if (cur_rt0 && !rt0_plausible) {
             XELOGW("Guide: RT0 holds {:08X}, not a surface - rebinding",
                    cur_rt0);
