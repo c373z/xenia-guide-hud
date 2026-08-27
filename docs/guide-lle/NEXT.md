@@ -3602,3 +3602,40 @@ Net: the chain up to `XuiVisualCreateInstance(name)` still stands - that part
 was read from the code and confirmed by the tag - but **the identity of
 `name` is not yet known**, and neither of the two shortcuts tried this pass
 can produce it.
+
+### xam's trace gate, and four imported variables with no value
+
+The trace sink at `817FED60` bails when `[r13+0x2B4]` is zero:
+
+```
+817fed8c  lwz    r11,692(r13)
+817fed90  cmplwi r11,0
+817fed94  bc     -> bail
+```
+
+`r13` is per-thread (the log records `r13=3005B000` for the UI thread), so
+tracing is enabled per thread. `XENIA_XAM_TRACE=1` now points that slot at a
+zeroed 256-byte buffer rather than a bare `1`, in case anything downstream
+dereferences it:
+
+    xam trace gate [r13+2B4] (r13=3005B000) was 00000000, now 301C8000
+
+**It did not produce any XUI trace output.** The gate is set on the thread the
+diagnostics run on, and the XUI work that matters may run on another; or the
+sink needs more than a non-null pointer. Either way, tracing is not enabled by
+this alone - recorded so the next attempt starts from "the gate is necessary
+but not sufficient" rather than repeating it.
+
+**Separately, a real gap worth knowing about.** A full run reports four
+imported *variables* that Xenia never provides a value for:
+
+    StfsDeviceErrorEvent
+    UsbdDriverLoadRequiredEvent
+    XboxKrnlBaseVersion
+    g_XuiAutomation
+
+`g_XuiAutomation` is the interesting one - an XUI global that xam imports and
+reads, left unpopulated. Whether it bears on the visual path is unknown and
+should not be assumed; it is noted because an unpopulated global that guest
+code branches on is exactly the class of problem that has produced several of
+the failures in this file.

@@ -1188,6 +1188,28 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
           // comes back null. [81D6CDDC] is the visual class it searches for;
           // if the global itself is null the lookup can never succeed for any
           // control, which would explain the result being global.
+          // xam's XUI functions announce themselves with printf-style
+          // traces, but the sink at 817FED60 bails when [r13+0x2B4] is zero -
+          // a per-thread gate - which is why a whole run has 31 DbgPrint
+          // lines and none from XUI. Point it at a zeroed buffer rather than
+          // a bare 1, in case anything downstream dereferences it.
+          if (const char* want_trace = std::getenv("XENIA_XAM_TRACE")) {
+            (void)want_trace;
+            uint32_t r13 = static_cast<uint32_t>(ts->context()->r[13]);
+            uint32_t gate = r13 + 0x2B4u;
+            uint32_t prev = rd(gate);
+            if (!prev) {
+              uint32_t blk = memory->SystemHeapAlloc(256, 16);
+              if (blk) {
+                std::memset(memory->TranslateVirtual(blk), 0, 256);
+                xe::store_and_swap<uint32_t>(memory->TranslateVirtual(gate),
+                                             blk);
+              }
+            }
+            XELOGI("GuideScene: xam trace gate [r13+2B4] (r13={:08X}) was "
+                   "{:08X}, now {:08X}",
+                   r13, prev, rd(gate));
+          }
           XELOGI("GuideScene: visual class global [81D6CDDC] = {:08X}",
                  rd(0x81D6CDDCu));
           // Check whether computing .rdata file offsets as runtime + 0x7200
