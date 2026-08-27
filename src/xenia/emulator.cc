@@ -2613,6 +2613,42 @@ bool Emulator::ExceptionCallback(Exception* ex) {
       // value is a field of an object a register points at rather than the
       // register itself. XENIA_CRASH_PEEK="29,4E8,8" dumps 8 words starting at
       // r29 + 0x4E8. Off unless the variable is set.
+      // XENIA_CRASH_PEEK_DEREF="31,1C8,8" reads the pointer at rN+off and
+      // dumps `count` words from *there*. The plain peek shows the pointer;
+      // this shows what it points at, which is what distinguishes "the field
+      // holds the wrong address" from "the address is right and its contents
+      // are wrong". Reasoning across those two without the data has already
+      // produced one withdrawn conclusion here.
+      if (const char* pd = std::getenv("XENIA_CRASH_PEEK_DEREF")) {
+        uint32_t reg = 0, off = 0, count = 8;
+        if (std::sscanf(pd, "%u,%x,%u", &reg, &off, &count) >= 2 && reg < 32) {
+          if (count > 32) count = 32;
+          auto* mm3 = kernel_state() ? kernel_state()->memory() : nullptr;
+          uint32_t pa = static_cast<uint32_t>(ectx->r[reg]) + off;
+          auto* hp3 = mm3 ? mm3->LookupHeap(pa) : nullptr;
+          if (hp3 && hp3->QueryRangeAccess(pa, pa + 3) !=
+                         xe::memory::PageAccess::kNoAccess) {
+            uint32_t tgt = xe::load_and_swap<uint32_t>(
+                mm3->TranslateVirtual(pa));
+            auto* hp4 = mm3->LookupHeap(tgt);
+            if (tgt && hp4 &&
+                hp4->QueryRangeAccess(tgt, tgt + count * 4 - 1) !=
+                    xe::memory::PageAccess::kNoAccess) {
+              std::string w2;
+              for (uint32_t i = 0; i < count; ++i) {
+                w2 += fmt::format("{:08X} ",
+                                  xe::load_and_swap<uint32_t>(
+                                      mm3->TranslateVirtual(tgt + i * 4)));
+              }
+              XELOGE("GUEST CRASH: deref r{}+{:X} -> {:08X}: {}", reg, off,
+                     tgt, w2);
+            } else {
+              XELOGE("GUEST CRASH: deref r{}+{:X} -> {:08X}: unmapped", reg,
+                     off, tgt);
+            }
+          }
+        }
+      }
       if (const char* peek = std::getenv("XENIA_CRASH_PEEK")) {
         uint32_t reg = 0, off = 0, count = 4;
         if (std::sscanf(peek, "%u,%x,%u", &reg, &off, &count) >= 2 &&
