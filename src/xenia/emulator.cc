@@ -3891,6 +3891,22 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
         xam_boot->Wait(0, 0, 0, nullptr);
       }
       XELOGI("LLE xam: init complete");
+      // Did the skin's registrations actually land? XuiVisualRegister
+      // (8193D238) takes a lock at 81D6CE5C and inserts into a registry at
+      // 81D6CF50 - both constants built in its own prologue. That is the
+      // collection XuiVisualCreateInstance searches, and it is NOT the class
+      // registry at 81D6D508 (48 slots, 38 non-null), which is a different
+      // table entirely. Dump it here so a skin run can be compared against a
+      // default one without inferring anything from scene behaviour.
+      {
+        std::string vr;
+        for (uint32_t i = 0; i < 12; ++i) {
+          vr += fmt::format("{:08X} ", xe::load_and_swap<uint32_t>(
+                                           memory()->TranslateVirtual(
+                                               0x81D6CF50u + i * 4)));
+        }
+        XELOGI("LLE xam: visual registry @81D6CF50: {}", vr);
+      }
       // The tag->index mapper (817BA1D8) returns a single flag bit as the
       // index for the 0x10000000 request class, so requests like 0x18100000
       // land on heap[0] deterministically - and heap[0] is the 0xCCCC
