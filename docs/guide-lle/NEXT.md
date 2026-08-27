@@ -6300,3 +6300,50 @@ this loop actually watches.
 
 **Operational note:** grepping the 20MB `xenia.log` without a tight pattern and
 `head` produced a 20MB tool result. Always constrain both.
+
+## Both roads end at the same place: the system command buffer is a stub
+
+`VdGetSystemCommandBuffer` in `xboxkrnl_video.cc` does not return a command
+buffer. It zeroes the structure and writes two constants:
+
+    p0_ptr.Zero(0x94);
+    store(p0_ptr, 0xBEEF0000);
+    store(p1_ptr, 0xBEEF0001);
+
+The comment above it already states the concern - *"The Guide's drawing is
+expected to reach the GPU through the system command buffer, and this stub
+hands back two magic constants instead of one."*
+
+And it is genuinely on the path: **8 calls logged in the mode-1 run, two of
+them inside `[XAM CREATEDEVICE]` scope**. So xam asks for the system command
+buffer while creating the Guide's device, and gets `0xBEEF0000`.
+
+That ties the two dead ends together:
+
+| configuration | what happens |
+|---|---|
+| mode 2 (default) | device has no front buffer *by design*; scenes, visuals and composite draws all work, but the emitter faults on the null `[dev+0x3F74]` |
+| mode 1 | device is set up properly and the front buffer **is** allocated; but device init then waits in `InsertAsyncCommandBufferCall` for async command-buffer calls that never retire |
+
+The link between the stub and the non-retiring calls is **strongly supported
+but not directly proven**: the calls are inserted against a command buffer that
+is two magic constants, and nothing in Xenia processes them, so nothing can
+signal their completion. Proving it would mean watching the progress counter
+at `[r29+0x2B10]` across the wait.
+
+**What this means for the goal.** Every blocker before this one was a missing
+call inside xam - the skin loader, the heap creator, the surface binder, the
+mode-1 device creator - and each was found and driven. This one is not: it is
+an unimplemented emulator facility that the Guide's rendering path depends on.
+No amount of further xam reversing produces it.
+
+So the remaining work to get pixels is, most likely, **implementing the system
+command buffer in Xenia's GPU** so that async command-buffer calls can be
+submitted and retired. That is a substantially larger and different piece of
+work than anything in this session, and it should be a deliberate decision
+rather than something drifted into.
+
+Everything up to that boundary now works and is reproducible:
+skin loads, 281 visuals register, controls resolve visuals with `S_OK`,
+scenes build, the composite draw loop runs, and the device can be given a real
+front buffer. That is the state to build on.
