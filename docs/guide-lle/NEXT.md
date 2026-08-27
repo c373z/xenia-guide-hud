@@ -2518,3 +2518,58 @@ itself. It has been inferred as `section://301B3000,hud#strings.xus` from the
 static builder's inputs, never read. That is the next thing to measure, and
 the honest next step - given that on this problem every inferred step has
 eventually turned out to be the wrong one.
+
+## SOLVED: the E_FAIL trio loads
+
+The locator string was the last thing still inferred rather than observed, and
+the way to settle it was to stop reasoning and **call the loader directly**.
+Invoking `XuiLoadStringTableFromFile` (ordinal `0x342`) from the bootstrap with
+a locator built from the skin module:
+
+    XuiLoadStringTableFromFile("section://301B3000,hud#strings.xus") -> 00000000, table 408B66C0
+    XuiLoadStringTableFromFile("section://301B3000,hud#Strings.xus") -> 00000000, table 408BC790
+
+All succeed. So the loader was never broken and the locator format was right -
+hud's own call is what fails. Rather than keep chasing why, the bootstrap now
+loads the table itself and stores it where hud expects it:
+
+```cpp
+// after [guide+4] = skin module
+uint32_t lst = xam->GetProcAddressByOrdinal(0x342);   // XuiLoadStringTableFromFile
+... build "section://<skin module>,hud#strings.xus" ...
+processor->Execute(ts, lst, {locator, &out}, 2);
+store_and_swap<uint32_t>(guide_bs_obj_ + 0x4E8, table);
+```
+
+    GuideBootstrap: string table "section://301B3000,hud#strings.xus" -> 00000000,
+                    table 40899E90, [guide+4E8] now 40899E90
+
+**Result - the three scenes that never loaded now load:**
+
+| Scene | Before | After |
+|---|---|---|
+| `GuideMain.xur` | `80004005` | **`00000000`**, scene `00010042` |
+| `GuideMainServer.xur` | `80004005` | **`00000000`**, scene `00010155` |
+| `MiniMediaPlayer.xur` | `80004005` | **`00000000`**, scene `00010219` |
+| `Options.xur`, `Status.xur` | ok | ok |
+| `QuickLaunch.xur` | `8007013D` | `8007065B` |
+
+The `913FA204` null-string crash is gone too - it was the same missing table.
+
+`QuickLaunch` still fails, with a *different* code than before (`8007065B`
+rather than `8007013D`), consistent with its references to `sharedres://`
+items that are absent from hud's package. That is a separate problem from the
+E_FAIL trio.
+
+### Why this took so long
+
+Every hypothesis about *why* hud's load fails - module 0, patch timing, wrong
+instance, section not reached, case sensitivity - was consistent with the
+evidence and wrong. The step that worked was not another explanation but a
+direct call to the function under suspicion with known-good inputs, which
+answered "is the loader or the caller at fault" in one run.
+
+Note what is **not** fixed: hud's own string-table load still fails silently.
+The bootstrap now papers over it by supplying the table. That is worth
+revisiting if the Guide misbehaves later in ways that trace back to hud
+believing it owns that table.

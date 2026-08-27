@@ -1005,6 +1005,41 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
              res_ptr ? wide_at(res_ptr) : std::string("(null)"));
     }
   }
+  // hud loads its own string table into [guide+0x4E8] and the load fails
+  // silently - the assign helper ignores the return value - so the field stays
+  // null and hud later copies from a null string (crash at 913FA204 in a
+  // UTF-16 copy loop). Calling XuiLoadStringTableFromFile ourselves with a
+  // locator built from the skin module succeeds where hud's own attempt does
+  // not, so supply the table directly.
+  if (guide_bs_obj_ && guide_bs_skin_module_) {
+    auto xm_st = kernel_state()->GetModule("xam.xex", true);
+    uint32_t lst = xm_st ? xm_st->GetProcAddressByOrdinal(0x342) : 0;
+    uint32_t tloc = memory->SystemHeapAlloc(256, 16);
+    uint32_t tout = memory->SystemHeapAlloc(16, 16);
+    if (lst && tloc && tout) {
+      std::memset(memory->TranslateVirtual(tloc), 0, 256);
+      std::memset(memory->TranslateVirtual(tout), 0, 16);
+      std::string l =
+          fmt::format("section://{:08X},hud#strings.xus", guide_bs_skin_module_);
+      for (size_t w = 0; w < l.size(); ++w) {
+        xe::store_and_swap<uint16_t>(
+            memory->TranslateVirtual(tloc + uint32_t(w) * 2), uint16_t(l[w]));
+      }
+      xe::store_and_swap<uint16_t>(
+          memory->TranslateVirtual(tloc + uint32_t(l.size()) * 2), 0);
+      uint64_t la[] = {tloc, tout};
+      uint64_t st_r = processor->Execute(ts, lst, la, xe::countof(la));
+      uint32_t table = rd(tout);
+      if (!st_r && table) {
+        xe::store_and_swap<uint32_t>(
+            memory->TranslateVirtual(guide_bs_obj_ + 0x4E8), table);
+      }
+      XELOGI("GuideBootstrap: string table \"{}\" -> {:08X}, table {:08X}, "
+             "[guide+4E8] now {:08X}",
+             l, static_cast<uint32_t>(st_r), table,
+             rd(guide_bs_obj_ + 0x4E8));
+    }
+  }
   if (::cvars::guide_static_locator) {
     // The dynamic locator builder is handed [guide+8] as its module and
     // that field is 0, giving "section://@0,...". Selecting the static
@@ -1190,6 +1225,37 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
           uint32_t loc = memory->SystemHeapAlloc(256, 16);
           uint32_t nmb = memory->SystemHeapAlloc(256, 16);
           uint32_t out2 = memory->SystemHeapAlloc(16, 16);
+          // hud's own string-table load fails and leaves [guide+0x4E8] null,
+          // and every input to it has checked out. The locator string itself
+          // has only ever been inferred, so call XuiLoadStringTableFromFile
+          // (ordinal 0x342) directly with a locator we control: success here
+          // means hud's locator is the problem, failure means the loader is.
+          {
+            uint32_t lst = xm2 ? xm2->GetProcAddressByOrdinal(0x342) : 0;
+            uint32_t tloc = memory->SystemHeapAlloc(256, 16);
+            uint32_t tout = memory->SystemHeapAlloc(16, 16);
+            if (lst && tloc && tout) {
+              for (const char* form :
+                   {"section://{:08X},hud#strings.xus",
+                    "section://{:X},hud#strings.xus",
+                    "section://{:08X},hud#Strings.xus"}) {
+                std::memset(memory->TranslateVirtual(tloc), 0, 256);
+                std::memset(memory->TranslateVirtual(tout), 0, 16);
+                std::string l = fmt::format(fmt::runtime(form),
+                                            guide_bs_skin_module_);
+                wide(tloc, l);
+                uint64_t la[] = {tloc, tout};
+                uint64_t lr2 = processor->Execute(ts, lst, la,
+                                                  xe::countof(la));
+                XELOGI("GuideScene: XuiLoadStringTableFromFile(\"{}\") -> "
+                       "{:08X}, table {:08X}",
+                       l, static_cast<uint32_t>(lr2), rd(tout));
+              }
+            } else {
+              XELOGW("GuideScene: no ordinal 342 / alloc for string table "
+                     "probe");
+            }
+          }
           std::string spec2 = ::cvars::guide_scene_override;
           size_t sp = 0;
           while (sp <= spec2.size()) {
