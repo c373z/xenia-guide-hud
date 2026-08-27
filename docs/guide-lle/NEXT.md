@@ -2637,3 +2637,37 @@ Two things this settles, and one it opens:
 So the remaining chain to pixels is now two concrete questions rather than one
 vague one: why controls get no visual, and why the nested tab scenes are not
 built.
+
+### The missing visuals are global, not a GuideMain problem
+
+Running the same id probe against `Options.xur` and `Status.xur` - scenes that
+have loaded correctly since long before any of this session's fixes:
+
+| Scene | id | handle | `XuiControlGetVisual` |
+|---|---|---|---|
+| Options | `btnOnlineStatus` | `00010067` | `80300017` |
+| Options | `btnA` | `0001004C` | `80300017` |
+| Options | `backBtn` | `0001004F` | `80300017` |
+| Options | `artPanel` | `00010046` | `8030000A` |
+| Options | `graphic_metapane` | `00010043` | `80300017` |
+| Status | `artPanel` | `00010075` | `8030000A` |
+| Status | `txtMessage` | `0001007B` | `80300017` |
+
+Every one resolves to a live handle and **none has a visual**. So this is not
+something GuideMain does differently - no control in any scene gets a visual.
+That makes it a systemic gap in the visual/skin plumbing rather than anything
+scene-specific, and it is the single remaining reason nothing can draw.
+
+Worth noting `guide_skin_path` is deliberately blank because hud carries its
+own skin as a resource section; whether that skin is actually bound to the
+render context is now the obvious thing to check.
+
+### Caveat on the nested-scene claim
+
+The previous section inferred that the tab scenes are never instantiated
+because `Blade_Center`, `Tab1` and friends fail lookup. That inference is not
+safe: `XuiElementGetChildById` may search only immediate children, in which
+case those ids failing means "not a direct child of the scene", not "never
+created". The ids that did resolve in every scene look like top-level chrome,
+which is consistent with a non-recursive search. Treat the nested-scene
+question as open.

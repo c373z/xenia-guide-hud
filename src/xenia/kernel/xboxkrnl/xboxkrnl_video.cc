@@ -1306,9 +1306,15 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
                   uint32_t idb = memory->SystemHeapAlloc(128, 16);
                   if (gcbi && idb) {
                     for (const char* want :
-                         {"Blade_Center", "txt_Games", "Label_Head",
+                         {// GuideMain
+                          "Blade_Center", "txt_Games", "Label_Head",
                           "ringOfLight_Group", "btnB", "imgHeadsetBattery",
-                          "Header", "Tab1", "Blade3"}) {
+                          "Header", "Tab1", "Blade3",
+                          // Options / Status - controls in scenes that have
+                          // always loaded, as a control for whether missing
+                          // visuals are specific to GuideMain or global
+                          "btnOnlineStatus", "btnA", "backBtn", "artPanel",
+                          "graphic_metapane", "txtMessage"}) {
                       std::memset(memory->TranslateVirtual(idb), 0, 128);
                       std::memset(memory->TranslateVirtual(co2), 0, 16);
                       wide(idb, want);
