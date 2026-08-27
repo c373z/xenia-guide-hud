@@ -1928,7 +1928,15 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
       }
     }
   }
+  // Print both arguments. guide_patch_null_render yields 0 composite draws
+  // where borrow-only yields 2100+, with the hook reported installed in both
+  // - so the suspicion is render_obj coming back null here, which would make
+  // the `guide_draw_fn_ && guide_draw_this_` test in the notification path
+  // silently false. "Installed" logged without values cannot distinguish that
+  // from a notification that never fires.
   SetGuideDrawHook(guide_bs_hud_base_ + 0xAB28u, render_obj);
+  XELOGI("GuideBootstrap: draw hook args fn={:08X} self={:08X}",
+         guide_bs_hud_base_ + 0xAB28u, render_obj);
   XELOGI("GuideBootstrap: draw hook installed on title thread");
 }
 

@@ -6974,3 +6974,671 @@ xam's table state intact, which is what `0x3308` needs.
 Guide device's `[32A0]/[32B0]` (size/format, both `00000000`) may also need to
 agree with it. Lending one field may simply move the fault rather than clear
 it.
+
+### guide_borrow_front_buffer works; clear_null_render is still the wrong lever
+
+Lending just `[+0x3F74]` to the Guide's own device is stable:
+
+```
+Guide: lent front buffer A240A380 from title device 40952400
+       to guide device 40870D00; [3F74] now A240A380
+GuidePreDraw: device 40870D00 ... [3F74]=A240A380
+```
+
+Composite draws ran to **#2100+ with no crash**. For the first time xam's
+device tables and a real front buffer are on the same object. Committed as
+`b783e6a`.
+
+Remaining on every line: `[134]=00000001` and `RT0/RT1/depth=00000000`.
+
+I then paired the borrow with `guide_clear_null_render`, whose description
+promises exactly both halves (DC built non-null -> `XuiRenderBegin` runs
+`vtable[20]`, "where any render-target setup would happen"). It crashed at
+`819DE94C`, `r3=0`, deref `+0x24`, unwinding through `818FDE60` - the DC
+initialiser - before the borrow even ran.
+
+That flag was **already documented in this file, at line 370, as
+non-functional**:
+
+> The pre-existing `guide_clear_null_render` never worked because it clears
+> `[ctx+0x1C]` at bootstrap while the per-frame context is constructed later.
+
+So its cvar description states an intent the implementation does not achieve.
+`kernel_flags.cc` is a good index of *what a lever is for*, but NEXT.md is
+the authority on *whether it works*. Check both - reading only the cvar text
+cost this run.
+
+The working lever is `guide_patch_null_render`: it nops the store at
+`818FDF14` in xam's image at load time, so the constructor's zero in
+`[dc+0x134]` survives, `XuiRenderBegin` does not skip `vtable[20]`, and the
+draw emitter `819F5D18` can build a DRAW_INDX packet. That is the pairing now
+under test.
+
+### Both null-render flags crash identically - the fault is vtable[20], not the flag
+
+Pairing the borrow with `guide_patch_null_render` produced a crash **byte-for
+-byte identical** to the `guide_clear_null_render` run: same PC `819DE94C`,
+same `r3=0`, same `fault_addr 0x100000024`, same unwind
+`819DEB30 / 8191B024 / 818FDE60 / 818F8374`.
+
+Two conclusions follow.
+
+1. The crash is not a property of either flag. It is what happens **whenever
+   `[dc+0x134]` is genuinely 0**, because `XuiRenderBegin` then stops skipping
+   `dc->vtable[20]` and that path dereferences null at `+0x24`. Both flags
+   work; reaching the gated code is the problem.
+
+2. **The line-370 note is wrong under `guide_reuse_xui_ctx`.** It says
+   `clear_null_render` can never work because it clears `[ctx+0x1C]` at
+   bootstrap while the per-frame context is built later. With
+   `guide_reuse_xui_ctx` on, the per-frame context *is* the bootstrap context,
+   so the clear does apply - which is exactly why it crashed identically.
+   The note should be read as "never worked *before* ctx reuse existed".
+
+The faulting function is `819DE8F8` (len 0x174), called from only two sites,
+both in `819DEA70`.
+
+**Ordering is the actual defect.** `vtable[20]` runs during DC *construction*;
+`guide_borrow_front_buffer` lent the buffer from the composite-draw path, long
+after. `GuidePreDraw` still read `[3F74]=00000000` at the moment of the crash
+- the signature of a fix that arrives too late rather than one that is wrong.
+
+The lend now also runs from the `XuiCtxWatch` poller (250us, started as soon
+as the context global is non-null), walking
+`[81D6C978] -> ctx -> [+0x08] wrapper -> [+0x0C] device` and writing
+`[dev+0x3F74]` the first time that device exists. The draw-path lend stays as
+a fallback; whichever runs first wins, and the second sees a non-null field
+and skips.
+
+### The early lend never ran: XuiCtxWatch is gated behind an env var
+
+The `XuiCtxWatch`-hosted lend produced **zero** `lent front buffer` lines and
+an identical crash. Cause: that thread is spawned inside
+
+```
+if (std::getenv("XENIA_XUICTX_WATCH")) {
+```
+
+and is further nested under the `guide_xam_ui_startup` path, so it never
+started. The code was correct and simply never executed.
+
+Worth generalising, because this is the second time a change has been judged
+by a run in which it never ran (the first was the device signature scan
+triggering at `i == 30000`, past the harness window): **before concluding
+anything from a run, confirm the new code produced at least one line of
+output.** A silent absence looks exactly like a fix that did not work.
+
+`guide_borrow_front_buffer` now spawns its own `GuideLendFB` thread next to
+`GuideAutoPress`, gated only by its own cvar, polling
+`[81D6C978] -> ctx -> [+0x08] -> [+0x0C]` every 250us and logging either the
+lend or an explicit give-up. No flag should depend on an unrelated environment
+variable to take effect.
+
+### GuideLendFB crashed the host: guest-pointer walks need guarding
+
+The dedicated thread did run this time (`GuideLendFB: watching for the guide
+device`), and immediately took the **host process** down:
+
+```
+ABORT: UNHANDLED EXCEPTION dialog during boot after ~1s
+Title Info: Title not started yet.
+Faulting thread name: GuideLendFB
+```
+
+The thread starts before the title does and walks pointers *read out of guest
+memory*, so unmapped and garbage addresses are the normal case, not the
+exceptional one. `Memory::TranslateVirtual` does not validate: it returns a
+host pointer into reserved-but-uncommitted space, and the load faults the
+emulator rather than returning garbage.
+
+This is a different failure mode from a guest crash and needs saying
+explicitly, because the harness reports both as "ABORT: UNHANDLED EXCEPTION":
+**a fault whose `Faulting thread name` is one of our own watcher threads is a
+host bug in the watcher, not a finding about the guest.** The give-up branch
+added last tick did its job here - the absence of both the lend line and the
+give-up line placed the failure inside the loop.
+
+Reads in any polling thread now go through a guarded helper: reject null,
+sub-page and misaligned addresses, require `LookupHeap` to find a heap,
+require `QueryProtect` to report the page committed, and only then translate.
+The store is likewise skipped if translation yields null.
+
+### Guarded reads fixed the host crash; the chain itself is wrong
+
+With the guard in place there is no host abort and `GuideLendFB` runs for the
+whole session - but it logged **neither** the lend nor the give-up, so its
+condition never became true. Meanwhile `GuidePreDraw` in the same run showed
+the device present the entire time:
+
+```
+GuidePreDraw: device 40870D00 ... [3F74]=00000000
+```
+
+So the device exists and has a null front buffer - exactly the case the lend
+is supposed to catch - and the poller could not see it. The two disagree
+because they walk **different chains**:
+
+* `GuidePreDraw`: `guide_draw_this_+12` -> dc -> `[dc+0x1CC]` wrapper ->
+  `[+0x0C]` device.
+* `GuideLendFB`: `[81D6C978]` ctx -> `[+0x08]` wrapper -> `[+0x0C]` device.
+
+The second is from the note at line 2346 of this file. One of its links is
+null in practice. Rather than guess which - the mistake this file has now
+recorded several times - the poller prints `ctx`, `wrap`, `gdev`,
+`gdev[3F74]`, `tdev` and `tdev[3F74]` once per second for the first 40s.
+
+Note the DC-based chain is not simply a drop-in replacement: `guide_draw_this_`
+is only set at draw time, which is the "too late" problem the early lend
+exists to avoid. If the ctx chain is broken, the fix is to find an
+*early-available* route to the wrapper, not to fall back to the draw-time one.
+
+### The ctx chain was right; my own guard was the null
+
+Diagnostics settled it in one run:
+
+```
+GuideLendFB[0]:     ctx=00000000 wrap=00000000 gdev=00000000 tdev=00000000
+GuideLendFB[4000]:  ctx=40877DC0 wrap=40877E00 gdev=40870D00
+                    gdev[3F74]=00000000 tdev=00000000 tdev[3F74]=00000000
+```
+
+`ctx -> [+0x08] -> [+0x0C]` resolves to `40877E00` / `40870D00`, matching the
+composite-draw log (`[1CC]=40877E00 wrap[0C]=40870D00`) exactly. The note at
+line 2346 is correct and the poller finds the device within a second.
+
+The null was `tdev` - the read of the **constant** `0x801E6FC4`
+(VdGlobalDevice), which the draw path reads unguarded every frame and gets
+`40952400`. The guarded helper added last tick rejected it: `LookupHeap`
+succeeds, but `QueryProtect` declines for that page, so the helper returned 0
+and the lend condition could never be satisfied.
+
+So the fix for the host crash introduced a false negative that looked exactly
+like a missing object. Both failure modes - the unguarded version crashing the
+host, and the guarded version silently seeing nothing - produced runs with no
+lend line. Only the per-link dump distinguished them.
+
+Guard now allows module/kernel image addresses (`0x80000000-0x90000000`)
+through when `QueryProtect` declines, since `LookupHeap` has already
+established the address is backed and xam's image is mapped once loaded.
+Pointers read out of guest memory still get the full check.
+
+## REFUTED: the front buffer is not what vtable[20] is missing
+
+The early lend now works. It fires at iteration 245, well before DC
+construction, and the draw path sees it:
+
+```
+Guide: lent front buffer 98409940 to guide device 40870D00 EARLY
+       (GuideLendFB, iteration 245); [3F74] now 98409940
+GuidePreDraw: device 40870D00 RT0=00000000 RT1=00000000 depth=00000000
+              [3F74]=98409940
+```
+
+And the crash is **byte-identical** to every run without it - same guest PC
+`819DE94C`, same `r3=0`, same `fault_addr 0x100000024`, same unwind, down to
+the same host address `A09BCD77`.
+
+So the ordering hypothesis is dead. `vtable[20]` does not fault for want of a
+front buffer, early or late. Three ticks of work on lend timing (draw path ->
+XuiCtxWatch -> dedicated thread -> guarded reads -> relaxed guard) produced a
+working mechanism that answers the question **no**.
+
+Where the null actually comes from, read rather than guessed:
+
+```
+819e5d28  or r3,r29,r29      ; caller 819DEA70 passes r29...
+819e5d2c  bl 819DE8F8        ; ...into the faulting function
+819e5b08  or r31,r3,r3       ; which keeps it in r31
+                             ; and derefs [r31+0x24] -> fault, r3=0
+```
+
+`r29` is already null **in the caller**, `819DEA70`. The next question is what
+`819DEA70` failed to construct - not anything about front buffers.
+
+### Second bug found by the same run: the lend raced the title
+
+`tdev=FFCAE000` on the first poll - `VdGlobalDevice` holds garbage until dash
+publishes its device - so the lend copied `98409940` rather than dash's
+`A240A380`. It lent a plausible-looking value read from a junk pointer.
+
+That did not affect the refutation (the crash is identical either way) but it
+would have quietly poisoned any later result. Early pollers must validate what
+they read, not just that the read succeeded: `tdev` is now required to fall in
+the guest heap range `0x40000000-0x50000000` before it is trusted.
+
+### The vtable[20] null is [wrapper+0x0C], traced to its source
+
+Chased the null up three frames by reading, not guessing:
+
+```
+8191AFD0:  or   r31,r3,r3      ; r31 = first arg (a wrapper)
+           lwz  r3,12(r31)     ; r3 = [wrapper+0x0C]  <- the device slot
+           bl   819DEA70
+819DEA70:  or   r29,r3,r3      ; r29 = first arg, i.e. that device
+           or   r3,r29,r29
+           bl   819DE8F8
+819DE8F8:  or   r31,r3,r3
+           ...  [r31+0x24]     ; faults, r3=0
+```
+
+So the fault is a **null `[wrapper+0x0C]`** at DC-construction time. That very
+likely explains why the null-render flag exists at all: xam skips
+`vtable[20]` exactly when the device is not yet bound, and forcing the flag to
+zero removes a guard rather than enabling a feature.
+
+The complication is that `GuideLendFB` reads `[40877E00+0x0C] = 40870D00` -
+non-null - one second into boot, and the composite-draw log agrees
+(`[1CC]=40877E00 wrap[0C]=40870D00`). So either a **different** wrapper
+reaches `8191AFD0`, or that slot is cleared again before DC construction.
+
+Those two have different fixes, so a `cpu::Breakpoint` at `8191AFD0` now logs
+the wrapper identity and its `[+0x0C]` rather than assuming. Unlike the
+`8191BAC8` hook that saw nothing, this call happens **at the Guide press**,
+after the traces install, so it should fire.
+
+Also confirmed this run: validating `tdev` did not change which buffer is
+lent (`98409940` again, iteration 241). `VdGlobalDevice` legitimately points
+at a different device that early - it is not garbage, so the range check
+passes. Dash's `40952400`/`A240A380` appears later. Whether the Guide should
+get the early buffer or dash's is now an open question, but it is moot while
+`vtable[20]` faults for an unrelated reason.
+
+## CORRECTION: [wrapper+0x0C] is NOT null at the faulting call
+
+The trace fired at exactly the frame the crash unwinds through:
+
+```
+WrapRender #1: wrapper=40877E00 [+0C]=40870D00 lr=818FDE60
+```
+
+Same wrapper the composite-draw log and `GuideLendFB` both report, and its
+device slot is **populated**. So the previous tick's conclusion - "the fault
+is a null `[wrapper+0x0C]` at DC-construction time" - is wrong as stated. The
+disassembly was right about *where* r3 comes from (`lwz r3,12(r31)`), but the
+inference that the slot must therefore be null did not survive measurement.
+
+Worse for that theory: **this run did not crash at all.** No `GUEST CRASH`
+lines, where the identical configuration one tick earlier crashed at
+`819DE94C` every time.
+
+The only delta is the two `cpu::Breakpoint`s installed by
+`guide_trace_devsetup`. Breakpoints change JIT codegen and timing, so the
+honest reading is one of:
+
+* the crash is a **race** that the breakpoints' overhead hides, or
+* the crash was always intermittent and earlier runs were unlucky.
+
+Do not record "the trace fixes the crash" as a finding until a repeat run
+says so. A measurement that changes the thing being measured is exactly the
+case where one sample proves nothing.
+
+### But no drawing happens either
+
+```
+GUEST CRASH     0
+GuideScene     38
+composite draw  0     <- borrow-only produced 2100+
+DRAW_INDX       0
+```
+
+So with `guide_patch_null_render` on, the run survives and builds scenes, but
+the composite-draw path is never entered. Not crashing is not the same as
+rendering: clearing `[dc+0x134]` moves execution onto a branch that produces
+no draws at all, which is a worse outcome for pixels than the crashing path
+that at least reached #2100.
+
+### The crash is a race; the breakpoints hide it. And the flag kills the draws.
+
+Repeat run confirms the previous tick was not a fluke: **2 of 2** runs with
+`guide_trace_devsetup` on show no crash, identical `WrapRender #1:
+wrapper=40877E00 [+0C]=40870D00 lr=818FDE60`, and scenes built. The same
+configuration **without** the trace crashed at `819DE94C` every time.
+
+So the crash is timing-dependent - a race that breakpoint overhead hides -
+not a deterministic null. Two supporting facts:
+
+* The crash predates `GuideLendFB` entirely (it first appeared with the
+  draw-path borrow), so our own guest-memory writes are not the cause.
+* `[wrapper+0x0C]` is populated whenever we are slow enough to look.
+
+### The real problem is not the crash
+
+```
+                     borrow only    + patch_null_render
+GUEST CRASH               0                 0  (with trace)
+GuideScene               32                38
+composite draw         2100+                0
+```
+
+`guide_patch_null_render` **eliminates the composite draws**. The draw hook
+reports itself installed in both cases ("draw hook installed on title
+thread"), so the difference is either a null `render_obj` passed to
+`SetGuideDrawHook` - which would make the `guide_draw_fn_ && guide_draw_this_`
+test silently false - or a notification that stops firing.
+
+This is the cleanest statement of the remaining problem so far:
+
+* `[dc+134]=1`: draws happen (2100+), present is a no-op.
+* `[dc+134]=0`: present would be real, but **no draws happen at all**.
+
+Which suggests the composite-draw path being driven only runs in null-render
+mode, and that clearing the flag is not "opening a gate in front of finished
+geometry" - it selects a different, currently empty, code path.
+
+The bootstrap site logged "installed" without its arguments, which cannot
+distinguish those two cases. It now prints `fn` and `self`.
+
+## Why patch_null_render shows 0 draws: the draw call HANGS
+
+Not a suppressed code path - a hang. Chased by elimination, not guesswork:
+
+* `draw hook args fn=913EAB28 self=401587F0` - both non-null, so the
+  `guide_draw_fn_ && guide_draw_this_` test passes. The null-`render_obj`
+  theory is dead.
+* `VdSwap fetch_ptr` logs at line 22227, two lines *after* the hook is armed
+  at 22225 - so a swap really does run with both globals set.
+* There is no early `return` between the block at 2020 and the log at 2958;
+  every `return` in that range is inside a lambda.
+* The log at **2958 prints the draw's return value**, and the draw is executed
+  at **2645**. A line that never appears therefore means the call never
+  returned.
+* `WrapRender #1` fires at log line 22431 - *inside* that call - and the log
+  tail is the title thread spinning on `KeWaitForMultipleObjects` that will
+  not resolve.
+
+So `guide_patch_null_render` does not remove the draws. It hangs
+`819F5D18`'s caller inside `vtable[20]`, and the title thread never swaps
+again.
+
+Combined with the earlier result, `vtable[20]` is broken in both directions:
+
+* without the trace: **crashes** at `819DE94C` (race, fast path)
+* with the trace:    **hangs** in the same call (breakpoint overhead changes
+  which side of the race wins)
+
+That is one defect with two faces, not two problems.
+
+### Consequence: the flag pairing to aim for
+
+* `[dc+134]=1` -> `XuiRenderBegin` skips `vtable[20]`; 2100+ draws happen;
+  `XuiRenderPresent` returns S_OK without presenting.
+* `[dc+134]=0` -> `vtable[20]` runs and crashes or hangs; nothing draws.
+
+Neither state renders. What is wanted is the **combination**: Begin must see
+non-zero (skip the broken setup, keep the draws) while Present sees zero (do a
+real present). Both existing flags change the *field*, so they necessarily
+change both call sites together.
+
+The precise lever is therefore inside `XuiRenderPresent` (`dc->vtable[21]`,
+runtime `818F9290`): patch **its** test of `[dc+0x134]`, leaving the field -
+and hence `XuiRenderBegin` - alone. That is the next thing to try, and it is
+a one-instruction image patch of the same kind `guide_patch_null_render`
+already does at `818FDF14`.
+
+### guide_patch_present_gate: split Begin from Present
+
+`XuiRenderPresent` (runtime `818F9290`) reads the flag and branches:
+
+```
+818F92DC  lwz   r11,0x134(r31)   ; null-render flag
+818F92E0  cmpwi cr6,r11,0
+818F92E4  bne   cr6,+0x38        ; non-zero -> skip the real present
+818F92E8  lwz   r3,0x1CC(r31)    ; else: wrapper
+          lwz   r11,0x60(r11)    ; vtable[24]
+          bctr                   ; the actual present
+```
+
+(Also confirms the corrected gate order above: `[dc+0x11C] != 0` returns
+`0x8000FFFF` early, and our logs show `[11C]=00000000`, so that one is open.)
+
+`guide_patch_present_gate` nops **only** `818F92E4`, leaving `[dc+0x134]`
+untouched. That is the whole point: both existing flags clear the *field*,
+which necessarily changes `XuiRenderBegin` as well, and Begin then runs the
+`vtable[20]` path that crashes or hangs. Keeping the field set preserves the
+2100+ draws while letting Present through.
+
+Use it INSTEAD of `guide_patch_null_render` / `guide_clear_null_render`, never
+alongside them - together they would reintroduce the hang this exists to
+avoid.
+
+Prediction to check against the result, recorded before the run so it cannot
+be adjusted afterwards: draws should stay at 2100+, no crash, and the present
+should reach `vtable[24]`. That is still not the same as pixels - the Guide
+device's `RT0/RT1/depth` are all `00000000`, so what gets presented may be an
+empty surface.
+
+## The present gate is open: Present now reaches the real path
+
+`guide_patch_present_gate` applied cleanly and did what it was designed to:
+
+```
+Guide: patched 818F92E4 409A0038 -> 60000000 (present gate removed;
+       [dc+134] left intact for XuiRenderBegin)
+```
+
+The unwind changed completely, which is the proof it took effect:
+
+```
+before: 819DEB30 8191B024 818FDE60 818F8374   (vtable[20], during DC ctor)
+after:  819F7FB4 819FEC68 8191B438 818F930C   (818F930C = inside
+                                               XuiRenderPresent, past the gate)
+```
+
+So splitting Begin from Present was the right call: Begin still skips the
+`vtable[20]` path that crashes/hangs, and Present now runs through to the real
+presentation code.
+
+### The stale lent buffer is now a real bug
+
+New fault: `819F5EC4`, `fault_addr 0x98409960` = **`98409940 + 0x20`** - the
+front buffer `GuideLendFB` lent (`r8` and `r14` both hold `98409940`).
+
+`VdGlobalDevice` points at one device ~60ms into boot (front buffer
+`98409940`) and at dash's `40952400` (`A240A380`) later. The one-shot lend
+captured the early one and never revisited it. That was harmless while the
+present was gated off and nothing followed the pointer - **a stale pointer
+only becomes a bug once something dereferences it.** Opening the gate made it
+one.
+
+`GuideLendFB` now *syncs* rather than snapshots: every poll, if
+`[gdev+0x3F74]` differs from the title's current `[tdev+0x3F74]`, it rewrites
+it (logging the first 6 changes). By the time the present runs, the field
+holds whatever dash currently owns.
+
+### Syncing blindly wrote garbage - validate the value, not just the source
+
+The sync reached dash's real buffer and then drifted off it:
+
+```
+lent 98409940 (was 00000000)   iteration 230
+lent A240A380 (was 98409940)   iteration 239   <- correct
+lent 01C001C0 (was A240A380)   iteration 485   <- not a pointer
+lent 03C003C0 / 06000600 / 08C00900
+```
+
+`0x01C0`=448, `0x03C0`=960, `0x0600`=1536 - packed width/height pairs.
+`VdGlobalDevice` does **not** always point at a device, so `[+0x3F74]` is not
+always a front buffer, and copying it unconditionally propagates whatever
+happens to sit at that offset.
+
+Both fixes so far were about *where* the value came from (range-check `tdev`,
+require a committed page). Neither checks **what was read**. A pointer-shaped
+guard on the source says nothing about the payload. Real buffers seen are
+`98409940` and `A240A380`; the filter is now `fb >= 0x80000000`.
+
+Crash moved with each fix, which is the useful signal:
+
+* stale `98409940` -> fault at `98409940+0x20` (`819F5EC4`)
+* synced/garbage   -> fault at null`+0x18` (`819F5F60`), with `r8`/`r14`
+                      holding `A240A380`
+
+Same caller chain throughout (`819F7FB4 / 819FEC68 / 8191B438 / 818F930C`),
+so the present path is being entered consistently and failing progressively
+later.
+
+## The present path now reaches the draw emitter - and faults on a null RT
+
+Value validation (`fb >= 0x80000000`) did **not** change the crash: identical
+PC `819F5F60`, identical `fault_addr 0x18`, identical `r8/r14 = A240A380`.
+The garbage lends (`85008600`, `8B008BC0`, ... - still pair-shaped, so the
+filter is too weak) are a separate defect that is **not** causing this fault:
+at crash time the buffer in use is dash's correct `A240A380`.
+
+Worth noting as a method point: two consecutive fixes were aimed at the lent
+buffer, and the second one demonstrably fixed nothing. The register dump said
+so immediately - `r14` already held the right value. Checking whether a fix
+moved the crash is cheaper than assuming it did.
+
+The faulting function is **`819F5D18` - the draw emitter itself** (len
+0x2208, single caller `819F7F20`):
+
+```
+819FD148  bne   cr6,+0xc
+819FD14C  lwz   r11,12976(r31)    ; [dev+0x32B0] = depth surface
+819FD150  b     +0x10
+819FD154  addi  r11,r17,3240      ; else indexed RT slot
+819FD15C  lwzx  r11,r11,r31
+819FD160  lhz   r11,0x18(r11)     ; <- faults, r11 = 0
+```
+
+So the emitter loads a render target / depth surface off the device and reads
+a halfword at `+0x18` from it. `GuidePreDraw` has reported
+`RT0=00000000 RT1=00000000 depth=00000000` in every single run. Previously
+nothing got far enough to touch them; now the present path does.
+
+This is the predicted next blocker, arriving exactly where predicted -
+recorded last tick as "what gets presented may be an empty surface".
+
+`guide_bind_title_rt` already exists for this and its description names the
+right mechanism: the title's RT sits at `[VdGlobalDevice+0x3AC4]`, and
+binding it "means the Guide draws into the title's back buffer, which is what
+an overlay should do". Testing that now, alone rather than together with
+`guide_bind_depth_copy`, so that if the fault moves it is clear which slot
+mattered.
+
+## RT bound -> emitter runs -> now it needs somewhere to write
+
+`guide_bind_title_rt` worked:
+
+```
+Guide: RT bind sees dev 40870D00 RT0 00000000 (plausible=false) surf 40958CD0
+GuidePreDraw: device 40870D00 RT0=40958CD0 RT1=00000000 depth=00000000
+              [3F74]=A240A380
+```
+
+RT0 is bound to the title's surface and the front buffer is dash's real
+`A240A380`. The fault moved off `819F5D18` entirely.
+
+New fault `81A01638`, `fault_addr 0x00000004`, in function `81A015B8`
+(len 0x90, **278 callers** - the PM4 word-emit helper):
+
+```
+81A08828  lwz  r11,0(r30)    ; r11 = write cursor
+81A0882C  addi r11,r11,4     ; reserve a word
+81A08834  stw  r11,0(r30)
+81A08838  stw  r10,0(r11)    ; <- faults; r11 = 4, so the cursor was 0
+```
+
+So the emitter is now genuinely *emitting* - it just has no buffer. Checking
+`kernel_flags.cc` first (the rule this file records three times) found the
+flag written for precisely this, and its description predicts the observed
+fault to the byte:
+
+> "on a mode-2 device the cursor is 0 so the first word stores to guest
+> address 4 ... this binds the one field standing between the emitter and
+> somewhere real to write"
+
+Cursor field is `[dev+0x2B4C]`. Testing `guide_bind_cmdbuf_kb=64` with the
+now-working stack: borrow + present gate + title RT.
+
+Note this is a different flag from `guide_syscmdbuf_buffer_kb`, which was
+tried much earlier and produced "identical stall, guest wrote 0 words" - that
+was before the emitter was ever reached, so it was measuring a path that was
+not executing.
+
+### guide_bind_cmdbuf_kb applies but the cursor is cleared before emission
+
+The flag did take effect - the `= 0` line in the harness output is the config
+*file* dump, not the runtime value, and the third argument below is
+`csize/4` in words, i.e. 64KB:
+
+```
+Guide: cmdbuf init 81A01358(dev 40870D00, 301D5000, 16384) -> 301D4FFC;
+       base=301D5000 cursor=301D4FFC limit=301E4FFC
+```
+
+Yet the crash is byte-identical (`81A01638`, `fault_addr 0x4`), so
+`[dev+0x2B4C]` is 0 again by the time packets are emitted. `kernel_flags.cc`
+explains it exactly:
+
+> `guide_patch_cmdbuf_reset`: "Nop the store at 81A01464, which zeroes the
+> command-buffer cursor [dev+0x2B4C]. xam calls 81A013B8 (its frame end/flush)
+> from 81A06080 during the Guide's draw, and that clears the cursor set by the
+> begin - which is why a command buffer prepared before the draw is always
+> gone by the time packets are emitted. Needs guide_second_context_kb."
+
+So `guide_bind_cmdbuf_kb` is the wrong shape of fix: preparing a buffer
+*before* the draw cannot survive a flush that happens *during* it.
+`guide_second_context_kb` is the intended mechanism - it resets the cursor
+each frame, calls xam's own begin (`81A01358`) through the lifecycle that owns
+it, runs the draw, then submits what was emitted, and its description says to
+pair it with `guide_bind_title_rt`.
+
+Now running the documented combination: second context 64KB +
+patch_cmdbuf_reset + bind_title_rt + present gate + borrow. Also useful as
+context for `GuideBootstrap`'s dump - the title device has a live cursor
+(`+2B4C=FF9C9000`) while the xam device's is `00000000`.
+
+## MILESTONE: first crash-free run with every prerequisite satisfied
+
+Configuration: `lle_xam_skin_init` + `guide_reuse_xui_ctx` +
+`guide_borrow_front_buffer` + `guide_patch_present_gate` +
+`guide_bind_title_rt` + `guide_second_context_kb=64` +
+`guide_patch_cmdbuf_reset`.
+
+```
+GuidePreDraw: device 40870D00 RT0=40958CD0 RT1=00000000 depth=00000000
+              [3F74]=A240A380
+Guide composite draw #600 -> 00000000; [11C]=00000000 [134]=00000001
+              [1CC]=40877E00 wrap[0C]=40870D00 realdev[32A0]=40958CD0
+GUEST CRASH   0
+```
+
+Everything that has blocked this path in turn is now simultaneously true:
+draws run (600+), the title's RT is bound, dash's real front buffer is in
+place, `[dc+134]` stays set so `XuiRenderBegin` skips the crashing/hanging
+`vtable[20]`, the present gate is patched open, and the command buffer
+survives the mid-draw flush. Nothing crashes.
+
+### But the Guide emits nothing
+
+```
+GuideCtx2 #600: submitted 1 words from 40875804, GPU draws +0;
+                buf: 0000200E 00000000 00000000 ...
+DRAW_INDX  0
+```
+
+**One word per frame.** `0000200E` is not a type-3 PM4 header (those are
+`0xC0......`), GPU draws increase by 0, and no DRAW_INDX packet is ever
+built. The emitter is entered, has a valid cursor and a real buffer, and
+writes one word.
+
+So the whole crash chain was necessary but not sufficient: the plumbing is
+now complete and carries no geometry. This is emphatically **not** the stop
+condition - nothing is on screen.
+
+Scene state in the same run, for the next investigation:
+
+```
+GuideScene                38 lines
+000100B1 GetVisual -> 00000000: 000100E5   (resolves)
+000100E2 GetVisual -> 00000000: 00010129   (resolves)
+0001012D GetVisual -> 8030000A: 00000000   (fails)
+```
+
+Visuals do resolve for some nodes, so the earlier `80300017`-for-everything
+problem is fixed by the skin init - but at least one node still returns
+`8030000A` with a null visual. Whether a scene with partly-null visuals emits
+no geometry at all is the next question, and it is a *content* question
+rather than a device/plumbing one - a different class of problem from
+everything solved so far.

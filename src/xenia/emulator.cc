@@ -1397,6 +1397,42 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                   ks->processor()->AddBreakpoint(setdev_bp.get());
                   XELOGI("SetDevice trace installed at 8191BAC8");
                 }
+                // The vtable[20] crash is a null [wrapper+0x0C]: 8191AFD0
+                // does `lwz r3,12(r31)` with r31 = its first argument and
+                // hands that straight to 819DEA70, which passes it on to
+                // 819DE8F8 where [r3+0x24] faults with r3=0. But GuideLendFB
+                // reads [40877E00+0x0C] = 40870D00, non-null, a second into
+                // boot - so either a DIFFERENT wrapper reaches here, or that
+                // slot is cleared again. Read the wrapper identity and its
+                // device slot instead of assuming which.
+                static std::unique_ptr<cpu::Breakpoint> wrapdev_bp;
+                if (cvars::guide_trace_devsetup && !wrapdev_bp) {
+                  wrapdev_bp = std::make_unique<cpu::Breakpoint>(
+                      ks->processor(), cpu::Breakpoint::AddressType::kGuest,
+                      0x8191AFD0ull,
+                      [ks](cpu::Breakpoint* bp, cpu::ThreadDebugInfo* ti,
+                           uint64_t host_pc) {
+                        auto* th = kernel::XThread::GetCurrentThread();
+                        if (!th) return;
+                        auto* c = th->thread_state()->context();
+                        static std::atomic<uint32_t> n{0};
+                        if (++n > 10) return;
+                        uint32_t wrap = static_cast<uint32_t>(c->r[3]);
+                        auto* m = ks->memory();
+                        uint32_t dev = 0;
+                        if (wrap) {
+                          if (auto* hp = m->TranslateVirtual(wrap + 0x0Cu)) {
+                            dev = xe::load_and_swap<uint32_t>(hp);
+                          }
+                        }
+                        XELOGI("WrapRender #{}: wrapper={:08X} [+0C]={:08X} "
+                               "lr={:08X}",
+                               static_cast<uint32_t>(n), wrap, dev,
+                               static_cast<uint32_t>(c->lr));
+                      });
+                  ks->processor()->AddBreakpoint(wrapdev_bp.get());
+                  XELOGI("WrapRender trace installed at 8191AFD0");
+                }
                 // 819F7F20 passes its 4th argument (r6) down to 819F5D18 as
                 // r8, which becomes r14 there and is dereferenced at +32
                 // without a guard. 819F7F20 itself guards the same read. Log
@@ -1931,7 +1967,7 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                     // negative cost a full round of analysis: the answer was a
                     // use-after-free, and the watcher stayed silent through it.
                     uint32_t last = 0, last_ctx = 0;
-                    bool primed = false;
+                    bool primed = false, lent = false;
                     for (int i = 0; i < 240000; ++i) {
                       uint32_t c = xe::load_and_swap<uint32_t>(
                           wmem->TranslateVirtual(0x81D6C978u));
@@ -1948,6 +1984,35 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                               "XuiCtxWatch: [{:08X}+0C] changed {:08X} -> "
                               "{:08X}",
                               c, last, v);
+                        }
+                      }
+                      // Lend the title's front buffer to the Guide's device
+                      // as soon as that device exists. Doing it in the
+                      // composite-draw path is too late: XuiRenderBegin runs
+                      // dc->vtable[20] during DC CONSTRUCTION, well before the
+                      // first draw, and with [dc+134] cleared that path faults
+                      // at 819DE94C (r3=0, deref +0x24). GuidePreDraw still
+                      // read [3F74]=00000000 at the crash, which is what
+                      // "arrived too late" looks like.
+                      if (cvars::guide_borrow_front_buffer && !lent) {
+                        auto rdv = [wmem](uint32_t a) {
+                          return a ? xe::load_and_swap<uint32_t>(
+                                         wmem->TranslateVirtual(a))
+                                   : 0u;
+                        };
+                        uint32_t wrap = rdv(c + 0x08u);
+                        uint32_t gdev = rdv(wrap + 0x0Cu);
+                        uint32_t tdev = rdv(0x801E6FC4u);
+                        uint32_t fb = rdv(tdev + 0x3F74u);
+                        if (gdev && fb && !rdv(gdev + 0x3F74u)) {
+                          lent = true;
+                          xe::store_and_swap<uint32_t>(
+                              wmem->TranslateVirtual(gdev + 0x3F74u), fb);
+                          XELOGI(
+                              "Guide: lent front buffer {:08X} to guide device "
+                              "{:08X} EARLY (from XuiCtxWatch, before DC "
+                              "construction); [3F74] now {:08X}",
+                              fb, gdev, rdv(gdev + 0x3F74u));
                         }
                       }
                       last = v;
@@ -3794,6 +3859,140 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                kAddr, cur, kOrig);
       }
     }
+    if (cvars::guide_patch_present_gate) {
+      // XuiRenderPresent (dc->vtable[21], runtime 818F9290):
+      //   818F92DC  lwz   r11,0x134(r31)   ; the null-render flag
+      //   818F92E0  cmpwi cr6,r11,0
+      //   818F92E4  bne   cr6,+0x38        ; non-zero -> skip the real present
+      //   818F92E8  lwz   r3,0x1CC(r31)    ; else fall through to the wrapper
+      //   ...       lwz   r11,0x60(r11)    ; vtable[24]
+      //             bctr                   ; the actual present
+      //
+      // Nop ONLY that branch. Both existing flags clear the FIELD, so they
+      // change XuiRenderBegin too - and Begin then runs vtable[20], which
+      // crashes at 819DE94C or hangs the draw call at 2645 depending on
+      // timing. Leaving the field non-zero keeps Begin skipping that broken
+      // setup (which is what yields 2100+ composite draws) while making
+      // Present actually present.
+      const uint32_t kPAddr = 0x818F92E4u;
+      const uint32_t kPOrig = 0x409A0038u;
+      auto* pp = memory()->TranslateVirtual<uint32_t*>(kPAddr);
+      uint32_t pcur = pp ? xe::load_and_swap<uint32_t>(pp) : 0;
+      if (pcur == kPOrig) {
+        void* ppage = reinterpret_cast<void*>(
+            reinterpret_cast<uintptr_t>(pp) & ~uintptr_t(0xFFF));
+        xe::memory::PageAccess pold = xe::memory::PageAccess::kReadOnly;
+        if (xe::memory::Protect(ppage, 0x1000,
+                                xe::memory::PageAccess::kReadWrite, &pold)) {
+          xe::store_and_swap<uint32_t>(pp, 0x60000000u);  // nop
+          xe::memory::Protect(ppage, 0x1000, pold, nullptr);
+          XELOGI("Guide: patched {:08X} {:08X} -> 60000000 (present gate "
+                 "removed; [dc+134] left intact for XuiRenderBegin)",
+                 kPAddr, pcur);
+        } else {
+          XELOGE("Guide: could not unprotect {:08X} for patching", kPAddr);
+        }
+      } else {
+        XELOGW("Guide: NOT patching {:08X}: found {:08X}, expected {:08X}",
+               kPAddr, pcur, kPOrig);
+      }
+    }
+  }
+
+  // Lend the title's front buffer to the Guide's device the moment that
+  // device exists. This needs its own thread: the first attempt lived in the
+  // composite-draw path (far too late - vtable[20] runs during DC
+  // CONSTRUCTION) and the second lived in XuiCtxWatch, which never starts
+  // unless XENIA_XUICTX_WATCH is set in the environment, so it silently never
+  // ran. A flag should not depend on an unrelated env var to take effect.
+  if (cvars::guide_borrow_front_buffer) {
+    auto* lmem = memory();
+    std::thread([lmem]() {
+      xe::threading::set_name("GuideLendFB");
+      // Every read here must be guarded. This thread starts before the title
+      // does, and the chain walks pointers read out of guest memory, so an
+      // unmapped or garbage address is normal rather than exceptional -
+      // TranslateVirtual happily returns a host pointer into reserved-but-
+      // uncommitted space and the load faults the HOST process. The first
+      // version had no guard and took the emulator down in GuideLendFB before
+      // the title started.
+      auto rdv = [lmem](uint32_t a) -> uint32_t {
+        if (a < 0x1000u || (a & 3u)) return 0u;
+        auto* heap = lmem->LookupHeap(a);
+        if (!heap) return 0u;
+        // QueryProtect is the right check for pointers read out of guest
+        // memory, but it rejects 0x801E6FC4 - VdGlobalDevice, a fixed global
+        // in xam's loaded image that the draw path reads unguarded every
+        // frame. That false negative is what made the poller sit for a whole
+        // run with tdev=00000000 while the device it wanted was plainly
+        // there. Module/kernel image addresses are mapped once xam is loaded,
+        // and LookupHeap already established the address is backed, so allow
+        // them through when QueryProtect declines to answer.
+        uint32_t protect = 0;
+        if (!heap->QueryProtect(a, &protect) || !protect) {
+          if (a < 0x80000000u || a >= 0x90000000u) return 0u;
+        }
+        auto* host = lmem->TranslateVirtual(a);
+        return host ? xe::load_and_swap<uint32_t>(host) : 0u;
+      };
+      for (int i = 0; i < 400000; ++i) {
+        uint32_t ctx = rdv(0x81D6C978u);
+        uint32_t wrap = rdv(ctx + 0x08u);
+        uint32_t gdev = rdv(wrap + 0x0Cu);
+        uint32_t tdev = rdv(0x801E6FC4u);
+        // VdGlobalDevice holds garbage until dash publishes its device: the
+        // first poll read tdev=FFCAE000, and lending from that produced a
+        // front buffer of 98409940 instead of dash's A240A380. Racing ahead
+        // of the title is a real hazard for any early poller - require the
+        // pointer to look like a guest heap object before trusting it.
+        if (tdev < 0x40000000u || tdev >= 0x50000000u) tdev = 0;
+        uint32_t fb = rdv(tdev + 0x3F74u);
+        // The previous run polled the whole time without the condition ever
+        // becoming true, while GuidePreDraw showed the device plainly present
+        // at 40870D00 - so one of these links is null and guessing which
+        // would repeat the mistake this file keeps recording. Print them.
+        // GuidePreDraw reaches the device through the DC
+        // ([[dc+0x1CC]+0x0C]), NOT through the ctx global, so the ctx->+08
+        // chain is the part most likely to be wrong.
+        if ((i % 4000) == 0 && i < 160000) {
+          XELOGI(
+              "GuideLendFB[{}]: ctx={:08X} wrap={:08X} gdev={:08X} "
+              "gdev[3F74]={:08X} tdev={:08X} tdev[3F74]={:08X}",
+              i, ctx, wrap, gdev, rdv(gdev + 0x3F74u), tdev, fb);
+        }
+        // Keep the field in SYNC rather than snapshotting once. The first
+        // version lent whatever VdGlobalDevice pointed at ~60ms in
+        // (98409940) and never revisited it; dash publishes 40952400 /
+        // A240A380 later. That did not matter while the present was gated
+        // off, but with guide_patch_present_gate the real present actually
+        // dereferences the buffer - and faulted at 98409940+0x20. A stale
+        // pointer only becomes a bug once something follows it.
+        // Validate the VALUE, not just the source. Syncing blindly walked
+        // A240A380 -> 01C001C0 -> 03C003C0 -> 06000600 -> 08C00900: packed
+        // width/height pairs (0x01C0=448, 0x03C0=960), not pointers.
+        // VdGlobalDevice does not always point at a device, so [+0x3F74] is
+        // not always a front buffer. Real buffers observed are 98409940 and
+        // A240A380 - both above 0x80000000.
+        if (fb < 0x80000000u) fb = 0;
+        uint32_t cur_fb = rdv(gdev + 0x3F74u);
+        if (gdev && fb && cur_fb != fb) {
+          auto* slot = lmem->TranslateVirtual(gdev + 0x3F74u);
+          if (!slot) continue;
+          xe::store_and_swap<uint32_t>(slot, fb);
+          static int lends = 0;
+          if (++lends <= 6) {
+            XELOGI(
+                "Guide: lent front buffer {:08X} (was {:08X}) to guide device "
+                "{:08X} (GuideLendFB, iteration {})",
+                fb, cur_fb, gdev, i);
+          }
+        }
+        std::this_thread::sleep_for(std::chrono::microseconds(250));
+      }
+      XELOGW("GuideLendFB: gave up; never saw a guide device with a null "
+             "front buffer while the title had one");
+    }).detach();
+    XELOGI("GuideLendFB: watching for the guide device");
   }
 
   if (cvars::guide_auto_press_seconds > 0) {

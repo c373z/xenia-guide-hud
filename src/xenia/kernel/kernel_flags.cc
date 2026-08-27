@@ -329,6 +329,17 @@ DEFINE_uint32(guide_force_obj14, 0,
               "is enough to take it.",
               "Kernel");
 
+DEFINE_bool(guide_patch_present_gate, false,
+            "Nop the branch at runtime 818F92E4 inside XuiRenderPresent, so it "
+            "performs the real present regardless of [dc+0x134], WITHOUT "
+            "clearing that field. guide_patch_null_render and "
+            "guide_clear_null_render both clear the field itself, which also "
+            "makes XuiRenderBegin run vtable[20] - that path crashes at "
+            "819DE94C or hangs the draw call, giving 0 draws. Leaving the "
+            "field set keeps Begin skipping it (2100+ draws) while this makes "
+            "Present actually present. Use INSTEAD of those two, not with.",
+            "Kernel");
+
 DEFINE_bool(guide_patch_null_render, false,
             "Nop the store at runtime 818FDF14, which copies the XUI "
             "context's null-render flag [ctx+0x1C] over the device context's "

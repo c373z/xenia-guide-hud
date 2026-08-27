@@ -48,6 +48,7 @@ DECLARE_bool(guide_syscmdbuf_fields);
 DECLARE_string(guide_system_root);
 DECLARE_int32(guide_auto_press_seconds);
 DECLARE_uint32(guide_force_obj14);
+DECLARE_bool(guide_patch_present_gate);
 DECLARE_bool(guide_patch_null_render);
 DECLARE_uint32(guide_coverage_fn);
 DECLARE_int32(guide_front_buffer_shift);
