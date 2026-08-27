@@ -3411,3 +3411,33 @@ skin among them.
 Next: identify what the loop at `81960494`-`819604E8` is searching. That names
 the collection that is empty, and therefore what has to be populated - rather
 than assuming it is a skin.
+
+### There is no skin package in xam either
+
+Running the XUIZ extractor's directory parse over `xam17489.pe` finds **seven**
+containers:
+
+| offset | entries | contents |
+|---|---|---|
+| `00830000` | 10 | `strings.xus` and its locale variants |
+| `00834D00` | 54 | `XamNuiTipsAndProgressScene.xur`, `XamVariables.xur`, `..\handles\*.xur`, `..\dash\SimpleCursorScene.xur` |
+| `0085CF00` | 10 | more strings |
+| `0085E000` | 30 | `gamercard.xur`, `star_*.png` |
+| `00866F00` | 37 | `Blade_dark.png`, `Blade_grey.png`, `*.xma` |
+| `00871900` | 151 | `ico_*.png` |
+| `008ABA80` | 63 | `notify.xur`, notification art |
+
+**None contains anything skin-shaped** - no `.xzp`, no `.xui`, no file with
+"skin" in its name. Combined with the earlier result that hud's package holds
+34 scenes and no skin, that means **neither module ships a skin file**, and the
+"a skin is missing" reading of `80300026` does not survive.
+
+So the visual a control attaches has to come from somewhere else - the scene's
+own data (the decoded `.xur` sections include `CUST`, which is a candidate) or
+the class registry. The failing search is
+`819428B0(container, r27, &out, r26)` where the container comes from
+`81946428`; naming that container is what identifies the empty collection.
+
+Recording the negative because it is the kind that saves time later: two
+sessions could easily be spent looking for a skin to load, and there is not
+one to find.
