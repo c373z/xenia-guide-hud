@@ -6145,3 +6145,44 @@ afterwards - consistent with the older note that mode 1 reaches
 inside a known call, on a known thread, with a known last-JIT address - which
 is a far more tractable thing to chase than any of the five "nobody drives it"
 gaps that came before.
+
+### The mode-1 stall is a GPU-progress wait
+
+`819F3FC8`, the last function JIT-ed on the stalled Guide thread, is not where
+it is stuck - it is a **delay loop**:
+
+    addi r11,r0,4 ; mtspr 9,r11      ; CTR = 4
+    or r31,r31,r31  x8               ; nops
+    bdnz -0x20
+
+Four iterations of eight nops. It returns immediately. It is simply the last
+*newly compiled* function; after that the thread spins in code already
+translated, which is why the log goes quiet without a crash.
+
+Its caller `819F4488` is the loop that matters:
+
+    r29 = [r31]
+    lbz  r11,11068(r29)   ; assert a flag byte
+    bl   819F3FC8         ; the delay
+    lbz  r11,11069(r29)   ; test another bit -> exit path at +0xC4
+    lwz  r11,11024(r29)   ; else read counters:
+    lwz  r10,256(r13)     ;   per-thread block
+    lwz  r9,8(r31)
+    lwz  r8,0(r11)
+    cmplw r9,r8           ; and compare progress against a target
+
+Poll a counter, delay, poll again - a **wait for GPU progress**. If the ring
+buffer stops advancing, this spins forever, which is exactly the observed
+symptom: no crash, no further JIT activity, the thread simply never returns.
+
+That matches the note already at the creator call site - *"mode 1 reaches
+VdInitializeRingBuffer and the title stops swapping"*. Mode 1 re-initialises
+the ring, the GPU stops making progress against the counters this loop watches,
+and the loop never exits.
+
+**And the branch already has a cvar for it:** `guide_restore_title_ring`, which
+snapshots the title's ring before the creator and restores it afterwards, on
+the theory that if the ring is merely repointed the title can carry on. It has
+been `false` in every run this session. Testing mode 1 with it enabled is the
+obvious next step and uses infrastructure that already exists rather than new
+scaffolding.
