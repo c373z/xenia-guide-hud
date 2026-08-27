@@ -4100,3 +4100,96 @@ itself: the cleanest outcome is that XStudio should never have been enabled,
 in which case the whole path - assert, null deref and all - simply does not
 execute. `81D4FDB0`, the pointer passed in `r4`, is also the `81D4FDB0(+54)`
 in the crash's stack code refs.
+
+### The XStudio feature gate, decoded - and a contradiction worth keeping
+
+`81747D20` is the enable check, and it is a plain bitmask test:
+
+    81747D20(id):
+      assert id <= 0x40 ; assert id != 0
+      ld   r11, -1888(0x81D40000)     ; 64-bit mask at 81D3F8A0
+      r10 = 1 << (id - 1)
+      r11 = r10 & r11
+      return (r11 != 0) ? 1 : 0
+
+So feature `id` is enabled iff bit `id-1` of the 64-bit word at **`81D3F8A0`**
+is set. XSTUDIO is id 6, i.e. bit 5.
+
+Three measurements of that mask, all agreeing:
+
+* **zero in the image on disk**;
+* **zero at both probe checkpoints** (after xam load, after title load);
+* **never changes during a run** - it is now in the `XamTextWatch` poll set and
+  produced no change line at all, while four `.text` addresses in the same run
+  flipped to zero and back.
+
+Nothing writes it, either: the only two accesses to `81D3F8A0` anywhere in
+xam's `.text` are the `ld` above and a second `ld` in `81748210`, both reads,
+and no pointer to it is stored anywhere in the image.
+
+**Which contradicts the crash.** For `817CE3C8` to reach its `bl` to
+`81747D70` at `817CE440`, the check must have returned non-zero - the disabled
+branch returns `80004005` well before that call. Yet the crash's back-chain
+unwind is `817CE444 ...`, i.e. the return address immediately after exactly
+that `bl`. Mask zero and that call happening cannot both be true, so one of
+these is wrong and it is not yet clear which:
+
+* the back-chain entry is stale stack data rather than a live frame (the
+  "stack code refs" line in the same report is explicitly a heuristic scan, and
+  `81747D70` has three other callers);
+* or the mask is non-zero at the instant of the check, in a way that 0.5 ms
+  polling and two checkpoints both miss.
+
+Recorded unresolved rather than papered over. The useful consequence either
+way: **XSTUDIO is not enabled**, so the "xam is trying to bring up a devkit
+feature it should not" reading of the crash is *not* supported by the mask.
+
+Related, decoded while here: `81748210` reads a second global at `81D3F8C0`
+and, if it is non-zero, asserts that bit 32 - feature 33, `DEVKIT_HEAP` - is
+set in the same mask. Another devkit gate keyed off the same word.
+
+Also worth connecting: Xenia's own HLE has `XamXStudioRequest_entry` returning
+`X_E_FAIL` as a `kStub`, and `xam_nui.cc` documents `XamNuiGetDeviceStatus`
+calling `XamXStudioRequest(6, &var)` - the same id 6 and the same
+`(id, pointer)` shape as `81747D70(6, 81D4FDB0)`. So `81747D70` is very likely
+the real `XamXStudioRequest`, and under LLE the guest reaches the real
+implementation instead of the stub that was written precisely because XStudio
+is not available.
+
+### What the host-level details say about the transient zeroing
+
+From the same run, `VirtualQuery` at the moment each address flips reports
+`protect=4` (PAGE_READWRITE), `state=1000` (MEM_COMMIT), `type=40000`
+(MEM_MAPPED), `allocbase=0x180000000`, and a different `RegionSize` per
+address. Those sizes are not arbitrary - adding each to its own page base gives
+the same answer every time:
+
+    18186E000 + 642000 = 181EB0000
+    181893000 + 61D000 = 181EB0000
+    181747000 + 769000 = 181EB0000
+    1818AE000 + 602000 = 181EB0000
+
+All four addresses lie in **one** mapped region that ends at host
+`0x181EB0000`, i.e. guest `81EB0000`. The pages are committed and writable
+throughout, so nothing is being decommitted or protection-flipped underneath
+them - which argues against "the mapping was replaced" and for something
+actually writing zeros over the range and then writing the original bytes back.
+
+Note also that `.data` (`81D3F8A0`) sits outside that region and does not flip,
+which is the first evidence that the phenomenon is bounded rather than
+image-wide. Whether `.rdata` flips is now being measured - `815FA1E0` and
+`815FA280` are in the watch set.
+
+### `.edata` does not describe exports in this image
+
+Tried to name xam functions from the export directory. `.edata` is listed at
+`81E20000`, which under the (otherwise verified) memory-image mapping is file
+offset `0x830000` - and that offset holds the XUIZ resource container with
+`strings.xus`, not an `IMAGE_EXPORT_DIRECTORY`; parsed either endianness it
+yields nonsense. So exports are not reachable from this file. Xenia gets them
+from the `.xex` itself, which is why it can log `xam ordinal 35F -> 8194A4E0`;
+that log line is the practical way to map ordinals to addresses.
+
+The memory-image mapping remains verified for `.rdata`, `.pdata`, `.text` and
+`.data`, each against runtime probes. `.edata`'s section entry simply does not
+appear to describe what is at that address.

@@ -2848,7 +2848,8 @@ static void ReportXamTextPopulation(Memory* memory, const char* when) {
 // not .text: if it is also affected, the transient-zero phenomenon is
 // not confined to the code section.
 for (uint32_t probe_addr : {0x8186E528u, 0x818936B8u, 0x81747D70u,
-                            0x81747A00u, 0x815FA1E0u, 0x815FA280u}) {
+                            0x81747A00u, 0x815FA1E0u, 0x815FA280u,
+                            0x81D3F8A0u}) {
     auto* hp = memory->LookupHeap(probe_addr);
     if (!hp || hp->QueryRangeAccess(probe_addr, probe_addr + 31) ==
                    xe::memory::PageAccess::kNoAccess) {
@@ -3351,12 +3352,29 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
       Memory* wmem = memory();
       std::thread([wmem]() {
         xe::threading::set_name("XamTextWatch");
+        // 81D3F8A0 is xam's 64-bit feature-enable bitmask (bit id-1 per the
+        // table at 815FA1E0). It reads zero on disk and zero at both load
+        // checkpoints, which should mean XSTUDIO (id 6, bit 5) is disabled and
+        // that 817CE3C8 returns 80004005 without ever calling 81747D70 - yet
+        // the crash unwind shows it did call it. Either the mask is set
+        // between the checkpoints and the call, or that reasoning is wrong.
+        // Watching it says which, and nothing in xam writes it through any
+        // lis+displacement store, so a writer would be worth seeing.
+        // 815FA1E0/815FA280 are the feature table in .rdata - rec0 (key 1)
+        // and rec5 (key 6, XSTUDIO). The four .text addresses above are known
+        // to flip to zero and back together; 81D3F8A0 in .data has been
+        // measured never to change. Whether .rdata flips is the open question,
+        // and it matters directly: if the table reads zero at the instant
+        // 81747A00 searches it, the lookup misses a key that is present, which
+        // is exactly the failure seen at 81747DDC.
         const uint32_t addrs[] = {0x8186E528u, 0x818936B8u, 0x81747D70u,
-                                  0x818AE538u};
-        uint32_t last[4] = {};
+                                  0x818AE538u, 0x81D3F8A0u,
+                                  0x815FA1E0u, 0x815FA280u};
+        constexpr size_t kWatchCount = xe::countof(addrs);
+        uint32_t last[kWatchCount] = {};
         bool primed = false;
         for (int iter = 0; iter < 120000; ++iter) {
-          for (int i = 0; i < 4; ++i) {
+          for (size_t i = 0; i < kWatchCount; ++i) {
             auto* hp = wmem->LookupHeap(addrs[i]);
             if (!hp || hp->QueryRangeAccess(addrs[i], addrs[i] + 3) ==
                            xe::memory::PageAccess::kNoAccess) {
@@ -3387,7 +3405,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
           std::this_thread::sleep_for(std::chrono::microseconds(500));
         }
       }).detach();
-      XELOGI("XamTextWatch: polling 4 xam .text addresses");
+      XELOGI("XamTextWatch: polling 7 xam addresses");
       // Opt-in (XENIA_XAM_RO=1): make xam's .text read-only at the host level
       // so whatever writes zeros over it traps instead of succeeding. The
       // existing fault logging then names the writer. Off by default because
