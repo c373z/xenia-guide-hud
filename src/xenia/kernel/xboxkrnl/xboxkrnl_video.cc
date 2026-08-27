@@ -1297,6 +1297,43 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
                                     : 0;
                 uint32_t gvi2 = xm2 ? xm2->GetProcAddressByOrdinal(0x395)
                                     : 0;
+                // Walk down the tree with repeated GetLastChild. hud imports
+                // no sibling accessor, but recursing the last child is enough
+                // to show whether the scene has real depth and where visuals
+                // start or stop appearing.
+                if (gid2 && gvi2) {
+                  uint32_t node = rd(co2);
+                  for (int depth = 0; depth < 12 && node; ++depth) {
+                    std::string nid;
+                    std::memset(memory->TranslateVirtual(co2), 0, 16);
+                    uint64_t qi[] = {node, co2};
+                    processor->Execute(ts, gid2, qi, xe::countof(qi));
+                    uint32_t sp4 = rd(co2);
+                    if (sp4 > 0x1000u) {
+                      for (uint32_t w = 0; w < 40; ++w) {
+                        uint16_t c4 = xe::load_and_swap<uint16_t>(
+                            memory->TranslateVirtual(sp4 + w * 2));
+                        if (!c4) break;
+                        nid += (c4 >= 0x20 && c4 < 0x7F) ? char(c4) : '?';
+                      }
+                    }
+                    std::memset(memory->TranslateVirtual(co2), 0, 16);
+                    uint64_t qv[] = {node, co2};
+                    uint32_t vr = uint32_t(processor->Execute(
+                        ts, gvi2, qv, xe::countof(qv)));
+                    uint32_t vis = rd(co2);
+                    XELOGI("GuideScene:   depth {} node {:08X} id \"{}\" "
+                           "visual -> {:08X}: {:08X}",
+                           depth, node, nid, vr, vis);
+                    std::memset(memory->TranslateVirtual(co2), 0, 16);
+                    uint64_t qc[] = {node, co2};
+                    processor->Execute(ts, glc2, qc, xe::countof(qc));
+                    uint32_t next = rd(co2);
+                    if (next == node) break;
+                    node = next;
+                  }
+                }
+
                 if (okid && gid2) {
                   std::memset(memory->TranslateVirtual(co2), 0, 16);
                   uint64_t q1[] = {okid, co2};

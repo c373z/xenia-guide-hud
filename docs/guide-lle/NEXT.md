@@ -2573,3 +2573,34 @@ Note what is **not** fixed: hud's own string-table load still fails silently.
 The bootstrap now papers over it by supplying the table. That is worth
 revisiting if the Guide misbehaves later in ways that trace back to hud
 believing it owns that table.
+
+### First look at a GuideMain that actually loads
+
+With the scene finally creating, its tree can be walked. Recursing
+`XuiElementGetLastChild` (hud imports no sibling accessor, so this follows one
+branch only):
+
+    override XuiSceneCreate("GuideMain.xur") -> 00000000, scene 00010042
+    override last child 0001014D
+      depth 0 node 0001014D id "" visual -> 8030000A: 00000000
+
+So the scene exists, has a child, and that child has an empty id, no children
+of its own, and no visual.
+
+Two cautions before this becomes the next theory:
+
+- **One branch is not the tree.** `GetLastChild` follows a single path; the
+  XUR analysis put ~57 objects in this scene. A single childless node says
+  nothing about the other branches. Enumerating properly needs
+  `XuiElementGetChildById` (ordinal `0x32A`, which hud does import) against ids
+  taken from the scene's own `STRN` - `Blade_Center`, `txt_Games`, `Blade3`,
+  `ringOfLight_Group` and so on are already extracted in `work/xur/`.
+- **`8030000A` may not mean "no visual".** `XuiControlGetVisual` is a *control*
+  accessor; asking it about a plain element or group could just as easily be
+  reporting "not a control". Earlier sessions read this code as proof that
+  nothing anywhere has a visual, which was always weaker evidence than it
+  looked - and it was measured on the near-empty upsell page.
+
+Next: query known ids from GuideMain's string table and check visuals on
+elements that are actually controls, before concluding anything about why
+nothing draws.
