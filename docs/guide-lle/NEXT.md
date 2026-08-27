@@ -5562,3 +5562,46 @@ simply memory 12KB past a 140-byte object.
 
 The useful next question is where the present's `r31` comes from - which is a
 question about its caller, not about `[dc+0x1CC]` at all.
+
+### The present's device, traced to its source
+
+Walking the crash unwind rather than guessing. The chain, with each link
+checked against the disassembly:
+
+    hud 913EAB4C
+      -> 818FAEB8
+        -> 818F8374
+          -> 818FDDE8        (contains 818FDE60, no bl callers - reached via vtable)
+            -> 8191AFD0      (contains 8191B024, likewise)
+              -> 819DEA70    (len 0x104)
+                -> 819DE8F8  (len 0x174) - faults at 819DE94C
+
+How the device travels:
+
+    8191AFD0(r3, ...)      or   r31,r3
+                           lwz  r3,12(r31)     ; r3 = [r31 + 0x0C]   <-- the device
+                           bl   819DEA70
+    819DEA70(r3, ...)      or   r29,r3         ; first argument
+                           ...  or r3,r29 ; bl 819DE8F8
+    819DE8F8(r3, ...)      or   r31,r3         ; first argument
+                           lwz  r8,12960(r31)  ; [dev+0x32A0]
+                           lwz  r11,12976(r31) ; else [dev+0x32B0]
+                           lwz  r9,36(r11)     ; faults, both were zero
+
+So the object the present tries to draw into is **`[X + 0x0C]`**, where `X` is
+whatever `8191AFD0` is handed - and at the fault that was `40870D00`, with both
+surface fields zero.
+
+Two things worth noting about `+0x0C`:
+
+* it is the same offset `GuideFrame` reads off the Guide object, where it is
+  `0`. That may be coincidence - `+0x0C` is a common offset - but if `X` turns
+  out to be the Guide object then the two are the same field and the `0` there
+  is directly meaningful rather than a misread, which would partly rehabilitate
+  a diagnostic this file has already dismissed once.
+* neither `818FDDE8` nor `8191AFD0` has a single `bl` caller in xam, so both
+  are reached through vtables. Identifying `X` statically means finding which
+  vtable slot points at `8191AFD0` - which is tractable, since a vtable
+  containing it can be found the same way `81640680` was.
+
+That is the next concrete step, and it is a search rather than a guess.
