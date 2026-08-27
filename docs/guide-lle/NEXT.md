@@ -6461,3 +6461,23 @@ inferred:
 
 Both are behind cvars that default off, so the established baseline is
 unaffected either way.
+
+### Regression check: the default path is unaffected by this session
+
+Run with only `--guide_auto_press_seconds=45`, i.e. every new cvar off:
+
+    GuideScene lines:   32          (the tree is walked)
+    composite draws:    to #2400
+    crashes / faults:   0
+    visual registry:    empty       (expected - the skin flag is off)
+    SwapDraws:          150295 draws over 5200 swaps
+
+So the module-dedupe fix, resource-only XEX support, the `CalculateHash` guard,
+the corrected `.text` scan bounds, the retargeted RT bind and the new probes
+have not disturbed the established baseline. The visual registry being empty
+here is the correct result, not a regression - it is populated only under
+`lle_xam_skin_init`.
+
+Worth doing explicitly because several of this session's changes touch code the
+default path runs through (`LoadUserModule`, `ReadImage`, `CalculateHash`), not
+just code behind flags.
