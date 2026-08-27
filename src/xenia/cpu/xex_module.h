@@ -229,6 +229,23 @@ class XexModule : public xe::cpu::Module {
     return *(uint32_t*)buffer == 0x905A4D;
   }
 
+  // A resource-only XEX carries RESOURCE_INFO but no code at all: no entry
+  // point, no import libraries, and nothing PE-shaped at its load address.
+  // The dashboard's HUD skin, huduiskin.xex, is one of these - it holds a
+  // 'skin' and an 'xam' resource and nothing else. Such a file is perfectly
+  // valid and must not be rejected for failing is_valid_executable().
+  bool is_resource_only() const {
+    if (!xex_header()) {
+      return false;
+    }
+    xex2_opt_resource_info* resources = nullptr;
+    if (!GetOptHeader(xex_header(), XEX_HEADER_RESOURCE_INFO, &resources)) {
+      return false;
+    }
+    xe::be<uint32_t>* entry_point = nullptr;
+    return !GetOptHeader(xex_header(), XEX_HEADER_ENTRY_POINT, &entry_point);
+  }
+
   bool is_patch() const {
     assert_not_null(xex_header());
     if (!xex_header()) {

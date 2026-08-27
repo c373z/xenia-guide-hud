@@ -562,6 +562,17 @@ int XexModule::ReadImage(const void* xex_addr, size_t xex_length,
     return 0;
   }
 
+  // A resource-only XEX has no PE image by design, so the check above can
+  // never pass for one. Rejecting it here is what stopped the dashboard's
+  // skin (huduiskin.xex) from loading: xam asks for it by name, gets a
+  // failure, and every XUI control then ends up with a null visual because
+  // the skin is the only thing that ever registers any.
+  if (is_resource_only()) {
+    XELOGD("XEX {:08X} is resource-only; skipping PE validation",
+           base_address_);
+    return 0;
+  }
+
   // Not a patch and image doesn't have proper PE header, return 3
   return 3;
 }
@@ -1039,7 +1050,10 @@ bool XexModule::LoadContinue() {
 
   finished_load_ = true;
 
-  if (ReadPEHeaders()) {
+  // Resource-only modules have no PE headers to read. Everything below that
+  // matters for them - the page-descriptor walk and memory protection - works
+  // off the security info, and imports/exports simply are not present.
+  if (!is_resource_only() && ReadPEHeaders()) {
     XELOGE("Failed to load XEX PE headers!");
     return false;
   }

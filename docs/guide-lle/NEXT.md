@@ -4540,3 +4540,48 @@ failing, `81795548` dereferences the null result and faults at `8177B2F0`
 (`fault_addr ...30`, unwinding through `81795940`, inside the loader's `0x424`
 body). That is downstream of the failure, not a separate defect - it will go
 away when the load succeeds.
+
+### Correction: `huduiskin.xex` does have a load address, and a resource table
+
+I wrote above that it has "no image base at all". That was wrong, and it came
+from reading `load_address` at offset `0x114` in `xex2_security_info` when it
+is at **`0x110`** (`0x114` is `section_digest`). With the right offset:
+
+    huduiskin.xex: image_size=0x38000 load_address=90F90000 page_descriptors=4
+    hud.xex:       image_size=0x4A000 load_address=913E0000 page_descriptors=7
+
+`90F90000` is a perfectly sane address, sitting just below hud's `913E0000`.
+So the file **can** be mapped, and Xenia's `base_address_` fallback to the
+security info already produces the right answer for it. The absent
+`XEX_HEADER_IMAGE_BASE_ADDRESS` optional header is normal for this kind of
+file, not a defect.
+
+Its `RESOURCE_INFO` table confirms the rest:
+
+    'skin'  address=90F90000  size=0x1284B  (75851 bytes)
+    'xam'   address=90FA2880  size=0x25297  (152215 bytes)
+
+Both fall inside `90F90000 .. 90FC8000`, exactly where the image maps. The
+`skin` resource is what `81795548` is after (`L"skin"`, `L"skin.xur"`,
+`L"skin://"`), and the `xam` resource is almost certainly the `xam://`
+namespace the scenes reference - `InfoUpsellLive.xur` asks for
+`xam://livelogo_upsell.png`.
+
+So the fix is much smaller than "decide where to put the data": the address is
+already known, `UserModule::GetSection` already serves sections straight out of
+`RESOURCE_INFO` without needing a PE, and only two things stand in the way.
+
+**Implemented:**
+
+* `XexModule::is_resource_only()` - has `RESOURCE_INFO`, has no
+  `XEX_HEADER_ENTRY_POINT`. That is the cleanest signal in the header for
+  "container, not executable", and it cannot be confused with a corrupt image.
+* `ReadImage` accepts such a file instead of returning 3. The PE check can
+  never pass for one by design.
+* `LoadContinue` skips `ReadPEHeaders()` for it. Everything below that which
+  matters - the page-descriptor walk and memory protection - runs off the
+  security info, and imports/exports are simply absent.
+
+This is a general Xenia gap rather than anything Guide-specific: any
+resource-only XEX hits it. If it holds up it belongs in the upstream patch set
+alongside the module-dedupe fix.
