@@ -6511,3 +6511,38 @@ which is one run rather than a new line of reverse engineering.
 Running tally of eliminated explanations for this stall: the stubbed system
 command buffer, ring ownership, uninitialised wait structures, and absent
 notifications. None of them.
+
+### Notification frequency is not the difference either
+
+Counting `VdCallGraphicsNotificationRoutines` calls (the log samples at
+`n <= 3 || n % 300 == 0`, so a handful of lines means a handful of calls):
+
+| run | notification calls |
+|---|---|
+| mode 1 - stalls in `InsertAsyncCommandBufferCall` | **2** |
+| mode 2 - scenes, visuals, composite draws to #2700 | **1** |
+
+The **working** configuration receives *fewer* notifications than the stalling
+one. So "not enough notifications arrive to retire the queued calls" is wrong,
+and there is a second, more useful consequence: the graphics notification
+callback is not what drives mode 2's composite draw loop either. Both
+configurations are essentially notification-free.
+
+That closes the cheap discriminators for this stall. Eliminated so far, each by
+measurement rather than argument:
+
+1. the stubbed system command buffer (a real buffer changes nothing; the guest
+   writes zero words into it, and the Guide never requests one);
+2. ring ownership (the CP does switch to the Guide's ring; starved and
+   not-starved stall identically);
+3. uninitialised wait structures (`[dev+0x2B10]` is set up by the same mode-1
+   routines that allocate the front buffer);
+4. absent notifications (they are delivered);
+5. insufficient notifications (the working path gets fewer).
+
+**Honest state of this line of work:** the mode-1 stall cause is unknown, and
+the inexpensive experiments are exhausted. Further progress needs either
+instrumenting the wait itself - logging `[[dev+0x2B10]]` across the loop to see
+what the counter actually does - or accepting that mode 2 plus a front buffer
+obtained some other way is the more promising route. Both are real work rather
+than another flag combination.
