@@ -6186,3 +6186,42 @@ the theory that if the ring is merely repointed the title can carry on. It has
 been `false` in every run this session. Testing mode 1 with it enabled is the
 obvious next step and uses infrastructure that already exists rather than new
 scaffolding.
+
+### Ring restore does not help, and the reason looks structural
+
+Mode 1 with `guide_restore_title_ring=true`. The ring instrumentation shows
+exactly what mode 1 does:
+
+    GuideRing: saved title ring    ptr=1F9CA000 size=00008000 wb=1F9D303C
+    GuideRing: before creator      ptr=1F9CA000 size=00008000 wb=1F9D303C
+    GuideRing: CHANGED after 1s    ptr 1F9CA000->1DE3C000 size 00008000->00001000
+    GuideRing: restored title ring ptr 1DE3C000->1F9CA000 size 00001000->00008000
+
+So mode 1 **repoints the ring buffer** - a different address and a much smaller
+size (`0x8000` -> `0x1000`). That is its own ring, for the device it just
+created. Restoring the title's ring gives the title back what it needs, and the
+title indeed keeps drawing (`SwapDraws` still advancing, 74895).
+
+But the Guide is no better off: front buffer allocated, `CreateDevice` still
+never returns, no scenes, no draws, no crash - the thread is still sitting in
+`819F4488`, the GPU-progress wait.
+
+**The most consistent reading** - stated as a reading, since it is not directly
+proven - is that the two are in conflict rather than merely interfering: mode 1
+gives the Guide's device its own ring and then waits for progress on it, while
+restoring the title's ring takes that ring away. Whichever ring is installed,
+one of the two consumers is waiting on a ring the GPU is not reading.
+
+That would make this structural rather than a matter of finding another call:
+xam is asking for **two** command streams and Xenia's command processor follows
+one. It also explains why every variation tried here trades the title's
+rendering against the Guide's without ever satisfying both.
+
+Worth noting the existing `guide_fake_ring` cvar, still `false`, which suggests
+an earlier session reached a similar suspicion.
+
+**If that reading is right**, the remaining work is an emulator feature - a
+second ring the command processor can service - not a further xam call to
+locate. That is a materially different kind of task from the five
+"nobody drives it" gaps, and worth being explicit about before spending more
+ticks looking for a call that may not exist.
