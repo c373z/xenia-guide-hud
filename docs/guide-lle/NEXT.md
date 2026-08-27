@@ -3376,3 +3376,38 @@ This is worth writing down as a rule rather than a one-off: on this compiler's
 output, **never match a two-instruction constant build by adjacency**. Match
 the low half alone (`ori rX,rX,imm`) and accept the false positives - the
 scheduler routinely separates the pair.
+
+### `80300026` is a failed lookup, and the tag trick found it immediately
+
+With all eight sites tagged, message 9 returns **`80300037`** - tag index 7,
+i.e. runtime **`81959304`**, one of the two sites the adjacency filter had
+missed. Dropping that filter paid for itself in a single run.
+
+The site:
+
+```
+819604dc  bl     81949c68       ; loop body
+819604e8  bc     -> loop while non-zero
+819604ec  lwz    r11,80(r1)     ; did the search find anything?
+819604f4  bc     -> success if non-zero
+819604f8  lwz    r11,20(r31)
+81960500  ori    r11,r11,0x4    ; set a failure bit in [obj+0x14]
+81960504  ori    r30,r30,0x26   ; return 80300026
+81960508  stw    r11,20(r31)
+```
+
+So the message-9 handler **walks a list looking for something to attach,
+finds nothing**, records the failure in `[obj+0x14]` bit 2, and returns
+`80300026`. The message is delivered and handled correctly; there is simply
+nothing to attach.
+
+That is consistent with the visual templates not being present - which is what
+a missing skin would look like, and this project deliberately runs with
+`guide_skin_path` blank on the grounds that hud carries its own skin as a
+resource section. Whether that skin is ever handed to XUI has never been
+established; the container work earlier in this file found 34 scenes and no
+skin among them.
+
+Next: identify what the loop at `81960494`-`819604E8` is searching. That names
+the collection that is empty, and therefore what has to be populated - rather
+than assuming it is a skin.
