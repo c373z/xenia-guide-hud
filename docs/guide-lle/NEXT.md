@@ -5750,3 +5750,39 @@ the condition that has now changed. So the two flags that each failed alone
 fail for reasons the other fixes: the null-render patch needed a surface, and
 the surface needs the null-render gate open to be presented through. Testing
 them together is the obvious next step and is running now.
+
+### The draw emitter is reached for the first time
+
+All four flags together - skin, reuse-ctx, bind-title-rt, patch-null-render:
+
+    GUEST CRASH at 819F5EC4  fault_addr ...20
+    lr=819F5D6C  r11=40958CD0  r14=00000000
+    unwind: 819F7FB4 819FEC68 8191B438 818F930C 818FB020 913EABC4
+
+`819F5EC4` is `819F5D18 + 0x1AC`, and `819F5D18` is the function this file
+records as **"the draw emitter ... never reached, because `[dc+0x134] = 1`
+makes XuiRenderBegin skip its device call"**. It is reached now. That gate has
+been closed for the entire history of this investigation.
+
+Two details confirm the pieces are connected rather than coincidental:
+
+* `r11 = 40958CD0` - the emitter is holding **the surface we bound**, so the
+  RT work and the emitter are on the same path;
+* the earlier crash at `819DE94C` is gone. That one faulted because
+  `[dev+0x32A0]` and `[+0x32B0]` were both zero; binding RT0 fixed exactly
+  that, and the failure moved deeper rather than repeating.
+
+The new fault is `lwz r11,32(r14)` with **`r14 = 0`** - a null where a pointer
+is expected, `0x1AC` into the emitter. `r14` is callee-saved, so it was either
+never loaded on this path or is expected to hold something the surrounding
+setup normally provides.
+
+**Screen: still the dashboard sign-in UI.** The emitter faults before emitting,
+so there are zero composite draws in this configuration and the draw rate stays
+at the dashboard's `74891 / 2600` = 28.8 per swap.
+
+So the position is: each flag removes the blocker the previous one exposed, and
+the failure has walked from "no visuals" to "no skin" to "no surface" to
+"inside the draw emitter". That is real movement along a single path rather
+than a set of separate problems - but it is still **not pixels**, and the
+honest summary is that the Guide has never yet drawn a frame.
