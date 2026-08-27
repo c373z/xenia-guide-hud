@@ -2924,3 +2924,33 @@ Two guard bugs found on the way, both worth keeping regardless of this:
 - `guide_bind_title_rt` being enabled therefore did nothing in earlier runs,
   which means the earlier claim that enabling it "moved the crash" was wrong;
   the other deepest-reach flags did that.
+
+### The present's device is being destroyed
+
+The bind on `[dc+0x1CC]` does execute - and xam answers immediately:
+
+    Guide: present-device bind check: flag=true cached surf 40958CD0 dev 4088B7A0
+    (DbgPrint) WRN[D3D]: VALIDATE_DEVICE called on a device that's currently
+                         finalizing in D3DDevice_Release
+
+So `4088B7A0` is not merely "the other device" - it is a device **in the
+middle of being released**. That explains what nothing else did:
+
+- why its `[32A0]` holds `00000060` rather than a surface or a clean null -
+  it is teardown state, not an unbound slot;
+- why binding a render target on it has no useful effect;
+- why the composite draw completes exactly **once** and then stops.
+
+`guide_use_bound_device` is supposed to point the present at the live device
+and is set in these runs, yet `[dc+0x1CC]` still resolves to the dying one.
+The live device is `40883A80`: its RT0 (`4088B3E0`) is a valid surface, and it
+is the one `guide_bind_title_rt` reaches through the render wrapper.
+
+This reframes the remaining work. Binding harder on `4088B7A0` cannot help;
+what matters is why the draw DC references a device that is being finalised,
+and whether the DC should be built against `40883A80` instead - or built later,
+after whatever tears the first device down has finished.
+
+(The `bound RT0 ...` line never prints because the `Execute` of `819F31A8` is
+still running when the run ends - the JIT is visibly still translating inside
+it - not because the call was skipped.)
