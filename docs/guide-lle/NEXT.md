@@ -5031,3 +5031,40 @@ Also worth recording, because it removes a false lead: `XuiInit returned
 returns 1 when XUI was already initialised, and `XUI ctx before` is already
 `40877DC0` - so xam had initialised XUI itself before we called it. The context
 is real; the question is why `[ctx+0x0C]` holds text.
+
+### It is corruption, not misconfiguration: the XUI context is overwritten
+
+Dumping the context right after `XuiInit` shows a perfectly well-formed object:
+
+    Guide button: XUI ctx @40877DC0: 8163E200 00000001 40877E00 8178DBD8
+                                     00000000 00000000 00000000 00000001 ...
+
+    [ctx+0x00] = 8163E200   a .rdata pointer - its vtable
+    [ctx+0x04] = 00000001
+    [ctx+0x08] = 40877E00   the same value the dc later passes as `this`
+    [ctx+0x0C] = 8178DBD8   a real pointer into xam's .text
+
+So `[ctx+0x0C]` holds a **valid function pointer** at init. By the time the
+device context dereferences it, the same slot reads `006E0065` - two UTF-16
+code units, `'e'` and `'n'`. The object is correct when created and wrong when
+used.
+
+That reframes the problem, and in a useful direction:
+
+* it is **not** that `[dc+0x1C8]` points at the wrong object - it points at the
+  genuine XUI context, and `[ctx+0x08]` matching `[dc+0x1CC]` confirms the two
+  structures agree with each other;
+* it is **not** an initialisation failure - `XuiInit` returning 1 means
+  "already initialised", and the context proves it was;
+* something **writes text over the live XUI context** between init and use.
+
+`006E0065` reading as `'e'`,`'n'` is suggestive of a locale or language string
+(`"en-..."`), which would fit a string table or resource load writing to the
+wrong address - and the skin brings two new resources into play, `skin`
+(75851 bytes) and `xam` (152215 bytes), plus the `xam`/`shrdres` sections the
+loader pulls afterwards. That is a hypothesis, not a finding.
+
+A second sample of the context is now taken at the point the XUI bootstrap is
+queued, which brackets the window: still-good there means the corruption
+happens inside the queued bootstrap on the title thread; already-bad means it
+happens between `XuiInit` and the queue, in the device-creation path.

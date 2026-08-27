@@ -1819,6 +1819,26 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                            ui_thread, threads.size());
                   }
                 }
+                {
+                  // Second sample of the XUI context. It is well-formed right
+                  // after XuiInit - [ctx+0x0C] holds 8178DBD8, a real .text
+                  // pointer - but by the time the device context dereferences
+                  // it the slot holds 006E0065, two UTF-16 code units. Sample
+                  // it again here to narrow when it is overwritten.
+                  uint32_t xc = xe::load_and_swap<uint32_t>(
+                      ks->memory()->TranslateVirtual(0x81D6C978u));
+                  if (xc) {
+                    std::string cw;
+                    for (uint32_t i = 0; i < 8; ++i) {
+                      cw += fmt::format(
+                          "{:08X} ", xe::load_and_swap<uint32_t>(
+                                         ks->memory()->TranslateVirtual(
+                                             xc + i * 4)));
+                    }
+                    XELOGI("Guide button: XUI ctx @{:08X} at queue time: {}",
+                           xc, cw);
+                  }
+                }
                 XELOGI("Guide button: queued XUI bootstrap for the title "
                        "thread (hud {:08X}, obj {:08X})",
                        hud_base, obj);
