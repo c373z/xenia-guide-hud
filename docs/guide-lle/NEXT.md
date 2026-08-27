@@ -2302,3 +2302,26 @@ module at all. `XuiLoadStringTableFromFile` (runtime `81937AF0`) fails early -
 its first call, the resource resolve at runtime `8196BEC0`, returns a negative
 status and it bails - so confirming what locator string reaches that call is
 what settles it.
+
+### Xenia's HLE locator builder is reached, but not on hud's string-table path
+
+Xenia does implement `XamBuildResourceLocator` (xam_info.cc), and it matters
+how: a module of **0** silently produces `file://media:/{container}.xzp#{res}`
+instead of a `section://` locator - a path that does not exist here, which
+would fail a load exactly the way hud's string table does.
+
+Logging every locator it builds shows it *is* being called:
+
+    XamBuildResourceLocator #1: module=30013000 -> "section://30013000,shrdres#loadingRing.png"
+    XamBuildResourceLocator #2: module=30013000 -> "section://30013000,shrdres#B-Button_32.png"
+    #3, #4 likewise, all shrdres
+
+`30013000` is the LLE xam module handle, and all four are shared-resource
+lookups. **None is hud's `strings.xus`.** So hud's own call on the
+string-table path does not reach Xenia's HLE - its import is bound to real
+xam - and the module-0 theory cannot be confirmed or refuted from the HLE
+side.
+
+That also explains why the `913EC75C` patch changed nothing observable here:
+whichever builder hud selects, the call lands in guest xam, not in the code
+being logged.

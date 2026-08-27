@@ -56,6 +56,8 @@ DEFINE_int32(guide_subcommand, 1,
              "XamShowGuideUI dispatches message 0x80000004. Valid range 1-9.",
              "Kernel");
 
+#include <atomic>
+
 namespace xe {
 namespace kernel {
 namespace xam {
@@ -213,6 +215,21 @@ dword_result_t keXamBuildResourceLocator(uint64_t module,
   const uint32_t char_count = buffer_count / sizeof(char16_t);
   xe::string_util::copy_and_swap_truncating(buffer_ptr.as<char16_t*>(), path,
                                             char_count);
+  // hud's string table load fails and leaves its table null, and the locator
+  // is the prime suspect: a module of 0 silently turns into a file://media:/
+  // path that does not exist. Log what actually gets built.
+  {
+    static std::atomic<uint32_t> locn{0};
+    uint32_t ln = ++locn;
+    if (ln <= 200) {
+      auto* th = kernel::XThread::GetCurrentThread();
+      auto* c = th && th->thread_state() ? th->thread_state()->context()
+                                         : nullptr;
+      XELOGI("XamBuildResourceLocator #{}: module={:08X} lr={:08X} -> \"{}\"",
+             ln, static_cast<uint32_t>(module),
+             c ? static_cast<uint32_t>(c->lr) : 0, xe::to_utf8(path));
+    }
+  }
   return 0;
 }
 
