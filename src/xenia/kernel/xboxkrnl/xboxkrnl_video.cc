@@ -1452,6 +1452,24 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
             // is indistinguishable from "no content" unless measured.
             uint32_t gid = xmod ? xmod->GetProcAddressByOrdinal(0x32E) : 0;
             uint32_t gpos = xmod ? xmod->GetProcAddressByOrdinal(0x3DF) : 0;
+            // Visual on an element of the scene that is actually being
+            // composite-drawn. Querying scenes built ad hoc by
+            // guide_scene_override says nothing: those are never attached to
+            // anything that renders, so their controls have no reason to hold
+            // a visual.
+            {
+              uint32_t gvi3 = xmod ? xmod->GetProcAddressByOrdinal(0x395) : 0;
+              uint32_t vb = memory->SystemHeapAlloc(16, 16);
+              if (gvi3 && vb && kid) {
+                std::memset(memory->TranslateVirtual(vb), 0, 16);
+                uint64_t vq[] = {kid, vb};
+                uint32_t vrr = uint32_t(
+                    processor->Execute(ts, gvi3, vq, xe::countof(vq)));
+                XELOGI("GuideScene: depth {} node {:08X} visual -> {:08X}: "
+                       "{:08X}  (bootstrap scene)",
+                       depth + 1, kid, vrr, rd(vb));
+              }
+            }
             uint32_t buf3 = memory->SystemHeapAlloc(32, 16);
             if (buf3 && gpos) {
               std::memset(memory->TranslateVirtual(buf3), 0, 32);

@@ -2671,3 +2671,36 @@ case those ids failing means "not a direct child of the scene", not "never
 created". The ids that did resolve in every scene look like top-level chrome,
 which is consistent with a non-recursive search. Treat the nested-scene
 question as open.
+
+### Correction, and the state of the render path
+
+**The earlier visual measurements were on the wrong scenes.** Scenes built by
+`guide_scene_override` are standalone: created, inspected, never attached to
+anything that renders. Their controls have no reason to hold a visual, so
+"no control anywhere has a visual" was not established by them.
+
+Re-measuring on the scene that *is* being drawn (`00010000`, the bootstrap's
+own, which takes 600+ composite draws in a run):
+
+    depth 1 node 00010008 visual -> 80300017: 00000000  (bootstrap scene)
+    depth 2 node 00010039 visual -> 80300017: 00000000  (bootstrap scene)
+
+So the result does hold where it counts - a scene under active composite draw,
+with real depth, whose elements still have no visual. The conclusion survives,
+but it needed the right scene to mean anything.
+
+**The old provider blocker is gone.** `[81D6D0AC]` now reads `81D22A54`, not
+null. The note above about XuiInit never installing a resource provider
+described a state that no longer exists, which fits scenes loading.
+
+**Two independent things stand between here and pixels:**
+
+1. No element has a visual, including on the drawn scene.
+2. The DC present gates are closed: `[dc+11C]=00000000` (bail with
+   E_UNEXPECTED) and `[dc+134]=00000001` (return S_OK having presented
+   nothing). Only `[134]==0` reaches a real present. These runs did not set
+   `guide_patch_null_render` / `guide_clear_null_render`, which exist
+   precisely to clear that flag - so this half is expected here rather than
+   new.
+
+Neither alone explains a blank screen; both have to be cleared.
