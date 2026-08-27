@@ -2056,3 +2056,49 @@ with `mask=0x20, max_version=10`, and the question becomes why xam's own
 implementation refuses. Worth checking first whether it depends on
 notification state that our bootstrap never sets up, since that would fit the
 "three scenes that need hud-side setup" pattern.
+
+## SOLVED: `ObInsertObject` is unimplemented in Xenia
+
+The full chain, every link measured rather than inferred:
+
+1. hud's scene setup calls **`XamNotifyCreateListener(mask=0x20,
+   max_version=10)`** (xam ordinal `0x28A`, runtime `817680C0`).
+2. That is **real xam**, not Xenia's HLE shim - instrumenting the shim logs
+   **zero** calls on a run that still fails.
+3. xam's implementation creates the listener with **`ObCreateObject`**, which
+   **succeeds**: `factory=81D22460 tag=66746F4E ('Notf') size=48 -> status
+   00000000 object 301C9018`. The pool allocator is fine too - no "system heap
+   exhausted" anywhere.
+4. xam then calls **`ObInsertObject`** (xboxkrnl ordinal `0x108`/264) to turn
+   that object into a handle. The log says:
+
+       !> undefined extern call to 81D0FDBC ObInsertObject
+
+   exactly once, matching the single `ObCreateObject` call. `ObInsertObject`
+   appears **only** in `xboxkrnl_table.inc:278`; there is no implementation
+   anywhere under `src/xenia/kernel/`.
+5. With no handle, xam cleans up via `ObDereferenceObject` and returns **0**.
+6. hud tests that result at `913F2810`, sees zero, and returns **`E_FAIL`**.
+7. `XuiSceneCreate("GuideMain.xur")` -> `80004005`.
+
+So the Guide's scenes fail on a **single missing kernel export**. That is why
+nothing in the scene files ever distinguished the three failing scenes: the
+files were never the problem. The three that fail are simply the ones whose
+hud-side setup needs a notification listener.
+
+### Why this took so long to find
+
+Every earlier probe was aimed at XUI, and the error is not raised there. The
+tagging tool is what finally located it, by rewriting E_FAIL immediates so the
+returned HRESULT names its own construction site - all 886 sites in xam came
+back untagged, which is what forced attention onto hud.
+
+### Next
+
+Implement `ObInsertObject`. Xenia already has the pieces: `ObCreateObject`
+builds the object with an `X_OBJECT_HEADER`, and the object table hands out
+handles elsewhere. The export needs to take the object pointer, allocate a
+handle for it, and return the handle. Once it exists, re-run the scene census
+- `GuideMain`, `GuideMainServer` and `MiniMediaPlayer` should stop returning
+E_FAIL, and the queued question of why no element gets a visual becomes the
+next thing worth measuring.

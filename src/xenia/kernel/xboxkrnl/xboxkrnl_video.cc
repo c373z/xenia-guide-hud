@@ -1114,6 +1114,16 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
           XELOGI("GuideScene: xam ordinal 28A (XamNotifyCreateListener) -> "
                  "{:08X}",
                  nfn);
+          // The listener creation ends in ObCreateObject with the object type
+          // descriptor at 81D22460, and ObCreateObject calls that
+          // descriptor's allocate_proc. 81D22460 sits inside the
+          // 81D14000-81D5F000 range that is zero at load, so dump it: a null
+          // allocate_proc would explain the whole failure.
+          std::string ot;
+          for (uint32_t w = 0; w < 12; ++w) {
+            ot += fmt::format("{:08X} ", rd(0x81D22460u + w * 4));
+          }
+          XELOGI("GuideScene: object type @81D22460: {}", ot);
         }
         XELOGI("GuideScene: class index bound [81D6D4F8] = {} ({:08X}); "
                "neighbourhood {}",

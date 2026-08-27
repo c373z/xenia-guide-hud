@@ -16,6 +16,8 @@
 #include "xenia/kernel/xthread.h"
 #include "xenia/xbox.h"
 
+#include <atomic>
+
 namespace xe {
 namespace kernel {
 namespace xboxkrnl {
@@ -429,6 +431,20 @@ dword_result_t ObCreateObject_entry(
       xeObCreateObject(object_factory, optional_attributes,
                        object_size_sans_headers, &out_object_tmp, context);
   *out_object = out_object_tmp;
+  // The Guide's scene creation ends here: xam's notification listener is made
+  // with ObCreateObject, and hud returns E_FAIL from XuiSceneCreate when it
+  // gets nothing back. Log the calls so the failing one can be seen directly
+  // rather than inferred from the disassembly.
+  static std::atomic<uint32_t> obn{0};
+  uint32_t on = ++obn;
+  if (on <= 40 || result != 0 || !out_object_tmp) {
+    XELOGI(
+        "ObCreateObject #{}: factory={:08X} tag={:08X} size={} -> status "
+        "{:08X} object {:08X} (lr={:08X})",
+        on, object_factory.guest_address(),
+        uint32_t(object_factory->pool_tag), uint32_t(object_size_sans_headers),
+        result, out_object_tmp, uint32_t(context->lr));
+  }
   return result;
 }
 DECLARE_XBOXKRNL_EXPORT1(ObCreateObject, kNone, kImplemented);
