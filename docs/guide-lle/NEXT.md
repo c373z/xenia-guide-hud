@@ -5202,3 +5202,43 @@ brackets the pointer change will say which.
 **Watcher fixed.** It now logs the pointer transition itself, including going
 to zero (`(CLEARED)`), rather than skipping null iterations. The previous
 version's silence was the bug that hid the free.
+
+### The free is ours: the bootstrap builds a second XUI context
+
+With the watcher fixed, the transition is caught and attributed in one step:
+
+    21528  XuiCtxWatch: polling [xui_ctx+0C]
+    21561  XuiCtxWatch: ctx pointer 40877DC0 -> 408BCA60
+    21562  GuideBootstrap: render host -> 80300005, XUI ctx 408BCA60, provider 81D22A54
+    21563  GuideBootstrap: XuiRenderCreateDC -> 00000000 dc=407D2FC0
+    21846  GUEST CRASH ...
+
+The pointer is **replaced, not cleared**, and the replacement happens inside
+**our own bootstrap**, at the call to `8178DC58` - xam's render-host init. That
+routine builds a XUI context and stores it at `81D6C978`; when one is already
+there it builds a second and frees the first.
+
+So the whole chain is self-inflicted:
+
+1. xam brings XUI up on its own and a device context `40879860` is created
+   against context `40877DC0` - hence `[dc+0x1C8] = 40877DC0`;
+2. our bootstrap calls the render-host init anyway, which builds `408BCA60`
+   and frees `40877DC0`;
+3. the heap reuses that block for the wide string `"XuiScene"`;
+4. something still holding the old device context calls
+   `[[dc+0x1C8]+0x0C]`, gets `006E0065` - the `"ne"` of `"XuiScene"` - and
+   faults.
+
+Note the render-host call returns **`80300005`**, an error, and swaps the
+context anyway. So this was never doing what it looked like it was doing.
+
+Two things worth separating: this is **not** caused by the skin work. The
+second context has presumably been built on every Guide open for as long as
+that call has been in the bootstrap. It only became fatal once the visual
+registry was populated and XUI travelled far enough to dereference the stale
+pointer - the same pattern as the `[dc+0x1CC]` mismatch recorded near the top
+of this file, which is very likely this same bug seen from the other end.
+
+**Fix under test:** `guide_reuse_xui_ctx` skips the render-host init when
+`81D6C978` already holds a context, logging what it reused. Default **off**, so
+the established baseline is untouched until this is shown to be better.

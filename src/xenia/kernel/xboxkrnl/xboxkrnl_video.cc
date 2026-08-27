@@ -868,8 +868,23 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
              cur, bound);
     }
   }
-  uint64_t a0[] = {0};
-  uint64_t hr = processor->Execute(ts, 0x8178DC58u, a0, xe::countof(a0));
+  // 8178DC58 is xam's render-host init. It builds a XUI context and stores
+  // it at 81D6C978 - and when one is already there it builds a *second* one
+  // and frees the first. Anything holding the old pointer is then dangling,
+  // which is what killed the run: 81D6C978 went 40877DC0 -> 408BCA60 here,
+  // and a device context created earlier kept [dc+0x1C8] = 40877DC0. By the
+  // time it called through it the block had been reused for the wide string
+  // "XuiScene", so CTR took 006E0065 - the "ne" - and the fetch faulted.
+  uint32_t live_ctx = rd(0x81D6C978u);
+  uint64_t hr = 0;
+  if (::cvars::guide_reuse_xui_ctx && live_ctx) {
+    XELOGI(
+        "GuideBootstrap: render host skipped, reusing live XUI ctx {:08X}",
+        live_ctx);
+  } else {
+    uint64_t a0[] = {0};
+    hr = processor->Execute(ts, 0x8178DC58u, a0, xe::countof(a0));
+  }
   if (spoofed) {
     xe::store_and_swap<uint32_t>(memory->TranslateVirtual(0x81D42520u),
                                  saved_ui_thread);

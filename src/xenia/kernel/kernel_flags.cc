@@ -729,6 +729,14 @@ DEFINE_bool(lle_xam_heap_init, false,
             "directly. xam's heap descriptors are never built under our "
             "bootstrap because nothing outside the module drives that call.",
             "Kernel");
+DEFINE_bool(guide_reuse_xui_ctx, false,
+            "Skip the render-host init (8178DC58) when a XUI context "
+            "already exists. Calling it a second time builds a new "
+            "context and frees the live one, leaving any device "
+            "context created against the old one dangling - measured "
+            "as 81D6C978 changing 40877DC0 -> 408BCA60 and a later "
+            "call through freed memory holding the string XuiScene.",
+            "Kernel");
 DEFINE_bool(lle_xam_skin_init, false,
             "After xam's DllMain, call its skin loader (81795548) "
             "directly. That routine opens \\SystemRoot\\huduiskin.xex, "
