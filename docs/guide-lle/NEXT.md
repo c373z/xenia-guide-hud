@@ -3793,3 +3793,65 @@ check whether `8193D238` is ever entered. Xenia JITs on first call, so a
 proof of the opposite - no breakpoint needed, no perturbation of the path.
 If it never runs, the empty per-class collection is explained outright, and the
 three roots above name the small set of entry points that would populate it.
+
+### Harness trap: `press.ps1` does not build
+
+It runs `build\bin\Windows\Release\xenia_canary.exe` and nothing else. Several
+ticks in this project use a patch -> build -> run -> revert cycle for one-off
+experiments, and the revert restores the *source* while leaving the *binary*
+built from the patched source. `press.ps1` then happily runs that binary
+against a clean tree, and the result looks like a regression in code that was
+never changed.
+
+The staleness was real here - the exe was timestamped 22:44 against source
+restored at 22:51 - and `press.ps1` now builds first (`-NoBuild` opts out).
+
+**But it was not the cause of the crash that led me to it, and the correction
+matters more than the trap.** A run died at boot with a host breakpoint
+(`xenia_canary.exe+56A169` = `x64::TrapDebugBreak+0x39`) having reached neither
+the bootstrap nor any scene, and I read that as a regression. It was not:
+`git diff` against the last known-good commit was empty for every file under
+`src/`, and after a clean rebuild the boot crash still happened - this time as
+an access violation at `+56A574` = `x64::ResolveFunction+0x294`.
+
+Both are **already documented in this file** as the expected state:
+`TrapDebugBreak+0x39` is recorded as not-a-Xenia-bug, and `x64::ResolveFunction`
+dereferencing the null it gets when translation refuses is recorded as "the
+current remaining crash". It is also recorded as a **race**, which is the piece
+that explains the confusion: the same build boots cleanly to `draws=13` on some
+runs and dies at boot on others. Two consecutive bad runs are unremarkable and
+are not evidence of anything having changed.
+
+Lesson worth more than the harness fix: before calling a run a regression,
+check this file for the failure signature. Both symbols were in here already.
+
+**Check `xenia_canary.exe`'s mtime against `src/` before believing any result**,
+and rebuild (`cmake --build build --config Release`) when in doubt. A run that
+contradicts a previously verified state is far more likely to be a stale binary
+than a real regression.
+
+### Lead, not yet a conclusion: the XUI trace level is already 1
+
+The XUI warning traces are gated on a verbosity global at **`0x81D28964`**,
+read as `lwz r11,-30364(rN)` off `lis rN,0x81d3` and compared `>= 1` for the
+first level and `>= 2` for the second. In the on-disk image that global is
+already **1**, so the level-1 traces ought to emit by default - yet no XUI
+trace has ever appeared in a log.
+
+That makes the silence a property of the sink or of the runtime value, not of
+the gate, which is the opposite of what "traces never fire" implied. Both
+`XuiVisualRegister` and `XuiControlAttachVisual` route through the same
+formatter at **`81970F60`**, called as
+`f("Warning", format, ...)` - the first argument is the literal string
+`'Warning'` at `8161FE68`, so these are warning-level messages, and the
+formatter reads a pointer from `0x81D391F0` before doing anything else.
+
+Worth chasing because the payoff is direct: the full text of the failing trace
+is
+
+> `XuiControlAttachVisual: Visual='%ls' specified on hObj=0x%08x ID='%ls' not found...trying class defaults`
+
+so making it emit prints **the name of the missing visual and the control it
+belongs to**, which is the one fact the visual investigation still lacks. Note
+also the tail - `trying class defaults` - which says the failing lookup is not
+fatal by design and there is a documented fallback path behind it.

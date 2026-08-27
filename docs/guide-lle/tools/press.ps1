@@ -2,7 +2,8 @@ param([int]$After = 25,
       [string]$Grep = 'Coverage|composite draw|draws/swap|scene=',
       [string]$Extra = '',
       [int]$Boot = 20,
-      [string]$Title = '')
+      [string]$Title = '',
+      [switch]$NoBuild)
 $dir = 'C:\Users\Xx_Bootyslayer_xX\Documents\Claude\XeniaGuide&Hud\xenia-canary\build\bin\Windows\Release'
 $exe = Join-Path $dir 'xenia_canary.exe'
 $dash = 'C:\Users\Xx_Bootyslayer_xX\Documents\Claude\XeniaGuide&Hud\dashroot\dash.xex'
@@ -44,6 +45,28 @@ function Get-CrashDialogs([int]$ProcId) {
   }
   [void][XW]::EnumWindows($cb, [IntPtr]::Zero)
   return $script:dlg
+}
+
+# Build before running. This script used to launch whatever binary happened to
+# be sitting in buildin, which is a trap: the patch -> build -> run -> revert
+# cycle used for one-off experiments restores the source but leaves the binary
+# built from the patched source, so a clean tree gets tested with a dirty exe
+# and the result looks like a regression in code nobody touched.
+# cl.exe needs the MSVC environment, so go through vcvars64.
+if (-not $NoBuild) {
+  $vc = 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat'
+  $cm = 'C:\Program Files\CMake\bin\cmake.exe'
+  $bd = Join-Path (Split-Path (Split-Path (Split-Path $PSScriptRoot))) 'build'
+  $bat = Join-Path $env:TEMP 'press-build.bat'
+  @("@echo off", "call `"$vc`" >nul", "`"$cm`" --build `"$bd`" --config Release") |
+    Set-Content -Encoding ASCII $bat
+  $out = & cmd /c $bat 2>&1
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "ABORT: build failed"
+    $out | Select-Object -Last 20 | ForEach-Object { Write-Host $_ }
+    exit 1
+  }
+  $out | Select-String -Pattern '^\[\d+/\d+\]' | Select-Object -Last 3 | ForEach-Object { Write-Host $_.Line }
 }
 
 $log = Join-Path $dir 'xenia.log'
