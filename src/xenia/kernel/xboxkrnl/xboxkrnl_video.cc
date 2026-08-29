@@ -10196,6 +10196,10185 @@ void VdSwap_entry(
                    di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
                    qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
                    qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
+            // [dev+0x10] low 12 bits gate DRAW_INDX at 819F6BC0
+            // (rldicl r10,r11,0,52 -> keep low 12, beq skips the draw), and
+            // [dev+0x28] gates the block above it. Both are 64-bit; log the
+            // low words to see whether geometry ever marks them.
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   di, qdev, qrd(qdev + 0x10u), qrd(qdev + 0x14u),
+                   qrd(qdev + 0x28u), qrd(qdev + 0x2Cu),
+                   qrd(qdev + 0x14u) & 0xFFFu);
             XELOGI("CmdbufAtDraw #{}: dev={:08X} RESERVE cur[30]={:08X} "
                    "end[34]={:08X} gate[3A00]={:08X} | 81A01358 block "
                    "base[2B48]={:08X} cursor[2B4C]={:08X} limit[2B50]={:08X}",
@@ -14145,30 +24324,4 @@ void VdSwap_entry(
   dwords[offset++] = *width;
   dwords[offset++] = *height;
 
-  // Fill the rest of the buffer with NOP packets.
-  for (uint32_t i = offset; i < 64; i++) {
-    dwords[i] = xenos::MakePacketType2();
-  }
-}
-DECLARE_XBOXKRNL_EXPORT3(VdSwap, kVideo, kImplemented, kHighFrequency,
-                         kImportant);
-
-void RegisterVideoExports(xe::cpu::ExportResolver* export_resolver,
-                          KernelState* kernel_state) {
-  auto memory = kernel_state->memory();
-
-  // Allocate single page that stores all pointers instead of separate pages.
-  const uint32_t baseAllocation =
-      memory->SystemHeapAlloc(40, 32, kSystemHeapPhysical);  // 40 bytes
-
-  // VdGlobalDevice (4b)
-  // Pointer to a global D3D device. Games only seem to set this, so we don't
-  // have to do anything. We may want to read it back later, though.
-  const uint32_t pVdGlobalDevice = 0x801E6FC4;
-  export_resolver->SetVariableMapping("xboxkrnl.exe", ordinals::VdGlobalDevice,
-                                      pVdGlobalDevice);
-  xe::store_and_swap<uint32_t>(memory->TranslateVirtual(pVdGlobalDevice),
-                               baseAllocation);
-
-  // VdGlobalXamDevice (4b)
-  // Pointer to the XAM D3D device, which we don't have
+  // Fill the res
