@@ -194,7 +194,16 @@ bool PPCTranslator::Translate(GuestFunction* function,
   if (cvars::trace_functions) {
     debug_info_flags |= DebugInfoFlags::kDebugInfoTraceFunctions;
   }
-  if (cvars::trace_function_coverage) {
+  // Coverage instrumentation, optionally restricted to one function.
+  //
+  // The flag is otherwise global: every function translated gets a counter per
+  // guest instruction, which is enough overhead that the title never reaches
+  // the code under study and behaves differently when it does. Restricting it
+  // to a single address keeps the instrument while removing nearly all of the
+  // perturbation.
+  if (cvars::trace_function_coverage &&
+      (!cvars::trace_coverage_only_fn ||
+       function->address() == cvars::trace_coverage_only_fn)) {
     debug_info_flags |= DebugInfoFlags::kDebugInfoTraceFunctionCoverage;
   }
   if (cvars::trace_function_references) {

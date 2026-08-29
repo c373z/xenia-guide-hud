@@ -53,6 +53,15 @@ DEFINE_path(trace_function_data_path, "", "File to write trace data to.",
 DEFINE_bool(break_on_start, false, "Break into the debugger on startup.",
             "CPU");
 
+DEFINE_bool(log_demand_functions, false,
+            "Log every demand-JITted guest function as it is entered "
+            "and defined. Two lines per function, roughly 1,100 of the "
+            "first 3,000 log lines and about 1 MB of log in the first "
+            "40 seconds - by far the largest component of startup time. "
+            "Off by default; turn it on only when tracing which guest "
+            "functions actually execute.",
+            "CPU");
+
 namespace xe {
 namespace kernel {
 class XThread;
@@ -341,7 +350,9 @@ bool Processor::DemandFunction(Function* function) {
   // Log entry and exit: a guest thread whose PPC context is frozen at a call
   // boundary is often sitting in here, either compiling a pathological
   // function or blocked on DefineFunction's per-symbol lock.
-  XELOGI("DemandFunction: enter {:08X}", function->address());
+  if (cvars::log_demand_functions) {
+    XELOGI("DemandFunction: enter {:08X}", function->address());
+  }
   auto module = function->module();
   auto symbol_status = module->DefineFunction(function);
   if (symbol_status == Symbol::Status::kNew) {
@@ -353,7 +364,9 @@ bool Processor::DemandFunction(Function* function) {
       XELOGI("DemandFunction: FAILED {:08X}", function->address());
       return false;
     }
-    XELOGI("DemandFunction: defined {:08X}", function->address());
+    if (cvars::log_demand_functions) {
+      XELOGI("DemandFunction: defined {:08X}", function->address());
+    }
 
     // Before we give the symbol back to the rest, let the debugger know.
     OnFunctionDefined(function);

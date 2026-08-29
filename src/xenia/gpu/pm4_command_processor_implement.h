@@ -662,6 +662,29 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
   uint32_t frontbuffer_height = reader_.ReadAndSwap<uint32_t>();
   reader_.AdvanceRead((count - 4) * sizeof(uint32_t));
 
+  // Draw the Guide over the finished frame, before it is presented.
+  {
+    // Report what the swap handler sees. The publish side logs a clean range
+    // and this side logs nothing, so one of them is not running or they are
+    // not looking at the same command processor instance.
+    static uint32_t swap_seen = 0;
+    if ((swap_seen++ % 600u) == 0) {
+      XELOGI("GuideOverlay: swap #{} sees ptr={:08X} words={}", swap_seen,
+             guide_overlay_ptr_, guide_overlay_words_);
+    }
+  }
+  if (guide_overlay_ptr_ && guide_overlay_words_) {
+    uint32_t gptr = guide_overlay_ptr_;
+    uint32_t gwords = guide_overlay_words_;
+    guide_overlay_ptr_ = 0;
+    XELOGI("GuideOverlay: executing {} words at {:08X} before swap", gwords,
+           gptr);
+    uint32_t draws_before = guide_draw_count_;
+    COMMAND_PROCESSOR::ExecuteGuestBufferVirtualUnsafe(gptr, gwords);
+    XELOGI("GuideOverlay: {} GPU draws dispatched",
+           guide_draw_count_ - draws_before);
+  }
+
   COMMAND_PROCESSOR::IssueSwap(frontbuffer_ptr, frontbuffer_width,
                                frontbuffer_height);
 

@@ -19,6 +19,7 @@ DECLARE_bool(disassemble_functions);
 
 DECLARE_bool(trace_functions);
 DECLARE_bool(trace_function_coverage);
+DECLARE_uint32(trace_coverage_only_fn);
 DECLARE_bool(trace_function_references);
 DECLARE_bool(trace_function_data);
 

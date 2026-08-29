@@ -561,9 +561,364 @@ static std::vector<GraphicsNotificationRoutine>* graphics_notification_routines_
 
 uint32_t guide_prev_device_ = 0;
 static uint32_t guide_draw_fn_ = 0;
+// The device's own reservation window, sampled either side of the composite
+// draw. 81A042E0 allocates packet space from [dev+0x30] and advances it; that
+// is where the draw emitter 819F5D18 writes, and it is NOT the 81A01358 block
+// that guide_bind_cmdbuf_kb repoints. Bracketing the cursor gives exactly the
+// words one draw emitted, with no diffing and no guessing where the stream
+// starts.
+// Ordered checkpoints through the pre-draw path. With the ownership claim
+// the run wedges before the composite draw is even reached, and the last
+// line logged was a device survey - which narrows it to a stretch of code
+// with several guest calls in it. Naming each block as it is entered says
+// which one, instead of another round of disassembly and inference.
+static bool ckpt_on = false;
+static uint32_t guide_claim_dev_ = 0;
+static uint32_t guide_claim_prev_ = 0;
+static std::atomic<void*> guide_stall_thread_{nullptr};
+// Recovered 2026-08-29: accessors lost when the refactor incident destroyed
+// this file; the storage above survived the replay but these did not.
+void* GuideStallThread() { return guide_stall_thread_.load(); }
+void GuidePublishStallThread(void* h) { guide_stall_thread_ = h; }
+static uint32_t guide_first_visual_node_ = 0;
+static uint32_t guide_resv_dev_ = 0;
+
+// Resolve the guest thread xam recorded as its XUI render thread.
+//
+// 81778BB8 is six instructions: r10 = [r13+256] (current thread), r11 =
+// [0x81D42520] (recorded render thread), return r10 == r11. It is called at
+// the entry of 46 functions across the render subsystem and every call site
+// traps when it returns 0 - including 81792928, the only route to 819FF7A0,
+// which is what sets [dev+16344] and clears the 0x20 latch that makes the
+// vertex allocator refuse.
+//
+// Measured: the slot holds 3002A010 and the bootstrap runs on 30052010, so
+// the gate has always failed. Executing against the recorded thread's
+// ThreadState makes r13 - and therefore the comparison - come out right,
+// which satisfies the gate the way xam means it instead of writing the slot.
+static xe::cpu::ThreadState* GuideRenderThreadState() {
+  auto* ks = kernel_state();
+  if (!ks || !ks->memory()) {
+    return nullptr;
+  }
+  if (!XamAddrInImage(XamUiThreadSlot(), 4)) {
+    return nullptr;  // dashroot-only slot; not present on this build
+  }
+  uint32_t want =
+      xe::load_and_swap<uint32_t>(ks->memory()->TranslateVirtual(XamUiThreadSlot()));
+  if (!want) {
+    return nullptr;
+  }
+  static bool logged = false;
+  for (uint32_t id : ks->GetAllThreadIDs()) {
+    auto th = ks->GetThreadByID(id);
+    if (th && th->guest_object() == want) {
+      if (!logged) {
+        logged = true;
+        // Name it once. Which xam thread this turns out to be decides the
+        // next move: if it is a thread whose proc is 81794BC8 then that loop
+        // is what should have called 819FF7A0 on its own, and the question
+        // becomes why it is not running rather than which state to borrow.
+        XELOGI("GuideRenderThread: guest={:08X} id={} name='{}'", want, id,
+               th->thread_name());
+      }
+      return th->thread_state();
+    }
+  }
+  if (!logged) {
+    logged = true;
+    XELOGW("GuideRenderThread: [81D42520]={:08X} matches no live XThread", want);
+  }
+  return nullptr;
+}
+static uint32_t guide_resv_pre_ = 0;
 static uint32_t guide_cmdbuf_base_ = 0;
+static uint32_t guide_boot_dc_ = 0;
 static uint32_t guide_cmdbuf_size_ = 0;
 static uint32_t guide_draw_this_ = 0;
+
+static uint32_t g_xam_lo = 0;
+static uint32_t g_xam_hi = 0;
+uint32_t XamUiThreadSlot();
+uint32_t XamDeviceSlot();
+// hud's XUI-init and render entry points, located by signature in the
+// emulator and published here. dashroot +0xA898/+0xAB28, retail +0x98F8/
+// +0x9B88; the draw-hook install below used the dashroot offsets, which is
+// why retail installed no hook and drew nothing.
+static uint32_t g_hud_xuiinit = 0;
+static uint32_t g_hud_render = 0;
+void SetHudEntries(uint32_t xuiinit, uint32_t render) {
+  g_hud_xuiinit = xuiinit;
+  g_hud_render = render;
+  XELOGI("SetHudEntries: xuiinit {:08X} render {:08X}", xuiinit, render);
+}
+void SetXamImageExtent(uint32_t lo, uint32_t hi) {
+  g_xam_lo = lo;
+  g_xam_hi = hi;
+  // Resolve eagerly. Lazily, these only fire on paths a given build happens to
+  // reach - retail never called XamDeviceSlot at all, so it went unvalidated
+  // while looking fine. Resolving here means every run reports both, on both
+  // builds, whether or not anything later uses them.
+  XamUiThreadSlot();
+  XamDeviceSlot();
+  XamRenderHost();
+  XamXuiCtxSlot();
+  XamProviderSlot();
+}
+bool XamAddrInImage(uint32_t addr, uint32_t len) {
+  return g_xam_lo && addr >= g_xam_lo && addr + len <= g_xam_hi;
+}
+
+// The slot holding xam's recorded UI thread. dashroot puts it at 81D42520;
+// retail 17559 at 81AA09F0. Both are read by the same six-instruction identity
+// check - lwz rX,256(r13) (current thread), load the slot, subtract, cntlzw,
+// rlwinm ..,27,31,31 - so find that shape and decode the address out of its
+// lis/addi/lwz triple rather than hardcoding either value.
+static uint32_t g_ui_thread_slot = 0;
+static bool g_ui_thread_slot_done = false;
+// xam's device global. dashroot puts it at 81D43684, retail 17559 at
+// 81AA1B14. Both are the out-parameter of the same device-creation function,
+// whose head is the XboxHardwareInfo bit-0x200 gate; the slot address is built
+// by a lis/addi pair 0x58 bytes in. Find the function by masked signature and
+// decode the pair, rather than hardcoding either address.
+static uint32_t g_xam_dev_slot = 0;
+static bool g_xam_dev_slot_done = false;
+// xam's XUI render host. dashroot 8178DC58, retail 17559 816C8328. The two
+// are the same function except retail has no thread-identity assertion, which
+// is why a whole-prologue signature and a role match both failed (phases
+// 429-430). Anchor on what they share: the standard prologue with a 240-byte
+// frame, then within a few instructions memset(r1+100, 0, 120).
+static uint32_t g_render_host = 0;
+static bool g_render_host_done = false;
+// The XUI context pointer slot. dashroot 81D6C978, retail 17559 81AC7DE4.
+// No shape-based scan finds it: its dashroot accessor has no counterpart in
+// retail, and dashroot's copy carries CALLCAP marker nops that shift every
+// offset (phase 433). Positional anchor instead - in BOTH builds the render
+// host calls a ctx-reading helper immediately before it calls XuiInit, and
+// that helper's first global load is the slot.
+static uint32_t g_xui_ctx_slot = 0;
+static uint32_t g_xui_createdc = 0;  // the helper itself, not just its slot
+static bool g_xui_ctx_slot_done = false;
+uint32_t XamXuiCreateDC() { return g_xui_createdc; }
+// The XUI resource-provider slot. dashroot 81D6D0AC, retail 17559 81AC82FC.
+// Both are the SECOND global store performed by XuiInit (export ordinal
+// 0x340), and in both builds the second and third stores are 0xC apart - a
+// structural corroboration that the ordering is the same object, not a
+// coincidence of position.
+static uint32_t g_provider_slot = 0;
+static bool g_provider_slot_done = false;
+// Is the loaded xam the dashroot build these hardcoded tables came from?
+// Some blocks are lists of dozens of build-specific function addresses (the
+// 39 XUI class registrars, the device-creation entries) where converting each
+// by signature is not practical. Those addresses all fall inside retail's
+// image too, so a range check cannot reject them - the resolved structures
+// can. If the device and UI-thread slots are dashroot's, the tables apply.
+bool XamIsDashrootLayout() {
+  return XamDeviceSlot() == 0x81D43684u && XamUiThreadSlot() == 0x81D42520u;
+}
+
+uint32_t XamProviderSlot() {
+  if (g_provider_slot_done) {
+    return g_provider_slot;
+  }
+  g_provider_slot_done = true;
+  auto* mem = kernel_state() ? kernel_state()->memory() : nullptr;
+  auto xam = kernel_state() ? kernel_state()->GetModule("xam.xex", true)
+                            : nullptr;
+  uint32_t xui_init = xam ? xam->GetProcAddressByOrdinal(0x340) : 0;
+  if (!mem || !xui_init) {
+    return 0;
+  }
+  uint32_t hi = 0, rt = 0, seen = 0;
+  for (uint32_t off = 0; off < 0x400; off += 4) {
+    uint32_t w =
+        xe::load_and_swap<uint32_t>(mem->TranslateVirtual(xui_init + off));
+    if ((w >> 26) == 15 && ((w >> 16) & 31) == 0) {
+      hi = w & 0xFFFF;
+      rt = (w >> 21) & 31;
+    } else if (hi && (w >> 26) == 36 && ((w >> 16) & 31) == rt) {
+      int32_t lo = static_cast<int16_t>(w & 0xFFFF);
+      uint32_t slot = (hi << 16) + lo;
+      if (++seen == 2) {
+        g_provider_slot = slot;
+        XELOGI("XamProviderSlot: XuiInit {:08X} store #2 -> slot {:08X}",
+               xui_init, slot);
+        return g_provider_slot;
+      }
+    }
+  }
+  XELOGW("XamProviderSlot: not resolved on this build");
+  return 0;
+}
+
+uint32_t XamXuiCtxSlot() {
+  if (g_xui_ctx_slot_done) {
+    return g_xui_ctx_slot;
+  }
+  g_xui_ctx_slot_done = true;
+  auto* mem = kernel_state() ? kernel_state()->memory() : nullptr;
+  uint32_t host = XamRenderHost();
+  auto xam = kernel_state() ? kernel_state()->GetModule("xam.xex", true)
+                            : nullptr;
+  uint32_t xui_init = xam ? xam->GetProcAddressByOrdinal(0x340) : 0;
+  if (!mem || !host || !xui_init) {
+    XELOGW("XamXuiCtxSlot: need render host and XuiInit; have {:08X}/{:08X}",
+           host, xui_init);
+    return 0;
+  }
+  // Walk the host's calls; remember the previous one; stop at XuiInit.
+  uint32_t prev = 0;
+  for (uint32_t off = 0; off < 0x200; off += 4) {
+    uint32_t w = xe::load_and_swap<uint32_t>(mem->TranslateVirtual(host + off));
+    if ((w >> 26) != 18 || !(w & 1)) continue;
+    int32_t li = (w >> 2) & 0xFFFFFF;
+    if (li & 0x800000) li -= 0x1000000;
+    uint32_t tgt = host + off + (li << 2);
+    if (tgt == xui_init) {
+      if (!prev) break;
+      g_xui_createdc = prev;
+      // First lis/lwz global read inside that helper is the slot.
+      uint32_t hi = 0, rt = 0;
+      for (uint32_t o2 = 0; o2 < 0x80; o2 += 4) {
+        uint32_t v =
+            xe::load_and_swap<uint32_t>(mem->TranslateVirtual(prev + o2));
+        if ((v >> 26) == 15 && ((v >> 16) & 31) == 0) {
+          hi = v & 0xFFFF;
+          rt = (v >> 21) & 31;
+        } else if (hi && (v >> 26) == 32 && ((v >> 16) & 31) == rt) {
+          int32_t lo = static_cast<int16_t>(v & 0xFFFF);
+          g_xui_ctx_slot = (hi << 16) + lo;
+          XELOGI("XamXuiCtxSlot: helper {:08X} -> slot {:08X}", prev,
+                 g_xui_ctx_slot);
+          return g_xui_ctx_slot;
+        }
+      }
+      break;
+    }
+    prev = tgt;
+  }
+  XELOGW("XamXuiCtxSlot: not resolved on this build");
+  return 0;
+}
+
+uint32_t XamRenderHost() {
+  if (g_render_host_done) {
+    return g_render_host;
+  }
+  g_render_host_done = true;
+  auto* mem = kernel_state() ? kernel_state()->memory() : nullptr;
+  if (!mem || !g_xam_lo) {
+    return 0;
+  }
+  for (uint32_t a = g_xam_lo; a + 48 <= g_xam_hi; a += 4) {
+    uint32_t w[12];
+    for (int k = 0; k < 12; ++k) {
+      w[k] = xe::load_and_swap<uint32_t>(mem->TranslateVirtual(a + k * 4));
+    }
+    if (w[0] != 0x7D8802A6u || w[1] != 0x9181FFF8u || w[2] != 0xFBE1FFF0u) {
+      continue;
+    }
+    if ((w[3] >> 26) != 37 || (w[3] & 0xFFFF) != 0xFF10u) {
+      continue;  // stwu r1,-240(r1)
+    }
+    for (int j = 4; j < 10; ++j) {
+      if (w[j] == 0x38A00078u && w[j + 1] == 0x38800000u &&
+          (w[j + 2] & 0xFFFF0000u) == 0x38610000u &&
+          (w[j + 2] & 0xFFFFu) == 100u) {
+        g_render_host = a;
+        XELOGI("XamRenderHost: located at {:08X}", a);
+        return g_render_host;
+      }
+    }
+  }
+  XELOGW("XamRenderHost: not found in this xam image");
+  return 0;
+}
+
+uint32_t XamDeviceSlot() {
+  if (g_xam_dev_slot_done) {
+    return g_xam_dev_slot;
+  }
+  g_xam_dev_slot_done = true;
+  auto* mem = kernel_state() ? kernel_state()->memory() : nullptr;
+  if (!mem || !g_xam_lo) {
+    return 0;
+  }
+  // lis rX,0x815F / lwz rX,imm(rX) / lwz rX,0(rX) / rlwinm rX,rX,0,22,22
+  for (uint32_t a = g_xam_lo; a + 0x60 <= g_xam_hi; a += 4) {
+    uint32_t w0 = xe::load_and_swap<uint32_t>(mem->TranslateVirtual(a + 0x0C));
+    if ((w0 >> 26) != 15 || ((w0 >> 16) & 31) != 0 || (w0 & 0xFFFF) != 0x815F) {
+      continue;
+    }
+    uint32_t w3 = xe::load_and_swap<uint32_t>(mem->TranslateVirtual(a + 0x18));
+    if ((w3 >> 26) != 21 || ((w3 >> 11) & 31) != 0 || ((w3 >> 6) & 31) != 22 ||
+        ((w3 >> 1) & 31) != 22) {
+      continue;  // not the rlwinm rX,rX,0,22,22 bit-0x200 test
+    }
+    uint32_t hi = xe::load_and_swap<uint32_t>(mem->TranslateVirtual(a + 0x54));
+    uint32_t lo = xe::load_and_swap<uint32_t>(mem->TranslateVirtual(a + 0x58));
+    if ((hi >> 26) == 15 && (lo >> 26) == 14) {
+      g_xam_dev_slot = ((hi & 0xFFFF) << 16) + (lo & 0xFFFF);
+      XELOGI("XamDeviceSlot: creator at {:08X} -> slot {:08X}", a,
+             g_xam_dev_slot);
+      return g_xam_dev_slot;
+    }
+  }
+  XELOGW("XamDeviceSlot: device creator not found in this xam image");
+  return 0;
+}
+
+uint32_t XamUiThreadSlot() {
+  if (g_ui_thread_slot_done) {
+    return g_ui_thread_slot;
+  }
+  g_ui_thread_slot_done = true;
+  auto* mem = kernel_state() ? kernel_state()->memory() : nullptr;
+  if (!mem || !g_xam_lo) {
+    return 0;
+  }
+  for (uint32_t a = g_xam_lo; a + 32 <= g_xam_hi; a += 4) {
+    uint32_t w[8];
+    for (int k = 0; k < 8; ++k) {
+      w[k] = xe::load_and_swap<uint32_t>(mem->TranslateVirtual(a + k * 4));
+    }
+    bool cur = false, clz = false, norm = false;
+    for (int k = 0; k < 8; ++k) {
+      if (k < 3 && (w[k] >> 26) == 32 && ((w[k] >> 16) & 31) == 13 &&
+          (w[k] & 0xFFFF) == 256) {
+        cur = true;
+      }
+      if ((w[k] >> 26) == 31 && ((w[k] >> 1) & 0x3FF) == 26) clz = true;
+      if ((w[k] >> 26) == 21 && ((w[k] >> 11) & 31) == 27 &&
+          ((w[k] >> 6) & 31) == 31 && ((w[k] >> 1) & 31) == 31) {
+        norm = true;
+      }
+    }
+    if (!cur || !clz || !norm) continue;
+    uint32_t hi = 0, lo1 = 0, lo2 = 0;
+    bool hi_ok = false, lo1_ok = false, lo2_ok = false;
+    for (int k = 0; k < 8; ++k) {
+      if ((w[k] >> 26) == 15 && ((w[k] >> 16) & 31) == 0 && !hi_ok) {
+        hi = w[k] & 0xFFFF;
+        hi_ok = true;
+      } else if ((w[k] >> 26) == 14 && hi_ok && !lo1_ok) {
+        lo1 = w[k] & 0xFFFF;
+        lo1_ok = true;
+      } else if ((w[k] >> 26) == 32 && ((w[k] >> 16) & 31) != 13 && !lo2_ok) {
+        lo2 = w[k] & 0xFFFF;
+        lo2_ok = true;
+      }
+    }
+    if (hi_ok && lo1_ok && lo2_ok) {
+      g_ui_thread_slot = (hi << 16) + lo1 + lo2;
+      XELOGI("XamUiThreadSlot: identity check at {:08X} -> slot {:08X}", a,
+             g_ui_thread_slot);
+      return g_ui_thread_slot;
+    }
+  }
+  XELOGW("XamUiThreadSlot: identity check not found in this xam image");
+  return 0;
+}
 
 void SetGuideDrawHook(uint32_t fn, uint32_t self) {
   guide_draw_fn_ = fn;
@@ -706,8 +1061,18 @@ static uint32_t guide_title_surface_ = 0;
 // published to any global and cannot be found by signature scan.
 static std::atomic<uint32_t> guide_mode1_device_{0};
 void GuideSetMode1Device(uint32_t dev) { guide_mode1_device_.store(dev); }
+
+// 819F4D28 arg5 (r7). See the header for why this is captured there rather
+// than at 81A0FE48: that function only runs on the mode-1 path, so a
+// breakpoint on it never fires in the mode-2 configuration that needs the
+// value.
+static std::atomic<uint32_t> guide_devcreate_arg5_{0};
+void GuideSetDevCreateArg5(uint32_t ptr) { guide_devcreate_arg5_.store(ptr); }
+uint32_t GuideGetDevCreateArg5() { return guide_devcreate_arg5_.load(); }
 static uint32_t guide_bs_scene_ = 0;
 static std::atomic<bool> guide_bs_ready_{false};
+
+uint32_t GuideBootDc() { return guide_boot_dc_; }
 
 bool GuideBootstrapReady() { return guide_bs_ready_; }
 static std::atomic<bool> guide_bs_pending_{false};
@@ -761,8 +1126,25 @@ void QueueGuideBootstrap(uint32_t hud_base, uint32_t guide_obj,
 // owned by a different thread".
 static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   auto* memory = kernel_state()->memory();
-  auto rd = [&](uint32_t a) {
+  auto rd = [&](uint32_t a) -> uint32_t {
+    // This bootstrap is full of dashroot-derived xam constants. On a build
+    // whose image ends lower they are unmapped and reading them host-faults,
+    // so reject 0x81xxxxxx addresses outside the loaded image. Guarding the
+    // reader rather than each call site: patching individual sites missed the
+    // same constant three times.
+    if (a >= 0x81000000u && a < 0x82000000u && !XamAddrInImage(a, 4)) {
+      return uint32_t(0);
+    }
     return xe::load_and_swap<uint32_t>(memory->TranslateVirtual(a));
+  };
+  // Same bound for the writes below - a store to an unmapped constant faults
+  // just as readily as a load.
+  auto wr = [&](uint32_t a, uint32_t v) {
+    if (a >= 0x81000000u && a < 0x82000000u && !XamAddrInImage(a, 4)) {
+      return false;
+    }
+    xe::store_and_swap<uint32_t>(memory->TranslateVirtual(a), v);
+    return true;
   };
   auto* processor = kernel_state()->processor();
   auto* ts = thread->thread_state();
@@ -789,8 +1171,7 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   if (guide_bs_use_title_device_) {
     uint32_t title_dev = rd(0x801E6FC4u);
     if (title_dev) {
-      xe::store_and_swap<uint32_t>(memory->TranslateVirtual(0x81D43684u),
-                                   title_dev);
+      wr(XamDeviceSlot(), title_dev);
       XELOGI("GuideBootstrap: xam device global -> title device {:08X}",
              title_dev);
     }
@@ -801,7 +1182,7 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
     // 0x81D42520, comparing it against [r13+256]. Log both: if the recorded
     // slot is zero, xam never registered a UI thread and the check can never
     // pass no matter which thread we use.
-    uint32_t recorded = rd(0x81D42520u);
+    uint32_t recorded = rd(XamUiThreadSlot());
     uint32_t r13 = static_cast<uint32_t>(ts->context()->r[13]);
     uint32_t current = r13 ? rd(r13 + 256) : 0;
     XELOGI("GuideBootstrap: xam UI thread recorded={:08X} current={:08X} "
@@ -836,10 +1217,13 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
       uint32_t stub = memory->SystemHeapAlloc(0x400, 16);
       if (stub) {
         std::memset(memory->TranslateVirtual(stub), 0, 0x400);
-        xe::store_and_swap<uint32_t>(memory->TranslateVirtual(0x81D3F924u),
-                                     stub);
-        XELOGI("GuideBootstrap: CHUDBkgndScene slot 81D3F924 = stub {:08X}",
-               stub);
+        if (wr(0x81D3F924u, stub)) {
+          XELOGI("GuideBootstrap: CHUDBkgndScene slot 81D3F924 = stub {:08X}",
+                 stub);
+        } else {
+          XELOGW("GuideBootstrap: CHUDBkgndScene slot 81D3F924 is not in this "
+                 "xam image - not written");
+        }
       }
     }
   }
@@ -849,9 +1233,8 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
     uint32_t r13 = static_cast<uint32_t>(ts->context()->r[13]);
     uint32_t current = r13 ? rd(r13 + 256) : 0;
     if (current) {
-      saved_ui_thread = rd(0x81D42520u);
-      xe::store_and_swap<uint32_t>(memory->TranslateVirtual(0x81D42520u),
-                                   current);
+      saved_ui_thread = rd(XamUiThreadSlot());
+      wr(XamUiThreadSlot(), current);
       spoofed = true;
       XELOGI("GuideBootstrap: spoofing xam UI thread {:08X} -> {:08X}",
              saved_ui_thread, current);
@@ -859,10 +1242,9 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   }
   if (::cvars::guide_use_bound_device) {
     uint32_t bound = rd(0x801E6FC8u);
-    uint32_t cur = rd(0x81D43684u);
+    uint32_t cur = rd(XamDeviceSlot());
     if (bound && bound != cur) {
-      xe::store_and_swap<uint32_t>(memory->TranslateVirtual(0x81D43684u),
-                                   bound);
+      wr(XamDeviceSlot(), bound);
       guide_prev_device_ = cur;  // keep the displaced device visible
       XELOGI("GuideBootstrap: xam device global {:08X} (RT0={:08X}) -> "
              "{:08X} (RT0={:08X})",
@@ -879,7 +1261,7 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   // and a device context created earlier kept [dc+0x1C8] = 40877DC0. By the
   // time it called through it the block had been reused for the wide string
   // "XuiScene", so CTR took 006E0065 - the "ne" - and the fetch faulted.
-  uint32_t live_ctx = rd(0x81D6C978u);
+  uint32_t live_ctx = rd(XamXuiCtxSlot());
   uint64_t hr = 0;
   if (::cvars::guide_reuse_xui_ctx && live_ctx) {
     XELOGI(
@@ -887,29 +1269,47 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
         live_ctx);
   } else {
     uint64_t a0[] = {0};
-    hr = processor->Execute(ts, 0x8178DC58u, a0, xe::countof(a0));
+    // 8178DC58 is dashroot's XUI render host. Unlike the seven structures
+    // resolved so far, it does NOT signature-match in retail 17559 - not at
+    // 14, 12, 10, 8 or 6 instructions, even with frame immediates masked - so
+    // that function is restructured there, not merely relocated. Executing
+    // dashroot's address on retail landed in unrelated code and crashed in
+    // __restgprlr_14 with lr=0.
+    //
+    // A role-based search (functions that both call the thread-identity check
+    // and read the device slot) gives exactly one retail candidate, 816C7D00,
+    // but the same search yields FIVE on dashroot, so it does not identify
+    // the analogue uniquely. Executing an unconfirmed address is what caused
+    // this whole family of bugs, so skip rather than guess.
+    uint32_t rhost = XamRenderHost();
+    if (!rhost) {
+      XELOGW("GuideBootstrap: XUI render host not located on this build - "
+             "skipping the call");
+      hr = 0x80004005u;
+    } else {
+      hr = processor->Execute(ts, rhost, a0, xe::countof(a0));
+    }
   }
   if (spoofed) {
-    xe::store_and_swap<uint32_t>(memory->TranslateVirtual(0x81D42520u),
-                                 saved_ui_thread);
+    wr(XamUiThreadSlot(), saved_ui_thread);
     XELOGI("GuideBootstrap: restored xam UI thread {:08X}", saved_ui_thread);
   }
   XELOGI("GuideBootstrap: render host -> {:08X}, XUI ctx {:08X}, "
          "provider {:08X}",
-         static_cast<uint32_t>(hr), rd(0x81D6C978u), rd(0x81D6D0ACu));
+         static_cast<uint32_t>(hr), rd(XamXuiCtxSlot()), rd(XamProviderSlot()));
 
   {
     // Read-only: the null-render flag as the render host left it. It is
     // computed, not a constant, so what it depends on is worth probing - the
     // hardware-info word is the cheapest input to vary.
-    uint32_t c0 = rd(0x81D6C978u);
+    uint32_t c0 = rd(XamXuiCtxSlot());
     XELOGI("GuideBootstrap: null-render flag [ctx+1C] = {:08X} "
            "(hw info word = {:08X})",
            c0 ? rd(c0 + 0x1Cu) : 0xFFFFFFFFu,
            rd(rd(0x815F048Cu)));
   }
   if (::cvars::guide_clear_null_render) {
-    uint32_t ctx = rd(0x81D6C978u);
+    uint32_t ctx = rd(XamXuiCtxSlot());
     if (ctx) {
       uint32_t before = rd(ctx + 0x1Cu);
       xe::store_and_swap<uint32_t>(memory->TranslateVirtual(ctx + 0x1Cu), 0);
@@ -922,7 +1322,7 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   {
     // The XUI resource provider is a static xam object; its vtable[1] is the
     // open-by-name call that is failing with 80300004.
-    uint32_t prov = rd(0x81D6D0ACu);
+    uint32_t prov = rd(XamProviderSlot());
     uint32_t pvt = prov ? rd(prov) : 0;
     XELOGI("GuideBootstrap: provider {:08X} vtable {:08X} [0]={:08X} "
            "[1]={:08X} [2]={:08X}",
@@ -934,7 +1334,12 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   // duplicate "XuiElement" - see phase 67. Classes and cached resources share
   // the registry at 81D6D508, and a scene cannot instantiate a class that is
   // not in it.
-  if (::cvars::guide_register_all_classes) {
+  if (::cvars::guide_register_all_classes && !XamIsDashrootLayout()) {
+    XELOGW("GuideBootstrap: the 39 XUI class registrars are dashroot "
+           "addresses; on this build they are different functions - skipping "
+           "(this is why retail crashed before installing the draw hook)");
+  }
+  if (::cvars::guide_register_all_classes && XamIsDashrootLayout()) {
     // xam has 39 per-class registrars; the registry otherwise ends up
     // with only 16 entries. A scene asking for an unregistered control
     // class is exactly what E_FAIL from XuiSceneCreate looks like.
@@ -961,7 +1366,14 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
     XELOGI("GuideBootstrap: called {} class registrars, returns: {}",
            uint32_t(xe::countof(kRegs)), rets);
   }
-  if (::cvars::guide_register_classes) {
+  // These three are dashroot addresses. On retail 17559, 817503E8 is an
+  // unrelated function and executing it is what crashed at 817503E4 - the
+  // crash PC matched the constant four bytes in, which is the tell.
+  if (::cvars::guide_register_classes && !XamIsDashrootLayout()) {
+    XELOGW(
+        "GuideBootstrap: the 3 XUI class registrars are dashroot addresses; "
+        "on this build they are different functions - skipping");
+  } else if (::cvars::guide_register_classes) {
     for (uint32_t reg : {0x817503E8u, 0x8199BE08u, 0x8176B2C8u}) {
       uint64_t rargs[] = {0};
       uint64_t rr = processor->Execute(ts, reg, rargs, xe::countof(rargs));
@@ -973,12 +1385,26 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   uint64_t dr = 0;
   if (::cvars::guide_bootstrap_create_dc) {
     uint64_t a1[] = {dcp};
-    dr = processor->Execute(ts, 0x818FB038u, a1, xe::countof(a1));
+    // 818FB038 is dashroot's XuiRenderCreateDC helper. It is the same
+    // function the ctx-slot resolver already locates (the call immediately
+    // before XuiInit in the render host); on retail it is 8177DAC8. Executing
+    // the dashroot address there crashed inside xam's cleanup loop.
+    uint32_t createdc = XamXuiCreateDC();
+    if (!createdc) createdc = 0x818FB038u;
+    XELOGI("GuideBootstrap: XuiRenderCreateDC fn={:08X}", createdc);
+    dr = processor->Execute(ts, createdc, a1, xe::countof(a1));
   } else {
     XELOGI("GuideBootstrap: skipping our own XuiRenderCreateDC");
   }
   XELOGI("GuideBootstrap: XuiRenderCreateDC -> {:08X} dc={:08X}",
          static_cast<uint32_t>(dr), rd(dcp));
+  // Remember our DC. It is the only one in the process whose [+0x1C8]/[+0x1CC]
+  // are populated - 81900E70 (the constructor) writes [+0x134] and nothing
+  // else, and only 818FDE98 writes those two, reached solely through a vtable
+  // dispatch that our bootstrap never performs on hud's own DC. hud's DC is
+  // therefore constructed with [+0x1C8] holding whatever the allocation
+  // contained, and 81901E40 bctrls through [[dc+0x1C8]+0x0C] into it.
+  guide_boot_dc_ = rd(dcp);
 
   uint32_t render_obj = guide_bs_obj_ + 16;
   xe::store_and_swap<uint32_t>(memory->TranslateVirtual(render_obj + 20), 1u);
@@ -1118,7 +1544,7 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
     // and hand off. Holding the render thread through an async scene load
     // deadlocks it.
     if (::cvars::guide_install_draw_hook) {
-      SetGuideDrawHook(guide_bs_hud_base_ + 0xAB28u, render_obj);
+      SetGuideDrawHook((g_hud_render ? g_hud_render : guide_bs_hud_base_ + 0xAB28u), render_obj);
     } else {
       XELOGI("GuideBootstrap: draw hook NOT installed (test)");
     }
@@ -1141,6 +1567,187 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
     XELOGI("GuideBootstrap: scene creator {:08X} -> {:08X}, scene={:08X}",
            scene_fn, static_cast<uint32_t>(ir),
            scene_out ? rd(scene_out) : 0);
+    // Create a scene AND NAVIGATE TO IT, the way hud does.
+    //
+    // hud never calls the bare creator through a bl - it is vtable dispatch
+    // only. Its own path is 913EB7D8(this, parent):
+    //   r3 = [this+0x508]                    current scene handle
+    //   bl XuiHandleIsValid
+    //   if valid: XuiSceneNavigateBack(...)
+    //   913EB508(this, parent, L"Status.xur", 0)
+    // and 913EB508 is XuiSceneCreate immediately followed by
+    // XuiSceneNavigateForward(parent, 0, newScene, transition). Creating
+    // without navigating leaves the scene out of whatever the renderer walks,
+    // which is the shape of the problem: a tree that lays out correctly and
+    // emits no geometry.
+    //
+    // The scene path comes from hud's own global at hud+0x201E8, which holds
+    // a pointer to L"Status.xur" - the Guide's entry screen. Read at runtime
+    // from the loaded image rather than hardcoded, since the constant is only
+    // meaningful relative to hud's base.
+    if (::cvars::guide_navigate_scene && guide_bs_obj_) {
+      uint32_t hud_base = guide_bs_hud_base_;
+      uint32_t path_ptr = hud_base ? rd(hud_base + 0x201E8u) : 0;
+      // The object 913EB7D8 wants is a SINGLETON, not hud's main object.
+      // 913E9580 loads it as `lwz r30, 1684(r10)` with r10 = 0x91400000, i.e.
+      // [hud+0x20694], and dispatches on [this+0x1F0] to one of four navigate
+      // variants; case 1 is `913EB7D8(r30, [this+8])`. Passing guide_bs_obj_
+      // was a guess that the create half happened to accept.
+      // Build the scene by hand and PARENT IT before navigating.
+      //
+      // 913EB508 does XuiSceneCreate and XuiSceneNavigateForward back to back,
+      // and the scene it creates has no parent, so the navigate rejects it
+      // with 8030000B (XuiElementGetParent returns null for both the new and
+      // the current scene). There is no way to attach anything in between, so
+      // the four steps are performed directly:
+      //
+      //   XamBuildResourceLocator([obj+4], L"hud", 0, buf, 128)
+      //   XuiSceneCreate(locator, L"Status.xur", 0, &newScene)
+      //   XuiElementAddChild(currentScene, newScene)
+      //   XuiSceneNavigateForward(currentScene, 0, newScene, 0)
+      //
+      // Only the NEW scene needs a parent: NavigateForward checks it first
+      // (8193C31C) and proceeds if either scene has one, which avoids having
+      // to invent a host above our existing scene.
+      if (::cvars::guide_navigate_manual) {
+        auto xmg = kernel_state()->GetModule("xam.xex", true);
+        uint32_t f_loc = xmg ? xmg->GetProcAddressByOrdinal(0x31B) : 0;
+        uint32_t f_scn = xmg ? xmg->GetProcAddressByOrdinal(0x357) : 0;
+        uint32_t f_add = xmg ? xmg->GetProcAddressByOrdinal(0x328) : 0;
+        uint32_t f_nav = xmg ? xmg->GetProcAddressByOrdinal(0x35A) : 0;
+        uint32_t buf_loc = memory->SystemHeapAlloc(512, 16);
+        uint32_t buf_out = memory->SystemHeapAlloc(16, 16);
+        uint32_t obj4 = rd(guide_bs_obj_ + 4u);
+        uint32_t s_hud = hud_base + 0x1B24u;   // L"hud"
+        uint32_t s_path = hud_base ? rd(hud_base + 0x201E8u) : 0;
+        {
+          // The scene loaded is whatever s_path points at. Phase 283 wants a
+          // DIFFERENT scene (GuideMain.xur, the blade itself, vs the
+          // Status.xur loading screen), so log the string to learn the format
+          // a replacement must follow.
+          std::string sp;
+          if (s_path) {
+            for (uint32_t c = 0; c < 96; ++c) {
+              uint32_t addr = s_path + c * 2u;
+              uint16_t ch = xe::load_and_swap<uint16_t>(
+                  memory->TranslateVirtual(addr));
+              if (!ch) break;
+              sp += (ch >= 0x20 && ch < 0x7F) ? (char)ch : '?';
+            }
+          }
+          XELOGI("GuideNavM: scene path ptr={:08X} = L\"{}\"", s_path, sp);
+        }
+        if (f_loc && f_scn && f_add && f_nav && buf_loc && buf_out && s_path) {
+          std::memset(memory->TranslateVirtual(buf_loc), 0, 512);
+          std::memset(memory->TranslateVirtual(buf_out), 0, 16);
+          uint64_t la[] = {obj4, s_hud, 0, buf_loc, 128};
+          uint32_t lr = uint32_t(
+              processor->Execute(ts, f_loc, la, xe::countof(la)));
+          uint64_t sa[] = {buf_loc, s_path, 0, buf_out};
+          uint32_t sr = uint32_t(
+              processor->Execute(ts, f_scn, sa, xe::countof(sa)));
+          uint32_t new_scene = rd(buf_out);
+          XELOGI("GuideNavM: locator -> {:08X}; SceneCreate -> {:08X}, "
+                 "scene={:08X}",
+                 lr, sr, new_scene);
+          if (new_scene) {
+            uint64_t ca[] = {guide_bs_scene_, new_scene};
+            uint32_t cr = uint32_t(
+                processor->Execute(ts, f_add, ca, xe::countof(ca)));
+            uint64_t va[] = {guide_bs_scene_, 0, new_scene, 0};
+            uint32_t vr = uint32_t(
+                processor->Execute(ts, f_nav, va, xe::countof(va)));
+            XELOGI("GuideNavM: AddChild({:08X},{:08X}) -> {:08X}; "
+                   "NavigateForward -> {:08X}",
+                   guide_bs_scene_, new_scene, cr, vr);
+            // Navigating does not repoint the draw. hud's composite draw uses
+            // [this+8] as its root, which still holds the ORIGINAL scene, so
+            // a successful navigate to Status.xur changes what XUI considers
+            // current without changing what gets drawn. [this+8] is
+            // guide_bs_obj_+0x18, the draw object being the bootstrap object
+            // plus 0x10.
+            if (!vr && new_scene) {
+              xe::store_and_swap<uint32_t>(
+                  memory->TranslateVirtual(guide_bs_obj_ + 0x18u), new_scene);
+              guide_bs_scene_ = new_scene;
+              XELOGI("GuideNavM: draw root [this+8] -> {:08X} (Status.xur)",
+                     new_scene);
+            }
+          }
+        } else {
+          XELOGW("GuideNavM: skipped (loc={:08X} scn={:08X} add={:08X} "
+                 "nav={:08X} path={:08X})",
+                 f_loc, f_scn, f_add, f_nav, s_path);
+        }
+      }
+      uint32_t nav_obj = hud_base ? rd(hud_base + 0x20694u) : 0;
+      XELOGI("GuideNav: singleton [hud+0x20694] = {:08X}", nav_obj);
+      // Phase 299: resolve the xam exports the tab loader depends on, so
+      // they can be disassembled. 0x3BA is XuiTabSceneGetCurrentTab -
+      // the comparison at 913E9250 that keeps every tab from activating.
+      {
+        auto xm = kernel_state()->GetModule("xam.xex", true);
+        if (xm) {
+          XELOGI("GuideNav: xam exports: XuiTabSceneGetCurrentTab(3BA)={:08X} "
+                 "XuiElementInitUserFocus(334)={:08X} "
+                 "XuiElementGetUserFocus(332)={:08X}",
+                 xm->GetProcAddressByOrdinal(0x3BA),
+                 xm->GetProcAddressByOrdinal(0x334),
+                 xm->GetProcAddressByOrdinal(0x332));
+        }
+      }
+      // hud has TWO navigate entries. 913EB7D8 (called below) is hardcoded
+      // to [9140:01E8] = L"Status.xur". The real dispatcher is 913EC6D0,
+      // which selects by state at [navObj+76]:
+      //   7 / 3 / 5 / 6 / 8 -> specific scenes
+      //   0 or 4            -> GuideMain.xur ([9140:014C]) unless 913FE294()
+      //   anything else     -> E_FAIL 0x80004005
+      // So this word decides whether the Guide can reach its blade.
+      if (nav_obj) {
+        XELOGI("GuideNav: state [+72]={} [+76]={} [+88]={} [+240]={} "
+               "(76 in {{0,4}} selects GuideMain.xur)",
+               rd(nav_obj + 72u), rd(nav_obj + 76u), rd(nav_obj + 88u),
+               rd(nav_obj + 240u));
+      }
+      if (hud_base && path_ptr && nav_obj) {
+        // Call hud's own entry, 913EB7D8(navObj, parentScene), rather than
+        // the inner helper: it checks [navObj+0x508] with XuiHandleIsValid and
+        // navigates back from the current scene first, which is the sequence
+        // hud performs and the inner helper assumes has happened.
+        uint64_t na[] = {nav_obj, guide_bs_scene_};
+        uint64_t nr = processor->Execute(ts, hud_base + 0xB7D8u, na,
+                                         xe::countof(na));
+        XELOGI("GuideNav: 913EB7D8(navObj {:08X}, parent scene {:08X}) -> "
+               "{:08X}; [navObj+500]={:08X} [navObj+508]={:08X}",
+               nav_obj, guide_bs_scene_, static_cast<uint32_t>(nr),
+               rd(nav_obj + 0x500u), rd(nav_obj + 0x508u));
+        // hud's own path now succeeds: giving the manually created scene a
+        // parent first satisfies NavigateForward's check inside 913EB508, so
+        // 913EB7D8 builds AND navigates to a properly initialised Status
+        // scene and records it at [navObj+0x508]. That scene came through
+        // hud's construction path, unlike the phase 192 one, so it is the
+        // fair comparison phase 215 said was missing.
+        uint32_t hud_scene = rd(nav_obj + 0x508u);
+        // 913EB7D8 is hardcoded to Status.xur (phase 284), so this re-point
+        // always lands on the loading screen and silently discards a scene
+        // chosen with guide_scene_name. If the caller named a scene, that is
+        // an explicit choice - leave the draw root where GuideNavM put it.
+        if (!nr && hud_scene && !::cvars::guide_scene_name.empty()) {
+          XELOGI("GuideNav: keeping guide_scene_name draw root; NOT "
+                 "re-pointing to hud-built Status {:08X}", hud_scene);
+        } else if (!nr && hud_scene) {
+          xe::store_and_swap<uint32_t>(
+              memory->TranslateVirtual(guide_bs_obj_ + 0x18u), hud_scene);
+          guide_bs_scene_ = hud_scene;
+          XELOGI("GuideNav: draw root [this+8] -> {:08X} (hud-built Status)",
+                 hud_scene);
+        }
+      } else {
+        XELOGW("GuideNav: skipped (hud_base={:08X} path_ptr={:08X} "
+               "nav_obj={:08X})",
+               hud_base, path_ptr, nav_obj);
+      }
+    }
     // A scene HANDLE is not evidence of scene CONTENT. Resolve it with
     // XuiObjectFromHandle (xam ordinal 0x346) and dump the object head:
     // if the render tree has no children there is nothing to draw, which
@@ -1151,8 +1758,13 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
       if (obj_out) {
         std::memset(memory->TranslateVirtual(obj_out), 0, 16);
         uint64_t oa[] = {scene_h, obj_out};
-        uint64_t orr = processor->Execute(ts, 0x81942938u, oa,
-                                          xe::countof(oa));
+        // XuiObjectFromHandle is xam ordinal 0x346. 81942938 is only its
+        // dashroot address; resolve the export the way XuiInit is resolved.
+        auto xm_oh = kernel_state()->GetModule("xam.xex", true);
+        uint32_t objfh = xm_oh ? xm_oh->GetProcAddressByOrdinal(0x346) : 0u;
+        if (!objfh) objfh = 0x81942938u;
+        XELOGI("GuideBootstrap: XuiObjectFromHandle fn={:08X}", objfh);
+        uint64_t orr = processor->Execute(ts, objfh, oa, xe::countof(oa));
         uint32_t sobj = rd(obj_out);
       {
         // The XUI class registry, read AFTER the scene has loaded. The
@@ -1229,6 +1841,25 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
                    "{:08X}, now {:08X}",
                    r13, prev, rd(gate));
           }
+          // The whole class-descriptor table around 81D6CDDC. XuiTextElement
+          // SetText (81937310) is 29 instructions: it loads [81D6CDCC], calls
+          // 81930FE8(handle, class) to resolve the handle AND check its class,
+          // and returns 80300016 verbatim when that comes back null. Every
+          // SetText we have tried returns exactly that, including on
+          // labelHeading, which really is a text element - so either the
+          // handle does not resolve or the class slot is empty. A null slot
+          // would also break every other class-checked dispatch, which is the
+          // kind of thing that makes a render walk emit nothing.
+          {
+            auto* km = kernel_state()->memory();
+            std::string tbl;
+            for (uint32_t a = 0x81D6CDA0u; a < 0x81D6CE00u; a += 4) {
+              tbl += fmt::format("{:08X}:{:08X} ", a,
+                                 xe::load_and_swap<uint32_t>(
+                                     km->TranslateVirtual(a)));
+            }
+            XELOGI("GuideScene: class table {}", tbl);
+          }
           XELOGI("GuideScene: visual class global [81D6CDDC] = {:08X}",
                  rd(0x81D6CDDCu));
           // Check whether computing .rdata file offsets as runtime + 0x7200
@@ -1250,9 +1881,57 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
             }
             XELOGI("GuideScene: string at runtime 816462C4 = \"{}\"", a1);
           }
-          for (auto ord : {0x342u, 0x31Eu, 0x31Bu, 0x395u, 0x359u, 0x38Au, 0x35Fu}) {
+          // 818FAEE0(obj) returns E_INVALIDARG when obj is null and only
+          // otherwise dispatches obj->vtable[19] - which on the wrapper's
+          // vtable (81640680) is 8191B250, the draw method that never runs.
+          // Its four bl callers all never execute either, so hud calls it as
+          // an export and passes null. Resolve the render ordinals to find
+          // which export it is; the .edata parse gives nonsense so use
+          // Xenia's own module lookup.
+          // 0x35A XuiSceneNavigateForward, 0x39E XuiSceneInterruptTransitions,
+          // 0x35E/0x35D the transition players. hud imports all of them and
+          // the bootstrap calls none: the scene is created and never
+          // navigated to, which would leave it out of the render list while
+          // still laying out correctly - exactly the observed split.
+          for (auto ord : {0x35Au, 0x39Eu, 0x35Eu, 0x35Du,
+                           0x342u, 0x31Eu, 0x31Bu, 0x395u, 0x359u, 0x38Au,
+                           0x35Fu, 0x350u, 0x336u, 0x34Bu, 0x34Fu, 0x357u,
+                           0x363u, 0x3DFu, 0x37Eu, 0x346u}) {
             XELOGI("GuideScene: xam ordinal {:03X} -> {:08X}", ord,
                    xmn ? xmn->GetProcAddressByOrdinal(ord) : 0);
+          }
+          // hud calls XuiRenderGetBackBufferSize (ordinal 0x350) - its thunk
+          // 913FE8A4 is entered - and lays the scene out against whatever it
+          // returns. Our Guide device is synthetic, so if it reports 0x0 the
+          // layout collapses and nothing rasterises, which would fit an
+          // otherwise-intact pipeline emitting nothing. Call it here and read
+          // the answer rather than assuming the device reports a sane size.
+          {
+            uint32_t bbs = xmn ? xmn->GetProcAddressByOrdinal(0x350u) : 0;
+            uint32_t dc_now = rd(dcp);
+            // XuiRenderEnd is ordinal 0x34F = 818FAEE0, and it IS the draw
+            // dispatcher: null-check arg1, then call arg1->vtable[19]
+            // (lwz r11,0x4C(r11) / mtctr / bctrl). Slot 19 was matched
+            // against the WRAPPER vtable 81640680 earlier and gave 8191B250 -
+            // but XuiRenderEnd takes the DC, which has its own vtable. Print
+            // the DC's, so the right slot 19 is read rather than assumed.
+            {
+              uint32_t dvt = dc_now ? rd(dc_now) : 0;
+              XELOGI("GuideScene: DC {:08X} vtable {:08X} [19]={:08X} "
+                     "[11]={:08X} [20]={:08X}",
+                     dc_now, dvt, dvt ? rd(dvt + 19 * 4) : 0,
+                     dvt ? rd(dvt + 11 * 4) : 0, dvt ? rd(dvt + 20 * 4) : 0);
+            }
+            uint32_t obuf = memory->SystemHeapAlloc(32, 16);
+            if (bbs && obuf && dc_now) {
+              std::memset(memory->TranslateVirtual(obuf), 0, 32);
+              uint64_t ba[] = {dc_now, obuf, obuf + 4};
+              uint64_t br = processor->Execute(ts, bbs, ba, xe::countof(ba));
+              XELOGI("GuideScene: GetBackBufferSize(dc {:08X}) -> {:08X}; "
+                     "w={} h={} (raw {:08X} {:08X})",
+                     dc_now, static_cast<uint32_t>(br), rd(obuf),
+                     rd(obuf + 4), rd(obuf), rd(obuf + 4));
+            }
           }
           // The listener creation ends in ObCreateObject with the object type
           // descriptor at 81D22460, and ObCreateObject calls that
@@ -1640,6 +2319,19 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
                 XELOGI("GuideScene: depth {} node {:08X} visual -> {:08X}: "
                        "{:08X}  (bootstrap scene)",
                        depth + 1, kid, vrr, rd(vb));
+                // Remember the shallowest node that actually HAS a visual.
+                // The observed tree is root 000100A9 -> 0001012D -> 000100B1
+                // ("scnInfoUpsellLive") -> 000100E2 ("labelHeading"), and
+                // 0001012D - the only child of the root, with no id, no
+                // position and no visual (8030000A) - is the node the render
+                // walk would have to descend THROUGH to reach any content.
+                // Layout descends unconditionally, which is why the tree lays
+                // out correctly; a render that skips a visual-less node and
+                // does not recurse would emit nothing, which is exactly what
+                // ResvWalk measures.
+                if (!vrr && rd(vb) && !guide_first_visual_node_) {
+                  guide_first_visual_node_ = kid;
+                }
               }
             }
             uint32_t buf3 = memory->SystemHeapAlloc(32, 16);
@@ -1743,6 +2435,29 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
               XELOGI("GuideScene:   {:08X} GetVisual -> {:08X}: {:08X}",
                      kid, static_cast<uint32_t>(vr), rd(buf3));
             }
+            // WHAT IS THIS ELEMENT? 81930FE8(handle, class) is the cast
+            // helper every typed XUI accessor funnels through - SetText loads
+            // [81D6CDCC] and calls it, then returns 80300016 when it comes
+            // back null. The class slot is populated (408878F0), so the
+            // failure is a type mismatch, not a missing class. Probing the
+            // handle against every slot in the table names the element's
+            // actual class instead of guessing from its id.
+            if (::cvars::guide_probe_class && kid) {
+              uint32_t cast = 0x81930FE8u;
+              std::string got;
+              for (uint32_t ca = 0x81D6CDC8u; ca <= 0x81D6CDFCu; ca += 4) {
+                uint32_t cls = rd(ca);
+                if (!cls) continue;
+                uint64_t qa[] = {kid, cls};
+                uint32_t qr = uint32_t(
+                    processor->Execute(ts, cast, qa, xe::countof(qa)));
+                if (qr) {
+                  got += fmt::format("[{:08X}]={:08X}->{:08X} ", ca, cls, qr);
+                }
+              }
+              XELOGI("GuideClass: {:08X} matches {}", kid,
+                     got.empty() ? std::string("NOTHING") : got);
+            }
             if (::cvars::guide_inject_label_text) {
               uint32_t stf = xmod ? xmod->GetProcAddressByOrdinal(0x363)
                                   : 0;
@@ -1785,7 +2500,7 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
       XELOGI("GuideBootstrap: preset [obj+28,32,64] as the scene creator does");
     }
     uint64_t a2[] = {render_obj, 0};
-    ir = processor->Execute(ts, guide_bs_hud_base_ + 0xA898u, a2,
+    ir = processor->Execute(ts, (g_hud_xuiinit ? g_hud_xuiinit : guide_bs_hud_base_ + 0xA898u), a2,
                             xe::countof(a2));
   }
   XELOGI("GuideBootstrap: after init -> {:08X}  +8={:08X} +12={:08X}",
@@ -1840,6 +2555,19 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
                "slot18={:08X} slot19={:08X} slot20={:08X} slot21={:08X}",
                dc, dcv, rd(dc + 0x0Cu), rd(dcv + 18 * 4),
                rd(dcv + 19 * 4), rd(dcv + 20 * 4), rd(dcv + 21 * 4));
+        // 81901EAC bctrls through [[dc+0x1C8]+0x0C] and lands on 4089B0B0 -
+        // data, not code. The guest only asserts the slot is non-null, so a
+        // wrong pointer passes. Logged here rather than pre-draw because the
+        // crash happens during hud's XUI work, before any composite draw.
+        {
+          uint32_t prm = rd(dc + 0x1C8u);
+          XELOGI("GuideBootstrap: param=[dc+1C8]={:08X} vt=[param+00]={:08X} "
+                 "cb=[param+0C]={:08X} [param+08]={:08X} [param+1C]={:08X} "
+                 "[dc+1CC]={:08X}",
+                 prm, prm ? rd(prm) : 0, prm ? rd(prm + 0x0Cu) : 0,
+                 prm ? rd(prm + 8u) : 0, prm ? rd(prm + 0x1Cu) : 0,
+                 rd(dc + 0x1CCu));
+        }
       } else {
         XELOGI("GuideBootstrap: DC {:08X} has no vtable", dc);
       }
@@ -1850,7 +2578,7 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
       // descriptor. Both null is the crash. Dump the slots on xam's own
       // device and on the title's so it is visible which, if either,
       // actually carries a surface.
-      uint32_t xam_dev = rd(0x81D43684u);
+      uint32_t xam_dev = rd(XamDeviceSlot());
       uint32_t ttl_dev = rd(0x801E6FC4u);
       for (auto& e : {std::make_pair("xam", xam_dev),
                       std::make_pair("title", ttl_dev)}) {
@@ -1934,10 +2662,102 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   // the `guide_draw_fn_ && guide_draw_this_` test in the notification path
   // silently false. "Installed" logged without values cannot distinguish that
   // from a notification that never fires.
-  SetGuideDrawHook(guide_bs_hud_base_ + 0xAB28u, render_obj);
+  SetGuideDrawHook((g_hud_render ? g_hud_render : guide_bs_hud_base_ + 0xAB28u), render_obj);
   XELOGI("GuideBootstrap: draw hook args fn={:08X} self={:08X}",
-         guide_bs_hud_base_ + 0xAB28u, render_obj);
+         (g_hud_render ? g_hud_render : guide_bs_hud_base_ + 0xAB28u), render_obj);
   XELOGI("GuideBootstrap: draw hook installed on title thread");
+}
+
+// Phase 377: the coverage readback used to live only inside the composite-
+// draw hook. With the command-buffer fixes enabled that hook stops firing,
+// so the instrument this investigation depends on went silent exactly in
+// the configurations that needed measuring. Extracted here so it can also
+// be driven from the swap path.
+static void EmitGuideCoverageOnce() {
+  if (::cvars::guide_coverage_fn) {
+    static bool cov_done = false;
+    if (!cov_done) {
+      cov_done = true;
+      auto* f = kernel_state()->processor()->LookupFunction(
+          ::cvars::guide_coverage_fn);
+      auto* gf = f ? dynamic_cast<cpu::GuestFunction*>(f) : nullptr;
+      if (gf && gf->trace_data().is_valid()) {
+        auto& td = gf->trace_data();
+        auto* counts =
+            reinterpret_cast<uint64_t*>(td.instruction_execute_counts());
+        uint32_t n = td.instruction_count(), executed = 0, last = 0;
+        for (uint32_t i = 0; i < n; ++i) {
+          if (counts[i]) {
+            ++executed;
+            last = td.start_address() + i * 4;
+          }
+        }
+        // counts[0] is the entry instruction's execution count, i.e. the
+        // number of times the function was CALLED. Reporting it turns the
+        // instrument from "was this reached" into "how often" - which is
+        // what distinguishes "painted once" from "painted per element".
+        XELOGI("Coverage {:08X}: {} of {} instructions executed, calls={}, "
+               "furthest reached {:08X} (+0x{:X})",
+               ::cvars::guide_coverage_fn, executed, n,
+               n ? counts[0] : 0, last, last - td.start_address());
+        // Report the NOT-executed spans. A function that runs to its last
+        // instruction while skipping 40% of its body has taken a set of
+        // branches, and the untaken ones are where an alternative path -
+        // such as one that submits geometry - would sit. The totals cannot
+        // show that; the gaps can.
+        std::string gaps;
+        uint32_t gap_start = 0;
+        bool in_gap = false;
+        uint32_t shown = 0;
+        for (uint32_t i = 0; i <= n; ++i) {
+          bool zero = (i < n) && (counts[i] == 0);
+          if (zero && !in_gap) {
+            in_gap = true;
+            gap_start = i;
+          } else if (!zero && in_gap) {
+            in_gap = false;
+            uint32_t len = i - gap_start;
+            if (len >= 4 && shown < 14) {
+              gaps += fmt::format("{:08X}+{} ",
+                                  td.start_address() + gap_start * 4, len);
+              ++shown;
+            }
+          }
+        }
+        XELOGI("Coverage {:08X}: unexecuted spans (>=4 insns): {}",
+               ::cvars::guide_coverage_fn,
+               gaps.empty() ? std::string("none") : gaps);
+      } else {
+        // "lookup=FOUND" means nothing on its own: Processor::LookupFunction
+        // DECLARES the function when it is absent, so it returns non-null for
+        // any valid guest address - including one that never executed. Reading
+        // it as "was called" produced two confident false positives (81A0FE48
+        // in phase 381, 819FF7A0 in phase 385) before the contradiction with
+        // the device state gave it away.
+        //
+        // The status field is the real signal. kDeclared is set by the lookup
+        // itself; kDefined is set only by DemandFunction after the function is
+        // actually translated, and translation happens on the demand path when
+        // a call resolves. So kDefined => it ran, kDeclared => it did not.
+        const char* st = "?";
+        if (f) {
+          using SS = xe::cpu::Symbol::Status;
+          SS ss = f->status();
+          st = ss == SS::kNew        ? "NEW"
+             : ss == SS::kDeclared   ? "DECLARED (never translated -> never called)"
+             : ss == SS::kDefined    ? "DEFINED (translated -> was called)"
+             : ss == SS::kFailed     ? "FAILED"
+                                     : "?";
+        }
+        XELOGI("Coverage {:08X}: status={} guest={} trace_valid={}",
+               ::cvars::guide_coverage_fn, st, gf ? "yes" : "no",
+               (gf && gf->trace_data().is_valid()) ? "yes" : "no");
+        XELOGI("Coverage {:08X}: no trace data (need "
+               "trace_function_coverage and trace_function_data_path)",
+               ::cvars::guide_coverage_fn);
+      }
+    }
+  }
 }
 
 void VdSwap_entry(
@@ -1949,6 +2769,15 @@ void VdSwap_entry(
     lpdword_t frontbuffer_ptr,  // ptr to frontbuffer address
     lpdword_t texture_format_ptr, lpdword_t color_space_ptr, lpdword_t width,
     lpdword_t height) {
+  // Phase 377: drive the coverage readback from the swap path too, so it
+  // reports in configurations where the composite-draw hook does not fire
+  // (e.g. with guide_clear_cmd_overflow). One-shot inside the function.
+  {
+    static uint32_t cov_frames = 0;
+    if (::cvars::guide_coverage_fn && ++cov_frames == 2000) {
+      EmitGuideCoverageOnce();
+    }
+  }
   // Composite the Guide here. The title's D3D device is thread-affine and
   // this runs on the thread that owns it, inside the title's frame and just
   // before its swap - which is where the Guide is drawn on hardware. The
@@ -2022,7 +2851,252 @@ void VdSwap_entry(
     static thread_local bool in_guide_draw = false;
     auto* gth = XThread::GetCurrentThread();
     if (gth && !in_guide_draw) {
-      in_guide_draw = true;
+      // Clear the re-entry guard on scope exit, not by assignment.
+      //
+      // Phase 250: the Guide draw path faults on the title thread, and when it
+      // does before the trailing `in_guide_draw = false`, the flag stays set
+      // and the hook is disabled for the rest of the session - which is why
+      // identical flags produced paintframe=32 in one run and 0 in the next,
+      // and why an unknown number of "forcing X changed nothing" results may
+      // have been runs where X never ran. A scope guard cannot be skipped by
+      // a fault that unwinds.
+      struct GuideDrawScope {
+        bool* flag;
+        explicit GuideDrawScope(bool* f) : flag(f) { *flag = true; }
+        ~GuideDrawScope() { *flag = false; }
+      } guide_draw_scope(&in_guide_draw);
+      {
+        // Arm the checkpoints at hook ENTRY - they are all upstream of the
+        // draw bracket, so arming them there would be too late to say
+        // anything about the first pass, which is the only one that matters.
+        static uint32_t hook_n = 0;
+        ckpt_on = hook_n++ < 3;
+      }
+      // Repoint the draw root at the shallowest element that owns a visual.
+      // hud hands [guide+8] to the layout and render walk. In the observed
+      // tree that is the root whose only child, 0001012D, has no id, no
+      // position and no visual - so a render that requires a visual to
+      // descend gets no further, while layout (which does not) reports the
+      // whole tree laid out correctly. Pointing the root at 000100B1
+      // ("scnInfoUpsellLive") skips the empty node. If the render emits
+      // packets after this, that node was the blocker; if it still emits
+      // nothing, the tree is not what is stopping it.
+      // The scene creator writes its handle through an out-pointer. We pass
+      // our own scratch buffer, so the handle lands there and never reaches
+      // [guide+8] - which is what hud's draw uses as its root. Measured:
+      // [guide+8] was 00000000 at every draw. hud itself would have passed
+      // &this->field8; storing the handle after the fact is the same result.
+      // Write to the DRAW object, not the bootstrap object. Both of these
+      // previously stored into guide_bs_obj_+8, which the object dump showed
+      // is a field on the OUTER object that nothing reads - the draw's `this`
+      // is guide_bs_obj_+0x10, so its root lives at bs+0x18. Their measured
+      // "no change" result was therefore about a field nobody looks at, and
+      // the repoint hypothesis was never actually tested.
+      //
+      // Worth testing because the class probe found that 0001012D - the only
+      // child of the scene root, and the node every render walk must pass
+      // through - matches ONLY the base class descriptor [81D6CDC8]. Its
+      // siblings deeper in the tree match the visual class [81D6CDDC] as well.
+      // A walk that needs the visual class to recurse stops there, which is
+      // what emitting no geometry from a healthy tree looks like.
+      if (::cvars::guide_root_to_visual && guide_draw_this_ &&
+          guide_first_visual_node_) {
+        auto* rm2 = kernel_state()->memory();
+        uint32_t cur_root = xe::load_and_swap<uint32_t>(
+            rm2->TranslateVirtual(guide_draw_this_ + 8u));
+        if (cur_root != guide_first_visual_node_) {
+          xe::store_and_swap<uint32_t>(
+              rm2->TranslateVirtual(guide_draw_this_ + 8u),
+              guide_first_visual_node_);
+          XELOGI("GuideRoot: [this+8] {:08X} -> {:08X}", cur_root,
+                 guide_first_visual_node_);
+        }
+      }
+      // Claim the D3D device for the thread that is about to draw with it.
+      //
+      // xam's 819F4348 is a thread-ownership guard, and it does not degrade
+      // gracefully:
+      //   819F4444  lwz   r11, 11016(r31)   [device+0x2B08] = owner thread
+      //   819F4454  bl    817F6C30          current thread id
+      //   819F4458  cmplw r31, r3
+      //   819F445C  beq   -> return         match: proceed
+      //   819F4474  bl    81A050A8          print the warning
+      //   819F4478  .long 0x0FE00019        unconditional TRAP
+      //
+      // The device is created on the Guide button dispatch thread and every
+      // draw is issued from the title's render thread inside VdSwap, so this
+      // fires on every frame - it is the "current thread (0x10) ... owned by a
+      // different thread (0x6)" message that appeared 400,000 times in a 25s
+      // log and was deduplicated as noise.
+      //
+      // 817F6C30 is xam's own "current thread id", so calling it here on the
+      // drawing thread and storing the result gives the guard the answer it
+      // is looking for, in its own terms, rather than faking the comparison.
+      if (::cvars::guide_claim_device_thread && guide_draw_this_) {
+        auto* cm2 = kernel_state()->memory();
+        auto crd = [cm2](uint32_t a) {
+          return a ? xe::load_and_swap<uint32_t>(cm2->TranslateVirtual(a)) : 0u;
+        };
+        uint32_t cdc2 = crd(guide_draw_this_ + 0x0Cu);
+        uint32_t cwr2 = crd(cdc2 + 0x1CCu);
+        uint32_t cdv2 = crd(cwr2 + 0x0Cu);
+        if (cdv2) {
+          uint32_t tid = uint32_t(kernel_state()->processor()->Execute(
+              gth->thread_state(), 0x817F6C30u, nullptr, 0));
+          uint32_t owner = crd(cdv2 + 0x2B08u);
+          if (tid && owner != tid) {
+            xe::store_and_swap<uint32_t>(
+                cm2->TranslateVirtual(cdv2 + 0x2B08u), tid);
+            // Remember what we displaced so it can be put back after the
+            // draw. Taking ownership permanently is not a fix, it is a theft:
+            // thread 0x6 owns this device legitimately and its own guarded
+            // calls - every D3D entry point checks - would then fail the same
+            // way ours did. With ignore_trap_instructions on they do not stop,
+            // they continue past a trap with whatever state they had, which
+            // is a good description of an emulator that wedges.
+            guide_claim_dev_ = cdv2;
+            guide_claim_prev_ = owner;
+            static uint32_t claim_logs = 0;
+            if (claim_logs++ < 3) {
+              XELOGI("GuideClaim: device {:08X} owner {:08X} -> this thread "
+                     "{:08X} (restored after the draw)",
+                     cdv2, owner, tid);
+            }
+          }
+        }
+      }
+      // The whole Guide object at draw entry. [guide+8] being null was found
+      // one field at a time; dumping the head answers "which of hud's fields
+      // are actually populated" in a single line instead of a cvar per field.
+      {
+        static uint32_t obj_dumps = 0;
+        if (obj_dumps++ < 2 && guide_draw_this_) {
+          auto* om = kernel_state()->memory();
+          std::string oh;
+          for (uint32_t w = 0; w < 16; ++w) {
+            oh += fmt::format("{:02X}:{:08X} ", w * 4,
+                              xe::load_and_swap<uint32_t>(
+                                  om->TranslateVirtual(guide_draw_this_ +
+                                                       w * 4)));
+          }
+          XELOGI("GuideObj: this={:08X} {}", guide_draw_this_, oh);
+          // The DC the draw actually renders into, which is not the one the
+          // scene walk reports. +0x134 is the null-render flag that makes
+          // XuiRenderPresent return S_OK without presenting and makes
+          // XuiRenderBegin skip dc->vtable[20]; +0x1C8/+0x1CC are the wrapper
+          // and callback that 81901E40 dereferences. If the draw's DC is a
+          // different object from the bootstrap's, then every measurement of
+          // "[dc+134]=0" so far was taken on a DC the draw does not use.
+          uint32_t ddc = xe::load_and_swap<uint32_t>(
+              om->TranslateVirtual(guide_draw_this_ + 0x0Cu));
+          if (ddc) {
+            auto ord = [om](uint32_t a) {
+              return xe::load_and_swap<uint32_t>(om->TranslateVirtual(a));
+            };
+            XELOGI("GuideDC: draw dc={:08X} vtable={:08X} [134]={:08X} "
+                   "[1C8]={:08X} [1CC]={:08X} [1D0]={:08X}",
+                   ddc, ord(ddc), ord(ddc + 0x134u), ord(ddc + 0x1C8u),
+                   ord(ddc + 0x1CCu), ord(ddc + 0x1D0u));
+            uint32_t wrap = ord(ddc + 0x1CCu);
+            if (wrap) {
+              XELOGI("GuideDC: wrapper {:08X} [00]={:08X} [0C]={:08X} "
+                     "(device) [10]={:08X}",
+                     wrap, ord(wrap), ord(wrap + 0x0Cu), ord(wrap + 0x10u));
+            }
+          }
+          if (guide_bs_obj_ && guide_bs_obj_ != guide_draw_this_) {
+            std::string bh;
+            for (uint32_t w = 0; w < 16; ++w) {
+              bh += fmt::format("{:02X}:{:08X} ", w * 4,
+                                xe::load_and_swap<uint32_t>(
+                                    om->TranslateVirtual(guide_bs_obj_ +
+                                                         w * 4)));
+            }
+      if (ckpt_on) XELOGI("GuideCk: render_begin_block");
+            XELOGI("GuideObj: bs  ={:08X} {}", guide_bs_obj_, bh);
+          }
+        }
+      }
+      // Call the DC's own render-begin, dc->vtable[20] (818FDDE8), directly
+      // before the composite draw. Disassembled it is:
+      //   traps if [dc+0x1CC] (the wrapper) is null
+      //   bctrl [[wrapper]+44]  -> Clear, flags 15, colour from [81601EF0]
+      //   bctrl [[wrapper]+20]
+      // A Clear with all flags set has to emit packets on every frame. The
+      // reservation cursor moves on draw #1 only, so either hud never reaches
+      // this call or the wrapper's clear emits nothing. Calling it ourselves
+      // separates those: if the cursor advances, the render path works and
+      // hud is not invoking it; if it does not, the wrapper is the problem.
+      if (::cvars::guide_call_render_begin && guide_draw_this_) {
+        auto* bm = kernel_state()->memory();
+        auto brd = [bm](uint32_t a) {
+          return a ? xe::load_and_swap<uint32_t>(bm->TranslateVirtual(a)) : 0u;
+        };
+        uint32_t bdc = brd(guide_draw_this_ + 0x0Cu);
+        uint32_t bvt = brd(bdc);
+        uint32_t bfn = bvt ? brd(bvt + 20u * 4u) : 0;
+        static uint32_t rb_logs = 0;
+        if (bdc && bfn && brd(bdc + 0x1CCu)) {
+          // Publish the device BEFORE calling, not after. The capture in
+          // CmdbufAtDraw sits further down the hook, so when this call hangs
+          // it never runs, GuideResvDevice() stays 0, and anything keyed off
+          // it - like the command-buffer completion forcer - silently targets
+          // only VdGlobalXamDevice. That produced a clean-looking negative
+          // for a treatment that was never applied to the right device.
+          guide_resv_dev_ = brd(brd(bdc + 0x1CCu) + 0x0Cu);
+          // Publish this thread so a host watchdog can sample its guest PC
+          // while it is stuck. Four candidate stall sites have now been
+          // proposed from disassembly and each test either failed to apply or
+          // targeted a loop the thread turns out not to be in. Reading the
+          // program counter is the only way to stop guessing.
+          guide_stall_thread_ = gth->thread() ? gth->thread()->native_handle()
+                                              : nullptr;
+          uint64_t ba[] = {bdc, 0};
+          // Which ThreadState this runs against decides whether the whole
+          // render subsystem is reachable: every function below this call
+          // re-checks 81778BB8 against [r13+256] and traps on mismatch.
+          xe::cpu::ThreadState* rts =
+              ::cvars::guide_render_thread ? GuideRenderThreadState() : nullptr;
+          uint64_t br = kernel_state()->processor()->Execute(
+              rts ? rts : gth->thread_state(), bfn, ba, xe::countof(ba));
+          if (rb_logs++ < 3) {
+            XELOGI("GuideRenderBegin: {:08X}(dc {:08X}, 0) -> {:08X} [thread={}]",
+                   bfn, bdc, static_cast<uint32_t>(br),
+                   rts ? "xam render thread"
+                       : (::cvars::guide_render_thread ? "BOOTSTRAP (render "
+                                                         "thread not resolved)"
+                                                       : "bootstrap"));
+          }
+        } else if (rb_logs++ < 3) {
+          XELOGW("GuideRenderBegin: skipped (dc={:08X} vt={:08X} fn={:08X} "
+                 "wrapper={:08X})",
+                 bdc, bvt, bfn, brd(bdc + 0x1CCu));
+        }
+      }
+      // Publish the drawing thread unconditionally, not only when the
+      // render-begin experiment runs. With guide_claim_device_thread the
+      // composite draw itself can now block, and the watchdog needs a handle
+      // to sample regardless of which call is the one that parks.
+      guide_stall_thread_ = gth->thread() ? gth->thread()->native_handle()
+                                          : nullptr;
+      {
+        // Name the thread being published. Several experiments this session
+        // measured the wrong object and produced confident answers about it,
+        // so record the OS thread id here and have the watchdog print the id
+        // it actually samples - if they differ, nothing the watchdog says is
+        // about this draw.
+        static bool once_pub = false;
+        if (!once_pub) {
+          once_pub = true;
+          XELOGI("GuidePublish: draw thread handle={} os_tid={} guest='{}'",
+                 guide_stall_thread_.load(),
+                 guide_stall_thread_
+                     ? GetThreadId(reinterpret_cast<HANDLE>(
+                           guide_stall_thread_.load()))
+                     : 0,
+                 gth->thread_name());
+        }
+      }
       uint64_t gargs[] = {guide_draw_this_};
       {
         // Log BEFORE the draw: with guide_force_real_present the draw faults,
@@ -2035,7 +3109,15 @@ void VdSwap_entry(
             return xe::load_and_swap<uint32_t>(pm->TranslateVirtual(a));
           };
           uint32_t pdc = prd(guide_draw_this_ + 12);
-          uint32_t pdev = pdc ? prd(pdc + 0x1CCu) : 0;
+          // [dc+0x1CC] is the WRAPPER, not the device - the device is
+          // [wrapper+0x0C]. This read the wrapper and called it "dev" for
+          // many phases, so "Guide pre-draw: dev [32A0]=00000060" was
+          // reporting a word at wrapper+0x32A0 that means nothing, directly
+          // contradicting the PreDrawBind line above it which correctly
+          // showed [32A0]=40AE2160 on device 40870D00. The surfaces were
+          // bound all along; only the report was wrong.
+          uint32_t pwrap = pdc ? prd(pdc + 0x1CCu) : 0;
+          uint32_t pdev = pwrap ? prd(pwrap + 0x0Cu) : 0;
           // 818FDE98 sets [dc+134] = [param+1C] and [dc+1CC] = [param+8],
           // and stores the parameter object itself at [dc+1C8]. Read it back
           // so the inheritance is measured rather than assumed.
@@ -2045,9 +3127,21 @@ void VdSwap_entry(
                  pdc, pdc ? prd(pdc + 0x134u) : 0, pdev, pparam,
                  pparam ? prd(pparam + 0x1Cu) : 0,
                  pparam ? prd(pparam + 8u) : 0);
+          // 81901EAC does bctrl through [[dc+0x1C8]+0x0C] and lands on
+          // 4089B0B0 - data, not code. The guest asserts only that the slot is
+          // non-null, so a wrong pointer passes. If [param+00] looks like an
+          // 81xxxxxx vtable the object is right and the slot is stale; if not,
+          // [dc+0x1C8] is holding the wrong object entirely.
+          XELOGI("Guide pre-draw: param vt=[param+00]={:08X} "
+                 "cb=[param+0C]={:08X} [dc+1CC]={:08X}",
+                 pparam ? prd(pparam) : 0, pparam ? prd(pparam + 0x0Cu) : 0,
+                 pdc ? prd(pdc + 0x1CCu) : 0);
+          if (ckpt_on) XELOGI("GuideCk: bind_cmdbuf");
           if (pdev) {
-            XELOGI("Guide pre-draw: dev [32A0]={:08X} [32B0]={:08X}",
-                   prd(pdev + 0x32A0u), prd(pdev + 0x32B0u));
+            XELOGI("Guide pre-draw: wrapper={:08X} dev={:08X} [32A0]={:08X} "
+                   "[32B0]={:08X} [3F74]={:08X}",
+                   pwrap, pdev, prd(pdev + 0x32A0u), prd(pdev + 0x32B0u),
+                   prd(pdev + 0x3F74u));
             // NOTE on SetRenderTarget's surface check (819FA3E4): it is
             //   rlwinm. r11,w0,0,1,1   ; isolate bit 30, Rc=1 so CR0 is set
             //   beq     cr0,+8         ; skip the trap when the bit is ZERO
@@ -2070,7 +3164,7 @@ void VdSwap_entry(
           // them. Comparing addresses across runs is worthless: the guest heap
           // is not stable between sessions.
           for (auto& e : {std::pair<const char*, uint32_t>{"xam dev [81D43684]",
-                                                           prd(0x81D43684u)},
+                                                           prd(XamDeviceSlot())},
                           {"VdGlobalXamDevice [801E6FC8]", prd(0x801E6FC8u)},
                           {"VdGlobalDevice [801E6FC4]", prd(0x801E6FC4u)},
                           {"dc wrapper [dc+1CC]", pdev},
@@ -2080,8 +3174,16 @@ void VdSwap_entry(
                           // 819FEB78, so the device the present path actually
                           // uses is [wrapper+12] - not the 81D43684 global the
                           // redirect changes.
+                          // pwrap, NOT pdev. This entry predates the phase
+                          // 183 fix that redefined pdev from the wrapper to
+                          // the device; left as pdev it reads [device+12] -
+                          // an arbitrary field - and the loop body then
+                          // dereferences that as a device pointer, which is
+                          // the exe+EEE3F host fault. [wrapper+12] is the
+                          // device, so this now agrees with pdev by
+                          // construction rather than by accident.
                           {"PRESENT PATH [wrapper+12]",
-                           pdev ? prd(pdev + 12u) : 0}}) {
+                           pwrap ? prd(pwrap + 12u) : 0}}) {
             if (!e.second) {
               XELOGI("  device {}: <null>", e.first);
               continue;
@@ -2162,6 +3264,7 @@ void VdSwap_entry(
             return a ? xe::load_and_swap<uint32_t>(
                            dm->TranslateVirtual(a)) : 0u;
           };
+      if (ckpt_on) XELOGI("GuideCk: predraw_surfaces");
           uint32_t ddc = d2(guide_draw_this_ + 12);
           uint32_t dwrap = ddc ? d2(ddc + 0x1CCu) : 0;
           uint32_t ddev = dwrap ? d2(dwrap + 12u) : 0;
@@ -2184,23 +3287,46 @@ void VdSwap_entry(
           }
         }
       }
+            if (ckpt_on) XELOGI("GuideCk: call_819E7528_surface");
       if (::cvars::guide_bind_cmdbuf_kb > 0) {
+        // Re-init the 81A01358 block on EVERY draw whose cursor is cold, not
+        // once. The one-shot this replaces is exactly what limited emission to
+        // the first frame: the log order is unambiguous - block cold at draw
+        // #1, init runs, 237 words emitted; block cold again at draw #2, no
+        // init, zero words; and so on for 3600 draws. Nothing zeroes the
+        // block - it is simply never set again, because `if (!cbuf)` fired
+        // once. The buffer allocation stays one-shot; only the binding
+        // repeats. 81A01358 asserts the cursor is currently zero, which is
+        // precisely the state at draw entry, so re-calling it is the
+        // precondition it wants rather than a workaround.
         static uint32_t cbuf = 0;
-        if (!cbuf) {
+            if (ckpt_on) XELOGI("GuideCk: call_819F31A8_rt");
+        {
           auto* cm = kernel_state()->memory();
           auto c2 = [cm](uint32_t a) {
             return a ? xe::load_and_swap<uint32_t>(
                            cm->TranslateVirtual(a)) : 0u;
           };
+            if (ckpt_on) XELOGI("GuideCk: call_819F38C8_depth");
           uint32_t cdc = c2(guide_draw_this_ + 12);
           uint32_t cwrap = cdc ? c2(cdc + 0x1CCu) : 0;
           uint32_t cdev = cwrap ? c2(cwrap + 12u) : 0;
           uint32_t csize =
               uint32_t(::cvars::guide_bind_cmdbuf_kb) * 1024u;
           if (cdev && !c2(cdev + 0x2B4Cu)) {
-            cbuf = cm->SystemHeapAlloc(csize, 4096);
+            bool fresh = false;
+            if (!cbuf) {
+              cbuf = cm->SystemHeapAlloc(csize, 4096);
+              fresh = true;
+            }
             if (cbuf) {
-              std::memset(cm->TranslateVirtual(cbuf), 0, csize);
+              // Clear on allocation only. Zeroing 512KB on each of 3600 draws
+              // is 1.8GB of memset for no benefit - the emitter overwrites
+              // what it uses, and the walkers read only as far as the cursor
+              // advanced.
+              if (fresh) {
+                std::memset(cm->TranslateVirtual(cbuf), 0, csize);
+              }
               // Go through xam's own setter rather than writing the
               // cursor: 81A01358(dev, buffer, words) sets base +2B48,
               // cursor +2B4C = buffer-4 (emission does +4 before each
@@ -2216,6 +3342,27 @@ void VdSwap_entry(
                       : 0;
               guide_cmdbuf_base_ = cbuf;
               guide_cmdbuf_size_ = csize;
+              // THE FIELDS THAT ACTUALLY MATTER. 81A042E0, the reservation
+              // that seeds the emitter's cursor, allocates from [dev+0x30]
+              // (current) and [dev+0x34] (end) - not the +0x2B48/2B4C/2B50
+              // block 81A01358 sets. Measured at draw entry those were
+              // cur=408881E0 end=40889424, i.e. 4676 bytes, while the Guide's
+              // first reservation asks for 2309 words = 9236 bytes. The fit
+              // test at 81A0432C fails, the slow path runs, and the reserve
+              // returns 0 - which is the zero cursor the emitter faults on.
+            if (ckpt_on) XELOGI("GuideCk: survey_start");
+              // Point them at the buffer we just allocated.
+              xe::store_and_swap<uint32_t>(
+                  cm->TranslateVirtual(cdev + 0x30u), cbuf);
+              xe::store_and_swap<uint32_t>(
+                  cm->TranslateVirtual(cdev + 0x34u), cbuf + csize);
+              if (ckpt_on) XELOGI("GuideCk: sv_reads");
+              static uint32_t bind_logs = 0;
+              if (bind_logs++ < 3)
+              XELOGI("Guide: reserve window widened -> cur[30]={:08X} "
+                     "end[34]={:08X} ({} bytes)",
+                     c2(cdev + 0x30u), c2(cdev + 0x34u), csize);
+              if (bind_logs < 4)
               XELOGI("Guide: cmdbuf init {:08X}(dev {:08X}, {:08X}, {}) "
                      "-> {:08X}; base={:08X} cursor={:08X} limit={:08X}",
                      0x81A01358u, cdev, cbuf, csize / 4,
@@ -2223,8 +3370,49 @@ void VdSwap_entry(
                      c2(cdev + 0x2B4Cu), c2(cdev + 0x2B50u));
             }
           } else {
+          if (ckpt_on) XELOGI("GuideCk: sv_firstlog");
+            static uint32_t skip_logs = 0;
+            if (skip_logs++ < 3)
             XELOGW("Guide: cmdbuf bind skipped (dev={:08X} cursor={:08X})",
                    cdev, cdev ? c2(cdev + 0x2B4Cu) : 0);
+          }
+        }
+        // Re-widen on EVERY draw, not just the first. The one-shot path above
+        // gets draw #1 through - it completes with [dc+134]=0 and both
+        // surfaces bound, the first time the real render path has run - but by
+        // draw #2 the device has restored its own ~4.6 KB window (cur[30] back
+        // in the 40888xxx range) and 81A042E0 fails again. Only intervene when
+        // the window is actually too small, so the device keeps its own when
+        // it is adequate.
+        if (guide_cmdbuf_base_) {
+          if (ckpt_on) XELOGI("GuideCk: sv_pdev");
+          auto* wm = kernel_state()->memory();
+          auto w2 = [wm](uint32_t a) {
+            return a ? xe::load_and_swap<uint32_t>(wm->TranslateVirtual(a))
+                     : 0u;
+          };
+          uint32_t wdc = w2(guide_draw_this_ + 12);
+          uint32_t wwrap = wdc ? w2(wdc + 0x1CCu) : 0;
+          uint32_t wdev = wwrap ? w2(wwrap + 12u) : 0;
+          if (wdev) {
+            uint32_t wcur = w2(wdev + 0x30u);
+            uint32_t wend = w2(wdev + 0x34u);
+            if (wcur < guide_cmdbuf_base_ ||
+                wcur >= guide_cmdbuf_base_ + guide_cmdbuf_size_ ||
+                wend - wcur < 0x8000u) {
+              xe::store_and_swap<uint32_t>(wm->TranslateVirtual(wdev + 0x30u),
+                                           guide_cmdbuf_base_);
+              xe::store_and_swap<uint32_t>(
+                  wm->TranslateVirtual(wdev + 0x34u),
+                  guide_cmdbuf_base_ + guide_cmdbuf_size_);
+              static std::atomic<uint32_t> wn{0};
+              uint32_t wi = ++wn;
+              if (wi <= 3) {
+                XELOGI("Guide: re-widened #{} (was cur={:08X} end={:08X})", wi,
+                       wcur, wend);
+              }
+            }
+          if (ckpt_on) XELOGI("GuideCk: sv_entryloop");
           }
         }
       }
@@ -2239,7 +3427,7 @@ void VdSwap_entry(
           uint32_t fdc3 = guide_draw_this_ ? f3(guide_draw_this_ + 12) : 0;
           uint32_t fw3 = fdc3 ? f3(fdc3 + 0x1CCu) : 0;
           uint32_t fdev = fw3 ? f3(fw3 + 12u) : 0;
-          if (!fdev) fdev = f3(0x81D43684u);
+          if (!fdev) fdev = f3(XamDeviceSlot());
           if (fdev && !f3(fdev + 0x3B64u)) {
             fr_done = true;
             uint32_t p1 = fm3->SystemHeapAlloc(0x1000, 0x1000,
@@ -2256,6 +3444,8 @@ void VdSwap_entry(
               XELOGI("Guide: fake ring on {:08X}: [3B64]={:08X} "
                      "[3DC4]={:08X}",
                      fdev, p1, p2);
+              if (ckpt_on) XELOGI("GuideCk: sv_devdiff");
+                     if (ckpt_on) XELOGI("GuideCk: sv_diffblock");
             }
           }
         }
@@ -2284,8 +3474,9 @@ void VdSwap_entry(
           uint32_t rdc = guide_draw_this_ ? r2(guide_draw_this_ + 12) : 0;
           uint32_t rwrap = rdc ? r2(rdc + 0x1CCu) : 0;
           uint32_t rdev = rwrap ? r2(rwrap + 12u) : 0;
+      if (ckpt_on) XELOGI("GuideCk: use_bound_device");
           if (!rdev) {
-            rdev = r2(0x81D43684u);
+            rdev = r2(XamDeviceSlot());
             if (!rdev) rdev = r2(0x801E6FC8u);
           }
           uint32_t tdev = r2(0x801E6FC4u);
@@ -2342,6 +3533,7 @@ void VdSwap_entry(
                 alt_w = wd;
                 alt_h = ht;
               }
+      if (ckpt_on) XELOGI("GuideCk: fake_ring");
             }
             if (!surf && alt) {
               surf = alt;
@@ -2374,6 +3566,7 @@ void VdSwap_entry(
             // reached through the wrapper, which is NOT the device the
             // present uses ([dc+0x1CC]). The draw path binds it there too.
             if (surf) guide_title_surface_ = surf;
+      if (ckpt_on) XELOGI("GuideCk: bind_title_rt");
             static uint32_t rtlog = 0;
             if (rtlog++ < 3) {
               XELOGI("Guide: RT bind sees dev {:08X} RT0 {:08X} "
@@ -2486,7 +3679,7 @@ void VdSwap_entry(
           auto drd = [dm](uint32_t a) {
             return xe::load_and_swap<uint32_t>(dm->TranslateVirtual(a));
           };
-          uint32_t ddev = drd(0x81D43684u);
+          uint32_t ddev = drd(XamDeviceSlot());
           uint32_t rt0 = ddev ? drd(ddev + 0x32A0u) : 0;
           uint32_t dep = ddev ? drd(ddev + 0x32B0u) : 0;
           if (ddev && rt0 && !dep) {
@@ -2534,6 +3727,7 @@ void VdSwap_entry(
       const uint32_t kBlk = 0x10000u;
       uint32_t kTotalBlocks = 0;
       for (auto& r : kRanges) kTotalBlocks += (r.hi - r.lo) / kBlk;
+      if (ckpt_on) XELOGI("GuideCk: fake_front_buffer");
       if (::cvars::guide_diff_draw_writes && pre_sums.empty()) {
         auto* mmv = kernel_state()->memory();
         pre_sums.reserve(kTotalBlocks);
@@ -2551,7 +3745,17 @@ void VdSwap_entry(
         XELOGI("DrawDiff: snapshot of {} blocks taken", pre_sums.size());
       }
       static std::vector<uint32_t> wd_pre;
-      const uint32_t kWdLo = 0xFE030000u, kWdHi = 0xFE050000u;
+      // FE030000..FE050000 is where the draw wrote when the device used its
+      // own reservation window. Since guide_bind_cmdbuf_kb repoints
+      // [dev+0x30]/[dev+0x34] at our allocation, the packets now land there
+      // instead - guide_diff_draw_writes shows ~12k changed words in the heap
+      // blocks and nothing at all in FE03xxxx. Watch the buffer we actually
+      // gave the device, else the word diff finds nothing to extract or run.
+      const uint32_t kWdLo =
+          guide_cmdbuf_base_ ? guide_cmdbuf_base_ : 0xFE030000u;
+      const uint32_t kWdHi =
+          guide_cmdbuf_base_ ? (guide_cmdbuf_base_ + guide_cmdbuf_size_)
+                             : 0xFE050000u;
       if (::cvars::guide_word_diff && wd_pre.empty()) {
         auto* wm3 = kernel_state()->memory();
         wd_pre.resize((kWdHi - kWdLo) / 4);
@@ -2582,6 +3786,7 @@ void VdSwap_entry(
           ++rtl;
           auto* qm = kernel_state()->memory();
           auto q = [qm](uint32_t a) {
+      if (ckpt_on) XELOGI("GuideCk: bind_depth_copy");
             return a ? xe::load_and_swap<uint32_t>(
                            qm->TranslateVirtual(a)) : 0u;
           };
@@ -2615,6 +3820,7 @@ void VdSwap_entry(
                 uint32_t(::cvars::guide_second_context_kb) * 1024u;
             guide_cmdbuf_base_ =
                 sm->SystemHeapAlloc(guide_cmdbuf_size_, 4096);
+                if (ckpt_on) XELOGI("GuideCk: force_real_present");
             XELOGI("GuideCtx2: buffer {:08X} +{} bytes",
                    guide_cmdbuf_base_, guide_cmdbuf_size_);
           }
@@ -2641,12 +3847,2314 @@ void VdSwap_entry(
           }
         }
       }
+      // --- front-buffer setup, BEFORE the draw ---
+      // The guide_force_front_buffer block further down is unreachable: it
+      // sits after this Execute, and the draw it is meant to enable faults
+      // inside the emitter, so the guest thread dies and control never
+      // returns to it. Run the same work here, with the other setup cvars.
+      //
+      // 81A0FE48 allocates [dev+0x2B10] (81A0A290(0x80,5,2) at 81A0FEF4) and
+      // performs the setup that fills [dev+0x3F74]. Its second argument is a
+      // 124-byte block; mode 2 hardcodes `li r7,0` at 8178F7BC so there is
+      // none to pass through and it must be synthesized. 8178E9F0 memsets the
+      // block and then writes only the fields below, so zero-plus-these is
+      // faithful. 640x480 is that function's own fallback branch
+      // (li r10,640 / li r11,480 at 8178EAE4/8178EAEC).
+      if (::cvars::guide_force_front_buffer) {
+        static bool pre_fb_done = false;
+        if (!pre_fb_done) {
+          auto* fm = kernel_state()->memory();
+          auto fr2 = [fm](uint32_t a) {
+            return a ? xe::load_and_swap<uint32_t>(fm->TranslateVirtual(a))
+                     : 0u;
+          };
+          uint32_t fdc = fr2(guide_draw_this_ + 12);
+          uint32_t fwrap = fdc ? fr2(fdc + 0x1CCu) : 0;
+          uint32_t fdev = fwrap ? fr2(fwrap + 0x0Cu) : 0;
+          // xam refused the call with "current thread (0x16) is trying to use
+          // a D3D device object that is owned by a different thread (0x6)".
+          // [dev+0x2B08] is where that owner is recorded - 81A03D40 asserts
+          // it equals 817F6C30(), xam's current-thread query. Read both and
+          // compare, so "the hook is on the wrong thread" is separated from
+          // "the device was created in another phase".
+          uint32_t owner = fdev ? fr2(fdev + 0x2B08u) : 0;
+          uint64_t cur = kernel_state()->processor()->Execute(
+              gth->thread_state(), 0x817F6C30u, nullptr, 0);
+          XELOGI("Guide: pre-draw front-buffer gate: dc={:08X} wrap={:08X} "
+                 "dev={:08X} [3F74]={:08X} [2B10]={:08X} owner[2B08]={:08X} "
+                 "817F6C30()={:08X} match={}",
+                 fdc, fwrap, fdev, fdev ? fr2(fdev + 0x3F74u) : 0,
+                 fdev ? fr2(fdev + 0x2B10u) : 0, owner,
+                 static_cast<uint32_t>(cur),
+                 owner == static_cast<uint32_t>(cur) ? "YES" : "NO");
+          if (fdev && !fr2(fdev + 0x3F74u)) {
+            pre_fb_done = true;
+            // EXPERIMENT, not a fix: xam refuses device calls whose caller is
+            // not the creating thread recorded at [dev+0x2B08]. Forge that
+            // field to the calling thread for the duration of the call, to
+            // confirm in one run that thread ownership is the only thing
+            // standing between us and 81A0FE48 completing. If this works the
+            // real change is to create the device on this thread instead.
+            uint32_t saved_owner = fr2(fdev + 0x2B08u);
+            if (saved_owner != static_cast<uint32_t>(cur)) {
+              xe::store_and_swap<uint32_t>(fm->TranslateVirtual(fdev + 0x2B08u),
+                                           static_cast<uint32_t>(cur));
+              XELOGI("Guide: [dev+2B08] {:08X} -> {:08X} (ownership forged "
+                     "for the setup call)",
+                     saved_owner, static_cast<uint32_t>(cur));
+            }
+            uint32_t blk = fm->SystemHeapAlloc(0x7C, 16);
+            if (blk) {
+              std::memset(fm->TranslateVirtual(blk), 0, 0x7C);
+              auto wr = [&](uint32_t off, uint32_t v) {
+                xe::store_and_swap<uint32_t>(fm->TranslateVirtual(blk + off),
+                                             v);
+              };
+              // Verbatim from a real mode-1 block, captured by dumping arg5 at
+              // the 819F4D28 breakpoint during a --guide_create_primary_device
+              // run (DevCreateBlock @7113F190). Every non-zero word is
+              // reproduced; everything else stays zeroed by the memset above.
+              //
+              // Two things this corrected: 640x480 IS the right size here (the
+              // "minimum frame buffer of 1280x720" validator line is a
+              // certification advisory, not a rejection - the real block
+              // triggers it too), and +0x40/+0x70/+0x74 are populated, which
+              // earlier guesses left at zero.
+      if (ckpt_on) XELOGI("GuideCk: second_context");
+              wr(0x00, 0x00000280);  // 640  width
+              wr(0x04, 0x000001E0);  // 480  height
+              wr(0x08, 0x28280186);
+              wr(0x34, 0x80000000);
+              wr(0x3C, 0x00000001);
+              wr(0x40, 0x24900106);
+              wr(0x4C, 0x00001000);  // 4096 - read via +0x48 by 81A0FE48
+              wr(0x54, 0x00010000);
+              wr(0x68, 0x00000280);  // 640
+              wr(0x6C, 0x000001E0);  // 480
+              wr(0x70, 0x00000780);  // 1920
+              wr(0x74, 0x00000438);  // 1080
+              // Bracket the call. The JIT demand-compiles 81A0FE48 and its
+              // callees, so it is definitely entered, but the result line has
+              // never printed - which leaves "faults inside" and "never
+              // returns" indistinguishable. Log both sides.
+              XELOGI("Guide: calling 81A0FE48(dev {:08X}, blk {:08X}) ...",
+                     fdev, blk);
+              uint64_t fa[] = {fdev, blk};
+              uint64_t fres = kernel_state()->processor()->Execute(
+                  gth->thread_state(), 0x81A0FE48u, fa, xe::countof(fa));
+              XELOGI("Guide: 81A0FE48 RETURNED {:08X}",
+                     static_cast<uint32_t>(fres));
+              XELOGI("Guide: pre-draw 81A0FE48(dev {:08X}, blk {:08X}) -> "
+                     "{:08X}; [3F74]={:08X} [2B10]={:08X} [30]={:08X} "
+                     "[34]={:08X}",
+                     fdev, blk, static_cast<uint32_t>(fres),
+                     fr2(fdev + 0x3F74u), fr2(fdev + 0x2B10u),
+                     fr2(fdev + 0x30u), fr2(fdev + 0x34u));
+            }
+          }
+        }
+      }
+      // Bracket the draw itself. With guide_claim_device_thread the run
+      // wedges and no "Guide composite draw" line is ever printed, but that
+      // line sits a long way below this call behind several blocks - so its
+      // absence does not establish that the guest call is where the thread
+      // is stuck. One log either side settles it.
+      // Run the composite draw's own sequence and READ the results it throws
+      // away. 913EAB28 ends in `li r3, 0`, so it reports S_OK no matter what
+      // XuiSendMessage, XuiBubbleMessage, XuiRenderEnd or XuiRenderPresent
+      // returned - which is why its return value has never carried any signal.
+      // Drawing happens by sending a render message down the element tree, so
+      // the interesting HRESULTs are the two message passes.
+      if (::cvars::guide_trace_draw && guide_draw_this_) {
+        static bool traced = false;
+        if (!traced) {
+          traced = true;
+          auto* tm = kernel_state()->memory();
+          auto trd = [tm](uint32_t a) {
+            return a ? xe::load_and_swap<uint32_t>(tm->TranslateVirtual(a))
+                     : 0u;
+          };
+          auto xmt = kernel_state()->GetModule("xam.xex", true);
+          auto ord = [&](uint32_t o) {
+            return xmt ? xmt->GetProcAddressByOrdinal(o) : 0u;
+          };
+          uint32_t f_begin = ord(0x34B), f_layout = ord(0x82A);
+          uint32_t f_send = ord(0x35F), f_bubble = ord(0x322);
+          uint32_t f_end = ord(0x34F), f_present = ord(0x353);
+          uint32_t dc = trd(guide_draw_this_ + 12u);
+          uint32_t root = trd(guide_draw_this_ + 8u);
+          uint32_t msgb = tm->SystemHeapAlloc(256, 16);
+          uint32_t payb = tm->SystemHeapAlloc(256, 16);
+          if (f_begin && f_send && f_bubble && dc && root && msgb && payb) {
+            std::memset(tm->TranslateVirtual(msgb), 0, 256);
+            std::memset(tm->TranslateVirtual(payb), 0, 256);
+            auto* pr = kernel_state()->processor();
+            auto* tsx = gth->thread_state();
+            auto call = [&](uint32_t fn, std::initializer_list<uint64_t> a) {
+              std::vector<uint64_t> v(a);
+              return fn ? uint32_t(pr->Execute(tsx, fn, v.data(), v.size()))
+                        : 0xDEADu;
+            };
+            uint32_t hb = call(f_begin, {dc, 0xFF000000});
+            uint32_t hl = call(f_layout, {root});
+            call(guide_bs_hud_base_ + 0xA888u, {msgb, payb, dc, 0xFFFFFFFFull, 1});
+            // [msg+8] is the handled flag: 81949F50 zeroes it on entry and
+            // aborts the chain walk as soon as a handler sets it. Reading it
+            // after the send distinguishes "the walk was stopped early" from
+            // "the chain only had two links", which phase 198's object diff
+            // could not tell apart.
+            auto msgw = [&](uint32_t off) {
+              return xe::load_and_swap<uint32_t>(
+                  tm->TranslateVirtual(msgb + off));
+            };
+            // Resolve the handle the way XuiSendMessage does and read the
+            // chain node it dispatches through. 8194A51C..8194A574:
+            //   table = 0x81D70000 - 12072 = 81D6D0D8
+            //   idx   = handle & 0xFFFF, must be < [table+1056]
+            //   sub   = [table + (idx >> 6) * 4]
+            //   entry = sub + (idx & 0x3F) * 8
+            //   generation check: [entry+0] == (handle >> 16) & 0xFFFF
+            //   object = [entry+4]
+            // This is NOT what 81931040 returns - on the scene object that
+            // pointer has float bounds at +0x1C, where the dispatcher expects
+            // a handler pointer, so the two must be different structures.
+            {
+              const uint32_t kTab = 0x81D6D0D8u;
+              uint32_t idx = root & 0xFFFFu;
+              uint32_t gen = (root >> 16) & 0xFFFFu;
+              uint32_t cnt = trd(kTab + 1056u);
+              // rlwinm r9,r10,26,6,29 rotates right 6 then masks bits 2..25,
+              // which clears the low two bits of (idx>>6) - i.e. (idx>>8)*4,
+              // 256 handles per sub-table. rlwinm r11,r10,3,21,28 is idx*8
+              // masked to 0x7F8, i.e. (idx & 0xFF)*8. Both were decoded wrong
+              // twice before; worked out from the mask bit numbering rather
+              // than guessed a third time.
+              uint32_t sub = (idx < cnt) ? trd(kTab + (idx >> 8) * 4u) : 0;
+              uint32_t ent = sub ? (sub + (idx & 0xFFu) * 8u) : 0;
+              uint32_t egen = ent ? trd(ent) : 0;
+              uint32_t node = (ent && egen == gen) ? trd(ent + 4u) : 0;
+              XELOGI("GuideChain: handle {:08X} idx={} gen={:04X} cnt={} "
+                     "sub={:08X} ent={:08X} egen={:04X} node={:08X}",
+                     root, idx, gen, cnt, sub, ent, egen, node);
+              // The rlwinm masks above were decoded wrong - the entry found
+              // had [+0]=10000001 where the code compares against the
+              // generation 0001. Scan the sub-tables instead: the entry we
+              // want is the one whose [+4] is an object we already know, and
+              // finding it empirically also reveals the real stride.
+              // Scan each sub-table's full extent word by word. The four
+              // pointers are 0x810 apart, so an 8-byte stride over 64 entries
+              // covers a fraction of it - the guess was too small as well as
+              // misaligned. Look for any word equal to an object we know and
+              // report where it sits; the layout follows from that rather
+              // than from re-deriving the rlwinm masks a third time.
+              for (uint32_t st = 0; st < 4; ++st) {
+                uint32_t sb = trd(kTab + st * 4u);
+                if (!sb) continue;
+                for (uint32_t off = 0; off < 0x810u; off += 4) {
+                  uint32_t ov = trd(sb + off);
+                  if (ov == 0x407E94F0u || ov == 0x407E95F0u ||
+                      ov == 0x40802A80u || ov == 0x407ECB00u) {
+                    XELOGI("GuideChain: FOUND sub[{}]={:08X} +{:04X} = {:08X}"
+                           "  prev={:08X} next={:08X}",
+                           st, sb, off, ov, trd(sb + off - 4u),
+                           trd(sb + off + 4u));
+                  }
+                }
+              }
+              uint32_t hops = 0;
+              for (uint32_t o = node; o && hops < 8; o = trd(o + 8u), ++hops) {
+                XELOGI("GuideChain:  [{}] node={:08X} this=[+0]={:08X} "
+                       "cls=[+4]={:08X} next=[+8]={:08X} "
+                       "handler=[+1C]={:08X} ctx=[+20]={:08X}",
+                       hops, o, trd(o), trd(o + 4u), trd(o + 8u),
+                       trd(o + 0x1Cu), trd(o + 0x20u));
+              }
+            }
+            // Verify the gate empirically and call the paint directly.
+            //
+            // Phase 204 concluded from flag values that 81954468 returns 1 and
+            // 81968890 therefore runs. That is a reading, not a measurement.
+            // Call both against chain node 1's context - the element object
+            // that carries the bounds - and bracket the device's reservation
+            // cursor around the paint. If the cursor moves, the paint emits
+            // and something upstream is not reaching it; if it does not, the
+            // paint itself is where the geometry goes missing.
+            {
+              uint32_t node1 = 0, ctx1 = 0;
+              {
+                const uint32_t kT = 0x81D6D0D8u;
+                uint32_t ix = root & 0xFFFFu;
+                uint32_t sb2 = trd(kT + (ix >> 8) * 4u);
+                uint32_t en2 = sb2 ? (sb2 + (ix & 0xFFu) * 8u) : 0;
+                uint32_t n0 = en2 ? trd(en2 + 4u) : 0;
+                node1 = n0 ? trd(n0 + 8u) : 0;
+                ctx1 = node1 ? trd(node1 + 0x20u) : 0;
+              }
+              uint32_t dev = guide_resv_dev_;
+              uint32_t cur0 = dev ? trd(dev + 0x30u) : 0;
+              uint32_t gate = ctx1 ? call(0x81954468u, {ctx1}) : 0xDEADu;
+              uint32_t pr2 = (ctx1 && gate == 1)
+                                 ? call(0x81968890u, {ctx1, msgb})
+                                 : 0xDEADu;
+              uint32_t cur1 = dev ? trd(dev + 0x30u) : 0;
+              XELOGI("GuidePaint: node1={:08X} ctx1={:08X} gate 81954468->"
+                     "{:08X} paint 81968890->{:08X}; cursor {:08X}->{:08X} "
+                     "({} words)",
+                     node1, ctx1, gate, pr2, cur0, cur1,
+                     (cur1 > cur0) ? (cur1 - cur0) / 4 : 0);
+              // Call the paint's four children in isolation, each with the
+              // cursor bracketed, to find which one should emit and does not.
+              // Signatures come from 81968890's body:
+              //   81966C60(obj, payload, &buf)
+              //   81963A38(obj, payload)
+              //   81963608(obj, payload, &buf)
+              //   81957598(obj, msg)
+              if (ctx1) {
+                uint32_t payload = msgw(16);
+                uint32_t sbuf = tm->SystemHeapAlloc(64, 16);
+                if (sbuf) std::memset(tm->TranslateVirtual(sbuf), 0, 64);
+                struct Sub { uint32_t fn; const char* name; int argc; };
+                const Sub subs[] = {{0x81966C60u, "81966C60", 3},
+                                    {0x81963A38u, "81963A38", 2},
+                                    {0x81963608u, "81963608", 3},
+                                    {0x81957598u, "81957598", 2}};
+                for (const auto& sb3 : subs) {
+                  uint32_t c0 = dev ? trd(dev + 0x30u) : 0;
+                  uint32_t rr;
+                  if (sb3.argc == 3) {
+                    rr = call(sb3.fn, {ctx1, payload, sbuf});
+                  } else if (sb3.fn == 0x81957598u) {
+                    rr = call(sb3.fn, {ctx1, msgb});
+                  } else {
+                    rr = call(sb3.fn, {ctx1, payload});
+                  }
+                  uint32_t c1 = dev ? trd(dev + 0x30u) : 0;
+                  XELOGI("GuidePaint:   {} -> {:08X}; cursor {:08X}->{:08X} "
+                         "({} words)",
+                         sb3.name, rr, c0, c1,
+                         (c1 > c0) ? (c1 - c0) / 4 : 0);
+                }
+              }
+            }
+            // Do the elements have anything to draw?
+            //
+            // Every structural check in the render path now passes and nothing
+            // emits, so the remaining candidate is content. An element
+            // rasterises its visual; walk down the tree, ask each node for its
+            // visual, resolve that through 81931040 and dump it. An element
+            // whose visual does not resolve, or resolves to an object with no
+            // geometry, has nothing to paint and a correct paint emits nothing.
+            {
+              uint32_t f_last2 = ord(0x32F), f_vis = ord(0x395);
+              uint32_t ob2 = tm->SystemHeapAlloc(16, 16);
+              uint32_t h = root;
+              for (int depth = 0; depth < 4 && h && f_last2 && f_vis && ob2;
+                   ++depth) {
+                std::memset(tm->TranslateVirtual(ob2), 0, 16);
+                uint32_t vr2 = call(f_vis, {h, ob2});
+                uint32_t vh = trd(ob2);
+                uint32_t vobj = 0;
+                if (vh) {
+                  vobj = call(0x81931040u, {vh});
+                }
+                // Dump the visual and flag anything pointing into hud's
+                // resource section (91401000-91429E9D, 167581b) or into the
+                // guest heap. A visual with no reference to either has nothing
+                // to rasterise, which is what "full pipeline state, zero
+                // draws" looks like from the GPU side.
+                std::string vd;
+                if (vobj) {
+                  for (uint32_t i = 0; i < 32; ++i) {
+                    uint32_t wv = trd(vobj + i * 4);
+                    const char* tag = "";
+                    // Narrow the heap tag. 0x40000000-0x4FFFFFFF also covers
+                    // ordinary float bit patterns - 44550000 is 852.0f - and
+                    // tagging those as pointers made the phase 211 dump
+                    // misleading. The guest heap objects in play all sit in
+                    // 0x40000000-0x41000000.
+                    if (wv >= 0x91401000u && wv <= 0x91429E9Du) {
+                      tag = "*RES";
+                    } else if (wv >= 0x40000000u && wv < 0x41000000u) {
+                      tag = "*HEAP";
+                    }
+                    vd += fmt::format("{:02X}:{:08X}{} ", i * 4, wv, tag);
+                  }
+                }
+                // Also report the render forwarding collections at each
+                // depth. 8195AA00 descends by iterating {ptr,count} at
+                // [obj+12]/[obj+16] and [obj+24]/[obj+28]; if those are empty
+                // at the top, the message never reaches the elements that do
+                // have visuals - which are at depth 2 and 3.
+                uint32_t eo_pub = 0, eo_int = call(0x81931040u, {h});
+                {
+                  uint32_t f_o = ord(0x346);
+                  if (f_o && ob2) {
+                    std::memset(tm->TranslateVirtual(ob2), 0, 16);
+                    uint64_t oa2[] = {h, ob2};
+                    pr->Execute(tsx, f_o, oa2, xe::countof(oa2));
+                    eo_pub = trd(ob2);
+                  }
+                }
+                // Follow the visual's two unexplained pointers.
+                if (vobj) {
+                  for (uint32_t which : {0x04u, 0x10u}) {
+                    uint32_t sp2 = trd(vobj + which);
+                    if (!sp2) continue;
+                    std::string sd;
+                    for (uint32_t i = 0; i < 24; ++i) {
+                      uint32_t wv = trd(sp2 + i * 4);
+                      const char* tg = "";
+                      if (wv >= 0x91401000u && wv <= 0x91429E9Du) tg = "*RES";
+                      else if (wv >= 0x40000000u && wv < 0x41000000u) tg = "*H";
+                      sd += fmt::format("{:02X}:{:08X}{} ", i * 4, wv, tg);
+                    }
+                    XELOGI("GuideVisual:   depth {} vobj+{:02X} -> {:08X}: {}",
+                           depth, which, sp2, sd);
+                    // The +0x10 object is element-shaped with its own bounds
+                    // (287x350 at 425,61) - a real sub-element. Paint it and
+                    // see whether IT emits draws, which the element above it
+                    // does not.
+                    if (which == 0x10u) {
+                      uint32_t q0 = guide_resv_dev_
+                                        ? trd(guide_resv_dev_ + 0x30u) : 0;
+                      uint32_t gq = call(0x81954468u, {sp2});
+                      uint32_t pq = call(0x81968890u, {sp2, msgb});
+                      uint32_t q1 = guide_resv_dev_
+                                        ? trd(guide_resv_dev_ + 0x30u) : 0;
+                      XELOGI("GuideVisual:   SUBPAINT {:08X} gate={:08X} "
+                             "paint={:08X} cursor {:08X}->{:08X} ({} words)",
+                             sp2, gq, pq, q0, q1,
+                             (q1 > q0) ? (q1 - q0) / 4 : 0);
+                      // Decode what it wrote. Phase 210's 2881-word stream was
+                      // state only; whether this one carries DRAW_INDX decides
+                      // whether the geometry exists and is merely unreachable,
+                      // or is never produced at all.
+                      if (q1 > q0 && (q1 - q0) < 0x40000u) {
+                        uint32_t nw2 = (q1 - q0) / 4;
+                        uint32_t cts[128] = {0};
+                        uint32_t a0 = 0, a2 = 0, pk2 = 0, ov2 = 0, jw = 0;
+                        std::string f2;
+                        while (jw < nw2) {
+                          uint32_t wd = trd(q0 + jw * 4);
+                          uint32_t ty = wd >> 30;
+                          uint32_t cn = ((wd >> 16) & 0x3FFF) + 1;
+                          if (ty == 3) {
+                            uint32_t op = (wd >> 8) & 0x7F;
+                            cts[op]++; ++pk2;
+                            if (pk2 <= 20) f2 += fmt::format("{:02X}x{} ", op, cn);
+                            jw += 1 + cn;
+                          } else if (ty == 0) { ++a0; jw += 1 + cn; }
+                          else if (ty == 2) { ++a2; ++jw; }
+                          else { jw += 2; }
+                          if (jw > nw2) { ++ov2; break; }
+                        }
+                        std::string h2;
+                        for (uint32_t o = 0; o < 128; ++o)
+                          if (cts[o]) h2 += fmt::format("{:02X}:{} ", o, cts[o]);
+                        XELOGI("GuideVisual:   SUBWALK {} words -> {} type3, "
+                               "{} type0, {} type2, overrun={}",
+                               nw2, pk2, a0, a2, ov2);
+                        XELOGI("GuideVisual:   SUBWALK opcodes {}", h2);
+                        XELOGI("GuideVisual:   SUBWALK first {}", f2);
+                        XELOGI("GuideVisual:   SUBWALK DRAW_INDX(22)={} "
+                               "DRAW_INDX_2(36)={}",
+                               cts[0x22], cts[0x36]);
+                        // Second, independent count. The walker overran with
+                        // ~2000 of 2430 words undecoded, so its zero is about
+                        // the prefix only. The command processor parses the
+                        // whole range and counts draws itself; two methods
+                        // agreeing is what made the phase 210 result safe.
+                        auto* gsx = kernel_state()->emulator()->graphics_system();
+                        if (gsx && gsx->command_processor()) {
+                          auto* cpx = gsx->command_processor();
+                          uint32_t before2 = cpx->guide_draw_count_;
+                          cpx->ExecuteGuestBufferVirtualUnsafe(q0, nw2);
+                          XELOGI("GuideVisual:   SUBEXEC executed {} words at "
+                                 "{:08X}; GPU draws +{}",
+                                 nw2, q0, cpx->guide_draw_count_ - before2);
+                        }
+                      }
+                    }
+                  }
+                }
+                XELOGI("GuideVisual: depth {} elem {:08X} GetVisual->{:08X} "
+                       "vh={:08X} vobj={:08X} {}",
+                       depth, h, vr2, vh, vobj,
+                       vd.empty() ? std::string("(unresolved)") : vd);
+                XELOGI("GuideVisual:   coll pub {:08X} [12]={:08X} [16]={} "
+                       "[24]={:08X} [28]={} | int {:08X} [12]={:08X} [16]={}",
+                       eo_pub, eo_pub ? trd(eo_pub + 12u) : 0,
+                       eo_pub ? trd(eo_pub + 16u) : 0,
+                       eo_pub ? trd(eo_pub + 24u) : 0,
+                       eo_pub ? trd(eo_pub + 28u) : 0,
+                       eo_int, eo_int ? trd(eo_int + 12u) : 0,
+                       eo_int ? trd(eo_int + 16u) : 0);
+                // If this element HAS a visual, paint it directly. Phases
+                // 205-206 painted the depth 0/1 object, which has none, so
+                // "emits nothing" was the correct result for the wrong
+                // element. These are the ones with something to draw.
+                if (vh && eo_int) {
+                  // `dev` was in scope here before the replay; it comes from
+                  // the same place the block above uses.
+                  uint32_t dev = guide_resv_dev_;
+                  uint32_t pc0 = dev ? trd(dev + 0x30u) : 0;
+                  uint32_t g2 = call(0x81954468u, {eo_int});
+                  uint32_t p2 = call(0x81968890u, {eo_int, msgb});
+                  uint32_t pc1 = dev ? trd(dev + 0x30u) : 0;
+                  // Report the three things the gate actually tests, so a
+                  // closed gate can be attributed rather than guessed:
+                  //   [obj+0xB4] bit 0 set, bit 30 clear, [obj+0x24] > 0.0
+                  uint32_t fl = trd(eo_int + 0xB4u);
+                  uint32_t op = trd(eo_int + 0x24u);
+                  float opf;
+                  std::memcpy(&opf, &op, 4);
+                  XELOGI("GuideVisual:   PAINT depth {} obj {:08X} gate={:08X}"
+                         " paint={:08X} cursor {:08X}->{:08X} ({} words)",
+                         depth, eo_int, g2, p2, pc0, pc1,
+                         (pc1 > pc0) ? (pc1 - pc0) / 4 : 0);
+                  XELOGI("GuideVisual:     gate inputs [B4]={:08X} bit0={} "
+                         "bit30={} [24]={:08X} ({}f)",
+                         fl, fl & 1u, (fl >> 30) & 1u, op, opf);
+                }
+                std::memset(tm->TranslateVirtual(ob2), 0, 16);
+                call(f_last2, {h, ob2});
+                h = trd(ob2);
+              }
+            }
+            std::string mpre;
+            for (uint32_t i = 0; i < 8; ++i) {
+              mpre += fmt::format("{:02X}:{:08X} ", i * 4, msgw(i * 4));
+            }
+            uint32_t hs = call(f_send, {root, msgb});
+            std::string mpost;
+            for (uint32_t i = 0; i < 8; ++i) {
+              mpost += fmt::format("{:02X}:{:08X} ", i * 4, msgw(i * 4));
+            }
+            XELOGI("GuideTrace: msg before send: {}", mpre);
+            XELOGI("GuideTrace: msg after  send: {}  handled[+8]={:08X}",
+                   mpost, msgw(8));
+            call(guide_bs_hud_base_ + 0xA890u, {msgb, payb, dc, 0xFFFFFFFFull, 1});
+            uint32_t hu = call(f_bubble, {root, msgb});
+            uint32_t he = call(f_end, {dc});
+            uint32_t hp = call(f_present, {dc, 0, 0, 0});
+            XELOGI("GuideTrace: dc={:08X} root={:08X} | RenderBegin={:08X} "
+                   "LayoutTree={:08X} SendMessage={:08X} BubbleMessage={:08X} "
+                   "RenderEnd={:08X} Present={:08X}",
+                   dc, root, hb, hl, hs, hu, he, hp);
+          } else {
+            XELOGW("GuideTrace: skipped (begin={:08X} send={:08X} "
+                   "bubble={:08X} dc={:08X} root={:08X})",
+                   f_begin, f_send, f_bubble, dc, root);
+          }
+        }
+      }
+      // Give the root scene a size.
+      //
+      // XuiElementSetBounds (ordinal 0x336, 81932110) takes its width and
+      // height as FLOATS in f1/f2, which Processor::Execute cannot pass - it
+      // only fills GPRs - so the field is written directly instead. The object
+      // dumps show where it lives: labelHeading's object carries
+      // `08:BF800000 0C:BF800000`, i.e. -1.0/-1.0 meaning auto-size, while the
+      // scene object 407E95F0 carries `08:00000000 0C:00000000`. A root
+      // element with 0x0 bounds clips its whole subtree away, which is what an
+      // XUI pipeline that returns S_OK at every stage and emits no geometry
+      // looks like.
+      if (::cvars::guide_scene_bounds_w > 0 && guide_draw_this_) {
+        static bool bounds_done = false;
+        if (!bounds_done) {
+          bounds_done = true;
+          auto* bm = kernel_state()->memory();
+          auto xmb = kernel_state()->GetModule("xam.xex", true);
+          uint32_t f_obj = xmb ? xmb->GetProcAddressByOrdinal(0x346) : 0;
+          uint32_t root = xe::load_and_swap<uint32_t>(
+              bm->TranslateVirtual(guide_draw_this_ + 8u));
+          uint32_t ob = bm->SystemHeapAlloc(16, 16);
+          if (f_obj && root && ob) {
+            std::memset(bm->TranslateVirtual(ob), 0, 16);
+            uint64_t oa[] = {root, ob};
+            kernel_state()->processor()->Execute(gth->thread_state(), f_obj,
+                                                 oa, xe::countof(oa));
+            uint32_t so = xe::load_and_swap<uint32_t>(bm->TranslateVirtual(ob));
+            if (so) {
+              // Call the real setter with real float arguments.
+              //
+              // Processor::Execute fills r3..r10 and then calls the no-arg
+              // overload, which touches only r1 and lr - it never writes the
+              // FPRs. So f1/f2 can simply be set on the context beforehand and
+              // they survive into the guest. XuiElementSetBounds takes its
+              // width and height there (`fmr f31,f1` / `fmr f30,f2` at
+              // 8193212C/81932130), so this is a proper call rather than the
+              // phase 194 poke, which wrote two words at offsets guessed from
+              // a different object type and proved nothing.
+              uint32_t f_bounds = xmb ? xmb->GetProcAddressByOrdinal(0x336) : 0;
+              auto rdo = [bm](uint32_t a) {
+                return xe::load_and_swap<uint32_t>(bm->TranslateVirtual(a));
+              };
+              // Snapshot the whole object either side of the call and report
+              // which words move. Reading two fixed offsets is what made
+              // phase 194 wrong; a diff cannot pick the wrong field because it
+              // does not pick one at all.
+              // Diff the object the SETTER resolves, not the one
+              // XuiObjectFromHandle hands back. 81931040 is the internal
+              // resolver every typed accessor funnels through, and there is no
+              // guarantee the public API returns the same pointer. Given how
+              // many results this session were invalidated by watching a
+              // neighbouring object, check rather than assume.
+              uint32_t so_int = 0;
+              {
+                uint64_t ra[] = {root};
+                so_int = uint32_t(kernel_state()->processor()->Execute(
+                    gth->thread_state(), 0x81931040u, ra, xe::countof(ra)));
+              }
+              XELOGI("GuideBounds: XuiObjectFromHandle={:08X} "
+                     "internal 81931040={:08X} {}",
+                     so, so_int, so == so_int ? "(same)" : "(DIFFERENT)");
+              if (so_int) {
+                so = so_int;
+              }
+              // Dump the INTERNAL object head. Every object head recorded in
+              // this investigation came from XuiObjectFromHandle, which
+              // returns a different pointer - so those dumps describe
+              // something adjacent to what was meant. Re-derive it here.
+              if (so_int) {
+                std::string head;
+                for (uint32_t i = 0; i < 32; ++i) {
+                  head += fmt::format("{:02X}:{:08X} ", i * 4,
+                                      rdo(so_int + i * 4));
+                }
+                XELOGI("GuideBounds: internal scene object {:08X}: {}", so_int,
+                       head);
+              }
+              const uint32_t kObjWords = 96;
+              std::vector<uint32_t> snap(kObjWords);
+              for (uint32_t i = 0; i < kObjWords; ++i) {
+                snap[i] = rdo(so + i * 4);
+              }
+              uint32_t before8 = rdo(so + 8u), beforeC = rdo(so + 0x0Cu);
+              uint32_t br = 0xDEAD;
+              if (f_bounds) {
+                auto* ctx = gth->thread_state()->context();
+                ctx->f[1] = double(::cvars::guide_scene_bounds_w);
+                ctx->f[2] = double(::cvars::guide_scene_bounds_h);
+                uint64_t ba[] = {root};
+                br = uint32_t(kernel_state()->processor()->Execute(
+                    gth->thread_state(), f_bounds, ba, xe::countof(ba)));
+              }
+              std::string diff;
+              for (uint32_t i = 0; i < kObjWords; ++i) {
+                uint32_t now = rdo(so + i * 4);
+                if (now != snap[i]) {
+                  diff += fmt::format("+{:02X}:{:08X}->{:08X} ", i * 4,
+                                      snap[i], now);
+                }
+              }
+              XELOGI("GuideBounds: SetBounds(scene {:08X}, {}f, {}f) -> "
+                     "{:08X}; obj {:08X} [+8]={:08X}->{:08X} "
+                     "[+C]={:08X}->{:08X}",
+                     root, ::cvars::guide_scene_bounds_w,
+                     ::cvars::guide_scene_bounds_h, br, so, before8,
+                     rdo(so + 8u), beforeC, rdo(so + 0x0Cu));
+              XELOGI("GuideBounds: object diff: {}",
+                     diff.empty() ? std::string("NOTHING CHANGED") : diff);
+            }
+          }
+        }
+      }
+      // Does the render message reach the child elements at all?
+      //
+      // The draw is a message dispatch and every stage returns S_OK, so
+      // success tells nothing. Snapshot the element objects before the draw
+      // and diff them after: untouched children mean the message is not
+      // arriving, changed children mean they receive it and decline to paint.
+      // Objects are resolved through 81931040, the path XUI's own accessors
+      // use - XuiObjectFromHandle returns a different pointer (phase 196).
+      static std::vector<uint32_t> objdiff_addr;
+      static std::vector<uint32_t> objdiff_snap;
+      const uint32_t kOdWords = 64;
+      bool objdiff_on = ::cvars::guide_diff_draw_objects;
+      if (objdiff_on) {
+        static uint32_t od_runs = 0;
+        objdiff_on = od_runs++ < 3;
+      }
+      if (objdiff_on) {
+        auto* om2 = kernel_state()->memory();
+        auto ord2 = [om2](uint32_t a) {
+          return a ? xe::load_and_swap<uint32_t>(om2->TranslateVirtual(a)) : 0u;
+        };
+        uint32_t root_h = ord2(guide_draw_this_ + 8u);
+        objdiff_addr.clear();
+        objdiff_snap.clear();
+        if (root_h) {
+          uint64_t ra2[] = {root_h};
+          uint32_t root_i = uint32_t(kernel_state()->processor()->Execute(
+              gth->thread_state(), 0x81931040u, ra2, xe::countof(ra2)));
+          if (root_i) {
+            objdiff_addr.push_back(root_i);
+            // [+8] and [+0x0C] both point at the same object on the scene -
+            // a child list head/tail - so follow it one level.
+            uint32_t kid_i = ord2(root_i + 8u);
+            if (kid_i) objdiff_addr.push_back(kid_i);
+            uint32_t kid2 = kid_i ? ord2(kid_i + 8u) : 0;
+            if (kid2) objdiff_addr.push_back(kid2);
+          }
+        }
+        for (uint32_t a : objdiff_addr) {
+          for (uint32_t i = 0; i < kOdWords; ++i) {
+            objdiff_snap.push_back(ord2(a + i * 4));
+          }
+        }
+      }
+      // Re-mark the elements dirty before each draw.
+      //
+      // ObjDiff showed a flag at [obj+0xB4] going 01008003 -> 01008001 on the
+      // root and its first child during draw #1, and nothing changing on any
+      // draw after. Bit 1 is a dirty flag: XUI repaints an element only while
+      // it is set, clears it once painted, and from frame 2 on there is
+      // nothing dirty to repaint. That is exactly the observed shape - draw #1
+      // does work, every draw after emits zero words - and it is the first
+      // explanation that accounts for the *change* between frames rather than
+      // just the absence of output.
+      if (::cvars::guide_force_dirty && guide_draw_this_) {
+        auto* dm = kernel_state()->memory();
+        auto drd = [dm](uint32_t a) {
+          return a ? xe::load_and_swap<uint32_t>(dm->TranslateVirtual(a)) : 0u;
+        };
+        uint32_t rh = drd(guide_draw_this_ + 8u);
+        if (rh) {
+          uint64_t ra3[] = {rh};
+          uint32_t ri = uint32_t(kernel_state()->processor()->Execute(
+              gth->thread_state(), 0x81931040u, ra3, xe::countof(ra3)));
+          uint32_t marked = 0;
+          for (uint32_t o = ri; o; o = drd(o + 8u)) {
+            uint32_t f = drd(o + 0xB4u);
+            if (!(f & 2u)) {
+              xe::store_and_swap<uint32_t>(dm->TranslateVirtual(o + 0xB4u),
+                                           f | 2u);
+              ++marked;
+            }
+            if (marked > 32) break;
+          }
+          static uint32_t dirty_logs = 0;
+          if (dirty_logs++ < 3) {
+            XELOGI("GuideDirty: marked {} elements dirty from root obj {:08X}",
+                   marked, ri);
+          }
+        }
+      }
+      // Put the scene's children into the collection the RENDER walks.
+      //
+      // 8195AA00 forwards a render message by iterating a {ptr,count} pair at
+      // [obj+12]/[obj+16] (and [obj+24]/[obj+28]), 8-byte entries whose first
+      // word is a child handle. On our scene both counts are zero, so the
+      // walk forwards to nothing - which is why every stage returns S_OK and
+      // nothing paints.
+      //
+      // XuiElementAddChild's worker 81967390 reads [parent+12] and hands it to
+      // 81963C50, so AddChild is what fills that collection. The navigable
+      // tree (XuiElementGetLastChild) is populated and the render collection
+      // is not - they are different structures, and only the first was ever
+      // built.
+      //
+      // Phase 192 used AddChild but then made the newly added child the draw
+      // root, so the render iterated the child's own empty collection. Here
+      // the root stays the scene and its existing child is added to it.
+      if (::cvars::guide_add_render_children && guide_draw_this_) {
+        static bool added = false;
+        if (!added) {
+          added = true;
+          auto* am = kernel_state()->memory();
+          auto ard = [am](uint32_t a) {
+            return a ? xe::load_and_swap<uint32_t>(am->TranslateVirtual(a))
+                     : 0u;
+          };
+          auto xma = kernel_state()->GetModule("xam.xex", true);
+          uint32_t f_last = xma ? xma->GetProcAddressByOrdinal(0x32F) : 0;
+          uint32_t f_add = xma ? xma->GetProcAddressByOrdinal(0x328) : 0;
+          uint32_t f_obj = xma ? xma->GetProcAddressByOrdinal(0x346) : 0;
+          uint32_t root = ard(guide_draw_this_ + 8u);
+          uint32_t ob = am->SystemHeapAlloc(16, 16);
+          if (f_last && f_add && f_obj && root && ob) {
+            auto* pr = kernel_state()->processor();
+            auto* tsa = gth->thread_state();
+            // The object whose collection the handler reads is the one
+            // XuiObjectFromHandle returns - node 0's ctx - not 81931040's.
+            std::memset(am->TranslateVirtual(ob), 0, 16);
+            uint64_t oa[] = {root, ob};
+            pr->Execute(tsa, f_obj, oa, xe::countof(oa));
+            uint32_t ro = ard(ob);
+            uint32_t c0 = ard(ro + 16u), d0 = ard(ro + 12u);
+            std::memset(am->TranslateVirtual(ob), 0, 16);
+            uint64_t la[] = {root, ob};
+            pr->Execute(tsa, f_last, la, xe::countof(la));
+            uint32_t kid = ard(ob);
+            uint32_t ar = 0xDEAD;
+            if (kid) {
+              uint64_t aa[] = {root, kid};
+              ar = uint32_t(pr->Execute(tsa, f_add, aa, xe::countof(aa)));
+            }
+            XELOGI("GuideAddChild: root={:08X} obj={:08X} child={:08X} "
+                   "AddChild->{:08X}; coll [12]={:08X}->{:08X} "
+                   "[16]={}->{}",
+                   root, ro, kid, ar, d0, ard(ro + 12u), c0, ard(ro + 16u));
+          }
+        }
+      }
+      // Make the Guide's elements visible.
+      //
+      // 81954468, the paint gate, requires bit 0 of [element+0xB4] set. On
+      // scnInfoUpsellLive - the one element that produces real geometry, 2881
+      // words of it, when painted directly - that word reads 11000004: bit 0
+      // CLEAR. So the render path correctly skips a hidden element, and every
+      // "everything succeeds and nothing draws" measurement in this
+      // investigation has been the correct behaviour of a scene whose content
+      // element is not visible.
+      if (::cvars::guide_force_visible && guide_draw_this_) {
+        auto* vm = kernel_state()->memory();
+        auto vrd = [vm](uint32_t a) {
+          return a ? xe::load_and_swap<uint32_t>(vm->TranslateVirtual(a)) : 0u;
+        };
+        auto xmv = kernel_state()->GetModule("xam.xex", true);
+        uint32_t f_last3 = xmv ? xmv->GetProcAddressByOrdinal(0x32F) : 0;
+        uint32_t vob = vm->SystemHeapAlloc(16, 16);
+        uint32_t hh = vrd(guide_draw_this_ + 8u);
+        uint32_t fixed = 0;
+        // Walk the chain the PAINT walks, not the navigable tree.
+        //
+        // 81963A38 descends via [obj+8] for the first child and [child+16] for
+        // siblings, gating each with 81954468. That is a different set of
+        // objects from XuiElementGetLastChild, which is what this cvar used to
+        // follow - so elements the descent visits could stay hidden while the
+        // ones it does not were being fixed.
+        {
+          uint32_t root_i2 = 0;
+          if (hh) {
+            uint64_t rr[] = {hh};
+            // Phase 308: is root_i2 the same object the draw root handle
+            // resolves to? Log both so the two trees can be compared within
+            // one run (cross-run pointers are invalid - phase 306).
+            XELOGI("RootCompare: guide_draw_this_+8 handle={:08X} "
+                   "guide_bs_scene_={:08X}",
+                   hh, guide_bs_scene_);
+            // Phase 310: resolve the same handle the way the guest does and
+            // compare with the handle-table lookup. If they differ, the
+            // phase 303-308 identification of the draw root was reading the
+            // wrong table (the phase 304 self-test only covered binding
+            // nodes).
+            {
+              uint32_t f_base = xmv ? xmv->GetProcAddressByOrdinal(0x33C) : 0;
+              // XuiGetBaseObject(hObj, HXUIOBJ* phBase) returns an HRESULT
+              // and writes the result through the out-pointer. Calling it with
+              // one argument and reading r3 gives the STATUS (0 = S_OK) and
+              // looks exactly like a null object - the same trap as the
+              // XexGetModuleSection log misread in phase 277.
+              uint32_t api_hr = 0, api_obj = 0;
+              uint32_t obuf = vm->SystemHeapAlloc(16, 16);
+              if (f_base && hh && obuf) {
+                xe::store_and_swap<uint32_t>(vm->TranslateVirtual(obuf), 0);
+                uint64_t ba[] = {hh, obuf};
+                api_hr = uint32_t(kernel_state()->processor()->Execute(
+                    gth->thread_state(), f_base, ba, xe::countof(ba)));
+                api_obj = vrd(obuf);
+              }
+              XELOGI("HandleResolveCompare: handle={:08X} hr={:08X} "
+                     "XuiGetBaseObject-> {:08X}",
+                     hh, api_hr, api_obj);
+            }
+            root_i2 = uint32_t(kernel_state()->processor()->Execute(
+                gth->thread_state(), 0x81931040u, rr, xe::countof(rr)));
+            // Phase 329: is "XuiTabScene" resolvable by name? Call the class
+            // registry lookup 81949B60 directly with the name and compare the
+            // result against the class object the census already identified
+            // (tabclass, read from [81D6CE38]). Cheaper than enumerating the
+            // map, and decisive either way.
+            {
+              static bool done = false;
+              if (!done) {
+                done = true;
+                const char* names[] = {"XuiTabScene", "XuiScene", "XuiShader"};
+                std::string out;
+                for (const char* nm : names) {
+                  size_t len = std::strlen(nm);
+                  uint32_t buf = vm->SystemHeapAlloc(
+                      static_cast<uint32_t>((len + 1) * 2), 16);
+                  if (!buf) continue;
+                  for (size_t k = 0; k < len; ++k) {
+                    xe::store_and_swap<uint16_t>(
+                        vm->TranslateVirtual(buf + uint32_t(k * 2)),
+                        static_cast<uint16_t>(nm[k]));
+                  }
+                  xe::store_and_swap<uint16_t>(
+                      vm->TranslateVirtual(buf + uint32_t(len * 2)), 0);
+                  uint64_t la2[] = {buf};
+                  uint32_t got = uint32_t(kernel_state()->processor()->Execute(
+                      gth->thread_state(), 0x81949B60u, la2,
+                      xe::countof(la2)));
+                  out += fmt::format("{}->{:08X} ", nm, got);
+                }
+                XELOGI("ClassByName: {}", out);
+                // Phase 332: 8194F568 creates BY NAME (phase 331). Ask it to
+                // create each class directly. This distinguishes phase 330's
+                // two possibilities: if XuiTabScene/XuiShader instantiate on
+                // demand they are live classes nothing happens to ask for; if
+                // creation fails they are vestigial, like the phase 273 ring.
+                std::string mk;
+                for (const char* nm : names) {
+                  size_t len = std::strlen(nm);
+                  uint32_t nbuf = vm->SystemHeapAlloc(
+                      static_cast<uint32_t>((len + 1) * 2), 16);
+                  uint32_t obuf2 = vm->SystemHeapAlloc(16, 16);
+                  if (!nbuf || !obuf2) continue;
+                  for (size_t k = 0; k < len; ++k) {
+                    xe::store_and_swap<uint16_t>(
+                        vm->TranslateVirtual(nbuf + uint32_t(k * 2)),
+                        static_cast<uint16_t>(nm[k]));
+                  }
+                  xe::store_and_swap<uint16_t>(
+                      vm->TranslateVirtual(nbuf + uint32_t(len * 2)), 0);
+                  xe::store_and_swap<uint32_t>(vm->TranslateVirtual(obuf2), 0);
+                  uint64_t ca2[] = {nbuf, obuf2};
+                  uint32_t hr2 = uint32_t(kernel_state()->processor()->Execute(
+                      gth->thread_state(), 0x8194F568u, ca2,
+                      xe::countof(ca2)));
+                  mk += fmt::format("{}: hr={:08X} obj={:08X} | ", nm, hr2,
+                                    vrd(obuf2));
+                }
+                XELOGI("CreateByName: {}", mk);
+                // Phase 334: create a XuiShader and attach it to the draw-root
+                // element through XuiElementAddChild (ordinal 0x328) - the API
+                // GuideNavM already uses successfully - rather than writing
+                // into the collection at [element+0] whose node layout is not
+                // established. Verified afterwards by the binding census.
+                if (::cvars::guide_inject_shader && guide_bs_scene_) {
+                  auto xm2 = kernel_state()->GetModule("xam.xex", true);
+                  uint32_t f_add2 = xm2 ? xm2->GetProcAddressByOrdinal(0x328) : 0;
+                  const char* sn = "XuiShader";
+                  size_t sl = std::strlen(sn);
+                  uint32_t nb = vm->SystemHeapAlloc(uint32_t((sl + 1) * 2), 16);
+                  uint32_t ob = vm->SystemHeapAlloc(16, 16);
+                  if (f_add2 && nb && ob) {
+                    for (size_t k = 0; k < sl; ++k) {
+                      xe::store_and_swap<uint16_t>(
+                          vm->TranslateVirtual(nb + uint32_t(k * 2)),
+                          static_cast<uint16_t>(sn[k]));
+                    }
+                    xe::store_and_swap<uint16_t>(
+                        vm->TranslateVirtual(nb + uint32_t(sl * 2)), 0);
+                    xe::store_and_swap<uint32_t>(vm->TranslateVirtual(ob), 0);
+                    uint64_t ma[] = {nb, ob};
+                    uint32_t chr = uint32_t(kernel_state()->processor()->Execute(
+                        gth->thread_state(), 0x8194F568u, ma, xe::countof(ma)));
+                    uint32_t sh = vrd(ob);
+                    uint32_t ahr = 0;
+                    if (!chr && sh) {
+                      uint64_t aa[] = {guide_bs_scene_, sh};
+                      ahr = uint32_t(kernel_state()->processor()->Execute(
+                          gth->thread_state(), f_add2, aa, xe::countof(aa)));
+                    }
+                    // Phase 336: the painter walks a chain threaded through
+                    // [obj+20], not the child tree (phase 335), so AddChild
+                    // was the wrong linkage. XuiControlAttachVisual (0x38A) is
+                    // the API shaped like that relationship - attach a visual
+                    // to a control - so try it as well and report both.
+                    uint32_t f_av = xm2 ? xm2->GetProcAddressByOrdinal(0x38A) : 0;
+                    uint32_t vhr = 0xFFFFFFFFu;
+                    if (f_av && sh) {
+                      uint64_t va[] = {guide_bs_scene_, sh};
+                      vhr = uint32_t(kernel_state()->processor()->Execute(
+                          gth->thread_state(), f_av, va, xe::countof(va)));
+                    }
+                    XELOGI("InjectShader: create hr={:08X} shader={:08X}; "
+                           "AddChild -> {:08X}; AttachVisual(0x38A) -> {:08X}",
+                           chr, sh, ahr, vhr);
+                  }
+                }
+              }
+            }
+            // 81931040 takes the handle and returns a POINTER (the walk below
+            // dereferences it). Resolving the same handle through the handle
+            // table should give the same pointer; if it does not, the table
+            // lookup used in phases 303-308 was reading the wrong structure.
+            {
+              uint32_t ti = hh & 0xFFFFu;
+              auto trd2 = [&](uint32_t a) {
+                return (a >= 0x40000000u && a < 0x50000000u && !(a & 3))
+                           ? vrd(a) : 0u;
+              };
+              uint32_t tb = trd2(0x81D6D0D8u + ((ti >> 6) * 4u));
+              uint32_t tobj = tb ? trd2(tb + ((ti * 8u) & 0x7F8u) + 4u) : 0u;
+              XELOGI("RootResolveCheck: handle={:08X} api(81931040)={:08X} "
+                     "table={:08X} -> {}",
+                     hh, root_i2, tobj,
+                     (root_i2 == tobj) ? "AGREE" : "DIFFER");
+              // Phase 311: with the CORRECT object (the API's), redo the
+              // class-chain read that phase 303 did on the wrong one.
+              if (root_i2 >= 0x40000000u && root_i2 < 0x50000000u) {
+                std::string chain;
+                for (uint32_t nd = vrd(root_i2 + 12u), hop = 0;
+                     nd >= 0x40000000u && nd < 0x50000000u && hop < 12;
+                     nd = vrd(nd + 8u), ++hop) {
+                  uint32_t cp = vrd(nd + 0x18u);
+                  std::string nm;
+                  if (cp >= 0x40000000u && cp < 0x50000000u) {
+                    uint32_t np = vrd(cp + 4u);
+                    if (np >= 0x40000000u && np < 0x50000000u) {
+                      for (uint32_t c = 0; c < 24; ++c) {
+                        uint32_t ad = np + c * 2u;
+                        uint32_t wv = vrd(ad & ~3u);
+                        uint16_t ch = (ad & 2u) ? (wv & 0xFFFF) : (wv >> 16);
+                        if (!ch || ch < 0x20 || ch > 0x7E) break;
+                        nm += (char)ch;
+                      }
+                    }
+                  }
+                  chain += nm.empty() ? fmt::format("{:08X} ", cp) : (nm + " ");
+                }
+                XELOGI("DrawRootClasses: obj={:08X} chain: {}", root_i2,
+                       chain.empty() ? std::string("(none)") : chain);
+                // Phase 314: a class object carries its own name at +4 and its
+                // DECLARED BASE name at +8 - that is how XuiTabScene's base was
+                // read as XuiScene. Read HUDScene's base directly instead of
+                // inferring it from XUR string adjacency (phase 313's dead end).
+                {
+                  uint32_t nd0 = vrd(root_i2 + 12u);
+                  uint32_t cls0 = (nd0 >= 0x40000000u && nd0 < 0x50000000u)
+                                      ? vrd(nd0 + 0x18u) : 0u;
+                  // Names may live in the HEAP (custom classes) or in the xam
+                  // IMAGE (built-ins, e.g. XuiShader's name at 81646698). A
+                  // heap-only guard silently returns "?" for every built-in
+                  // base - the phase 276 lesson about filters removing data.
+                  auto rdname = [&](uint32_t sp) {
+                    std::string nm;
+                    // Third range-filter miss in this investigation: hud.xex
+                    // is mapped at 0x913E0000, so a CUSTOM class's name lives
+                    // there, not in xam's image or the heap. Log the raw
+                    // pointer too, so an out-of-range value is visible as a
+                    // value rather than as "?".
+                    bool okp = (sp >= 0x40000000u && sp < 0x50000000u) ||
+                               (sp >= 0x81000000u && sp < 0x81E00000u) ||
+                               (sp >= 0x90000000u && sp < 0x92000000u);
+                    if (!okp) return nm;
+                    for (uint32_t c = 0; c < 28; ++c) {
+                      uint32_t ad = sp + c * 2u;
+                      uint32_t wv = vrd(ad & ~3u);
+                      uint16_t ch = (ad & 2u) ? (wv & 0xFFFF) : (wv >> 16);
+                      if (!ch || ch < 0x20 || ch > 0x7E) break;
+                      nm += (char)ch;
+                    }
+                    return nm;
+                  };
+                  if (cls0 >= 0x40000000u && cls0 < 0x50000000u) {
+                    std::string self = rdname(vrd(cls0 + 4u));
+                    std::string base = rdname(vrd(cls0 + 8u));
+                    // [cls+8] read as a string works for built-ins
+                    // (XuiTabScene -> 'XuiScene') but not here, so for this
+                    // class it is probably the base CLASS OBJECT, whose own
+                    // name is at its +4. Try that as well before concluding.
+                    uint32_t bp = vrd(cls0 + 8u);
+                    std::string base2 = rdname(vrd(bp + 4u));
+                    // The binder (8194EBB0) recurses on [class+40], NOT
+                    // [class+8]: `lwz r11,40(r28); beq -> stop; lwz r3,4(r11);
+                    // bl 8194EBB0`. So +40 is the link that decides whether a
+                    // base gets bound at all.
+                    // Phase 322: full field dump of the class object reached
+                    // through the API-resolved root_i2 - the only sound route
+                    // for elements (phase 310). Phase 321 dumped the right
+                    // layout but the wrong object because it used the handle
+                    // table again.
+                    {
+                      std::string w;
+                      for (uint32_t q = 0; q < 15; ++q) {
+                        w += fmt::format("+{}:{:08X} ", q * 4, vrd(cls0 + q * 4u));
+                      }
+                      XELOGI("DrawRootClassDump: cls={:08X} {}", cls0, w);
+                    }
+                    XELOGI("DrawRootClassLinks: cls={:08X} +8={:08X} +40={:08X} "
+                           "(+40 is what the binder follows)",
+                           cls0, vrd(cls0 + 8u), vrd(cls0 + 40u));
+                    XELOGI("DrawRootClass2: baseptr={:08X} as-object name='{}' "
+                           "its base={:08X}",
+                           bp, base2.empty() ? "?" : base2, vrd(bp + 8u));
+                    XELOGI("DrawRootClass: {:08X} name='{}' declared base='{}' "
+                           "(nameptr={:08X} baseptr={:08X})",
+                           cls0, self.empty() ? "?" : self,
+                           base.empty() ? "?" : base,
+                           vrd(cls0 + 4u), vrd(cls0 + 8u));
+                  }
+                }
+              }
+            }
+          }
+          uint32_t chain_fixed = 0, visited = 0;
+          // Depth-first over (first child, next sibling), bounded.
+          // The bound was 64, chosen when the scene had 62 objects. After
+          // navigation loads real content the scene has 109+, so the walk
+          // truncated and most elements never got bit 0 - which is exactly
+          // what the paint gate 81954468 tests. Symptom: element paint calls
+          // FELL from 26 to 6 when content was added (phase 280).
+          static constexpr int kMaxWalk = 1024;
+          uint32_t stack[kMaxWalk];
+          int sp = 0;
+          if (root_i2) stack[sp++] = root_i2;
+          while (sp > 0 && visited < kMaxWalk) {
+            uint32_t o = stack[--sp];
+            ++visited;
+            uint32_t fl = vrd(o + 0xB4u);
+            // bit 0  - the visibility gate 81954468 requires (phase 208)
+            // bit 17 - gates 8195E190 inside 81963608, the element's
+            //          hand-off to the device context:
+            //            81963624  lwz r11, 180(r29)
+            //            81963628  rlwinm. r11, r11, 0, 14, 14
+            //            8196362C  beq -> skip 8195E190
+            //          It is clear on every element observed (11000005,
+            //          01008005), so that call has never run.
+            uint32_t want = 1u | (::cvars::guide_force_flag17 ? 0x20000u : 0u);
+            if ((fl & want) != want) {
+              xe::store_and_swap<uint32_t>(vm->TranslateVirtual(o + 0xB4u),
+                                           fl | want);
+              ++chain_fixed;
+            }
+            uint32_t kid = vrd(o + 8u);
+            uint32_t sib = vrd(o + 16u);
+            if (sib && sp < kMaxWalk - 1) stack[sp++] = sib;
+            if (kid && sp < kMaxWalk - 1) stack[sp++] = kid;
+          }
+          // Name the objects actually modified, so they can be compared
+          // against the ones the per-element log reads. Phase 229 assumed the
+          // two sets overlapped and the comparison it drew from that was
+          // wrong; this makes the assumption checkable.
+          {
+            static uint32_t idl = 0;
+            if (idl++ < 2) {
+              std::string mods;
+              int sp4 = 0;
+              uint32_t st4[64], seen4 = 0;
+              if (root_i2) st4[sp4++] = root_i2;
+              while (sp4 > 0 && seen4 < 10) {
+                uint32_t o = st4[--sp4];
+                ++seen4;
+                mods += fmt::format("{:08X}:{:08X} ", o, vrd(o + 0xB4u));
+                uint32_t kid = vrd(o + 8u), sib = vrd(o + 16u);
+                if (sib && sp4 < 63) st4[sp4++] = sib;
+                if (kid && sp4 < 63) st4[sp4++] = kid;
+              }
+              XELOGI("GuideChainIds: first 10 walked objects (post-write): {}",
+                     mods);
+            }
+          }
+          static uint32_t ch_logs = 0;
+          if (ch_logs++ < 1) {
+            XELOGI("GuideVisibleChain: visited {} objects on the paint chain, "
+                   "set bit0 on {}",
+                   visited, chain_fixed);
+            // Name each element's class. [obj+4] points at a descriptor whose
+            // first bytes are a UTF-16 name - the visual's read "XuiScene".
+            // A 59-element scene that emits no primitives should contain image
+            // or text leaves; if it is containers all the way down, there is
+            // nothing in it that would ever draw.
+            int sp2 = 0;
+            uint32_t st2[64];
+            std::map<std::string, int> classes;
+            if (root_i2) st2[sp2++] = root_i2;
+            uint32_t seen2 = 0;
+            while (sp2 > 0 && seen2 < 64) {
+              uint32_t o = st2[--sp2];
+              ++seen2;
+              uint32_t cd = vrd(o + 4u);
+              std::string nm;
+              if (cd) {
+                for (uint32_t i = 0; i < 24; ++i) {
+                  uint16_t c = xe::load_and_swap<uint16_t>(
+                      vm->TranslateVirtual(cd + i * 2));
+                  if (!c) break;
+                  if (c >= 32 && c < 127) nm.push_back(char(c));
+                  else { nm.clear(); break; }
+                }
+              }
+              if (nm.empty()) nm = "?";
+              classes[nm]++;
+              uint32_t kid = vrd(o + 8u), sib = vrd(o + 16u);
+              if (sib && sp2 < 63) st2[sp2++] = sib;
+              if (kid && sp2 < 63) st2[sp2++] = kid;
+            }
+            std::string cl;
+            for (auto& kv : classes) {
+              cl += fmt::format("{}x{} ", kv.first, kv.second);
+            }
+            XELOGI("GuideVisibleChain: classes {}", cl);
+            // Census the HANDLERS. Each element is dispatched by handle
+            // through its own chain, and the chain node's [+0x1C] is the
+            // function that paints it. If every element shares one generic
+            // handler then no class-specific painter is installed for the
+            // buttons, labels and figures - which would explain a scene full
+            // of drawable content that never draws.
+            {
+              const uint32_t kTb = 0x81D6D0D8u;
+              std::map<uint32_t, int> handlers;
+              int sp3 = 0;
+              // Was 64, which sampled 64 of the blade's 464 elements and made
+              // "every element uses handler 8193FA30" look established when it
+              // was a sampling artefact - the same trap as the phase 282
+              // census. Cover the whole tree.
+              uint32_t st3[1024];
+              uint32_t seen3 = 0;
+              if (root_i2) st3[sp3++] = root_i2;
+              while (sp3 > 0 && seen3 < 1024) {
+                uint32_t o = st3[--sp3];
+                ++seen3;
+                uint32_t hnd = vrd(o);
+                uint32_t ix = hnd & 0xFFFFu;
+                uint32_t cnt3 = vrd(kTb + 1056u);
+                if (ix < cnt3) {
+                  uint32_t sb4 = vrd(kTb + (ix >> 8) * 4u);
+                  uint32_t en4 = sb4 ? (sb4 + (ix & 0xFFu) * 8u) : 0;
+                  uint32_t gen4 = en4 ? vrd(en4) : 0;
+                  if (en4 && gen4 == ((hnd >> 16) & 0xFFFFu)) {
+                    for (uint32_t nd = vrd(en4 + 4u), hop = 0;
+                         nd && hop < 6; nd = vrd(nd + 8u), ++hop) {
+                      handlers[vrd(nd + 0x1Cu)]++;
+                      // Dump one node in full. The handler values are not
+                      // referenced by any code (phase 292), so the node must
+                      // be built at runtime; its word 0 should be a vtable
+                      // that identifies what builds it.
+                      {
+                        static bool dumped = false;
+                        if (!dumped) {
+                          dumped = true;
+                          std::string w;
+                          for (uint32_t q = 0; q < 10; ++q) {
+                            w += fmt::format("+{:X}:{:08X} ", q * 4,
+                                             vrd(nd + q * 4u));
+                          }
+                          XELOGI("HandlerNode {:08X} on element {:08X}: {}",
+                                 nd, o, w);
+                        }
+                      }
+                    }
+                  }
+                }
+                uint32_t kid = vrd(o + 8u), sib = vrd(o + 16u);
+                if (sib && sp3 < 1023) st3[sp3++] = sib;
+                if (kid && sp3 < 1023) st3[sp3++] = kid;
+              }
+              std::string hs;
+              for (auto& kv : handlers) {
+                hs += fmt::format("{:08X}x{} ", kv.first, kv.second);
+              }
+              XELOGI("GuideVisibleChain: handlers {}", hs);
+              // Phase 312 control: is "custom class -> 1 binding, built-in ->
+              // leaf+base" a real pattern, or a coincidence of the two objects
+              // compared in phase 311? Walk the tree again and record, per
+              // leaf class name, the binding-chain length.
+              {
+                std::map<std::string, std::pair<uint32_t, uint32_t>> shape;
+                int sp5 = 0; uint32_t st5[1024], seen5 = 0;
+                if (root_i2) st5[sp5++] = root_i2;
+                while (sp5 > 0 && seen5 < 1024) {
+                  uint32_t o5 = st5[--sp5]; ++seen5;
+                  uint32_t len = 0; std::string leaf;
+                  for (uint32_t nd = vrd(o5 + 12u), hop = 0;
+                       nd >= 0x40000000u && nd < 0x50000000u && hop < 12;
+                       nd = vrd(nd + 8u), ++hop) {
+                    ++len;
+                    if (leaf.empty()) {
+                      uint32_t cp = vrd(nd + 0x18u);
+                      uint32_t np = (cp >= 0x40000000u && cp < 0x50000000u)
+                                        ? vrd(cp + 4u) : 0u;
+                      if (np >= 0x40000000u && np < 0x50000000u) {
+                        for (uint32_t c = 0; c < 24; ++c) {
+                          uint32_t ad = np + c * 2u;
+                          uint32_t wv = vrd(ad & ~3u);
+                          uint16_t ch = (ad & 2u) ? (wv & 0xFFFF) : (wv >> 16);
+                          if (!ch || ch < 0x20 || ch > 0x7E) break;
+                          leaf += (char)ch;
+                        }
+                      }
+                    }
+                  }
+                  // Phase 315: also walk the DECLARED inheritance from the
+                  // leaf class object ([cls+8] -> base class object) and
+                  // compare its depth with the binding-chain length. If they
+                  // agree for deep-chained classes and disagree for HUDScene,
+                  // the difference between those cases is the defect.
+                  uint32_t decl = 0;
+                  {
+                    uint32_t nd1 = vrd(o5 + 12u);
+                    uint32_t c1 = (nd1 >= 0x40000000u && nd1 < 0x50000000u)
+                                      ? vrd(nd1 + 0x18u) : 0u;
+                    // [cls+8] is a base CLASS OBJECT for custom classes but a
+                    // base NAME STRING for built-ins (phase 314). Following it
+                    // blindly, as phase 315 did, reads [string+8] as a pointer
+                    // and produces garbage. Disambiguate at every hop: if the
+                    // target has a readable UTF-16 name at ITS +4 it is a class
+                    // object and the walk continues; if the target is itself a
+                    // readable string it is a terminal base name; anything else
+                    // ends the walk.
+                    auto readable = [&](uint32_t sp) {
+                      bool okp = (sp >= 0x40000000u && sp < 0x50000000u) ||
+                                 (sp >= 0x81000000u && sp < 0x81E00000u) ||
+                                 (sp >= 0x90000000u && sp < 0x92000000u);
+                      if (!okp) return false;
+                      uint32_t wv = vrd(sp & ~3u);
+                      uint16_t ch = (sp & 2u) ? (wv & 0xFFFF) : (wv >> 16);
+                      return ch >= 0x20 && ch <= 0x7E;
+                    };
+                    while (c1 >= 0x40000000u && c1 < 0x50000000u && decl < 12) {
+                      ++decl;
+                      uint32_t nxt = vrd(c1 + 8u);
+                      // nxt must be validated BEFORE dereferencing nxt+4 -
+                      // guarding the value read is not the same as guarding
+                      // the address read from (phase 287).
+                      bool nxt_ok = (nxt >= 0x40000000u && nxt < 0x50000000u) ||
+                                    (nxt >= 0x81000000u && nxt < 0x81E00000u) ||
+                                    (nxt >= 0x90000000u && nxt < 0x92000000u);
+                      if (!nxt_ok) break;
+                      if (readable(vrd(nxt + 4u))) {
+                        c1 = nxt;          // base is a class object
+                      } else if (readable(nxt)) {
+                        ++decl;            // terminal base name
+                        break;
+                      } else {
+                        break;
+                      }
+                    }
+                  }
+                  if (!leaf.empty()) {
+                    auto& e = shape[leaf];
+                    e.first++; e.second = (len << 8) | (decl & 0xFF);
+                  }
+                  uint32_t kid = vrd(o5 + 8u), sib = vrd(o5 + 16u);
+                  if (sib && sp5 < 1023) st5[sp5++] = sib;
+                  if (kid && sp5 < 1023) st5[sp5++] = kid;
+                }
+                std::string sh;
+                for (auto& kv : shape) {
+                  sh += fmt::format("{}(n={},chain={},decl={}) ", kv.first,
+                                    kv.second.first, kv.second.second >> 8,
+                                    kv.second.second & 0xFF);
+                }
+                XELOGI("ChainShapes: {}", sh);
+              }
+            }
+          }
+        }
+        static uint32_t vis_logs = 0;
+        std::string rep;
+        for (int d = 0; d < 6 && hh && f_last3 && vob; ++d) {
+          uint64_t ra4[] = {hh};
+          uint32_t oi = uint32_t(kernel_state()->processor()->Execute(
+              gth->thread_state(), 0x81931040u, ra4, xe::countof(ra4)));
+          if (oi) {
+            uint32_t fl = vrd(oi + 0xB4u);
+            if (!(fl & 1u)) {
+              xe::store_and_swap<uint32_t>(vm->TranslateVirtual(oi + 0xB4u),
+                                           fl | 1u);
+              ++fixed;
+              if (vis_logs < 2) {
+                rep += fmt::format("{:08X}:{:08X}->{:08X} ", oi, fl, fl | 1u);
+              }
+            }
+          }
+          std::memset(vm->TranslateVirtual(vob), 0, 16);
+          uint64_t la3[] = {hh, vob};
+          kernel_state()->processor()->Execute(gth->thread_state(), f_last3,
+                                               la3, xe::countof(la3));
+          hh = vrd(vob);
+        }
+        if (vis_logs++ < 2) {
+          XELOGI("GuideVisible: set bit0 on {} elements {}", fixed, rep);
+        }
+      }
+      // Drive a real frame and paint the elements that have content.
+      //
+      // WORKAROUND, not a fix. The render message never descends past depth 1
+      // because the forwarding collections are empty (phase 207), so the
+      // element that actually draws - scnInfoUpsellLive, 2881 words when
+      // painted - is never asked to. This replicates hud's own frame
+      // (RenderBegin, LayoutTree, ..., RenderEnd, Present) and calls the paint
+      // directly on each element that owns a visual, standing in for the
+      // descent that is missing.
+      if (::cvars::guide_paint_frame && guide_draw_this_) {
+        auto* pm2 = kernel_state()->memory();
+        // Clear the 0x20 latch immediately before the paint, not only in the
+        // composite-draw hook. 81A02940 refuses every vertex allocation while
+        // that bit is set, and the paint is what makes the allocations - so a
+        // clear applied in the draw hook, on a different call and possibly a
+        // different frame, tests nothing. The command-buffer-end path
+        // (81A00458 -> 81A018B8) re-sets the bit, so it has to be cleared
+        // adjacent to the work that depends on it.
+        // Supply the structure the guard protects, before clearing the
+        // guard. Phase 400: clearing 0x20 alone sends 81A02940 into
+        // 81A019B8, which does lwz r10,11024(r31); lwz r10,4(r10) and faults
+        // because a type-2 device never allocated that field. The type-1
+        // initializer allocates 128 bytes there (81A0FEF4), so allocate the
+        // same and zero it. Ordering matters: this has to happen before the
+        // clear, and both before the paint that makes the allocations.
+        if (::cvars::guide_supply_ring_base && guide_resv_dev_) {
+          uint32_t cur = xe::load_and_swap<uint32_t>(
+              pm2->TranslateVirtual(guide_resv_dev_ + 11024u));
+          if (!cur) {
+            uint32_t nb = pm2->SystemHeapAlloc(128, 128);
+            if (nb) {
+              std::memset(pm2->TranslateVirtual(nb), 0, 128);
+              xe::store_and_swap<uint32_t>(
+                  pm2->TranslateVirtual(guide_resv_dev_ + 11024u), nb);
+              static uint32_t slog = 0;
+              if (slog++ < 3) {
+                XELOGI("PrePaintRing: supplied [dev+11024] = {:08X}", nb);
+              }
+            }
+          }
+        }
+        if (::cvars::guide_clear_cmd_overflow && guide_resv_dev_) {
+          uint8_t* pf =
+              pm2->TranslateVirtual<uint8_t*>(guide_resv_dev_ + 11069u);
+          if (pf) {
+            static uint32_t plog = 0;
+            uint8_t was = *pf;
+            *pf = static_cast<uint8_t>(was & ~0x20u);
+            if (plog++ < 3) {
+              XELOGI("PrePaintClear: [dev+11069] {:02X} -> {:02X}", was, *pf);
+            }
+          }
+        }
+        auto prd2 = [pm2](uint32_t a) {
+          return a ? xe::load_and_swap<uint32_t>(pm2->TranslateVirtual(a)) : 0u;
+        };
+        auto xmp = kernel_state()->GetModule("xam.xex", true);
+        auto po = [&](uint32_t o) {
+          return xmp ? xmp->GetProcAddressByOrdinal(o) : 0u;
+        };
+        static uint32_t pmsg = 0, ppay = 0, pout = 0;
+        if (!pmsg) {
+          pmsg = pm2->SystemHeapAlloc(256, 16);
+          ppay = pm2->SystemHeapAlloc(256, 16);
+          pout = pm2->SystemHeapAlloc(16, 16);
+        }
+        uint32_t dc2 = prd2(guide_draw_this_ + 0x0Cu);
+        uint32_t rt2 = prd2(guide_draw_this_ + 8u);
+        uint32_t f_b = po(0x34B), f_l = po(0x82A), f_e = po(0x34F),
+                 f_p = po(0x353), f_lc = po(0x32F), f_v = po(0x395);
+        uint32_t f_bounds_api = po(0x336);
+        if (dc2 && rt2 && pmsg && f_b && f_e && f_p && f_lc && f_v) {
+          auto* prc = kernel_state()->processor();
+          auto* tsp = gth->thread_state();
+          auto pcall = [&](uint32_t fn, std::initializer_list<uint64_t> a) {
+            std::vector<uint64_t> v(a);
+            return fn ? uint32_t(prc->Execute(tsp, fn, v.data(), v.size()))
+                      : 0xDEADu;
+          };
+          // Sample the dirty bit between SetBounds and the layout.
+          //
+          // Phase 230 changed an element's bounds through the API and found
+          // bit 17 clear when the paint read it - but the paint runs after
+          // XuiElementLayoutTree, and a layout pass is exactly what would
+          // consume dirty flags. Reading the flag immediately after the API
+          // call, before RenderBegin and LayoutTree, says whether the API sets
+          // it at all.
+          if (::cvars::guide_dirty_via_api && f_bounds_api) {
+            auto* vm2 = kernel_state()->memory();
+            uint32_t ri3 = pcall(0x81931040u, {rt2});
+            if (ri3) {
+              uint32_t f_before = prd2(ri3 + 0xB4u);
+              uint32_t bw3 = prd2(ri3 + 0x1Cu), bh3 = prd2(ri3 + 0x20u);
+              float cw3, ch3;
+              std::memcpy(&cw3, &bw3, 4);
+              std::memcpy(&ch3, &bh3, 4);
+              auto* cx3 = gth->thread_state()->context();
+              cx3->f[1] = double(cw3 + 1.0f);
+              cx3->f[2] = double(ch3);
+              uint64_t sa3[] = {rt2};
+              prc->Execute(tsp, f_bounds_api, sa3, xe::countof(sa3));
+              uint32_t f_mid = prd2(ri3 + 0xB4u);
+              // Does the LAYOUT clear a forced bit? That is the last open
+              // reading of phase 229: bit 17 was set on 59 objects and read
+              // back clear inside the paint frame, and the only thing running
+              // in between is this frame's RenderBegin and LayoutTree. Force
+              // it here, run the layout, read it back.
+              xe::store_and_swap<uint32_t>(
+                  vm2->TranslateVirtual(ri3 + 0xB4u), f_mid | 0x20000u);
+              uint32_t f_forced = prd2(ri3 + 0xB4u);
+              pcall(f_b, {dc2, 0xFF000000});
+              pcall(f_l, {rt2});
+              uint32_t f_after_layout = prd2(ri3 + 0xB4u);
+              static uint32_t dl = 0;
+              if (dl++ < 3) {
+                XELOGI("GuideDirty: [B4] {:08X} -> {:08X} after SetBounds "
+                       "(bit17 {} -> {}); forced {:08X}; after "
+                       "RenderBegin+LayoutTree {:08X} (bit17 {})",
+                       f_before, f_mid, (f_before >> 17) & 1,
+                       (f_mid >> 17) & 1, f_forced, f_after_layout,
+                       (f_after_layout >> 17) & 1);
+              }
+            }
+          }
+          if (!::cvars::guide_dirty_via_api) {
+            pcall(f_b, {dc2, 0xFF000000});
+            pcall(f_l, {rt2});
+          }
+          // Sample the cursor AFTER RenderBegin. Phase 209's reading spanned
+          // the rebind that happens inside it - 3009C030 to 40875814 - and so
+          // measured a pointer change rather than an amount of output. Taking
+          // both samples after the rebind makes the delta the paint's own.
+          uint32_t before = guide_resv_dev_
+                                ? prd2(guide_resv_dev_ + 0x30u) : 0;
+          std::memset(pm2->TranslateVirtual(pmsg), 0, 256);
+          std::memset(pm2->TranslateVirtual(ppay), 0, 256);
+          pcall(guide_bs_hud_base_ + 0xA888u,
+                {pmsg, ppay, dc2, 0xFFFFFFFFull, 1});
+          uint32_t painted = 0;
+          uint32_t hp = rt2;
+          for (int d = 0; d < 6 && hp; ++d) {
+            std::memset(pm2->TranslateVirtual(pout), 0, 16);
+            pcall(f_v, {hp, pout});
+            uint32_t vh2 = prd2(pout);
+            if (vh2) {
+              uint32_t oi2 = pcall(0x81931040u, {hp});
+              if (oi2) {
+                // Log each element as it is painted, with the fields that
+                // differ between a scene that emits state and one that emits
+                // nothing: the visibility flags, the opacity, the bounds, and
+                // how many words this particular paint produced.
+                // Paint TWICE and report both. The first paint after a
+                // state invalidation carries one-time pipeline setup - shader
+                // upload and a register block - and whichever element runs
+                // first pays for it. Phase 217 showed that is the whole
+                // difference between "2881 words" and "0 words" on two
+                // otherwise identical scene roots. The second figure is the
+                // element's own contribution.
+                // Dirty the element through the API before painting it.
+                //
+                // Bit 17 of [obj+0xB4] gates 8195E190 inside 81963608 and is
+                // transient - phase 229 forced it and found it cleared again
+                // before the paint read it. It is set when xam dirties an
+                // element, so the way to raise it is to change a property, not
+                // to poke the bit. XuiElementSetBounds takes its width and
+                // height as floats in f1/f2 (phase 195) and is known to write
+                // through to the object.
+                if (::cvars::guide_dirty_via_api && f_bounds_api) {
+                  uint32_t bw2 = prd2(oi2 + 0x1Cu), bh2 = prd2(oi2 + 0x20u);
+                  float cw, ch;
+                  std::memcpy(&cw, &bw2, 4);
+                  std::memcpy(&ch, &bh2, 4);
+                  auto* cx2 = gth->thread_state()->context();
+                  // Pass a CHANGED value. Setting the current bounds back
+                  // lets xam short-circuit on "no change" and dirty nothing,
+                  // which would make this test unable to distinguish "dirtying
+                  // does not help" from "nothing was dirtied". One pixel wider
+                  // is a real change and visually negligible.
+                  cx2->f[1] = double(cw + 1.0f);
+                  cx2->f[2] = double(ch);
+                  uint64_t sb5[] = {hp};
+                  prc->Execute(tsp, f_bounds_api, sb5, xe::countof(sb5));
+                }
+                // Set bit 17 IMMEDIATELY before this element's paint.
+                //
+                // It gates 8195E190 inside 81963608 - the element's hand-off
+                // to the device context - and painting clears it (phase 233).
+                // Setting it in a separate walk is useless because the descent
+                // paints elements before the loop reaches them, clearing it
+                // first. Here it cannot be cleared before 81963608 reads it.
+                if (::cvars::guide_force_flag17) {
+                  uint32_t fl17 = prd2(oi2 + 0xB4u);
+                  xe::store_and_swap<uint32_t>(
+                      pm2->TranslateVirtual(oi2 + 0xB4u), fl17 | 0x20000u);
+                }
+                uint32_t e0 = guide_resv_dev_
+                                  ? prd2(guide_resv_dev_ + 0x30u) : 0;
+                uint32_t gg = pcall(0x81954468u, {oi2});
+                pcall(0x81968890u, {oi2, pmsg});
+                uint32_t e1 = guide_resv_dev_
+                                  ? prd2(guide_resv_dev_ + 0x30u) : 0;
+                pcall(0x81968890u, {oi2, pmsg});
+                uint32_t e2 = guide_resv_dev_
+                                  ? prd2(guide_resv_dev_ + 0x30u) : 0;
+                static uint32_t el_logs = 0;
+                if (el_logs++ < 8) {
+                  uint32_t bw = prd2(oi2 + 0x1Cu), bh = prd2(oi2 + 0x20u);
+                  float fbw, fbh;
+                  std::memcpy(&fbw, &bw, 4);
+                  std::memcpy(&fbh, &bh, 4);
+                  XELOGI("GuideElem: h={:08X} obj={:08X} vis={:08X} gate={} "
+                         "[B4]={:08X} bounds {}x{} -> first {} words, "
+                         "repeat {} words",
+                         hp, oi2, vh2, gg, prd2(oi2 + 0xB4u), fbw, fbh,
+                         (e1 > e0) ? (e1 - e0) / 4 : 0,
+                         (e2 > e1) ? (e2 - e1) / 4 : 0);
+                  // Execute the REPEAT range - the element's own steady-state
+                  // output, with the one-time setup already paid. Two prior
+                  // streams were confirmed draw-free this way; this is the
+                  // first range that is actually the element's contribution
+                  // rather than the pipeline's.
+                  if (e2 > e1 && (e2 - e1) < 0x40000u) {
+                    auto* gsy =
+                        kernel_state()->emulator()->graphics_system();
+                    if (gsy && gsy->command_processor()) {
+                      auto* cpy = gsy->command_processor();
+                      uint32_t db = cpy->guide_draw_count_;
+                      cpy->ExecuteGuestBufferVirtualUnsafe(e1, (e2 - e1) / 4);
+                      XELOGI("GuideElem:   repeat range {:08X} +{} words -> "
+                             "GPU draws +{}",
+                             e1, (e2 - e1) / 4,
+                             cpy->guide_draw_count_ - db);
+                    }
+                  }
+                }
+                ++painted;
+              }
+            }
+            std::memset(pm2->TranslateVirtual(pout), 0, 16);
+            pcall(f_lc, {hp, pout});
+            hp = prd2(pout);
+          }
+          uint32_t after = guide_resv_dev_
+                               ? prd2(guide_resv_dev_ + 0x30u) : 0;
+          // Segment the rest of the frame too. The paints emit state and no
+          // draws, twice confirmed by executing their ranges - so if XUI
+          // batches geometry and submits it when the frame closes, the draws
+          // would appear across RenderEnd or Present, neither of which has
+          // ever been measured.
+          pcall(f_e, {dc2});
+          uint32_t afterEnd = guide_resv_dev_
+                                  ? prd2(guide_resv_dev_ + 0x30u) : 0;
+          uint32_t pres = pcall(f_p, {dc2, 0, 0, 0});
+          uint32_t afterPresent = guide_resv_dev_
+                                      ? prd2(guide_resv_dev_ + 0x30u) : 0;
+          {
+            static uint32_t seg_logs = 0;
+            if (seg_logs++ < 4) {
+              XELOGI("GuideFrameSeg: paint {:08X}->{:08X} ({} w) | "
+                     "RenderEnd ->{:08X} ({} w) | Present ->{:08X} ({} w)",
+                     before, after, (after > before) ? (after - before) / 4 : 0,
+                     afterEnd,
+                     (afterEnd > after) ? (afterEnd - after) / 4 : 0,
+                     afterPresent,
+                     (afterPresent > afterEnd) ? (afterPresent - afterEnd) / 4
+                                               : 0);
+            }
+          }
+          // Hand the range the paint just wrote to the swap-time executor.
+          // guide_overlay_at_swap has existed since phase 173 and has never
+          // had a stream worth running; guide_paint_frame produces one. The
+          // range must come from the paint itself, not from the whole frame.
+          // Phase 368 reported this flag "logs as false despite being passed
+          // on the command line", and the diagnostic that found it was later
+          // removed, so the issue's status has been unknown ever since - while
+          // sitting directly under the composition path. Report the flag and
+          // the range unconditionally, once, so a null result here can be told
+          // apart from the flag never arriving.
+          {
+            static bool once = false;
+            if (!once) {
+              once = true;
+              XELOGI("OverlayGate: guide_overlay_at_swap={} range {:08X}->{:08X}"
+                     " ({} words) -> {}",
+                     ::cvars::guide_overlay_at_swap ? "true" : "FALSE", before,
+                     after, (after > before) ? (after - before) / 4 : 0,
+                     (::cvars::guide_overlay_at_swap && after > before &&
+                      (after - before) < 0x40000u)
+                         ? "executing"
+                         : "skipped");
+            }
+          }
+          if (::cvars::guide_overlay_at_swap && after > before &&
+              (after - before) < 0x40000u) {
+            auto* gso2 = kernel_state()->emulator()->graphics_system();
+            if (gso2 && gso2->command_processor()) {
+              // Publishing to the swap handler does not work: only ONE
+              // XE_SWAP packet is seen in a whole run, so that hook is on a
+              // path the title almost never takes. Execute the range here
+              // instead. Not thread safe - it drives the command processor
+              // from the title thread - but it is the same path the phase 171
+              // probes used and it is the only way to find out whether this
+              // geometry reaches the screen.
+              uint32_t words = (after - before) / 4u;
+              // Walk the range as PM4 before executing it. "0 GPU draws" from
+              // the executor could mean the stream has no draws or that the
+              // executor mis-parsed it; decoding the packets distinguishes
+              // those, and says what the paint actually produced.
+              {
+                uint32_t counts[128] = {0};
+                uint32_t t0 = 0, t2 = 0, pk = 0, bad = 0, iw = 0;
+                std::string first;
+                while (iw < words) {
+                  uint32_t wd = prd2(before + iw * 4);
+                  uint32_t ty = wd >> 30;
+                  uint32_t cn = ((wd >> 16) & 0x3FFF) + 1;
+                  if (ty == 3) {
+                    uint32_t op = (wd >> 8) & 0x7F;
+                    counts[op]++;
+                    ++pk;
+                    if (pk <= 20) first += fmt::format("{:02X}x{} ", op, cn);
+                    iw += 1 + cn;
+                  } else if (ty == 0) {
+                    ++t0; iw += 1 + cn;
+                  } else if (ty == 2) {
+                    ++t2; ++iw;
+                  } else { iw += 2; }
+                  if (iw > words) { ++bad; break; }
+                }
+                std::string hist;
+                for (uint32_t o = 0; o < 128; ++o)
+                  if (counts[o]) hist += fmt::format("{:02X}:{} ", o, counts[o]);
+                static uint32_t wlog = 0;
+                if (wlog++ < 2) {
+                  XELOGI("GuidePaintWalk: {} words -> {} type3, {} type0, "
+                         "{} type2, overrun={}",
+                         words, pk, t0, t2, bad);
+                  XELOGI("GuidePaintWalk: opcodes {}", hist);
+                  XELOGI("GuidePaintWalk: first {}", first);
+                  XELOGI("GuidePaintWalk: DRAW_INDX(22)={} DRAW_INDX_2(36)={}",
+                         counts[0x22], counts[0x36]);
+                }
+              }
+              gso2->command_processor()->guide_overlay_words_ = words;
+              gso2->command_processor()->guide_overlay_ptr_ = before;
+              if (::cvars::guide_execute_command_stream) {
+                uint32_t d0 = gso2->command_processor()->guide_draw_count_;
+                gso2->command_processor()->ExecuteGuestBufferVirtualUnsafe(
+                    before, words);
+                static uint32_t ex_logs = 0;
+                if (ex_logs++ < 4) {
+                  XELOGI("GuidePaintFrame: executed {} words at {:08X}; "
+                         "GPU draws +{}",
+                         words, before,
+                         gso2->command_processor()->guide_draw_count_ - d0);
+                }
+              }
+            }
+          }
+          static uint32_t pf_logs = 0;
+          if (pf_logs++ < 4) {
+            XELOGI("GuidePaintFrame: painted {} elements; present={:08X}; "
+                   "paint wrote {:08X}->{:08X} ({} words)",
+                   painted, pres, before, after,
+                   (after > before) ? (after - before) / 4 : 0);
+          }
+        }
+      }
+      // Sample the reservation window IMMEDIATELY before the draw.
+      //
+      // CmdbufAtDraw samples at hook entry, before guide_bind_cmdbuf_kb
+      // widens it, so its 4676-byte reading says nothing about the state the
+      // draw actually sees. The reservation that fails asks for 2309 words
+      // (9236 bytes); whether the widened 512KB window is still in place at
+      // this point decides whether the re-widen is being overwritten or simply
+      // runs too early.
+      // Re-widen the window HERE, immediately before the draw.
+      //
+      // guide_bind_cmdbuf_kb widens it early in the hook and the measurement
+      // above shows only 3728 bytes survive to this point - the guest calls
+      // made in between (surface creation, render-target binding) restore the
+      // device's own narrow window. The reservation needs 9236 bytes, so it
+      // fails, returns a null cursor, and the emitter stores through it.
+      // Widening at the last possible moment leaves nothing in between to
+      // undo it.
+      if (::cvars::guide_widen_at_draw && guide_resv_dev_ &&
+          guide_cmdbuf_base_ && guide_cmdbuf_size_) {
+        auto* ww = kernel_state()->memory();
+        xe::store_and_swap<uint32_t>(
+            ww->TranslateVirtual(guide_resv_dev_ + 0x30u), guide_cmdbuf_base_);
+        xe::store_and_swap<uint32_t>(
+            ww->TranslateVirtual(guide_resv_dev_ + 0x34u),
+            guide_cmdbuf_base_ + guide_cmdbuf_size_);
+        // Phase 372: [dev+16344] is the base the overflow check subtracts from
+        // the cursor ((cursor - base + 4) >> 2 vs 0x100000, at 81A00774).
+        // Measured it as either 0 or ABOVE the cursor, giving counts of
+        // 201,496,577 and 1,073,733,145 - so the device latches
+        // "command buffer overflow" (bit 0x20 of [dev+11069]) and refuses every
+        // vertex allocation. Point it at our buffer so the count is real.
+        xe::store_and_swap<uint32_t>(
+            ww->TranslateVirtual(guide_resv_dev_ + 16344u),
+            guide_cmdbuf_base_);
+        // The overflow flag LATCHES: once bit 0x20 of [dev+11069] is set,
+        // EndCommandBuffer fails, so the buffer is never retired and the
+        // condition sustains itself. Fixing the base makes the count correct
+        // (measured: words=1) but does not clear the bit, so clear it too -
+        // now that the count it was derived from is no longer nonsense.
+        // Phase 374: the vertex allocator's success path dereferences
+        // [dev+0x2B10] (null since phase 271) at 81A019B8. The guest code that
+        // would build it (81A0FE48, allocating 128 bytes) is unreachable in
+        // this build - phase 273 - so supply an equivalent zeroed block.
+        // Diagnostic: this is a guess at the structure, not a reconstruction.
+        {
+          uint32_t rb = xe::load_and_swap<uint32_t>(
+              ww->TranslateVirtual(guide_resv_dev_ + 11024u));
+          if (!rb) {
+            uint32_t nb = kernel_state()->memory()->SystemHeapAlloc(128, 128);
+            if (nb) {
+              std::memset(ww->TranslateVirtual(nb), 0, 128);
+              xe::store_and_swap<uint32_t>(
+                  ww->TranslateVirtual(guide_resv_dev_ + 11024u), nb);
+              XELOGI("RingBase: supplied [dev+2B10] = {:08X} (was null)", nb);
+            }
+          }
+        }
+        {
+          uint8_t* fp = ww->TranslateVirtual<uint8_t*>(guide_resv_dev_ + 11069u);
+          if (fp && (*fp & 0x20u)) {
+            *fp = static_cast<uint8_t>(*fp & ~0x20u);
+            static uint32_t cleared = 0;
+            if (cleared++ < 3) {
+              XELOGI("CmdOverflow: cleared [dev+11069] bit 0x20 (now {:02X})",
+                     *fp);
+            }
+          }
+        }
+      }
+      {
+        static uint32_t win_logs = 0;
+        if (win_logs++ < 80 && guide_resv_dev_) {
+          auto* wm3 = kernel_state()->memory();
+          auto w3 = [wm3](uint32_t a) {
+            return xe::load_and_swap<uint32_t>(wm3->TranslateVirtual(a));
+          };
+          if (win_logs <= 4) {
+          uint32_t c30 = w3(guide_resv_dev_ + 0x30u);
+          uint32_t e34 = w3(guide_resv_dev_ + 0x34u);
+          XELOGI("WindowAtDraw #{}: dev={:08X} cur[30]={:08X} end[34]={:08X} "
+                 "= {} bytes (need 9236) cursor[2B4C]={:08X}",
+                 win_logs, guide_resv_dev_, c30, e34,
+                 (e34 > c30) ? (e34 - c30) : 0,
+                 w3(guide_resv_dev_ + 0x2B4Cu));
+          }
+          // Phase 270 traced the flush's untaken branches back to a single
+          // device field. 819FE48C loads [dev+23048] and 819FE4B0 branches on
+          // it being zero; that skips the ring-buffer block which is the only
+          // site that sets r28=1, and r28==0 at 819FE760 skips the call that
+          // would populate the stack slot guarding the surface-format block.
+          // The offsets are read off a disassembly, so measure them rather
+          // than trust them.
+          // Phase 274 left the live gate at 819432B0: a handle-table lookup
+          // that returns 1 only if [obj+24] == r4, where r4 is the fixed
+          // global [81D6CE50]. It returns 0, so the final dispatch
+          // (bl 81957750 / bl 819636C8) never runs. Both sides are readable
+          // from the host, so measure rather than reason: dump the expected
+          // class token and scan the handle table for any object carrying it.
+          // Sample the handle table late as well as early. matching=0 was only
+          // ever measured on the first two draws; if shader objects appear
+          // later that reading would be an artefact of when we looked.
+          if (win_logs <= 2 || win_logs == 30 || win_logs == 79) {
+            const uint32_t kTbl = 0x81D6D0D8u;   // 0x81D70000 - 12072
+            const uint32_t kTok = 0x81D6CE50u;   // 0x81D70000 - 12720
+            // Every address below comes from guest memory and can be
+            // garbage. Phase 248 cost several phases by reading a guest
+            // pointer without checking it; the first version of THIS block
+            // repeated that exact mistake and faulted the host twice.
+            // "non-null and below 4GB" is NOT a mapped-address test - the
+            // first version of this probe accepted guest 0x11C00 and faulted
+            // the host. Restrict to the two regions everything read here
+            // actually lives in: the guest heap objects (0x4xxxxxxx) and the
+            // xam image's code/data (0x81xxxxxx-0x81Exxxxx).
+            auto ok = [](uint32_t a) {
+              if (a & 3u) return false;
+              return (a >= 0x40000000u && a < 0x50000000u) ||
+                     (a >= 0x81000000u && a < 0x81E00000u);
+            };
+            auto rdz = [&](uint32_t a) -> uint32_t {
+              return ok(a) ? w3(a) : 0u;
+            };
+            uint32_t expect = rdz(kTok);
+            // Phase 299: XuiTabSceneGetCurrentTab (81937FB0) casts its scene
+            // to the class at [81D6CE38] and returns -1 if the cast fails.
+            // -1 matches no tab, so no tab ever activates. Count objects of
+            // that class exactly as the shader class is counted.
+            const uint32_t kTabTok = 0x81D6CE38u;
+            uint32_t tab_expect = rdz(kTabTok);
+            // Name the tab-scene class. If it is a base that the Guide's
+            // scenes should derive from, the absence of a binding for it says
+            // the inheritance chain is not being bound; if it is an unrelated
+            // class, it says the Guide's scene simply is not a tab scene.
+            std::string tabname;
+            {
+              uint32_t np = rdz(tab_expect + 4u);
+              if (ok(np)) {
+                for (uint32_t c = 0; c < 24; ++c) {
+                  uint32_t ad = np + c * 2u;
+                  uint32_t wv = rdz(ad & ~3u);
+                  uint16_t ch = (ad & 2u) ? (wv & 0xFFFF) : (wv >> 16);
+                  if (!ch || ch < 0x20 || ch > 0x7E) break;
+                  tabname += (char)ch;
+                }
+              }
+              uint32_t bp = rdz(tab_expect + 8u);
+              std::string basename;
+              if (ok(bp)) {
+                for (uint32_t c = 0; c < 24; ++c) {
+                  uint32_t ad = bp + c * 2u;
+                  uint32_t wv = rdz(ad & ~3u);
+                  uint16_t ch = (ad & 2u) ? (wv & 0xFFFF) : (wv >> 16);
+                  if (!ch || ch < 0x20 || ch > 0x7E) break;
+                  basename += (char)ch;
+                }
+              }
+              // Phase 323: apply the phase 322 discriminator to the two
+              // classes the surviving chain depends on. A real class has a
+              // CODE pointer at +16 (the handler trampoline); an element has a
+              // heap pointer there. Verify before trusting the names.
+              XELOGI("ClassCheck: tab {:08X} +16={:08X} +40={:08X} {} | "
+                     "shader {:08X} +16={:08X} +40={:08X} {}",
+                     tab_expect, rdz(tab_expect + 16u), rdz(tab_expect + 40u),
+                     (rdz(tab_expect + 16u) >= 0x81000000u &&
+                      rdz(tab_expect + 16u) < 0x81E00000u) ? "CLASS" : "NOT-CLASS",
+                     expect, rdz(expect + 16u), rdz(expect + 40u),
+                     (rdz(expect + 16u) >= 0x81000000u &&
+                      rdz(expect + 16u) < 0x81E00000u) ? "CLASS" : "NOT-CLASS");
+              XELOGI("TabClass {:08X} = '{}' (base '{}')", tab_expect,
+                     tabname.empty() ? "?" : tabname,
+                     basename.empty() ? "?" : basename);
+            }
+            uint32_t tab_match = 0;
+            uint32_t cap = rdz(kTbl + 1056u);
+            uint32_t live = 0, match = 0;
+            std::string sample;
+            for (uint32_t idx = 0; idx < 256 && idx < cap && cap < 0x10000u;
+                 ++idx) {
+              uint32_t bucket = rdz(kTbl + ((idx >> 6) * 4u));
+              if (!ok(bucket)) continue;
+              uint32_t ent = bucket + ((idx * 8u) & 0x7F8u);
+              uint32_t obj = rdz(ent + 4u);
+              if (!ok(obj)) continue;
+              ++live;
+              uint32_t cls = rdz(obj + 24u);
+              if (cls == expect && expect) ++match;
+              if (cls == tab_expect && tab_expect) ++tab_match;
+              if (live <= 6) {
+                sample += fmt::format("{}:obj={:08X} cls={:08X} ", idx, obj, cls);
+              }
+            }
+            XELOGI("HandleTable: expect[81D6CE50]={:08X} cap={} live={} "
+                   "matching={} | tabclass[81D6CE38]={:08X} tabmatch={} | {}",
+                   expect, cap, live, match, tab_expect, tab_match, sample);
+            // Phase 275 showed the wanted class is XuiShader and none exists.
+            // 62 objects across two classes is very thin for the Guide, so
+            // census the scene: distinct class tokens and their names.
+            // Name strings are read ONLY from the xam image range, which is
+            // fully mapped - this is what makes the read safe, unlike the
+            // probe in phase 275 that walked heap pointers and faulted.
+            {
+              uint32_t distinct[16] = {0};
+              uint32_t counts[16] = {0};
+              uint32_t nd = 0;
+              for (uint32_t idx = 0; idx < 256 && idx < cap && cap < 0x10000u;
+                   ++idx) {
+                uint32_t bucket = rdz(kTbl + ((idx >> 6) * 4u));
+                if (!ok(bucket)) continue;
+                uint32_t obj = rdz(bucket + ((idx * 8u) & 0x7F8u) + 4u);
+                if (!ok(obj)) continue;
+                uint32_t cls = rdz(obj + 24u);
+                if (!cls) continue;
+                uint32_t k = 0;
+                for (; k < nd; ++k) {
+                  if (distinct[k] == cls) break;
+                }
+                if (k == nd && nd < 16) distinct[nd++] = cls;
+                if (k < 16) ++counts[k];
+              }
+              std::string census;
+              for (uint32_t k = 0; k < nd; ++k) {
+                uint32_t np = rdz(distinct[k] + 4u);
+                std::string nm;
+                // The name string lives in the HEAP (np is typically cls+0x50),
+                // not in the image - an image-only filter excluded exactly the
+                // pointers that matter. ok() still bounds the read, and this
+                // walks one pointer per class rather than scanning candidates,
+                // which is what made the phase 275 probe fault.
+                if (ok(np)) {
+                  for (uint32_t c = 0; c < 20; ++c) {
+                    uint32_t addr = np + c * 2u;
+                    uint32_t wv = rdz(addr & ~3u);
+                    uint16_t ch = (addr & 2u) ? (wv & 0xFFFF) : (wv >> 16);
+                    if (!ch || ch < 0x20 || ch > 0x7E) break;
+                    nm += (char)ch;
+                  }
+                }
+                census += fmt::format("{}x{} ", counts[k],
+                                      nm.empty() ? fmt::format("{:08X}", distinct[k]) : nm);
+              }
+              XELOGI("SceneCensus: {} distinct classes | {}", nd, census);
+              // Phase 294: census every (class, handler) BINDING in the
+              // session, not just the ones reachable from the paint chain.
+              // A binding node has a class pointer at +0x18 and a code
+              // pointer at +0x1C. This answers directly whether ANY
+              // class-specific binding exists, rather than inferring it from
+              // the 464 elements walked in phase 291.
+              {
+                uint32_t tabbind = 0, shdbind = 0;
+                // XuiScene's class pointer, via its known handler 8193FC60.
+                uint32_t scene_cls = 0;
+                for (uint32_t idx = 0; idx < 1024 && idx < cap; ++idx) {
+                  uint32_t bk = rdz(kTbl + ((idx >> 6) * 4u));
+                  if (!ok(bk)) continue;
+                  uint32_t ob = rdz(bk + ((idx * 8u) & 0x7F8u) + 4u);
+                  if (!ok(ob)) continue;
+                  if (rdz(ob + 0x1Cu) == 0x8193FC60u) {
+                    scene_cls = rdz(ob + 0x18u);
+                    break;
+                  }
+                }
+                uint32_t scenes_shown = 0;
+                std::string scene_list;
+                std::map<uint32_t, uint32_t> binds;   // handler -> count
+                std::map<uint32_t, uint32_t> bcls;    // handler -> a class
+                uint32_t nodes = 0;
+                for (uint32_t idx = 0; idx < 1024 && idx < cap; ++idx) {
+                  uint32_t bucket = rdz(kTbl + ((idx >> 6) * 4u));
+                  if (!ok(bucket)) continue;
+                  uint32_t obj = rdz(bucket + ((idx * 8u) & 0x7F8u) + 4u);
+                  if (!ok(obj)) continue;
+                  uint32_t h = rdz(obj + 0x1Cu);
+                  if (h < 0x81930000u || h >= 0x819A0000u) continue;
+                  ++nodes;
+                  binds[h]++;
+                  bcls[h] = rdz(obj + 0x18u);
+                  // The cast 8193F1B8 walks this chain comparing [node+0x18]
+                  // against the wanted class, so a BINDING carrying the class
+                  // is what makes a cast succeed - not an object whose own
+                  // [obj+24] equals it. Count bindings for the tab-scene and
+                  // shader classes on the same basis.
+                  // Phase 306: list the XuiScene-bound objects. A binding
+                  // node holds the element it binds at +0x20 and its own
+                  // handle at +0. If one of these is GuideMain's scene, the
+                  // draw root should have been it.
+                  if (rdz(obj + 0x18u) == scene_cls && scene_cls &&
+                      scenes_shown < 8) {
+                    ++scenes_shown;
+                    scene_list += fmt::format(
+                        "[node={:08X} h={:08X} elem={:08X} sc={:08X}] ",
+                        obj, rdz(obj), rdz(obj + 0x20u), rdz(obj + 0x24u));
+                  }
+                  if (rdz(obj + 0x18u) == 0x40888E80u) ++tabbind;
+                  if (rdz(obj + 0x18u) == 0x408891D0u) ++shdbind;
+                }
+                std::string bs;
+                for (auto& kv : binds) {
+                  uint32_t cp = bcls[kv.first];
+                  uint32_t np = rdz(cp + 4u);
+                  std::string nm;
+                  if (ok(np)) {
+                    for (uint32_t c = 0; c < 20; ++c) {
+                      uint32_t ad = np + c * 2u;
+                      uint32_t wv = rdz(ad & ~3u);
+                      uint16_t ch = (ad & 2u) ? (wv & 0xFFFF) : (wv >> 16);
+                      if (!ch || ch < 0x20 || ch > 0x7E) break;
+                      nm += (char)ch;
+                    }
+                  }
+                  bs += fmt::format("{:08X}->{}x{} ", kv.first,
+                                    nm.empty() ? fmt::format("{:08X}", cp) : nm,
+                                    kv.second);
+                }
+                XELOGI("BindCensus: {} binding nodes, {} distinct handlers | "
+                       "tabclass-bindings={} shaderclass-bindings={} | {}",
+                       nodes, binds.size(), tabbind, shdbind, bs);
+              // Phase 319 control: for each distinct bound class, report its
+              // name, its +40 (the binder's base link) and the text at
+              // [[+8]+4] (the base-name string object). If built-ins have +40
+              // populated and custom classes do not, that is the split; if
+              // some built-ins also have +40=0, the story is different.
+              {
+                std::string tbl;
+                uint32_t shown3 = 0;
+                for (auto& kv : bcls) {
+                  uint32_t cp = kv.second;
+                  if (!ok(cp) || shown3 >= 10) continue;
+                  ++shown3;
+                  auto txt = [&](uint32_t sp) {
+                    std::string nm;
+                    if (!ok(sp)) return nm;
+                    for (uint32_t c = 0; c < 20; ++c) {
+                      uint32_t ad = sp + c * 2u;
+                      uint32_t wv = rdz(ad & ~3u);
+                      uint16_t ch = (ad & 2u) ? (wv & 0xFFFF) : (wv >> 16);
+                      if (!ch || ch < 0x20 || ch > 0x7E) break;
+                      nm += (char)ch;
+                    }
+                    return nm;
+                  };
+                  std::string nm = txt(rdz(cp + 4u));
+                  uint32_t s8 = rdz(cp + 8u);
+                  std::string basetxt = ok(s8) ? txt(rdz(s8 + 4u)) : std::string();
+                  tbl += fmt::format("{}[+40={:08X} base='{}'] ",
+                                     nm.empty() ? fmt::format("{:08X}", cp) : nm,
+                                     rdz(cp + 40u),
+                                     basetxt.empty() ? "-" : basetxt);
+                }
+                XELOGI("ClassLinks: {}", tbl);
+                // Phase 358: does ANY bound class derive from XuiShader? Walk
+                // each class's +40 base chain looking for the shader class. If
+                // none does, no element could ever satisfy the painter's check
+                // and the design-A reading needs re-examining.
+                {
+                  std::string der;
+                  uint32_t any = 0;
+                  for (auto& kv : bcls) {
+                    uint32_t cp = kv.second;
+                    if (!ok(cp)) continue;
+                    uint32_t c = cp, hops = 0;
+                    bool found = false;
+                    while (ok(c) && hops < 12) {
+                      if (c == expect) { found = true; break; }
+                      c = rdz(c + 40u); ++hops;
+                    }
+                    if (found) { ++any; der += fmt::format("{:08X} ", cp); }
+                  }
+                  XELOGI("ShaderDerived: {} of {} bound classes derive from "
+                         "XuiShader {:08X} | {}",
+                         any, bcls.size(), expect,
+                         der.empty() ? std::string("(none)") : der);
+                }
+                // Phase 321: are the Guide's "classes" the same kind of object
+                // as registered built-in classes? Registration (8194F118)
+                // allocates 60 bytes and sets +44 (flags), +48 (=-1) and +52
+                // (=0) before any lookup. Dump those fields for a known
+                // registered class and for a Guide class and compare.
+                {
+                  auto dump = [&](const char* tag, uint32_t cp) {
+                    if (!ok(cp)) return;
+                    std::string w;
+                    for (uint32_t q = 0; q < 15; ++q) {
+                      w += fmt::format("+{}:{:08X} ", q * 4, rdz(cp + q * 4u));
+                    }
+                    XELOGI("ClassDump {}: {:08X} {}", tag, cp, w);
+                  };
+                  uint32_t builtin = 0, guide = 0;
+                  for (auto& kv : bcls) {
+                    uint32_t cp = kv.second;
+                    if (!ok(cp)) continue;
+                    if (!builtin) builtin = cp;
+                  }
+                  // the draw root's own class, resolved earlier in this block
+                  if (guide_bs_scene_) {
+                    uint32_t hi2 = guide_bs_scene_ & 0xFFFFu;
+                    uint32_t hb3 = rdz(kTbl + ((hi2 >> 6) * 4u));
+                    uint32_t rt3 = ok(hb3)
+                        ? rdz(hb3 + ((hi2 * 8u) & 0x7F8u) + 4u) : 0u;
+                    uint32_t nd3 = ok(rt3) ? rdz(rt3 + 12u) : 0u;
+                    guide = ok(nd3) ? rdz(nd3 + 0x18u) : 0u;
+                  }
+                  dump("builtin", builtin);
+                  dump("guide", guide);
+                }
+              }
+              XELOGI("SceneObjects: XuiScene class {:08X} | {}", scene_cls,
+                     scene_list.empty() ? std::string("(none)") : scene_list);
+              // Phase 307: is the draw root a DESCENDANT of any scene object?
+              // Same run, so pointer comparison is valid here (phase 306).
+              if (guide_bs_scene_ && scene_cls) {
+                uint32_t hidx2 = guide_bs_scene_ & 0xFFFFu;
+                uint32_t hb2 = rdz(kTbl + ((hidx2 >> 6) * 4u));
+                uint32_t root2 = ok(hb2)
+                    ? rdz(hb2 + ((hidx2 * 8u) & 0x7F8u) + 4u) : 0u;
+                std::string verdict = "no scene contains it";
+                for (uint32_t idx = 0; idx < 1024 && idx < cap && root2; ++idx) {
+                  uint32_t bk = rdz(kTbl + ((idx >> 6) * 4u));
+                  if (!ok(bk)) continue;
+                  uint32_t nd2 = rdz(bk + ((idx * 8u) & 0x7F8u) + 4u);
+                  if (!ok(nd2) || rdz(nd2 + 0x18u) != scene_cls) continue;
+                  uint32_t sroot = rdz(nd2 + 0x20u);
+                  if (!ok(sroot)) continue;
+                  // DFS over (first child +8, next sibling +16)
+                  uint32_t st[256]; int sp = 0, seen = 0;
+                  st[sp++] = sroot;
+                  bool found = false;
+                  while (sp > 0 && seen < 256) {
+                    uint32_t o2 = st[--sp]; ++seen;
+                    if (o2 == root2) { found = true; break; }
+                    uint32_t kid = rdz(o2 + 8u), sib = rdz(o2 + 16u);
+                    if (ok(sib) && sp < 255) st[sp++] = sib;
+                    if (ok(kid) && sp < 255) st[sp++] = kid;
+                  }
+                  if (found) {
+                    verdict = fmt::format(
+                        "DESCENDANT of scene elem {:08X} (node h={:08X}), "
+                        "found after {} nodes", sroot, rdz(nd2), seen);
+                    break;
+                  }
+                }
+                XELOGI("RootParentage: root={:08X} -> {}", root2, verdict);
+                // Phase 309: how big is each scene's subtree? The draw root's
+                // subtree holds 464 blade elements; if one scene has a
+                // comparable tree it is the candidate the draw should use,
+                // and if all are tiny the Guide's content is not under any
+                // scene at all.
+                {
+                  std::string sizes;
+                  uint32_t shown2 = 0;
+                  for (uint32_t idx = 0; idx < 1024 && idx < cap && shown2 < 8;
+                       ++idx) {
+                    uint32_t bk = rdz(kTbl + ((idx >> 6) * 4u));
+                    if (!ok(bk)) continue;
+                    uint32_t nd2 = rdz(bk + ((idx * 8u) & 0x7F8u) + 4u);
+                    if (!ok(nd2) || rdz(nd2 + 0x18u) != scene_cls) continue;
+                    uint32_t sroot = rdz(nd2 + 0x20u);
+                    if (!ok(sroot)) continue;
+                    uint32_t st[512]; int sp = 0, cnt = 0;
+                    st[sp++] = sroot;
+                    while (sp > 0 && cnt < 512) {
+                      uint32_t o2 = st[--sp]; ++cnt;
+                      uint32_t kid = rdz(o2 + 8u), sib = rdz(o2 + 16u);
+                      if (ok(sib) && sp < 511) st[sp++] = sib;
+                      if (ok(kid) && sp < 511) st[sp++] = kid;
+                    }
+                    sizes += fmt::format("h={:08X}:{} ", rdz(nd2), cnt);
+                    ++shown2;
+                  }
+                  // Control: the same DFS on the draw root must find its
+                  // 464-element subtree. If it reports 1 as well, the walk or
+                  // the child/sibling offsets are wrong and "all scenes are
+                  // empty" would be an artefact.
+                  uint32_t ctl = 0;
+                  if (root2) {
+                    uint32_t st[512]; int sp = 0;
+                    st[sp++] = root2;
+                    while (sp > 0 && ctl < 512) {
+                      uint32_t o2 = st[--sp]; ++ctl;
+                      uint32_t kid = rdz(o2 + 8u), sib = rdz(o2 + 16u);
+                      if (ok(sib) && sp < 511) st[sp++] = sib;
+                      if (ok(kid) && sp < 511) st[sp++] = kid;
+                    }
+                  }
+                  XELOGI("SceneSizes: {} | CONTROL drawroot {:08X} subtree={}",
+                         sizes, root2, ctl);
+                }
+              }
+              // Self-test the handle resolution before trusting it. Every
+              // binding node carries its OWN handle at +0, so resolving that
+              // handle must yield the node's own address. If it does not, the
+              // table or the index math is wrong - which would make the
+              // phase 303 "the draw root is an XuiImagePresenter" reading an
+              // artefact rather than a finding.
+              {
+                for (uint32_t idx = 0; idx < 1024 && idx < cap; ++idx) {
+                  uint32_t bk = rdz(kTbl + ((idx >> 6) * 4u));
+                  if (!ok(bk)) continue;
+                  uint32_t ob = rdz(bk + ((idx * 8u) & 0x7F8u) + 4u);
+                  if (!ok(ob)) continue;
+                  uint32_t hh = rdz(ob + 0x1Cu);
+                  if (hh < 0x81930000u || hh >= 0x819A0000u) continue;
+                  uint32_t own = rdz(ob);            // the node's own handle
+                  uint32_t oi = own & 0xFFFFu;
+                  uint32_t ob2b = rdz(kTbl + ((oi >> 6) * 4u));
+                  uint32_t back = ok(ob2b)
+                                      ? rdz(ob2b + ((oi * 8u) & 0x7F8u) + 4u)
+                                      : 0u;
+                  XELOGI("HandleSelfTest: node {:08X} says handle {:08X}; "
+                         "resolving it gives {:08X} -> {}",
+                         ob, own, back, (back == ob) ? "OK" : "MISMATCH");
+                  break;
+                }
+              }
+              // Phase 303: what class chain does the DRAW ROOT scene have?
+              // The cast in XuiTabSceneGetCurrentTab walks exactly this chain,
+              // so naming it says directly whether our root is a tab scene.
+              if (guide_bs_scene_) {
+                // guide_bs_scene_ is a HANDLE (e.g. 00010135), not a pointer.
+                // Resolve it the way the guest does: index = handle & 0xFFFF,
+                // bucket = [tbl + (idx>>6)*4], entry = bucket + (idx*8 & 0x7F8),
+                // object = [entry+4].
+                uint32_t hidx = guide_bs_scene_ & 0xFFFFu;
+                uint32_t hbucket = rdz(kTbl + ((hidx >> 6) * 4u));
+                uint32_t root = ok(hbucket)
+                                    ? rdz(hbucket + ((hidx * 8u) & 0x7F8u) + 4u)
+                                    : 0u;
+                // The guest also checks the generation at [entry+0] against
+                // handle>>16 and rejects a mismatch, so verify it here rather
+                // than trusting a possibly recycled slot.
+                uint32_t hent = ok(hbucket)
+                                    ? hbucket + ((hidx * 8u) & 0x7F8u) : 0u;
+                uint32_t hgen = ok(hent) ? rdz(hent) : 0u;
+                XELOGI("RootScene: handle={:08X} idx={} gen_want={} gen_slot={} "
+                       "{} -> object {:08X}",
+                       guide_bs_scene_, hidx, guide_bs_scene_ >> 16, hgen,
+                       (hgen == (guide_bs_scene_ >> 16)) ? "MATCH" : "STALE",
+                       root);
+                std::string chain;
+                for (uint32_t nd = rdz(root + 12u), hop = 0;
+                     ok(nd) && hop < 12; nd = rdz(nd + 8u), ++hop) {
+                  uint32_t cp = rdz(nd + 0x18u);
+                  std::string nm;
+                  uint32_t np = rdz(cp + 4u);
+                  if (ok(np)) {
+                    for (uint32_t c = 0; c < 24; ++c) {
+                      uint32_t ad = np + c * 2u;
+                      uint32_t wv = rdz(ad & ~3u);
+                      uint16_t ch = (ad & 2u) ? (wv & 0xFFFF) : (wv >> 16);
+                      if (!ch || ch < 0x20 || ch > 0x7E) break;
+                      nm += (char)ch;
+                    }
+                  }
+                  chain += nm.empty() ? fmt::format("{:08X} ", cp)
+                                      : (nm + " ");
+                }
+                XELOGI("RootSceneChain: scene={:08X} [+12]={:08X} classes: {}",
+                       root, rdz(root + 12u),
+                       chain.empty() ? std::string("(empty)") : chain);
+              }
+              }
+            }
+            // The class-name probe that answered this lived here. It read
+            // candidate strings out of class descriptors and faulted the host
+            // twice before it was tuned; once it had produced the answer
+            // (expect = XuiShader, present = XuiCanvas / XuiText) it was
+            // removed rather than left in the draw path. See phase 275.
+          }
+          // Phase 372: the overflow check at 81A00774 computes
+          // ((cursor - [dev+16344]) + 4) >> 2 and trips when it exceeds
+          // 0x100000. Log both terms and the computed count.
+          {
+            uint32_t cur = w3(guide_resv_dev_ + 0x30u);
+            uint32_t cbase = w3(guide_resv_dev_ + 16344u);
+            uint32_t words = (cur - cbase + 4u) >> 2;
+            XELOGI("CmdCount: cursor[30]={:08X} base[3FD8]={:08X} diff={:08X} "
+                   "words={} limit=1048576 {}",
+                   cur, cbase, cur - cbase, words,
+                   (words > 0x100000u) ? "OVER LIMIT" : "within limit");
+          }
+          XELOGI("RingAtDraw #{}: head[5A00]={:08X} tail[5A04]={:08X} "
+                 "gate[5A08]={:08X} ringbase[2B10]={:08X} "
+                 "cfg[3AFC]={:08X} cfg[3B00]={:08X}",
+                 win_logs, w3(guide_resv_dev_ + 0x5A00u),
+                 w3(guide_resv_dev_ + 0x5A04u), w3(guide_resv_dev_ + 0x5A08u),
+                 w3(guide_resv_dev_ + 0x2B10u), w3(guide_resv_dev_ + 0x3AFCu),
+                 w3(guide_resv_dev_ + 0x3B00u));
+        }
+      }
+      static uint32_t drawbr = 0;
+      bool brk = drawbr++ < 4;
+      if (brk) {
+        XELOGI("GuideDrawEnter #{} fn={:08X} this={:08X}", drawbr,
+               guide_draw_fn_, guide_draw_this_);
+      }
       in_guide_draw_scope = true;
       uint64_t gr = kernel_state()->processor()->Execute(
           gth->thread_state(), guide_draw_fn_, gargs, xe::countof(gargs));
       in_guide_draw_scope = false;
+      if (brk) {
+        XELOGI("GuideDrawLeave #{} -> {:08X}", drawbr,
+               static_cast<uint32_t>(gr));
+      }
+      if (objdiff_on && !objdiff_addr.empty()) {
+        auto* om3 = kernel_state()->memory();
+        auto ord3 = [om3](uint32_t a) {
+          return a ? xe::load_and_swap<uint32_t>(om3->TranslateVirtual(a)) : 0u;
+        };
+        size_t k = 0;
+        for (uint32_t a : objdiff_addr) {
+          std::string diff;
+          for (uint32_t i = 0; i < kOdWords; ++i, ++k) {
+            uint32_t now = ord3(a + i * 4);
+            if (k < objdiff_snap.size() && now != objdiff_snap[k]) {
+              diff += fmt::format("+{:02X}:{:08X}->{:08X} ", i * 4,
+                                  objdiff_snap[k], now);
+            }
+          }
+          XELOGI("ObjDiff: {:08X} {}", a,
+                 diff.empty() ? std::string("untouched") : diff);
+        }
+      }
       // --- second rendering context: submit ---
       // The begin left the cursor at buffer-4 and every emitted word
+      if (ckpt_on) XELOGI("GuideCk: force_front_buffer");
       // advances it by 4, so the distance from where the begin left it
       // is exactly how much the Guide wrote. Submit that directly -
       // this runs inside the title's frame, before its swap, so with
@@ -2703,7 +6211,14 @@ void VdSwap_entry(
         // the GPU back the title's so it can present again.
         GuideRestoreTitleRing();
       }
-      if (::cvars::guide_diff_draw_writes && !pre_sums.empty()) {
+      // Diff only the first few draws. The Guide runs 3600+ composite draws in
+      // a 25s harness run and each one emitted ~2 lines per changed block, so
+      // the interesting first-frame result scrolled past thousands of
+      // identical repeats. Nothing has ever differed between draw 4 and draw
+      // 3600 that draw 1..3 did not already show.
+      static uint32_t diff_draws = 0;
+      if (::cvars::guide_diff_draw_writes && !pre_sums.empty() &&
+          diff_draws++ < 3) {
         auto* mmv = kernel_state()->memory();
         uint32_t changed = 0, idx = 0, shown = 0;
         for (auto& r : kRanges) for (uint32_t a = r.lo; a < r.hi; a += kBlk, ++idx) {
@@ -2780,6 +6295,74 @@ void VdSwap_entry(
           // the diff, not from walking headers: the largest run begins at
           // FE03E284, which is exactly the pointer xam hands to VdSwap, while
           // the header walker had guessed FE038000 and captured a fragment.
+          // Walk the run as a real PM4 stream: read each header, honour its
+          // count, and skip its payload. The older dump printed every word
+          // with a type-3 interpretation, which turns shader microcode into
+          // imaginary packets - the 22000000 inside an IM_LOAD payload read as
+          // a DRAW_INDX header, and the walk lost sync immediately. Only a
+          // walker that skips payload can say what the frame actually
+          // contains.
+          if (::cvars::guide_word_diff && len >= 32) {
+            auto* mmw = kernel_state()->memory();
+            uint32_t total_words = start + len;
+            uint32_t counts[128] = {0};
+            uint32_t t0 = 0, t1 = 0, t2 = 0, bad = 0, pkts = 0;
+            std::string first;
+            uint32_t i2 = 0;
+            while (i2 < total_words) {
+              uint32_t w = xe::load_and_swap<uint32_t>(
+                  mmw->TranslateVirtual(kWdLo + i2 * 4));
+              uint32_t type = w >> 30;
+              uint32_t cnt = ((w >> 16) & 0x3FFF) + 1;
+              if (type == 3) {
+                uint32_t op = (w >> 8) & 0x7F;
+                counts[op]++;
+                ++pkts;
+                if (pkts <= 24) {
+                  first += fmt::format("{:02X}x{} ", op, cnt);
+                }
+                i2 += 1 + cnt;
+              } else if (type == 0) {
+                ++t0;
+                i2 += 1 + cnt;
+              } else if (type == 2) {
+                ++t2;
+                i2 += 1;
+              } else {
+                ++t1;
+                i2 += 2;
+              }
+              if (i2 > total_words) {
+                ++bad;
+                break;
+              }
+            }
+            std::string hist;
+            for (uint32_t o = 0; o < 128; ++o) {
+              if (counts[o]) {
+                hist += fmt::format("{:02X}:{} ", o, counts[o]);
+              }
+            }
+            XELOGI(
+                "GuideWalk: {} words -> {} type3 pkts, {} type0, {} type2, "
+                "{} type1, overrun={}",
+                total_words, pkts, t0, t2, t1, bad);
+            XELOGI("GuideWalk: opcodes {}", hist);
+            XELOGI("GuideWalk: first {}", first);
+            XELOGI("GuideWalk: DRAW_INDX(22)={} DRAW_INDX_2(36)={}",
+                   counts[0x22], counts[0x36]);
+          }
+
+          // Hand the run to the GPU thread to draw over the title's next
+          // frame, instead of executing it here. This is the mechanism; the
+          // in-line execution below is the probe.
+          if (::cvars::guide_overlay_at_swap && len >= 32) {
+            auto* gso = kernel_state()->emulator()->graphics_system();
+            if (gso && gso->command_processor()) {
+              gso->command_processor()->guide_overlay_words_ = start + len;
+              gso->command_processor()->guide_overlay_ptr_ = kWdLo;
+            }
+          }
           if (::cvars::guide_execute_command_stream && len >= 32) {
             auto* gs2 = kernel_state()->emulator()->graphics_system();
             if (gs2 && gs2->command_processor()) {
@@ -2802,8 +6385,19 @@ void VdSwap_entry(
               }
               uint32_t draws_before =
                   gs2->command_processor()->guide_draw_count_;
-              gs2->command_processor()->ExecuteGuestBufferUnsafe(
-                  kWdLo + start * 4, len);
+              // Start at the BUFFER BASE, not at the first changed word. The
+              // diff's start is wherever memory first differs, which lands
+              // mid-packet: the observed run began at 3009C034 (+13 words) and
+              // its head decoded as 000B2200 - a type-0 header - so the parser
+              // was picking up the stream mid-stride and reported 0 regs and
+              // 0 draws. 81A01358 sets the cursor to base-4 and emission
+              // pre-increments, so the first packet really is at base; the
+              // leading words simply happen to be written as zero and so do
+              // not show up as "changed".
+              uint32_t exec_at = kWdLo;
+              uint32_t exec_len = start + len;
+              gs2->command_processor()->ExecuteGuestBufferUnsafe(exec_at,
+                                                                 exec_len);
               uint32_t after = 0;
               if (rf) {
                 for (uint32_t i = 0; i < gpu::RegisterFile::kRegisterCount;
@@ -2851,7 +6445,13 @@ void VdSwap_entry(
           // Walk from a block base to the first plausible type-3 header, then
           // follow the chain while it stays self-consistent. Opcode 0x45
           // COND_WRITE and 0x22 DRAW_INDX dominate what the Guide writes.
-          for (uint32_t base : {0xFE030000u, 0xFE040000u}) {
+          // guide_cmdbuf_base_ added: the Guide's packets go wherever the
+          // reservation window points, and since guide_bind_cmdbuf_kb now
+          // aims [dev+0x30]/[dev+0x34] at our own allocation, they land there
+          // rather than in FE03xxxx/FE04xxxx. Scanning only the hardcoded
+          // blocks meant this never looked at what the Guide actually wrote.
+          for (uint32_t base : {0xFE030000u, 0xFE040000u, guide_cmdbuf_base_}) {
+            if (!base) continue;
             uint32_t start = 0, words = 0;
             for (uint32_t i = 0; i < 0x4000; ++i) {
               uint32_t w = rdc(base + i * 4);
@@ -2870,6 +6470,22 @@ void VdSwap_entry(
               if (cnt > 64 || i + 1 + cnt > 0x4000) break;
               i += 1 + cnt;
               words += 1 + cnt;
+            }
+            {
+              // Dump the chain. Each type-3 header is (3<<30)|(count<<16)|
+              // (opcode<<8); decoding the opcodes says exactly which emission
+              // sites in 819F5D18 ran, which pins where execution diverged
+              // without needing coverage tracing or breakpoints on hot paths.
+              std::string hex;
+              for (uint32_t k = 0; k < words && k < 48; ++k) {
+                uint32_t wv = rdc(start + k * 4);
+                hex += fmt::format("{:08X} ", wv);
+                if ((wv >> 30) == 3) {
+                  hex += fmt::format("[op={:02X} cnt={}] ", (wv >> 8) & 0x7F,
+                                     ((wv >> 16) & 0x3FFF) + 2);
+                }
+              }
+              XELOGI("GuideExecDump: {}", hex);
             }
             XELOGI("GuideExec: {:08X} chain starts {:08X}, {} words",
                    base, start, words);
@@ -2890,40 +6506,60 @@ void VdSwap_entry(
           static uint32_t reported = 0;
           if (reported < 5) {
             ++reported;
+            if (guide_resv_dev_ && guide_resv_pre_) {
+              auto* rm = kernel_state()->memory();
+              uint32_t post = xe::load_and_swap<uint32_t>(
+                  rm->TranslateVirtual(guide_resv_dev_ + 0x30u));
+              if (post > guide_resv_pre_ &&
+                  (post - guide_resv_pre_) < 0x100000u) {
+                uint32_t nwords = (post - guide_resv_pre_) / 4u;
+                uint32_t counts[128] = {0};
+                uint32_t t0 = 0, t2 = 0, pkts = 0, bad = 0, iw = 0;
+                std::string firstpk;
+                while (iw < nwords) {
+                  uint32_t w = xe::load_and_swap<uint32_t>(
+                      rm->TranslateVirtual(guide_resv_pre_ + iw * 4));
+                  uint32_t type = w >> 30;
+                  uint32_t cnt = ((w >> 16) & 0x3FFF) + 1;
+                  if (type == 3) {
+                    uint32_t op = (w >> 8) & 0x7F;
+                    counts[op]++;
+                    ++pkts;
+                    if (pkts <= 24) firstpk += fmt::format("{:02X}x{} ", op, cnt);
+                    iw += 1 + cnt;
+                  } else if (type == 0) {
+                    ++t0;
+                    iw += 1 + cnt;
+                  } else if (type == 2) {
+                    ++t2;
+                    iw += 1;
+                  } else {
+                    iw += 2;
+                  }
+                  if (iw > nwords) { ++bad; break; }
+                }
+                std::string h;
+                for (uint32_t o = 0; o < 128; ++o)
+                  if (counts[o]) h += fmt::format("{:02X}:{} ", o, counts[o]);
+                XELOGI("ResvWalk: {:08X}..{:08X} {} words -> {} type3, {} "
+                       "type0, {} type2, overrun={}",
+                       guide_resv_pre_, post, nwords, pkts, t0, t2, bad);
+                XELOGI("ResvWalk: opcodes {}", h);
+                XELOGI("ResvWalk: first {}", firstpk);
+                XELOGI("ResvWalk: DRAW_INDX(22)={} DRAW_INDX_2(36)={}",
+                       counts[0x22], counts[0x36]);
+              } else {
+                XELOGI("ResvWalk: cursor {:08X} -> {:08X} (no forward "
+                       "progress; the draw emitted nothing here)",
+                       guide_resv_pre_, post);
+              }
+            }
             XELOGI("GuideDrawGPU: the guest draw dispatched {} GPU draws",
                    gd_after - gd_before);
           }
         }
       }
-      if (::cvars::guide_coverage_fn) {
-        static bool cov_done = false;
-        if (!cov_done) {
-          cov_done = true;
-          auto* f = kernel_state()->processor()->LookupFunction(
-              ::cvars::guide_coverage_fn);
-          auto* gf = f ? dynamic_cast<cpu::GuestFunction*>(f) : nullptr;
-          if (gf && gf->trace_data().is_valid()) {
-            auto& td = gf->trace_data();
-            auto* counts =
-                reinterpret_cast<uint64_t*>(td.instruction_execute_counts());
-            uint32_t n = td.instruction_count(), executed = 0, last = 0;
-            for (uint32_t i = 0; i < n; ++i) {
-              if (counts[i]) {
-                ++executed;
-                last = td.start_address() + i * 4;
-              }
-            }
-            XELOGI("Coverage {:08X}: {} of {} instructions executed, furthest "
-                   "reached {:08X} (+0x{:X})",
-                   ::cvars::guide_coverage_fn, executed, n, last,
-                   last - td.start_address());
-          } else {
-            XELOGI("Coverage {:08X}: no trace data (need "
-                   "trace_function_coverage and trace_function_data_path)",
-                   ::cvars::guide_coverage_fn);
-          }
-        }
-      }
+      EmitGuideCoverageOnce();
       static std::atomic<uint32_t> gdraws{0};
       uint32_t gn = ++gdraws;
       if (gn <= 3 || (gn % 300) == 0) {
@@ -2963,6 +6599,58 @@ void VdSwap_entry(
         // that is a snapshot long before the present runs and while dash is
         // demonstrably rendering - so the question is whether a surface
         // appears later, on this device, by the time it would be used.
+        // Phase 342: does 818FB2B8 (slot-59 accessor + AddRef) hand back the
+        // D3D wrapper? 81918EC0 dispatches slots 19/22 on whatever it returns,
+        // and the significance of the skipped block at 8195E368 rests on that
+        // object being the wrapper (vtable 81640680). One runtime read settles
+        // it; static reading cannot (phase 341).
+        {
+          static bool probed = false;
+          // 818FB2B8 is a dashroot address (one of the 22 in phase 440);
+          // on retail it is a different function and executing it faults.
+          if (!probed && ddc && XamIsDashrootLayout()) {
+            probed = true;
+            auto* pm3 = kernel_state()->memory();
+            uint32_t pbuf = pm3->SystemHeapAlloc(16, 16);
+            if (pbuf) {
+              xe::store_and_swap<uint32_t>(pm3->TranslateVirtual(pbuf), 0);
+              uint64_t pa[] = {ddc, pbuf};
+              uint32_t phr = uint32_t(kernel_state()->processor()->Execute(
+                  XThread::GetCurrentThread()->thread_state(), 0x818FB2B8u, pa,
+                  xe::countof(pa)));
+              uint32_t got = xe::load_and_swap<uint32_t>(
+                  pm3->TranslateVirtual(pbuf));
+              uint32_t gvt = (got >= 0x40000000u && got < 0x50000000u)
+                                 ? xe::load_and_swap<uint32_t>(
+                                       pm3->TranslateVirtual(got))
+                                 : 0u;
+              // Phase 351: which renderer is the Guide attached to? The dc's
+              // own vtable and the wrapper's identify the implementation; the
+              // live path sits around 818F while the vertex-message machinery
+              // in 8172x/8184x/818Dx/818Ex is inactive (phase 350).
+              // Phase 367: the shape draw dispatches slot 30 on [dc+460].
+              // Identify that object and its vtable so the emitter can be
+              // followed from a known class rather than guessed at.
+              {
+                uint32_t sub = rdw(ddc + 460u);
+                XELOGI("DrawSub: [dc+460]={:08X} vtable={:08X} slot30={:08X} "
+                       "slot31={:08X}",
+                       sub, sub ? rdw(sub) : 0,
+                       sub && rdw(sub) ? rdw(rdw(sub) + 120u) : 0,
+                       sub && rdw(sub) ? rdw(rdw(sub) + 124u) : 0);
+              }
+              XELOGI("RendererIds: dc={:08X} dc.vtable={:08X} | wrapper={:08X} "
+                     "wrapper.vtable={:08X} | dev[0C]={:08X}",
+                     ddc, rdw(ddc), dev, dev ? rdw(dev) : 0,
+                     dev ? rdw(dev + 0x0Cu) : 0);
+              XELOGI("AccessorProbe: 818FB2B8(dc {:08X}) hr={:08X} -> obj={:08X} "
+                     "vtable={:08X} | wrapper[1CC]={:08X} its vtable={:08X} | {}",
+                     ddc, phr, got, gvt, dev, dev ? rdw(dev) : 0,
+                     (gvt == 0x81640680u) ? "IS THE WRAPPER VTABLE"
+                                          : "different vtable");
+            }
+          }
+        }
         XELOGI("Guide composite draw #{} -> {:08X}; draw dc={:08X} "
                "[11C]={:08X} [134]={:08X} [1CC]={:08X} "
                "wrap[0]={:08X} wrap[0C]={:08X} "
@@ -3082,20 +6770,100 @@ void VdSwap_entry(
                      rdw(dev + 0x0Cu), rdw(rdw(dev + 0x0Cu) + 0x3F74u));
             }
           }
+          {
+            // Unconditional one-shot probe: the force block below silently did
+            // nothing across several runs and each of its three conditions is
+            // individually plausible as the cause. Report all of them once.
+            static bool probed = false;
+            if (!probed) {
+              probed = true;
+              XELOGI("Guide: force-fb gate: cvar={} dev={:08X} real_dev={:08X} "
+                     "[3F74]={:08X}",
+                     ::cvars::guide_force_front_buffer ? 1 : 0, dev, real_dev,
+                     real_dev ? rdw(real_dev + 0x3F74u) : 0);
+            }
+          }
           if (::cvars::guide_force_front_buffer && real_dev) {
             static bool fb_done = false;
             if (!fb_done && !rdw(real_dev + 0x3F74u)) {
-              fb_done = true;
-              auto* fth = XThread::GetCurrentThread();
-              uint64_t fargs[] = {real_dev, 0ull};
-              uint64_t fr = fth ? kernel_state()->processor()->Execute(
-                                      fth->thread_state(), 0x81A0FE48u,
-                                      fargs, xe::countof(fargs))
-                                : 0;
-              XELOGI("Guide: forced front-buffer setup on {:08X} -> {:08X};"
-                     " [3F74] now {:08X}",
-                     real_dev, static_cast<uint32_t>(fr),
-                     rdw(real_dev + 0x3F74u));
+              // 81A0FE48's second argument is NOT zero. Its one real caller
+              // is 819F4E8C inside 819F4D28:
+              //     819F4E84: mr r4,r28
+              //     819F4E88: mr r3,r31
+              //     819F4E8C: bl 81A0FE48
+              // and r28 is written exactly once, in the prologue:
+              //     819F4D40: mr r28,r7      (arg5)
+              // Passing 0 makes 81A0FE48 compute r4 = 0 + 0x48 at 81A0FF70 and
+              // fault at 81A04648 reading 0x4C - which is precisely the crash
+              // recorded against this cvar, and was misread as the routine
+              // depending on device state mode 2 never establishes.
+              // Mode 2 hardcodes `li r7,0` at 8178F7BC, so the captured arg5
+              // is legitimately zero on that path and there is nothing to pass
+              // through. But 8191BAC8 memcpy's 124 bytes - the exact size of
+              // the block 8178E9F0 builds at r1+0x90 - into wrapper+0x10. If
+              // that copy is populated it IS this structure, and no
+              // fabrication is needed. Dump it before deciding.
+              // Mode 2 hardcodes `li r7,0` at 8178F7BC, so there is nothing to
+              // pass through and the block has to be built. 8178E9F0 memsets
+              // 124 bytes at r1+0x90 (81A0EA70-81A0EA7C) and then writes only
+              // the fields below, so a zeroed buffer plus these is a faithful
+              // copy of what the mode-1 creator hands over. Offsets are
+              // relative to the block, i.e. the r1 displacement minus 0x90.
+              //
+              // The 640x480 pair is 8178E9F0's own fallback branch
+              // (li r10,640 / li r11,480 at 8178EAE4/8178EAEC), used when it
+              // has no display mode to read - which is exactly our situation.
+              uint32_t arg5 = GuideGetDevCreateArg5();
+              if (!arg5) {
+                static uint32_t synth = 0;
+                if (!synth) {
+                  synth = kernel_state()->memory()->SystemHeapAlloc(0x7C, 16);
+                }
+                if (synth) {
+                  auto* mm = kernel_state()->memory();
+                  std::memset(mm->TranslateVirtual(synth), 0, 0x7C);
+                  auto wr = [&](uint32_t off, uint32_t v) {
+                    xe::store_and_swap<uint32_t>(
+                        mm->TranslateVirtual(synth + off), v);
+                  };
+                  const uint32_t kW = 640, kH = 480;
+                  wr(0x00, kW);          // 8178EAF4  width
+                  wr(0x04, kH);          // 8178EAF8  height
+                  wr(0x08, 0x28280186);  // 8178EB08/EB18
+                  wr(0x34, 0x80000000);  // 8178EB14
+                  wr(0x3C, 1);           // 8178EB30/EB40
+                  wr(0x4C, 4096);        // 8178EB2C/EB50 - read via +0x48
+                  wr(0x54, 0x00010000);  // 8178EB20/EB34
+                  wr(0x68, kW);          // 8178EB00
+                  wr(0x6C, kH);          // 8178EB04
+                  arg5 = synth;
+                  XELOGI("Guide: synthesized 81A0FE48 param block @{:08X} "
+                         "({}x{}, [+4C]=4096)",
+                         synth, kW, kH);
+                }
+              }
+              if (!arg5) {
+                static bool warned = false;
+                if (!warned) {
+                  warned = true;
+                  XELOGW(
+                      "Guide: skipping forced front-buffer setup - no usable "
+                      "parameter block for 81A0FE48 arg2. Passing 0 faults at "
+                      "81A04648 reading block+0x4C.");
+                }
+              } else {
+                fb_done = true;
+                auto* fth = XThread::GetCurrentThread();
+                uint64_t fargs[] = {real_dev, arg5};
+                uint64_t fr = fth ? kernel_state()->processor()->Execute(
+                                        fth->thread_state(), 0x81A0FE48u,
+                                        fargs, xe::countof(fargs))
+                                  : 0;
+                XELOGI("Guide: forced front-buffer setup on {:08X} arg5={:08X}"
+                       " -> {:08X}; [3F74] now {:08X}, [2B10] now {:08X}",
+                       real_dev, arg5, static_cast<uint32_t>(fr),
+                       rdw(real_dev + 0x3F74u), rdw(real_dev + 0x2B10u));
+              }
             }
           }
           if (std::getenv("XENIA_PRESENT_RT") &&
@@ -3139,7 +6907,15 @@ void VdSwap_entry(
           }
         }
       }
-      in_guide_draw = false;
+      // in_guide_draw is cleared by GuideDrawScope's destructor.
+      // Hand the device back to whoever owned it before this draw.
+      if (guide_claim_dev_ && guide_claim_prev_) {
+        xe::store_and_swap<uint32_t>(
+            kernel_state()->memory()->TranslateVirtual(guide_claim_dev_ +
+                                                       0x2B08u),
+            guide_claim_prev_);
+        guide_claim_dev_ = 0;
+      }
     }
   }
   // All of these parameters are REQUIRED.

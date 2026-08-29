@@ -255,6 +255,18 @@ DEFINE_bool(guide_word_diff, false,
             "measured instead of guessed.",
             "Kernel");
 
+DEFINE_bool(guide_overlay_at_swap, false,
+            "Hand the Guide's finished command stream to the GPU thread and "
+            "execute it in the swap packet, immediately before the title's "
+            "frame is presented. This is the mechanism rather than a probe. "
+            "guide_execute_command_stream runs the same words from the title "
+            "thread, which drives the command processor concurrently with the "
+            "GPU thread and inserts the work at an arbitrary point in the "
+            "title's frame; an overlay wants the frame finished, the render "
+            "target still bound, and its geometry drawn last. "
+            "ExecutePacketType3_XE_SWAP is exactly that point.",
+            "Kernel");
+
 DEFINE_bool(guide_execute_command_stream, false,
             "After the Guide's composite draw, walk the PM4 stream it wrote "
             "into FE03xxxx/FE04xxxx and run it through the command processor. "
@@ -833,3 +845,104 @@ DEFINE_uint32(guide_message, 0x80000004,
               "Message id dispatched to the Guide (hud.xex) system app. It "
               "accepts 0x80000002 through 0x80000010.",
               "Kernel");
+
+// ---- recovered 2026-08-29 after the refactor incident ----
+DEFINE_bool(guide_add_render_children, false,
+             "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
+             "Guide");
+DEFINE_bool(guide_call_render_begin, false,
+             "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
+             "Guide");
+DEFINE_bool(guide_claim_device_thread, false,
+             "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
+             "Guide");
+DEFINE_bool(guide_diff_draw_objects, false,
+             "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
+             "Guide");
+DEFINE_bool(guide_dirty_via_api, false,
+             "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
+             "Guide");
+DEFINE_bool(guide_force_dirty, false,
+             "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
+             "Guide");
+DEFINE_bool(guide_force_flag17, false,
+             "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
+             "Guide");
+DEFINE_bool(guide_force_visible, false,
+             "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
+             "Guide");
+DEFINE_bool(guide_navigate_manual, false,
+             "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
+             "Guide");
+DEFINE_bool(guide_navigate_scene, false,
+             "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
+             "Guide");
+DEFINE_bool(guide_paint_frame, false,
+             "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
+             "Guide");
+DEFINE_bool(guide_probe_class, false,
+             "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
+             "Guide");
+DEFINE_bool(guide_root_to_visual, false,
+             "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
+             "Guide");
+DEFINE_int32(guide_scene_bounds_h, 0,
+             "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
+             "Guide");
+DEFINE_int32(guide_scene_bounds_w, 0,
+             "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
+             "Guide");
+DEFINE_int32(guide_stall_watchdog, 0,
+             "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
+             "Guide");
+DEFINE_bool(guide_trace_assert_src, false,
+             "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
+             "Guide");
+DEFINE_bool(guide_trace_draw, false,
+             "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
+             "Guide");
+DEFINE_bool(guide_widen_at_draw, false,
+             "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
+             "Guide");
+DEFINE_bool(guide_clear_cmd_overflow, false,
+             "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
+             "Guide");
+DEFINE_string(guide_dump_xam_path, "",
+             "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
+             "Guide");
+DEFINE_bool(guide_inject_shader, false,
+             "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
+             "Guide");
+DEFINE_bool(guide_render_thread, false,
+             "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
+             "Guide");
+DEFINE_string(guide_scene_name, "",
+             "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
+             "Guide");
+DEFINE_bool(guide_supply_ring_base, false,
+             "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
+             "Guide");
+DEFINE_bool(lle_xam_find_heaps, false,
+             "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
+             "Guide");
+DEFINE_bool(lle_xam_device_init, false,
+             "Guide research flag. Definition recovered 2026-08-29; the declaration survived but the definition did not.",
+             "Guide");
+DEFINE_bool(guide_bind_depth_scan, false,
+             "Guide research flag. Definition recovered 2026-08-29; the declaration survived but the definition did not.",
+             "Guide");
+DEFINE_bool(guide_fix_draw_device, false,
+             "Guide research flag. Definition recovered 2026-08-29; the declaration survived but the definition did not.",
+             "Guide");
+DEFINE_bool(guide_make_surface, false,
+             "Guide research flag. Definition recovered 2026-08-29; the declaration survived but the definition did not.",
+             "Guide");
+DEFINE_bool(guide_fix_hud_dc, false,
+             "Guide research flag. Definition recovered 2026-08-29; the declaration survived but the definition did not.",
+             "Guide");
+DEFINE_bool(guide_trace_cursor, false,
+             "Guide research flag. Definition recovered 2026-08-29; the declaration survived but the definition did not.",
+             "Guide");
+DEFINE_bool(guide_patch_cursor_writers, false,
+             "Guide research flag. Definition recovered 2026-08-29; the declaration survived but the definition did not.",
+             "Guide");

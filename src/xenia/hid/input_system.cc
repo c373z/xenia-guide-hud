@@ -15,6 +15,7 @@
 #include "xenia/hid/hid_flags.h"
 #include "xenia/hid/input_driver.h"
 #include "xenia/kernel/util/shim_utils.h"
+#include "xenia/ui/window.h"
 
 #ifdef XE_PLATFORM_WIN32
 #include "xenia/hid/portal/hardware_portal.h"
@@ -24,6 +25,12 @@ namespace xe {
 namespace hid {
 
 DEFINE_bool(vibration, true, "Toggle controller vibration.", "HID");
+
+DEFINE_bool(background_input, false,
+            "Keep reading controllers while the Xenia window is not focused. "
+            "Off by default so a controller only drives the emulator when you "
+            "are actually looking at it.",
+            "HID");
 
 DEFINE_double(left_stick_deadzone_percentage, 0.0,
               "Defines deadzone level for left stick. Allowed range [0.0-1.0].",
@@ -126,6 +133,7 @@ X_RESULT InputSystem::GetState(uint32_t user_index, uint32_t flags,
     if (result == X_ERROR_SUCCESS) {
       UpdateUsedSlot(driver, user_index, true);
       AdjustDeadzoneLevels(user_index, &out_state->gamepad);
+      ApplyFocusGate(user_index, out_state);
 
       if (out_state->gamepad.buttons != 0) {
         last_used_slot = user_index;
@@ -156,6 +164,8 @@ X_RESULT InputSystem::GetKeystroke(uint32_t user_index, uint32_t flags,
 
   std::vector<InputDriver*> filtered_drivers = FilterDrivers(flags);
 
+  const bool accepting_input = AcceptingInput();
+
   bool any_connected = false;
   for (auto& driver : filtered_drivers) {
     // connected_slots
@@ -168,6 +178,13 @@ X_RESULT InputSystem::GetKeystroke(uint32_t user_index, uint32_t flags,
     any_connected = true;
 
     if (result == X_ERROR_SUCCESS) {
+      if (!accepting_input) {
+        // The driver was still polled so its queue keeps draining rather than
+        // handing the guest a backlog of background presses on the next focus,
+        // but the keystroke itself is dropped.
+        *out_keystroke = {};
+        continue;
+      }
       last_used_slot = user_index;
       return result;
     }
@@ -189,6 +206,39 @@ void InputSystem::ToggleVibration() {
   for (uint8_t user_index = 0; user_index < XUserMaxUserCount; user_index++) {
     SetState(user_index, &vibration);
   }
+}
+
+bool InputSystem::AcceptingInput() const {
+  if (cvars::background_input) {
+    return true;
+  }
+  // No window means there is no focus to lose - never gate input off for the
+  // headless and tool paths that build an InputSystem without one.
+  return !window_ || window_->HasFocus();
+}
+
+void InputSystem::ApplyFocusGate(uint32_t user_index,
+                                 X_INPUT_STATE* out_state) {
+  const bool gated = !AcceptingInput();
+  if (gated) {
+    out_state->gamepad = {};
+  }
+
+  if (user_index >= XUserMaxUserCount) {
+    return;
+  }
+
+  if (input_gated_[user_index] != gated) {
+    input_gated_[user_index] = gated;
+    // A driver only bumps the packet number when the physical state changes, so
+    // a pad held still across a focus change would report the same number twice
+    // and let a game that trusts it keep the buttons it saw pressed. Bump once
+    // per transition so both closing the gate and reopening it read as a state
+    // change.
+    ++packet_number_bias_[user_index];
+  }
+  out_state->packet_number = static_cast<uint32_t>(out_state->packet_number) +
+                             packet_number_bias_[user_index];
 }
 
 void InputSystem::AdjustDeadzoneLevels(const uint8_t slot,

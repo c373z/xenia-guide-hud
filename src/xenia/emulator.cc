@@ -1118,6 +1118,57 @@ X_STATUS Emulator::CreateZarchivePackage(
   return X_STATUS_SUCCESS;
 }
 
+// Extent of the loaded xam image. Set once at load. Every dashroot-derived
+// constant in this file must be bounds-checked against it before use: on
+// another build those addresses are outside the image and reading them
+// host-faults (phases 407, 416, 417).
+// hud entry points located by code signature rather than by offset. The two
+// hud builds put them in different places (dashroot +0xA898/+0xAB28, retail
+// 17559 +0x98F8/+0x9B88) and calling the dashroot offsets on retail lands
+// mid-prologue of unrelated functions. Branch displacements and lis immediates
+// are masked, so only the instruction shape has to match; each pattern matched
+// exactly once in each image.
+static const uint32_t kHudXuiInitSig[14] = {
+    0x7D8802A6u, 0x48000000u, 0x9421FF70u, 0x81630014u,
+    0x7C7F1B78u, 0x7C9E2378u, 0x2F0B0000u, 0x419A0000u,
+    0x8163000Cu, 0x3BA3000Cu, 0x2B0B0000u, 0x409A0000u,
+    0x7FA3EB78u, 0x48000000u,
+};
+static const uint32_t kHudRenderSig[14] = {
+    0x7D8802A6u, 0x9181FFF8u, 0xFBC1FFE8u, 0xFBE1FFF0u,
+    0x9421FF60u, 0x3C800000u, 0x7C7F1B78u, 0x8063000Cu,
+    0x48000000u, 0x2C030000u, 0x41800000u, 0x807F0008u,
+    0x48000000u, 0x3BC0FFFFu,
+};
+static uint32_t MaskInsn(uint32_t w) {
+  uint32_t op = w >> 26;
+  if (op == 18) return 0x48000000u;
+  if (op == 16) return w & 0xFFFF0000u;
+  if (op == 15) return w & 0xFFE00000u;
+  return w;
+}
+static uint32_t FindHudSig(xe::Memory* mem, uint32_t base, uint32_t size,
+                           const uint32_t* sig, uint32_t n) {
+  if (!mem || !size) return 0;
+  for (uint32_t off = 0; off + n * 4 <= size; off += 4) {
+    bool ok = true;
+    for (uint32_t i = 0; i < n && ok; ++i) {
+      ok = MaskInsn(xe::load_and_swap<uint32_t>(
+               mem->TranslateVirtual(base + off + i * 4))) == sig[i];
+    }
+    if (ok) return base + off;
+  }
+  return 0;
+}
+
+static uint32_t g_hud_xuiinit = 0;  // hud XUI-init entry, located by signature
+static uint32_t g_hud_render = 0;   // hud render entry, located by signature
+static uint32_t g_xam_img_lo = 0;
+static uint32_t g_xam_img_hi = 0;
+static bool XamConstOk(uint32_t a, uint32_t len) {
+  return g_xam_img_lo && a >= g_xam_img_lo && a + len <= g_xam_img_hi;
+}
+
 static void InstallGuideStoreTraces(xe::kernel::KernelState* ks);
 static void ArmGuideThreadProbe(xe::kernel::KernelState* ks, int pdelay);
 static void TagEFailSites(Memory* memory, const char* spec, const char* what);
@@ -1139,9 +1190,12 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
     uint32_t buf = guide_buf_;
     uint32_t osz = guide_out_sz_;
     uint32_t hud_base = guide_hud_base_;
+    // Decoded from the handler at load time; 0 means fall back to dashroot's.
+    uint32_t obj_slot = guide_obj_slot_;
     uint32_t skin_mod = guide_skin_module_;
     auto t = kernel::object_ref<kernel::XHostThread>(new kernel::XHostThread(
-        ks, 512 * 1024, 0, [ks, handler, buf, osz, hud_base, skin_mod]() -> int {
+        ks, 512 * 1024, 0,
+        [ks, handler, buf, osz, hud_base, skin_mod, obj_slot]() -> int {
           auto* ts = kernel::XThread::GetCurrentThread()->thread_state();
           uint64_t a[] = {0x80000004ull, buf, osz};
           XELOGI("Guide button: dispatching open to {:08X}", handler);
@@ -1156,8 +1210,21 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
           // calls XuiRenderBegin/End/Present - and both take the Guide object
           // in r3 and only read from it.
           if (hud_base) {
+            uint32_t slot0 = obj_slot ? obj_slot : 0x91400690u;
             uint32_t obj = xe::load_and_swap<uint32_t>(
-                ks->memory()->TranslateVirtual(0x91400690u));
+                ks->memory()->TranslateVirtual(slot0));
+            // Same slot, same hazard as the loader path: on a hud build that
+            // does not store the Guide object here, this holds unrelated
+            // bytes and `if (obj)` passes. Require a mapped heap pointer.
+            if (obj && !(obj >= 0x30000000u && obj < 0x50000000u &&
+                         ks->memory()->LookupHeap(obj) &&
+                         ks->memory()->LookupHeap(obj)->QueryRangeAccess(
+                             obj, obj + 0x20u) !=
+                             xe::memory::PageAccess::kNoAccess)) {
+              XELOGW("Guide button: object slot 91400690 = {:08X} is not a "
+                     "mapped heap pointer - skipping the hud draw calls", obj);
+              obj = 0;
+            }
             if (obj) {
               // Dump the Guide object's vtable. The draw entry points used
               // below were guessed from static scanning; the object's own
@@ -1172,7 +1239,13 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                   XELOGI("Guide button: vtable[{}] = {:08X}", i, fn);
                 }
               }
-              auto rd = [&](uint32_t a) {
+              auto rd = [&](uint32_t a) -> uint32_t {
+                // Reject 0x81xxxxxx constants that are not inside THIS xam
+                // image; on another build they host-fault (phase 416).
+                if (a >= 0x81000000u && a < 0x82000000u &&
+                    !XamConstOk(a, 4)) {
+                  return 0;
+                }
                 return xe::load_and_swap<uint32_t>(
                     ks->memory()->TranslateVirtual(a));
               };
@@ -1248,8 +1321,21 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                 // 1 if XUI was already initialised.
                 XELOGI("Guide button: XUI ctx before = {:08X}",
                        rd(0x81D6C978u));
+                // XuiInit is xam export ordinal 0x340. It was hardcoded as
+                // 0x81953760, which is where dashroot's xam happens to put it;
+                // on retail 17559 that ordinal resolves to 817BC088 and the
+                // old constant lands on unrelated code, which crashed inside
+                // __restgprlr_14 with lr=0 (phase 423). Resolve the export.
+                uint32_t xui_init = xm ? xm->GetProcAddressByOrdinal(0x340)
+                                       : 0u;
+                if (!xui_init) {
+                  xui_init = 0x81953760u;
+                  XELOGW("Guide button: XuiInit ordinal 0x340 unresolved, "
+                         "falling back to the dashroot constant");
+                }
                 uint64_t xa[] = {0};
-                uint64_t xr = ks->processor()->Execute(ts, 0x81953760u, xa,
+                XELOGI("Guide button: XuiInit -> {:08X}", xui_init);
+                uint64_t xr = ks->processor()->Execute(ts, xui_init, xa,
                                                        xe::countof(xa));
                 XELOGI("Guide button: XuiInit returned {:08X}, ctx now {:08X}",
                        static_cast<uint32_t>(xr), rd(0x81D6C978u));
@@ -1367,6 +1453,57 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                       });
                   ks->processor()->AddBreakpoint(devsetup_bp.get());
                   XELOGI("DevSetup trace installed at 81A0FE48");
+                }
+                // 819F4D28 is the device-creation core both mode 1 and mode 2
+                // funnel into, so unlike the 81A0FE48 breakpoint above it
+                // fires on the mode-2 path too. Its arg5 (r7) is the pointer
+                // that its own call site at 819F4E8C hands to 81A0FE48 as that
+                // function's second argument - the one guide_force_front_buffer
+                // previously guessed as 0 and crashed on.
+                static std::unique_ptr<cpu::Breakpoint> devcreate_bp;
+                if (cvars::guide_trace_devsetup && !devcreate_bp) {
+                  devcreate_bp = std::make_unique<cpu::Breakpoint>(
+                      ks->processor(), cpu::Breakpoint::AddressType::kGuest,
+                      0x819F4D28ull,
+                      [](cpu::Breakpoint* bp, cpu::ThreadDebugInfo* ti,
+                         uint64_t host_pc) {
+                        auto* th = kernel::XThread::GetCurrentThread();
+                        if (!th) return;
+                        auto* c = th->thread_state()->context();
+                        uint32_t arg5 = static_cast<uint32_t>(c->r[7]);
+                        xe::kernel::xboxkrnl::GuideSetDevCreateArg5(arg5);
+                        static std::atomic<uint32_t> n{0};
+                        if (++n > 8) return;
+                        // Ground truth for the 124-byte parameter block.
+                        // Mode 1 (8178E9F0) builds a real one at r1+0x90 and
+                        // passes it here as arg5; mode 2 passes 0. Dumping it
+                        // gives every field's true value instead of inferring
+                        // them one validator complaint at a time.
+                        if (arg5) {
+                          // Reached through the thread: this lambda captures
+                          // nothing, so Emulator::kernel_state() is not
+                          // callable here.
+                          auto* bm = th->memory();
+                          std::string bd;
+                          for (uint32_t o = 0; o < 0x7Cu; o += 4) {
+                            bd += fmt::format(
+                                "{:02X}:{:08X} ", o,
+                                xe::load_and_swap<uint32_t>(
+                                    bm->TranslateVirtual(arg5 + o)));
+                          }
+                          XELOGI("DevCreateBlock @{:08X}: {}", arg5, bd);
+                        }
+                        XELOGI("DevCreate #{}: device={:08X} mode={} r6={:08X} "
+                               "arg5(r7)={:08X} r8={:08X} lr={:08X}",
+                               static_cast<uint32_t>(n),
+                               static_cast<uint32_t>(c->r[3]),
+                               static_cast<uint32_t>(c->r[4]),
+                               static_cast<uint32_t>(c->r[6]), arg5,
+                               static_cast<uint32_t>(c->r[8]),
+                               static_cast<uint32_t>(c->lr));
+                      });
+                  ks->processor()->AddBreakpoint(devcreate_bp.get());
+                  XELOGI("DevCreate trace installed at 819F4D28");
                 }
                 // And the wrapper's SetDevice itself. Before calling
                 // 8191BAC8(wrapper, device, x) by hand, learn the triple it is
@@ -1606,6 +1743,149 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                   ks->processor()->AddBreakpoint(r6_bp.get());
                   XELOGI("819F7F20 trace installed");
                 }
+              // Watchdog: sample the guest PC of whichever thread parks in
+              // the Guide render-begin call, and report a histogram. Every
+              // stall theory so far has been derived from disassembly and
+              // then tested by forcing an exit condition; three in a row
+              // turned out to target loops the thread was not in. This reads
+              // where it actually is.
+              if (cvars::guide_stall_watchdog > 0) {
+                static bool sw_started = false;
+                if (!sw_started) {
+                  sw_started = true;
+                  auto* procw = ks->processor();
+                  int wdelay = cvars::guide_stall_watchdog;
+                  std::thread([procw, wdelay]() {
+                    xe::threading::set_name("GuideStallWatch");
+                    void* h = nullptr;
+                    for (int i = 0; i < 900 && !h; ++i) {
+                      h = kernel::xboxkrnl::GuideStallThread();
+                      if (!h) {
+                        std::this_thread::sleep_for(
+                            std::chrono::milliseconds(50));
+                      }
+                    }
+                    if (!h) {
+                      XELOGW("StallWatch: no thread ever entered render-begin");
+                      return;
+                    }
+                    std::this_thread::sleep_for(
+                        std::chrono::seconds(wdelay));
+                    auto* cc = procw->backend()->code_cache();
+                    std::map<uint32_t, int> hist;
+                    std::map<std::string, int> host_hist;
+                    std::vector<uint32_t> stack_guest;
+                    int nosample = 0, nonguest = 0;
+                    for (int i = 0; i < 40; ++i) {
+                      CONTEXT ctx = {};
+                      ctx.ContextFlags = CONTEXT_CONTROL;
+                      uint64_t rip = 0, rsp = 0;
+                      if (SuspendThread(reinterpret_cast<HANDLE>(h)) !=
+                          static_cast<DWORD>(-1)) {
+                        if (GetThreadContext(reinterpret_cast<HANDLE>(h),
+                                             &ctx)) {
+                          rip = ctx.Rip;
+                          rsp = ctx.Rsp;
+                        }
+                        ResumeThread(reinterpret_cast<HANDLE>(h));
+                      }
+                      // Walk the stack for return addresses that land in
+                      // JIT'd guest code. The PC alone says "blocked in
+                      // ntdll", which is true and useless - it does not say
+                      // which guest call reached a host wait. Return
+                      // addresses left on the stack do.
+                      if (rsp && stack_guest.empty()) {
+                        // Bound the read with VirtualQuery rather than SEH -
+                        // __try cannot be used in a lambda that needs object
+                        // unwinding, and the stack's committed region is
+                        // exactly the extent that is safe to read anyway.
+                        MEMORY_BASIC_INFORMATION mbi = {};
+                        size_t words = 0;
+                        if (VirtualQuery(reinterpret_cast<LPCVOID>(rsp), &mbi,
+                                         sizeof(mbi)) &&
+                            mbi.State == MEM_COMMIT) {
+                          uint64_t end = reinterpret_cast<uint64_t>(
+                                             mbi.BaseAddress) +
+                                         mbi.RegionSize;
+                          words = static_cast<size_t>((end - rsp) / 8);
+                          // 8KB was too small. A guest call chain that deep
+                          // leaves its return addresses well above rsp, and
+                          // capping the scan there reported a single frame -
+                          // which reads as "not in guest code" when it may
+                          // just be "not in the first 8KB".
+                          if (words > 65536) words = 65536;
+                        }
+                        auto* p64 = reinterpret_cast<uint64_t*>(rsp);
+                        for (size_t q = 0; q < words; ++q) {
+                          uint64_t v = p64[q];
+                          if (v < 0x10000) continue;
+                          auto* gf = cc->LookupFunction(v);
+                          if (gf) {
+                            uint32_t ga = gf->MapMachineCodeToGuestAddress(v);
+                            if (ga) stack_guest.push_back(ga);
+                            if (stack_guest.size() >= 64) break;
+                          }
+                        }
+                      }
+                      if (!rip) {
+                        ++nosample;
+                      } else {
+                        auto* f = cc->LookupFunction(rip);
+                        if (!f) {
+                          ++nonguest;
+                          // Not guest code. Name the host module and offset -
+                          // "40 samples in host code" says the thread is
+                          // blocked in Xenia or in Windows, but not which,
+                          // and those need completely different fixes.
+                          HMODULE hm = nullptr;
+                          if (GetModuleHandleExA(
+                                  GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                      GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                  reinterpret_cast<LPCSTR>(rip), &hm) &&
+                              hm) {
+                            char mp[MAX_PATH] = {};
+                            GetModuleFileNameA(hm, mp, MAX_PATH);
+                            const char* base = strrchr(mp, '\\');
+                            uint64_t off =
+                                rip - reinterpret_cast<uint64_t>(hm);
+                            host_hist[fmt::format("{}+{:X}",
+                                                  base ? base + 1 : mp, off)]++;
+                          } else {
+                            host_hist["<unmapped>"]++;
+                          }
+                        } else {
+                          hist[f->MapMachineCodeToGuestAddress(rip)]++;
+                        }
+                      }
+                      std::this_thread::sleep_for(
+                          std::chrono::milliseconds(25));
+                    }
+                    XELOGI("StallWatch: {} samples in guest code, {} host, "
+                           "{} failed",
+                           static_cast<int>(hist.size()), nonguest, nosample);
+                    for (auto& kv : hist) {
+                      XELOGI("StallWatch: guest {:08X}  x{}", kv.first,
+                             kv.second);
+                    }
+                    for (auto& kv : host_hist) {
+                      XELOGI("StallWatch: host  {}  x{}", kv.first, kv.second);
+                    }
+                    if (stack_guest.empty()) {
+                      XELOGI("StallWatch: NO guest return addresses on the "
+                             "stack - the wait was entered from host code, "
+                             "not from guest code we called");
+                    } else {
+                      std::string chain;
+                      for (uint32_t g : stack_guest) {
+                        chain += fmt::format("{:08X} ", g);
+                      }
+                      XELOGI("StallWatch: guest frames on stack: {}", chain);
+                    }
+                  }).detach();
+                  XELOGI("StallWatch: armed, sampling {}s after the call",
+                         wdelay);
+                }
+              }
               if (cvars::guide_force_cmdbuf_complete > 0) {
                 static bool fc_started = false;
                 if (!fc_started) {
@@ -1620,14 +1900,99 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                                      fm4->TranslateVirtual(a)) : 0u;
                     };
                     for (int i = 0; i < 4000; ++i) {
-                      for (uint32_t slot : {0x81D43684u, 0x801E6FC8u}) {
+                      for (uint32_t slot : {kernel::xboxkrnl::XamDeviceSlot(), 0x801E6FC8u}) {
                         uint32_t dev = rd4(slot);
                         if (!dev) continue;
                         auto* p = fm4->TranslateVirtual(dev + 0x2B3Du);
+                        // Report each device ONCE with the bit's state as
+                        // found. The loop below only logs when it flips the
+                        // bit, so a device that already had it set is
+                        // indistinguishable from one never seen - which made
+                        // it impossible to tell whether the draw's device was
+                        // reached at all.
+                        {
+                          static std::set<uint32_t> seen_devs;
+                          if (seen_devs.insert(dev).second) {
+                            XELOGI("CmdBufComplete: device {:08X} slot {:08X} "
+                                   "[2B3D]={:02X} bit1={}",
+                                   dev, slot, p ? *p : 0,
+                                   (p && (*p & 0x02)) ? "already set"
+                                                      : "clear");
+                          }
+                        }
                         if (p && !(*p & 0x02)) {
                           *p = static_cast<uint8_t>(*p | 0x02);
                           XELOGI("CmdBufComplete: set bit1 of [{:08X}+2B3D]",
                                  dev);
+                        }
+                        // Advance the GPU writeback word this device's fence
+                        // wait actually polls. Disassembling 81A03E90 gives
+                        // the loop exactly:
+                        //   r11 = [[device+0x2B10]]      writeback word
+                        //   exit when (r10-r30) >= (r10-r11)
+                        //   else bl 819F4488 and spin
+                        // so the spin ends when the writeback reaches the
+                        // fence value. guide_fake_gpu_writeback does this
+                        // already but is nested inside the StallProbe block
+                        // and never runs unless that whole apparatus is
+                        // enabled - so it has been reporting nothing for a
+                        // treatment it never applied. Driving it from here
+                        // keeps it tied to the device the draw uses.
+                        uint32_t wbp = rd4(dev + 0x2B10u);
+                        // [device+0x2B10] is NULL on both devices - measured,
+                        // not assumed. The fence loop at 81A03E90 does
+                        // `lwz r11, 0(r11)` on it, so it reads guest address
+                        // zero every iteration and the comparison can never
+                        // satisfy: that is the hang. Its known writers
+                        // (81A0F858, 81A0FE48) only populate it on a device
+                        // that completed bring-up, which this one did not.
+                        // Give it a word of its own so the wait has something
+                        // real to poll. A probe, not a system command buffer.
+                        if (!wbp) {
+                          static std::map<uint32_t, uint32_t> made;
+                          auto it = made.find(dev);
+                          if (it == made.end()) {
+                            uint32_t nw = fm4->SystemHeapAlloc(16, 16);
+                            if (nw) {
+                              std::memset(fm4->TranslateVirtual(nw), 0, 16);
+                              xe::store_and_swap<uint32_t>(
+                                  fm4->TranslateVirtual(dev + 0x2B10u), nw);
+                              made[dev] = nw;
+                              wbp = nw;
+                              XELOGI("CmdBufComplete: [{:08X}+2B10] was NULL, "
+                                     "gave it writeback word {:08X}",
+                                     dev, nw);
+                            }
+                          } else {
+                            wbp = it->second;
+                          }
+                        }
+                        if (wbp) {
+                          auto* wp = fm4->TranslateVirtual(wbp);
+                          if (wp) {
+                            // TRACK the fence counter, do not just increment.
+                            // The loop compares wrapped distances:
+                            //   r10 = [dev+0x2B1C]   fence counter
+                            //   r30 = target
+                            //   r11 = [[dev+0x2B10]] writeback
+                            //   exit when (r10-r30) >= (r10-r11)
+                            // Running the writeback ahead by an arbitrary
+                            // amount makes (r10-r11) wrap to a huge value and
+                            // the test harder to satisfy, not easier. Parking
+                            // it exactly on the fence counter makes (r10-r11)
+                            // zero, which satisfies the comparison for any
+                            // target at or behind the counter.
+                            uint32_t cur = xe::load_and_swap<uint32_t>(wp);
+                            uint32_t fence = rd4(dev + 0x2B1Cu);
+                            xe::store_and_swap<uint32_t>(wp, fence);
+                            static std::set<uint32_t> wb_seen;
+                            if (wb_seen.insert(dev).second) {
+                              XELOGI("CmdBufComplete: writeback [{:08X}] via "
+                                     "[{:08X}+2B10] was {:08X}, parking on "
+                                     "fence [2B1C]={:08X}",
+                                     wbp, dev, cur, fence);
+                            }
+                          }
                         }
                       }
                       std::this_thread::sleep_for(
@@ -1645,6 +2010,10 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                   std::thread([nm]() {
                     xe::threading::set_name("NullRenderWatch");
                     auto rd5 = [nm](uint32_t a) {
+                      if (a >= 0x81000000u && a < 0x82000000u &&
+                          !XamConstOk(a, 4)) {
+                        return uint32_t(0);
+                      }
                       return a ? xe::load_and_swap<uint32_t>(
                                      nm->TranslateVirtual(a)) : 0u;
                     };
@@ -1679,13 +2048,23 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                   auto* wm = ks->memory();
                   std::thread([wm]() {
                     xe::threading::set_name("FrontBufferWatch");
-                    auto rdw = [wm](uint32_t a) {
-                      return a ? xe::load_and_swap<uint32_t>(
-                                     wm->TranslateVirtual(a))
-                               : 0u;
+                    // "a != 0" is not a mapped-address test. This runs in a
+                    // 60000-iteration poll over globals that hold garbage
+                    // until the Guide device exists - which in subcommand 0
+                    // never happens - so an unmapped read faults the host and
+                    // kills the run before anything draws. Mirror the guard
+                    // `rp` already uses: look the heap up and check access.
+                    auto rdw = [wm](uint32_t a) -> uint32_t {
+                      if (a < 0x1000u) return 0u;
+                      auto* hp = wm->LookupHeap(a);
+                      if (!hp || hp->QueryRangeAccess(a, a + 4) ==
+                                     xe::memory::PageAccess::kNoAccess) {
+                        return 0u;
+                      }
+                      return xe::load_and_swap<uint32_t>(wm->TranslateVirtual(a));
                     };
                     uint32_t last_dev[2] = {0, 0}, last_fb[2] = {0, 0};
-                    const uint32_t slots[2] = {0x81D43684u, 0x801E6FC8u};
+                    const uint32_t slots[2] = {kernel::xboxkrnl::XamDeviceSlot(), 0x801E6FC8u};
                     const char* names[2] = {"81D43684", "801E6FC8"};
                     for (int i = 0; i < 60000; ++i) {
                       for (int k = 0; k < 2; ++k) {
@@ -1721,7 +2100,22 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                 kernel::xboxkrnl::QueueGuideBootstrap(
                     hud_base, obj, cvars::guide_use_title_device, skin_mod);
               }
-              if (cvars::guide_create_xam_device) {
+              // Every address in this block - the two import thunks, both
+              // device creators, the boot entries, 81D3C8E8 - is a dashroot
+              // constant. They all fall inside retail's image too, so a range
+              // check cannot reject them; what does is that the thunks read
+              // DEADC0DE there, which is Xenia's unresolved-import marker.
+              // Reading a foreign build's memory through them produced
+              // "bit200=clear" (meaningless, not a finding) and then crashed
+              // executing 8178F748 as if it were the device creator.
+              bool xam_layout_ok = rd(0x815F048Cu) != 0xDEADC0DEu &&
+                                   rd(0x815F044Cu) != 0xDEADC0DEu;
+              if (cvars::guide_create_xam_device && !xam_layout_ok) {
+                XELOGW("Guide button: xam device-creation block is keyed to "
+                       "dashroot's layout (thunks read DEADC0DE here) - "
+                       "skipping it on this build");
+              }
+              if (cvars::guide_create_xam_device && xam_layout_ok) {
                 uint32_t gate_ptr = rd(0x815F048Cu);
                 uint32_t gate = gate_ptr ? rd(gate_ptr) : 0;
                 XELOGI("Guide button: VdGlobalDevice(801E6FC4) = {:08X}",
@@ -1778,6 +2172,20 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                   // ("cmpwi cr6,r29,0 / bne -> 81751294"). Calling it with 0,
                   // as the previous attempt did, takes the same path that
                   // skips the initialiser. Pass 1.
+                  // Publish this thread so guide_stall_watchdog can sample
+                  // it. The boot entry blocks and never returns (phase 237),
+                  // and the watchdog built in phase 182 names exactly this
+                  // kind of stall - it just has never been pointed at this
+                  // call.
+                  {
+                    auto* bt = kernel::XThread::GetCurrentThread();
+                    if (bt && bt->thread()) {
+                      kernel::xboxkrnl::GuidePublishStallThread(
+                          bt->thread()->native_handle());
+                      XELOGI("Guide button: published boot-entry thread for "
+                             "the stall watchdog");
+                    }
+                  }
                   for (uint32_t entry : {0x81750FA8u, 0x81751428u}) {
                     uint64_t ba[] = {entry == 0x81750FA8u ? 1u : 0u};
                     uint64_t br = ks->processor()->Execute(ts, entry, ba,
@@ -1892,7 +2300,7 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                         // not the device global - they are different objects,
                         // and reading the global is what made an earlier pass
                         // report [2B10]=0 and reject a correct guess.
-                        uint32_t dv = gr[0][2] ? gr[0][2] : rdp(0x81D43684u);
+                        uint32_t dv = gr[0][2] ? gr[0][2] : rdp(kernel::xboxkrnl::XamDeviceSlot());
                         uint32_t frame = gr[0][3];
                         if (frame) {
                           XELOGI("StallProbe: poll arg r31={:08X} [r31+8]={:08X}",
@@ -1978,13 +2386,13 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                 }
                 XELOGI("Guide button: xam CreateDevice returned {:08X}, "
                        "device now {:08X}",
-                       static_cast<uint32_t>(cr), rd(0x81D43684u));
+                       static_cast<uint32_t>(cr), rd(kernel::xboxkrnl::XamDeviceSlot()));
                 // Publish it as VdGlobalXamDevice (kernel global 801E6FC8).
                 // Xenia stores 0 there with the comment "Pointer to the XAM
                 // D3D device, which we don't have", and KernelState has a
                 // matching TODO to run graphics notifications as
                 // X_PROCTYPE_SYSTEM when it is non-zero. We have one now.
-                uint32_t xam_dev = rd(0x81D43684u);
+                uint32_t xam_dev = rd(kernel::xboxkrnl::XamDeviceSlot());
                 if (xam_dev) {
                   xe::store_and_swap<uint32_t>(
                       ks->memory()->TranslateVirtual(0x801E6FC8u), xam_dev);
@@ -2002,15 +2410,71 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                 // which device the present should be looking at, instead of
                 // guessing between them.
                 struct { const char* name; uint32_t at; } devs[] = {
-                    {"VdGlobalDevice   801E6FC4", 0x801E6FC4u},
-                    {"VdGlobalXamDevice 801E6FC8", 0x801E6FC8u},
-                    {"xam device global 81D43684", 0x81D43684u},
+                    {"VdGlobalDevice   ", 0x801E6FC4u},
+                    {"VdGlobalXamDevice", 0x801E6FC8u},
+                    // Label was "xam device global 81D43684" - a literal
+                    // baked into the text, so on retail it printed dashroot's
+                    // address next to a value read from 81AA1B14. Print the
+                    // address actually used.
+                    {"xam device global", kernel::xboxkrnl::XamDeviceSlot()},
                 };
                 for (auto& d : devs) {
                   uint32_t dev = rd(d.at);
-                  XELOGI("DevSurvey: {} -> {:08X}  [32A0]={:08X} [32B0]={:08X}",
-                         d.name, dev, dev ? rd(dev + 0x32A0u) : 0,
+                  XELOGI("DevSurvey: {} {:08X} -> {:08X}  [32A0]={:08X} "
+                         "[32B0]={:08X}",
+                         d.name, d.at, dev, dev ? rd(dev + 0x32A0u) : 0,
                          dev ? rd(dev + 0x32B0u) : 0);
+                }
+              }
+              if (cvars::guide_bind_depth_scan) {
+                // 819DE94C: lwz r9,36(r11) where r11 = [dev+0x32A0], or
+                // [dev+0x32B0] when the first is null. It then unpacks width
+                // and height bitfields out of [surface+0x24]. Both slots are
+                // zero on the Guide device, so that load faults - which is the
+                // real reason clearing the null-render flag crashes, and it is
+                // not the command buffer. 0x32A0 has no direct stw writer in
+                // xam at all; 0x32B0's only writer is 819F3A24 inside
+                // 819F38C8, and every guest route there wants the 124-byte
+                // parameter block mode 2 passes as null. So borrow a live
+                // surface from the title.
+                // Minimal probe: no scanning, three reads. The note on
+                // guide_bind_title_rt puts the title's render target at
+                // [VdGlobalDevice+0x3AC4]; 819DE94C needs [dev+0x32B0] to be
+                // a surface whose [+0x24] unpacks as width/height.
+                uint32_t tdev = rd(0x801E6FC4u);
+                uint32_t gdev = rd(kernel::xboxkrnl::XamDeviceSlot());
+                uint32_t cand = tdev ? rd(tdev + 0x3AC4u) : 0;
+                uint32_t fc = cand ? rd(cand + 0x24u) : 0;
+                XELOGI("DepthProbe: tdev={:08X} gdev={:08X} [t+3AC4]={:08X} "
+                       "[cand+24]={:08X} w~{} h~{}",
+                       tdev, gdev, cand, fc, ((fc >> 14) & 0x3FFFu) + 1,
+                       ((fc >> 3) & 0x7FFFu) + 1);
+                if (gdev && cand && fc) {
+                  // Both slots. 819DE94C takes 0x32A0 first and only falls
+                  // back to 0x32B0, but the draw emitter at 819F5EC4 reads a
+                  // *different* surface's [+0x20] format field (low 6 bits
+                  // compared against 0x36/0x37/0x3D) and faults with r14 null
+                  // when only the depth slot is filled.
+                  // 819F5F54-5C: the render targets are an INDEXED array,
+                  // [dev + (idx + 0xCA8)*4] = 0x32A0 + idx*4 for idx 0..3,
+                  // with idx==4 special-cased to the depth slot at 0x32B0.
+                  // That is also why a plain `stw` search finds no writer for
+                  // 0x32A0 - it is written with stwx. Fill all five.
+                  for (uint32_t i = 0; i <= 4; ++i) {
+                    xe::store_and_swap<uint32_t>(
+                        ks->memory()->TranslateVirtual(gdev + 0x32A0u + i * 4u),
+                        cand);
+                  }
+                  // 819F5D50 does `mr r14, r8`: the emitter's SIXTH argument
+                  // is the front buffer from [dev+0x3F74], and 819F5EC4 is
+                  // `lwz r11,32(r14)` faulting with r14 null. Reuse the same
+                  // already-validated pointer rather than reading further into
+                  // the title device, which is not mapped that far.
+                  xe::store_and_swap<uint32_t>(
+                      ks->memory()->TranslateVirtual(gdev + 0x3F74u), cand);
+                  XELOGI("DepthProbe: 32A0={:08X} 32B0={:08X} 3F74={:08X}",
+                         rd(gdev + 0x32A0u), rd(gdev + 0x32B0u),
+                         rd(gdev + 0x3F74u));
                 }
               }
               if (cvars::guide_bootstrap_on_title_thread &&
@@ -2051,8 +2515,14 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                   // pointer - but by the time the device context dereferences
                   // it the slot holds 006E0065, two UTF-16 code units. Sample
                   // it again here to narrow when it is overwritten.
-                  uint32_t xc = xe::load_and_swap<uint32_t>(
-                      ks->memory()->TranslateVirtual(0x81D6C978u));
+                  // 81D6C978 is a dashroot-xam constant; on another build it
+                  // is outside the image and reading it host-faults. Bound it
+                  // by the loaded module's extent (phase 416).
+                  uint32_t xc = XamConstOk(0x81D6C978u, 4)
+                                    ? xe::load_and_swap<uint32_t>(
+                                          ks->memory()->TranslateVirtual(
+                                              0x81D6C978u))
+                                    : 0;
                   if (xc) {
                     std::string cw;
                     for (uint32_t i = 0; i < 8; ++i) {
@@ -2084,9 +2554,16 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                     // use-after-free, and the watcher stayed silent through it.
                     uint32_t last = 0, last_ctx = 0;
                     bool primed = false, lent = false;
+                    // Same bound for the watcher loop.
+                    bool wctx_ok = XamConstOk(0x81D6C978u, 4);
+                    if (!wctx_ok) {
+                      XELOGW("XuiCtxWatch: 81D6C978 outside this xam image - "
+                             "watcher disabled");
+                    }
                     for (int i = 0; i < 240000; ++i) {
-                      uint32_t c = xe::load_and_swap<uint32_t>(
-                          wmem->TranslateVirtual(0x81D6C978u));
+                      uint32_t c = wctx_ok ? xe::load_and_swap<uint32_t>(
+                                       wmem->TranslateVirtual(0x81D6C978u))
+                                           : 0;
                       if (primed && c != last_ctx) {
                         XELOGE("XuiCtxWatch: ctx pointer {:08X} -> {:08X}{}",
                                last_ctx, c, c ? "" : "  (CLEARED)");
@@ -2112,6 +2589,10 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                       // "arrived too late" looks like.
                       if (cvars::guide_borrow_front_buffer && !lent) {
                         auto rdv = [wmem](uint32_t a) {
+                      if (a >= 0x81000000u && a < 0x82000000u &&
+                          !XamConstOk(a, 4)) {
+                        return uint32_t(0);
+                      }
                           return a ? xe::load_and_swap<uint32_t>(
                                          wmem->TranslateVirtual(a))
                                    : 0u;
@@ -2337,7 +2818,7 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                     XELOGI("Guide button: step 1 init(render_obj,0)");
                     uint64_t ia2[] = {obj + 16, 0};
                     uint64_t ir2 = ks->processor()->Execute(
-                        ts, hud_base + 0xA898u, ia2, xe::countof(ia2));
+                        ts, (g_hud_xuiinit ? g_hud_xuiinit : hud_base + 0xA898u), ia2, xe::countof(ia2));
                     XELOGI("Guide button: step 1 init -> {:08X}",
                            static_cast<uint32_t>(ir2));
                     uint32_t inp = rdm(obj + 72);
@@ -2416,7 +2897,7 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                 uint32_t title_dev = rd(0x801E6FC4u);
                 if (title_dev) {
                   xe::store_and_swap<uint32_t>(
-                      ks->memory()->TranslateVirtual(0x81D43684u), title_dev);
+                      ks->memory()->TranslateVirtual(kernel::xboxkrnl::XamDeviceSlot()), title_dev);
                   XELOGI("Guide button: xam device global -> title device "
                          "{:08X}",
                          title_dev);
@@ -2424,7 +2905,7 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
               }
               if (cvars::guide_call_render_host) {
                 XELOGI("Guide button: D3D device global 81D43684 = {:08X}",
-                       rd(0x81D43684u));
+                       rd(kernel::xboxkrnl::XamDeviceSlot()));
                 uint64_t ha[] = {0};
                 uint64_t hr = ks->processor()->Execute(ts, 0x8178DC58u, ha,
                                                        xe::countof(ha));
@@ -2459,7 +2940,7 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                     ks->memory()->TranslateVirtual(obj + 16 + 20), 1u);
               }
               uint64_t ia[] = {obj + 16, 0};
-              uint64_t ir = ks->processor()->Execute(ts, hud_base + 0xA898u,
+              uint64_t ir = ks->processor()->Execute(ts, (g_hud_xuiinit ? g_hud_xuiinit : hud_base + 0xA898u),
                                                      ia, xe::countof(ia));
               if (cvars::guide_create_scene) {
                 uint32_t cvt2 = rd(obj);
@@ -2484,13 +2965,13 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
               // on the title's render thread. The title's D3D device is
               // thread-affine, so drawing it from this thread is refused by
               // the guest D3D runtime.
-              kernel::xboxkrnl::SetGuideDrawHook(hud_base + 0xAB28u, obj + 16);
+              kernel::xboxkrnl::SetGuideDrawHook((g_hud_render ? g_hud_render : hud_base + 0xAB28u), obj + 16);
               XELOGI("Guide button: draw hook installed ({:08X}, {:08X})",
-                     hud_base + 0xAB28u, obj + 16);
+                     (g_hud_render ? g_hud_render : hud_base + 0xAB28u), obj + 16);
               for (int frame = 0; frame < 0; ++frame) {
                 uint64_t da[] = {obj + 16};
                 uint64_t dr = ks->processor()->Execute(
-                    ts, hud_base + 0xAB28u, da, xe::countof(da));
+                    ts, (g_hud_render ? g_hud_render : hud_base + 0xAB28u), da, xe::countof(da));
                 if (frame < 3) {
                   XELOGI("Guide button: draw frame {} returned {:08X}", frame,
                          static_cast<uint32_t>(dr));
@@ -2531,6 +3012,10 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
     std::thread([pmem]() {
       xe::threading::set_name("ProgressWatch");
       auto rd32 = [pmem](uint32_t a) -> uint32_t {
+                      if (a >= 0x81000000u && a < 0x82000000u &&
+                          !XamConstOk(a, 4)) {
+                        return uint32_t(0);
+                      }
         if (!a) return 0;
         auto* hp = pmem->LookupHeap(a);
         if (!hp || hp->QueryRangeAccess(a, a + 3) ==
@@ -2548,7 +3033,7 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
       uint32_t last = 0, last_dev = 0;
       bool primed = false;
       for (int i = 0; i < 240000; ++i) {
-        uint32_t g1 = rd32(0x81D43684u);
+        uint32_t g1 = rd32(kernel::xboxkrnl::XamDeviceSlot());
         uint32_t g2 = rd32(0x801E6FC8u);
         if (g1 != last_g1) {
           XELOGE("ProgressWatch: xam dev global {:08X} -> {:08X}"
@@ -3050,11 +3535,33 @@ bool Emulator::ExceptionCallback(Exception* ex) {
       // That helper stores the real LR at [r1-8] of the caller's frame before
       // the stwu, so with a 0xC0 frame it is at r1+0xB8. Scan a window in case
       // the frame size differs.
-      XELOGE("GUEST CRASH: [81D3F924] = {:08X}",
-             xe::load_and_swap<uint32_t>(
-                 memory()->TranslateVirtual(0x81D3F924u)));
+      // A crash reporter must not itself crash. 81D3F924 is a dashroot-xam
+      // global and need not be mapped on another build; reading it unguarded
+      // host-faulted here and swallowed the guest crash it was reporting.
+      // Same correction: for the xam image use its extent. Stack addresses
+      // are still queried, since those pages ARE tracked correctly.
+      uint32_t cr_lo = 0, cr_hi = 0;
+      if (lle_xam_module_ && lle_xam_module_->xex_module()) {
+        cr_lo = lle_xam_module_->xex_module()->base_address();
+        cr_hi = cr_lo + lle_xam_module_->xex_module()->image_size();
+      }
+      auto crash_mapped = [this, cr_lo, cr_hi](uint32_t a,
+                                               uint32_t len) -> bool {
+        if (cr_lo && a >= cr_lo && a + len <= cr_hi) return true;
+        auto* m = memory();
+        if (!m || a < 0x1000u) return false;
+        auto* hp = m->LookupHeap(a);
+        return hp && hp->QueryRangeAccess(a, a + len) !=
+                         xe::memory::PageAccess::kNoAccess;
+      };
+      if (crash_mapped(0x81D3F924u, 4)) {
+        XELOGE("GUEST CRASH: [81D3F924] = {:08X}",
+               xe::load_and_swap<uint32_t>(
+                   memory()->TranslateVirtual(0x81D3F924u)));
+      }
       uint32_t sp = static_cast<uint32_t>(ectx->r[1]);
       for (uint32_t off = 0xA0; off <= 0xE0; off += 8) {
+        if (!crash_mapped(sp + off, 4)) continue;
         uint32_t v = xe::load_and_swap<uint32_t>(
             memory()->TranslateVirtual(sp + off));
         if (v >= 0x81000000 && v < 0x82000000) {
@@ -3753,10 +4260,25 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
   // startup and gets "device not found". Doing it here makes the link exist
   // when the title first asks.
   if (cvars::system_root_early && !module_path.empty()) {
-    std::string base(utf8::find_base_guest_path(module_path));
+    // Prefer the SYS: mount when guide_system_root is set. \SystemRoot is
+    // where xam looks for huduiskin.xex (the skin loader at 81795548 opens
+    // \SystemRoot\huduiskin.xex, and it is the only route to
+    // XuiVisualRegister). Aliasing it to the title's own base makes that a
+    // lookup on GAME:, which is the dashboard folder only when the dashboard
+    // is the title - launch a real disc and GAME: is the disc, the skin is not
+    // on it, and the visual registry stays empty. Measured on the PvZ harness:
+    // "Early SystemRoot -> 'GAME:'" then "File not found:
+    // \SystemRoot\huduiskin.xex", so the Guide had no visuals to draw.
+    std::string base;
+    if (!cvars::guide_system_root.empty()) {
+      base = "SYS:";
+    } else {
+      base = utf8::find_base_guest_path(module_path);
+    }
     if (!base.empty()) {
       file_system_->RegisterSymbolicLink("\\SystemRoot", base);
-      XELOGI("Early SystemRoot -> '{}'", base);
+      XELOGI("Early SystemRoot -> '{}' (guide_system_root='{}')", base,
+             cvars::guide_system_root);
     }
   }
 
@@ -3797,6 +4319,60 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
       return xam_result;
     }
     XELOGI("LLE xam: loaded at {:08X}", xam_module->hmodule_ptr());
+    if (xam_module->xex_module()) {
+      g_xam_img_lo = xam_module->xex_module()->base_address();
+      g_xam_img_hi = g_xam_img_lo + xam_module->xex_module()->image_size();
+      // Publish it to the Guide code in xboxkrnl_video.cc, which reads its own
+      // set of dashroot-derived constants.
+      kernel::xboxkrnl::SetXamImageExtent(g_xam_img_lo, g_xam_img_hi);
+      XELOGI("LLE xam: image extent {:08X}..{:08X}", g_xam_img_lo,
+             g_xam_img_hi);
+    }
+    // Dump the loaded xam image, if asked. This has to happen here rather than
+    // in the draw path: on a non-dashroot build the Guide never binds a
+    // command buffer, so a dump placed there never fires - and that image is
+    // exactly what is needed to re-establish addresses for such a build.
+    if (!cvars::guide_dump_xam_path.empty()) {
+      auto* dm = memory();
+      // Use the module's own image size, not dashroot's 0x8C0000: the retail
+      // xam image is smaller, so a fixed extent failed the range check and
+      // dumped nothing precisely on the build the dump exists for.
+      uint32_t dbase = xam_module->xex_module()
+                           ? xam_module->xex_module()->base_address()
+                           : 0x815F0000u;
+      uint32_t dsize = xam_module->xex_module()
+                           ? xam_module->xex_module()->image_size()
+                           : 0u;
+      if (!dsize) dsize = 0x8C0000u;
+      // The image is not contiguously mapped over its whole extent, so a
+      // single range check rejects it. Walk it in 4K pages, writing what is
+      // mapped and zero-filling what is not: the scratchpad tooling wants a
+      // flat VA-indexed image, and a hole reads as zeroes there anyway.
+      FILE* f = std::fopen(cvars::guide_dump_xam_path.c_str(), "wb");
+      if (!f) {
+        XELOGW("DumpXam: could not open {}", cvars::guide_dump_xam_path);
+      } else {
+        static const uint8_t kZero[0x1000] = {0};
+        uint32_t mapped = 0, holes = 0;
+        for (uint32_t off = 0; off < dsize; off += 0x1000u) {
+          uint32_t a = dbase + off;
+          uint32_t n = std::min<uint32_t>(0x1000u, dsize - off);
+          auto* hp = dm ? dm->LookupHeap(a) : nullptr;
+          bool ok = hp && hp->QueryRangeAccess(a, a + n) !=
+                              xe::memory::PageAccess::kNoAccess;
+          if (ok) {
+            std::fwrite(dm->TranslateVirtual(a), 1, n, f);
+            ++mapped;
+          } else {
+            std::fwrite(kZero, 1, n, f);
+            ++holes;
+          }
+        }
+        std::fclose(f);
+        XELOGI("DumpXam: {:08X}+{:X} -> {} ({} pages mapped, {} zero-filled)",
+               dbase, dsize, cvars::guide_dump_xam_path, mapped, holes);
+      }
+    }
     if (cvars::guide_patch_cmdbuf_reset) {
       // 81A01464  stw r30,0x2B4C(r31)  ; zeroes the cmdbuf write cursor
       const uint32_t kRAddr = 0x81A01464u;
@@ -4033,6 +4609,10 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
       // version had no guard and took the emulator down in GuideLendFB before
       // the title started.
       auto rdv = [lmem](uint32_t a) -> uint32_t {
+                      if (a >= 0x81000000u && a < 0x82000000u &&
+                          !XamConstOk(a, 4)) {
+                        return uint32_t(0);
+                      }
         if (a < 0x1000u || (a & 3u)) return 0u;
         auto* heap = lmem->LookupHeap(a);
         if (!heap) return 0u;
@@ -4552,33 +5132,157 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
       // table entirely. Dump it here so a skin run can be compared against a
       // default one without inferring anything from scene behaviour.
       {
-        std::string vr;
-        for (uint32_t i = 0; i < 12; ++i) {
-          vr += fmt::format("{:08X} ", xe::load_and_swap<uint32_t>(
-                                           memory()->TranslateVirtual(
-                                               0x81D6CF50u + i * 4)));
+        // 81D6CF50 is a dashroot-xam address. On any other build it need not
+        // be mapped, and reading it unguarded host-faults during xam init -
+        // which killed the run before the title ever launched and made both
+        // alternative-xam tests look like properties of those builds
+        // (phases 403, 406). Check the range first; the project's own method
+        // note says never to read a guest pointer without doing so.
+        auto* vm = memory();
+        uint32_t vlo = 0, vhi = 0;
+        if (lle_xam_module_ && lle_xam_module_->xex_module()) {
+          vlo = lle_xam_module_->xex_module()->base_address();
+          vhi = vlo + lle_xam_module_->xex_module()->image_size();
         }
-        XELOGI("LLE xam: visual registry @81D6CF50: {}", vr);
+        if (vm && vlo && 0x81D6CF50u >= vlo && 0x81D6CF50u + 48u <= vhi) {
+          std::string vr;
+          for (uint32_t i = 0; i < 12; ++i) {
+            vr += fmt::format("{:08X} ", xe::load_and_swap<uint32_t>(
+                                             vm->TranslateVirtual(
+                                                 0x81D6CF50u + i * 4)));
+          }
+          XELOGI("LLE xam: visual registry @81D6CF50: {}", vr);
+        } else {
+          XELOGW("LLE xam: visual registry @81D6CF50 not mapped - skipping "
+                 "(expected on a non-dashroot xam)");
+        }
       }
       // The tag->index mapper (817BA1D8) returns a single flag bit as the
       // index for the 0x10000000 request class, so requests like 0x18100000
       // land on heap[0] deterministically - and heap[0] is the 0xCCCC
       // placeholder. Copy heap[1]'s descriptor over it to test whether that
       // is the whole story: if so the failures go away while xam stays up.
-      if (cvars::lle_xam_heap0_alias) {
-        auto* d0 = memory()->TranslateVirtual(0x81D4E1B0u);
-        auto* d1 = memory()->TranslateVirtual(0x81D4E1B0u + 408u);
-        std::memcpy(d0, d1, 408);
+      // Locate the heap-descriptor array by content, for builds where
+      // 81D4E1B0 does not apply. Signature per entry, from dashroot's runtime
+      // dump: +0 is a small index (0..15), +4 and +8 are equal and hold the
+      // heap base (0x4xxxxxxx or 0x8Cxxxxxx). The indices are written during
+      // init, so this must run after DllMain, not against the on-disk image.
+      // Locate the heap-descriptor array for THIS build. dashroot's is at
+      // 81D4E1B0 with stride 408; retail 17559's is at 81AABFF8 with stride
+      // 24 (phase 418). Deriving both at runtime removes the last hardcoded
+      // dependency from the heap workaround.
+      uint32_t heap_desc_base = 0, heap_desc_stride = 0;
+      if ((cvars::lle_xam_find_heaps || cvars::lle_xam_heap0_alias) &&
+          lle_xam_module_ && lle_xam_module_->xex_module()) {
+        uint32_t xb = lle_xam_module_->xex_module()->base_address();
+        uint32_t xs = lle_xam_module_->xex_module()->image_size();
+        auto* fm = memory();
+        std::vector<uint32_t> hits;
+        // No page query here either - it reports kNoAccess for readable
+        // image addresses (phase 416). Staying inside [base, base+size) is
+        // the correct and sufficient bound.
+        for (uint32_t o = 0; fm && xs && o + 12 < xs; o += 4) {
+          uint32_t a = xb + o;
+          uint32_t v0 = xe::load_and_swap<uint32_t>(fm->TranslateVirtual(a));
+          if (v0 > 15) continue;
+          uint32_t v4 =
+              xe::load_and_swap<uint32_t>(fm->TranslateVirtual(a + 4));
+          uint32_t v8 =
+              xe::load_and_swap<uint32_t>(fm->TranslateVirtual(a + 8));
+          // dashroot's heap bases are 4000_0000, 401F_0000, 405A_0000,
+          // 408D_0000, 408F_0000, 4091_0000 and 8C00_0000. The earlier bound
+          // (< 0x90000000) also admitted 0x81xxxxxx image pointers, which
+          // buried the signal in 90-odd false candidates.
+          bool base_ok = (v4 >= 0x40000000u && v4 < 0x50000000u) ||
+                         (v4 >= 0x8C000000u && v4 < 0x8D000000u);
+          if (v4 != v8 || !base_ok) continue;
+          hits.push_back(a);
+        }
+        XELOGI("FindHeaps: {} candidate descriptors in {:08X}+{:X}",
+               hits.size(), xb, xs);
+        // Derive the stride from two candidates whose indices differ by one,
+        // then project back to entry 0. Index-aware rather than
+        // spacing-aware: idx 0 and idx 3 are absent on BOTH builds (the
+        // 0000CCCC placeholder, and an entry with +4 != +8), so consecutive
+        // hits are not necessarily adjacent entries. A fixed minimum stride
+        // was also wrong - dashroot's is 408, retail's is 24.
+        auto idx_of = [&](uint32_t a) {
+          return xe::load_and_swap<uint32_t>(fm->TranslateVirtual(a));
+        };
+        for (size_t i = 0; i + 1 < hits.size() && !heap_desc_base; ++i) {
+          for (size_t j = i + 1; j < hits.size(); ++j) {
+            uint32_t ia = idx_of(hits[i]), ja = idx_of(hits[j]);
+            if (ja <= ia || ja - ia > 8 || hits[j] <= hits[i]) continue;
+            uint32_t span = hits[j] - hits[i];
+            if (span % (ja - ia)) continue;
+            uint32_t st = span / (ja - ia);
+            if (st < 8 || st > 0x600 || hits[i] < st * ia) continue;
+            heap_desc_stride = st;
+            heap_desc_base = hits[i] - st * ia;
+            XELOGI("FindHeaps: array at {:08X} stride {} ({:X}) from idx {} "
+                   "@{:08X} and idx {} @{:08X}",
+                   heap_desc_base, st, st, ia, hits[i], ja, hits[j]);
+            break;
+          }
+        }
+        for (size_t i = 0; i < hits.size() && i < 12; ++i) {
+          XELOGI("FindHeaps:   cand {:08X} idx={} base={:08X}", hits[i],
+                 xe::load_and_swap<uint32_t>(fm->TranslateVirtual(hits[i])),
+                 xe::load_and_swap<uint32_t>(
+                     fm->TranslateVirtual(hits[i] + 4)));
+        }
+      }
+      // Every address in this block is a constant lifted from dashroot's xam.
+      // On another build they need not be mapped, and reading them unguarded
+      // host-faults during init - which is what made phases 403 and 406 read
+      // as facts about those xams instead of about this code.
+      // QueryRangeAccess is NOT a readability test for the xam image: it
+      // reports kNoAccess for addresses that read back fine (measured -
+      // [81D4E1B0] returns 0000CCCC while the query says kNoAccess), because
+      // the page table does not track protection for the mapped image. Using
+      // it here rejected valid dashroot addresses and silently disabled the
+      // heap alias, which made dashroot fail exactly like retail.
+      //
+      // The question these guards actually need to answer is "is this
+      // dashroot-derived constant inside THIS build's xam image", so ask that
+      // directly against the loaded module's extent.
+      uint32_t xam_img_lo = 0, xam_img_hi = 0;
+      if (lle_xam_module_ && lle_xam_module_->xex_module()) {
+        xam_img_lo = lle_xam_module_->xex_module()->base_address();
+        xam_img_hi = xam_img_lo + lle_xam_module_->xex_module()->image_size();
+      }
+      auto xam_mapped = [&xam_img_lo, &xam_img_hi](uint32_t a,
+                                                   uint32_t len) -> bool {
+        return xam_img_lo && a >= xam_img_lo && a + len <= xam_img_hi;
+      };
+      // Use the located array rather than dashroot's constants, so this
+      // applies on any build. Falls back to the dashroot values only if the
+      // scan found nothing and they are inside this image.
+      uint32_t alias_base = heap_desc_base, alias_stride = heap_desc_stride;
+      if (!alias_base && xam_mapped(0x81D4E1B0u, 2 * 408u)) {
+        alias_base = 0x81D4E1B0u;
+        alias_stride = 408u;
+      }
+      if (cvars::lle_xam_heap0_alias && alias_base && alias_stride &&
+          xam_mapped(alias_base, 2 * alias_stride)) {
+        auto* d0 = memory()->TranslateVirtual(alias_base);
+        auto* d1 = memory()->TranslateVirtual(alias_base + alias_stride);
+        std::memcpy(d0, d1, alias_stride);
         xe::store_and_swap<uint32_t>(d0, 0);  // keep id field as index 0
-        XELOGI("LLE xam: aliased heap[0] to heap[1]");
+        XELOGI("LLE xam: aliased heap[0] to heap[1] at {:08X} stride {}",
+               alias_base, alias_stride);
+      } else if (cvars::lle_xam_heap0_alias) {
+        XELOGW("LLE xam: heap0 alias skipped - no descriptor array located");
       }
       // Read the heap descriptors straight out of guest memory rather than
       // inferring their state from allocation-failure counts. Array is at
       // 0x81D4E1B0 (a constant embedded in xam's code, so already a flat
       // runtime address), 10 entries of 408 bytes. Field +4 is the "created"
       // flag: every reader in xam early-outs when it is zero.
-      for (uint32_t i = 0; i < 10; ++i) {
-        uint32_t desc = 0x81D4E1B0u + i * 408u;
+      for (uint32_t i = 0; i < 10 && alias_base && alias_stride &&
+                          xam_mapped(alias_base, 10 * alias_stride);
+           ++i) {
+        uint32_t desc = alias_base + i * alias_stride;
         auto* dp = memory()->TranslateVirtual(desc);
         XELOGI("LLE xam: heap[{}] @{:08X} +0={:08X} +4={:08X} +8={:08X} "
                "+1C={:08X} +24={:08X}",
@@ -4593,7 +5297,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
       // falling through to KeGetCurrentProcessType, which yields 0xEE on title
       // threads and makes the heap selector trap. Title code calling into xam
       // therefore lands on heap 0, the zero-sized placeholder.
-      if (cvars::lle_xam_appid_sentinel) {
+      if (cvars::lle_xam_appid_sentinel && xam_mapped(0x81D227F0u, 4)) {
         auto* p = memory()->TranslateVirtual(0x81D227F0);
         XELOGI("LLE xam: app-id sentinel was {:08X}, forcing FFFFFFFF",
                xe::load_and_swap<uint32_t>(p));
@@ -4819,7 +5523,76 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                 // 0xFF with a handler baked into its code as base + 0x69C0
                 // (98007960: lis r11,0x913e / addi r5,r11,27072, against a
                 // load base of 913E0000). Derive it from the module base.
-                h = hud->xex_module()->base_address() + 0x69C0;
+                // +0x69C0 is dashroot's hud. On the retail 17559 hud the
+                // same handler sits at +0x5930, and dispatching a message ID
+                // into whatever else lives at +0x69C0 there crashed inside
+                // hud (phase 410: r3 held ASCII). The two handlers are
+                // instruction-for-instruction identical, so find it by
+                // signature instead of by offset:
+                //     mfspr / bl / stwu r1,-128(r1) / lis rX,0x8000
+                //     mr / ori rY,rX,4 / mr / subf r11,rY,r3
+                // The 0x80000004 construction is unique in both images, and
+                // sits at function_start + 0xC in both.
+                uint32_t hbase = hud->xex_module()->base_address();
+                uint32_t hsz = hud->xex_module()->image_size();
+                uint32_t found = 0;
+                auto* hmem = ks->memory();
+                for (uint32_t o = 0; hmem && hsz && o + 16 < hsz && !found;
+                     o += 4) {
+                  uint32_t a = hbase + o;
+                  auto* hh = hmem->LookupHeap(a);
+                  if (!hh || hh->QueryRangeAccess(a, a + 16) ==
+                                 xe::memory::PageAccess::kNoAccess) {
+                    continue;
+                  }
+                  uint32_t w0 =
+                      xe::load_and_swap<uint32_t>(hmem->TranslateVirtual(a));
+                  if ((w0 >> 26) != 15 || ((w0 >> 16) & 31) != 0 ||
+                      (w0 & 0xFFFF) != 0x8000) {
+                    continue;
+                  }
+                  uint32_t rt = (w0 >> 21) & 31;
+                  for (uint32_t j = 1; j <= 3; ++j) {
+                    uint32_t wj = xe::load_and_swap<uint32_t>(
+                        hmem->TranslateVirtual(a + j * 4));
+                    if ((wj >> 26) == 24 && ((wj >> 21) & 31) == rt &&
+                        (wj & 0xFFFF) == 0x0004) {
+                      found = a - 0xC;
+                      break;
+                    }
+                  }
+                }
+                if (found) {
+                  XELOGI("Guide: handler located by signature at {:08X} "
+                         "(base+{:X})", found, found - hbase);
+                  // The handler also tells us where it keeps the Guide
+                  // object. At +0x34 it builds the high half of that address
+                  // and at +0x3C loads through it; the two hud builds are
+                  // instruction-identical here, differing only in the
+                  // displacement (dashroot 91400690, retail 913FF690). Decode
+                  // it rather than hardcoding either.
+                  uint32_t wi_hi = xe::load_and_swap<uint32_t>(
+                      hmem->TranslateVirtual(found + 0x34u));
+                  uint32_t wi_lo = xe::load_and_swap<uint32_t>(
+                      hmem->TranslateVirtual(found + 0x3Cu));
+                  uint32_t xi = FindHudSig(hmem, hbase, hsz, kHudXuiInitSig,
+                                           14);
+                  uint32_t rr = FindHudSig(hmem, hbase, hsz, kHudRenderSig, 14);
+                  if (xi) g_hud_xuiinit = xi;
+                  if (rr) g_hud_render = rr;
+                  kernel::xboxkrnl::SetHudEntries(xi, rr);
+                  XELOGI("Guide: hud entries by signature - xuiinit {:08X} "
+                         "(base+{:X}), render {:08X} (base+{:X})",
+                         xi, xi ? xi - hbase : 0, rr, rr ? rr - hbase : 0);
+                  if ((wi_hi >> 26) == 15 && (wi_lo >> 26) == 32) {
+                    int32_t disp = static_cast<int16_t>(wi_lo & 0xFFFF);
+                    uint32_t slot = ((wi_hi & 0xFFFF) << 16) + disp;
+                    guide_obj_slot_ = slot;
+                    XELOGI("Guide: object slot decoded from handler = {:08X}",
+                           slot);
+                  }
+                }
+                h = found ? found : (hbase + 0x69C0);
                 XELOGW("Guide: HLE map empty (LLE xam owns the registration); "
                        "using hud base {:08X} + 0x69C0 -> {:08X}",
                        hud->xex_module()->base_address(), h);
@@ -4915,15 +5688,34 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
               // is a different problem from a class merely being absent.
               {
                 auto* mem2 = ks->memory();
-                std::string cs, tb;
-                for (int i = 0; i < 8; ++i) {
-                  cs += fmt::format("{:08X} ", xe::load_and_swap<uint32_t>(
-                      mem2->TranslateVirtual(0x81D6D030u + i * 4)));
-                  tb += fmt::format("{:08X} ", xe::load_and_swap<uint32_t>(
-                      mem2->TranslateVirtual(0x81D6D508u + i * 4)));
+                // Both constants are dashroot-xam addresses; on another build
+                // they need not be mapped. Reading them unguarded faulted on
+                // the Guide Loader thread (phase 407).
+                // Image-extent test, not a page query - see the note at the
+                // xam_mapped helper: QueryRangeAccess reports kNoAccess for
+                // readable image addresses.
+                uint32_t m2lo = 0, m2hi = 0;
+                if (xam_mod_for_guide && xam_mod_for_guide->xex_module()) {
+                  m2lo = xam_mod_for_guide->xex_module()->base_address();
+                  m2hi = m2lo + xam_mod_for_guide->xex_module()->image_size();
                 }
-                XELOGI("Guide: XUI crit @81D6D030: {}", cs);
-                XELOGI("Guide: XUI registry @81D6D508: {}", tb);
+                auto m2 = [m2lo, m2hi](uint32_t a, uint32_t len) -> bool {
+                  return m2lo && a >= m2lo && a + len <= m2hi;
+                };
+                if (m2(0x81D6D030u, 32) && m2(0x81D6D508u, 32)) {
+                  std::string cs, tb;
+                  for (int i = 0; i < 8; ++i) {
+                    cs += fmt::format("{:08X} ", xe::load_and_swap<uint32_t>(
+                        mem2->TranslateVirtual(0x81D6D030u + i * 4)));
+                    tb += fmt::format("{:08X} ", xe::load_and_swap<uint32_t>(
+                        mem2->TranslateVirtual(0x81D6D508u + i * 4)));
+                  }
+                  XELOGI("Guide: XUI crit @81D6D030: {}", cs);
+                  XELOGI("Guide: XUI registry @81D6D508: {}", tb);
+                } else {
+                  XELOGW("Guide: XUI crit/registry constants not mapped - "
+                         "skipping (expected on a non-dashroot xam)");
+                }
               }
               // Prefer xam's own entry point over a hand-built message.
               // Phase 18: the payload layout was guessed, and xam stores
@@ -5291,8 +6083,28 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
               // against the Guide object the create message just produced.
               if (cvars::lle_guide_draw) {
                 uint32_t hb = hud->xex_module()->base_address();
+                uint32_t slot1 = guide_obj_slot_ ? guide_obj_slot_ : 0x91400690u;
                 uint32_t obj = xe::load_and_swap<uint32_t>(
-                    mem->TranslateVirtual(0x91400690u));
+                    mem->TranslateVirtual(slot1));
+                // 0x91400690 is where *dashroot's* hud stores the Guide
+                // object. On the retail hud that slot holds unrelated data -
+                // it read 6E74726F ("ntro"), which was then passed as `this`
+                // and crashed inside hud (phases 410, 412). "Non-zero" is not
+                // a validity test: require it to be a mapped guest heap
+                // pointer before handing it to guest code.
+                bool obj_ok = false;
+                if (obj >= 0x30000000u && obj < 0x50000000u) {
+                  auto* oh = mem->LookupHeap(obj);
+                  obj_ok = oh && oh->QueryRangeAccess(obj, obj + 0x20u) !=
+                                     xe::memory::PageAccess::kNoAccess;
+                }
+                if (!obj_ok && obj) {
+                  XELOGW("Guide: object slot 91400690 = {:08X} is not a mapped "
+                         "heap pointer - not calling hud with it (the create "
+                         "returned an error, or this hud stores it elsewhere)",
+                         obj);
+                  obj = 0;
+                }
                 if (obj) {
                   uint64_t ia[] = {obj};
                   if (cvars::guide_force_obj14) {
@@ -5303,9 +6115,9 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                            "XuiRenderCreateDC branch",
                            uint32_t(cvars::guide_force_obj14));
                   }
-                  XELOGI("Guide: hud XUI init {:08X} this={:08X}", hb + 0xA898u,
+                  XELOGI("Guide: hud XUI init {:08X} this={:08X}", (g_hud_xuiinit ? g_hud_xuiinit : hb + 0xA898u),
                          obj);
-                  uint64_t ir = ks->processor()->Execute(ts, hb + 0xA898u, ia,
+                  uint64_t ir = ks->processor()->Execute(ts, (g_hud_xuiinit ? g_hud_xuiinit : hb + 0xA898u), ia,
                                                           xe::countof(ia));
                   XELOGI("Guide: hud XUI init returned {:08X}",
                          static_cast<uint32_t>(ir));
@@ -5334,7 +6146,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                       cpd ? cpd->guide_draw_count_ : 0u;
                   for (int frame = 0; frame < 6000; ++frame) {
                     uint64_t da[] = {obj};
-                    ks->processor()->Execute(ts, hb + 0xAB28u, da,
+                    ks->processor()->Execute(ts, (g_hud_render ? g_hud_render : hb + 0xAB28u), da,
                                              xe::countof(da));
                     if (frame < 3 || frame % 500 == 0) {
                       uint32_t dcp = xe::load_and_swap<uint32_t>(

@@ -10,6 +10,7 @@
 #include "xenia/kernel/xboxkrnl/xboxkrnl_strings.h"
 #include "xenia/kernel/util/shim_utils.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_private.h"
+#include "xenia/kernel/xthread.h"
 
 DEFINE_bool(log_string_format_kernel_calls, false,
             "Log usage of print formatters like sprintf.", "Logging");
@@ -640,7 +641,105 @@ dword_result_t DbgPrint_entry(lpstring_t format, const ppc_context_t& ctx) {
   }
 
   // trim whitespace from end of message
-  XELOGI("(DbgPrint) {}", string_util::rtrim(data.str()));
+  {
+    // Collapse repeats. xam emits one particular cross-thread warning several
+    // hundred thousand times per Guide run - 400k of the 819k lines in a 261MB
+    // log - which buries every line worth reading and makes each iteration
+    // slower than the emulation it is measuring. Identical consecutive
+    // messages are counted instead of printed, with a single line when the
+    // run of repeats ends.
+    // Name the caller of specific guest diagnostics.
+    //
+    // Phase 240 linked "Assertion failure: Value != 0" to two assert helpers by
+    // string reference; phase 241 showed the breakpoints on those helpers do
+    // not corroborate it. Reading the guest link register when the message is
+    // actually printed names the real caller, with no search pattern to get
+    // wrong.
+    if (cvars::guide_trace_assert_src) {
+      std::string probe = string_util::rtrim(data.str());
+      if (probe.find("Value != 0") != std::string::npos ||
+          probe.find("Assertion failure") != std::string::npos) {
+        auto* dth = XThread::GetCurrentThread();
+        if (dth) {
+          auto* dc = dth->thread_state()->context();
+          // Walk the guest frame chain. The immediate lr is only xam's
+          // diagnostic printer; the six callers of that printer are severity
+          // wrappers, so the site that actually asserted is several frames up.
+          // PPC convention: [r1] is the previous frame, [frame+4] its saved LR.
+          // Scan the stack for words that look like xam code addresses,
+          // rather than walking the frame chain. The chain walk failed because
+          // the formatted message buffer sits on the stack here and its
+          // contents were read as frames - "curr", "is o". A range filter
+          // cannot make that mistake: ASCII text does not land in
+          // 815F0000-81E00000 and stay 4-aligned.
+          std::string bt;
+          {
+            auto* mem = dth->memory();
+            uint32_t sp = static_cast<uint32_t>(dc->r[1]);
+            uint32_t shown = 0, last = 0;
+            for (uint32_t off = 0; off < 0x1200 && shown < 28; off += 4) {
+              uint32_t v = xe::load_and_swap<uint32_t>(
+                  mem->TranslateVirtual(sp + off));
+              if (v >= 0x815F0000u && v < 0x81E00000u && !(v & 3) &&
+                  v != last) {
+                // Flag anything in the assert-helper neighbourhood; the
+                // helper that fired should appear as a frame below the
+                // printer.
+                // Flag two regions: the assert helpers, and the draw
+                // emitter neighbourhood. 8198F7B8 - the function computing
+                // dimension-minus-border that asserts - is called from six
+                // places, one of which is 819F631C inside 819F5D18, the draw
+                // emitter. If the emitter appears here it is running, which
+                // would contradict phase 235's breakpoint result (taken in a
+                // configuration now known to suppress this very assertion).
+                const char* tag = "";
+                // 819E5900 - the function whose inlined asserts fire - has
+                // exactly two callers: 819E6C54 (in 819E6AE0) and 819F7C48
+                // (in 819F5D18, THE DRAW EMITTER). Which one is on the stack
+                // decides whether the emitter runs, and therefore whether
+                // phase 235's "DrawPrimitive is never called" survives - that
+                // was a breakpoint measurement, and breakpoints suppress this
+                // exact assertion.
+                // 819E6AE0's own callers, to name what asks for the
+                // degenerate surface: 81990704 (819903C0), 819E747C (819E7310,
+                // the front-buffer allocator), 819FE394 (819FE138), 81A0D56C /
+                // 81A0D670 (81A0CFA0), 81A0D7E8 (81A0D748).
+                if (v >= 0x819F7C40u && v <= 0x819F7C60u) tag = "*EMITTER";
+                else if (v >= 0x819E6C40u && v <= 0x819E6C70u) tag = "*OTHER";
+                else if (v >= 0x81990700u && v <= 0x81990710u) tag = "*C1";
+                else if (v >= 0x819E7478u && v <= 0x819E7488u) tag = "*FRONTBUF";
+                else if (v >= 0x819FE390u && v <= 0x819FE3A0u) tag = "*C3";
+                else if (v >= 0x81A0D560u && v <= 0x81A0D680u) tag = "*C4";
+                else if (v >= 0x81A0D7E0u && v <= 0x81A0D7F0u) tag = "*C5";
+                else if (v >= 0x8198F000u && v < 0x81993000u) tag = "*A";
+                else if (v >= 0x819E5000u && v < 0x819F8000u) tag = "*E";
+                bt += fmt::format("{:08X}{} ", v, tag);
+                last = v;
+                ++shown;
+              }
+            }
+          }
+          XELOGI("AssertSrc: '{}' lr={:08X} r3={:08X} bt: {}", probe,
+                 static_cast<uint32_t>(dc->lr),
+                 static_cast<uint32_t>(dc->r[3]), bt);
+        }
+      }
+    }
+    static std::string last_dbgprint;
+    static uint64_t dbgprint_repeats = 0;
+    std::string msg = string_util::rtrim(data.str());
+    if (msg == last_dbgprint) {
+      ++dbgprint_repeats;
+    } else {
+      if (dbgprint_repeats) {
+        XELOGI("(DbgPrint) [previous message repeated {} times]",
+               dbgprint_repeats);
+        dbgprint_repeats = 0;
+      }
+      XELOGI("(DbgPrint) {}", msg);
+      last_dbgprint = msg;
+    }
+  }
 
   return X_STATUS_SUCCESS;
 }

@@ -25,6 +25,16 @@ DEFINE_bool(trace_functions, false, "Generate tracing for function statistics.",
 DEFINE_bool(trace_function_coverage, false,
             "Generate tracing for function instruction coverage statistics.",
             "CPU");
+DEFINE_uint32(
+    trace_coverage_only_fn, 0,
+    "When non-zero, apply trace_function_coverage to ONLY the guest function at "
+    "this address instead of every function translated. The global form emits a "
+    "counter per guest instruction across tens of thousands of functions, which "
+    "slows the run far enough to change it - the workload under study stopped "
+    "reaching the code being measured. Give the address in DECIMAL; the flag "
+    "parser rejects a 0x prefix.",
+    "CPU");
+
 DEFINE_bool(trace_function_references, false,
             "Generate tracing for function address references.", "CPU");
 DEFINE_bool(trace_function_data, false,

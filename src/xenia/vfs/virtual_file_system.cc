@@ -153,7 +153,42 @@ Entry* VirtualFileSystem::ResolvePath(const std::string_view path) {
 
   const auto& device = *it;
   auto relative_path = normalized_path.substr(device->mount_path().size());
-  return device->ResolvePath(relative_path);
+  auto* resolved = device->ResolvePath(relative_path);
+  // Font lookups decide whether the Guide can rasterise text at all: xam
+  // resolves "file://media:/XenonJKLatin.xtt" and XUIFONT::Init has a
+  // "must specify a typeface" failure path. Data-file opens are not otherwise
+  // logged by name, so a missing font is indistinguishable from silence -
+  // which has already caused two wrong conclusions in this work. Log the
+  // result explicitly, hit or miss.
+  bool is_font =
+      xe::utf8::find_first_of(normalized_path, ".xtt") != std::string::npos ||
+      xe::utf8::find_first_of(normalized_path, ".XTT") != std::string::npos;
+  if (is_font && !resolved) {
+    // xam asks for "file://media:/XenonJKLatin.xtt" - media: is the TITLE's
+    // device. That happens to work when the title is the dashboard folder,
+    // which ships the fonts, but a real game disc has none, so the Guide
+    // would have no typeface at all. On hardware these live in flash, not on
+    // the game media, so fall back to SYS: (guide_system_root), which is
+    // mounted precisely so the Guide does not depend on the title's layout.
+    auto slash = normalized_path.find_last_of('\\');
+    auto leaf = slash == std::string::npos ? normalized_path
+                                           : normalized_path.substr(slash + 1);
+    auto sys_it = std::ranges::find_if(std::as_const(devices_), [&](auto& d) {
+      return d->mount_path() == "\\SYS";
+    });
+    if (sys_it != devices_.cend()) {
+      resolved = (*sys_it)->ResolvePath("\\" + leaf);
+      if (resolved) {
+        XELOGI("VFS: font \"{}\" not on the title device; served from SYS:",
+               leaf);
+      }
+    }
+  }
+  if (is_font) {
+    XELOGI("VFS: font lookup \"{}\" -> {}", path,
+           resolved ? "FOUND" : "NOT FOUND");
+  }
+  return resolved;
 }
 
 Entry* VirtualFileSystem::CreatePath(const std::string_view path,

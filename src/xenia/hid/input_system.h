@@ -10,6 +10,7 @@
 #ifndef XENIA_HID_INPUT_SYSTEM_H_
 #define XENIA_HID_INPUT_SYSTEM_H_
 
+#include <array>
 #include <bitset>
 #include <memory>
 #include <vector>
@@ -69,6 +70,12 @@ class InputSystem {
 
   void UpdateUsedSlot(InputDriver* driver, uint8_t slot, bool connected);
   void AdjustDeadzoneLevels(const uint8_t slot, X_INPUT_GAMEPAD* gamepad);
+  // False while the display window is in the background, unless the user has
+  // asked for background input.
+  bool AcceptingInput() const;
+  // Neutralizes out_state when input is gated off, and keeps the packet number
+  // honest across the transition.
+  void ApplyFocusGate(uint32_t user_index, X_INPUT_STATE* out_state);
   X_INPUT_VIBRATION ModifyVibrationLevel(X_INPUT_VIBRATION* vibration);
 
   std::vector<InputDriver*> FilterDrivers(uint32_t flags);
@@ -78,6 +85,11 @@ class InputSystem {
   std::vector<std::unique_ptr<InputDriver>> drivers_;
 
   std::unique_ptr<Portal> portal_;
+
+  // Per-slot state of the focus gate, and how far the packet number we report
+  // has been pushed ahead of the driver's own.
+  std::array<bool, XUserMaxUserCount> input_gated_ = {};
+  std::array<uint32_t, XUserMaxUserCount> packet_number_bias_ = {};
 
   std::bitset<XUserMaxUserCount> connected_slots = {};
   std::array<std::pair<joystick_value, joystick_value>, XUserMaxUserCount>

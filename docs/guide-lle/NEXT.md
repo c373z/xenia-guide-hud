@@ -8221,3 +8221,2022 @@ stays off and unused.
 The remaining question is entirely upstream: why hud's draw walks a populated
 scene (`btnJoinLive`, `btnB`, `labelHeading`, all with visuals) and produces
 no geometry.
+
+### The null-render flag lives in the CONTEXT and is still set
+
+From the bootstrap log in the best-so-far run:
+
+```
+GuideBootstrap: null-render flag [ctx+1C] = 00000001 (hw info word = 00000220)
+```
+
+`guide_patch_null_render` nops the *copy* at `818FDF14` so `[dc+0x134]` stays
+0 - and that is all it does. **`[ctx+0x1C]` itself is still 1.** Any other
+consumer that reads the context's flag directly still sees null-render mode
+and skips its work, which fits the current state exactly: every downstream
+stage is correct and the payload is empty.
+
+That reframes what `guide_patch_null_render` achieves. It makes the *device
+context* look non-null while the *XUI context* remains in null-render mode -
+a half-measure, and one that explains why running vtable[20] changed nothing.
+
+`guide_clear_null_render` clears the source, `[ctx+0x1C]`. It has been tried
+twice before and crashed both times, but both attempts predate
+`guide_bind_title_rt`, `guide_second_context_kb` and
+`guide_patch_cmdbuf_reset` - and the `819DE94C` crash they were hitting is now
+gone. Its "never worked because the per-frame context is built later" caveat
+also does not apply under `guide_reuse_xui_ctx`, where the per-frame context
+IS the bootstrap context (already noted above).
+
+So the same flag is worth retrying in the current stack, in place of
+`guide_patch_null_render` rather than alongside it.
+
+Also visible: the title itself is rendering healthily throughout
+(`GuideFrame 1500: gpu_draws +14181, total 54679`), so the GPU path is alive
+and it is specifically the Guide contributing nothing.
+
+## THE RESOURCE PROVIDER IS A STUB: two vtable slots return E_NOTIMPL
+
+First: clearing `[ctx+0x1C]` at source works and changes nothing.
+
+```
+XUI ctx 40877DC0 [1C] 00000001 -> 00000000 (null-render flag cleared at source)
+Guide composite draw #600 ... [134]=00000000
+GuideCtx2 #600: submitted 1 words ... GPU draws +0
+```
+
+So null-render is now off at **both** levels (context and device context) and
+the payload is unchanged. That refutes the previous tick's lead as well.
+
+Second: hud drives the pipeline correctly. All four import thunks execute:
+
+```
+913FE994 XuiSceneNavigateFirst   entered
+913FE874 XuiRenderBegin          entered
+913FE854 XuiRenderEnd            entered
+913FE6D4 XuiSceneCreate          entered
+```
+
+So the scene **is** navigated and the render bracket **does** run. The
+"created but never shown" hypothesis is dead - it was wrong in both of its
+forms.
+
+### The actual cause
+
+The bootstrap log records the provider's vtable, and two slots share one
+address - the signature of a stub:
+
+```
+GuideBootstrap: provider 81D22A54 vtable 81608258
+                [0]=817924E0 [1]=8178F600 [2]=8178F600
+```
+
+`8178F600` disassembles to three instructions:
+
+```
+81796800  lis r3,0x8000
+81796804  ori r3,r3,0x4001     ; 0x80004001 = E_NOTIMPL
+81796808  blr
+```
+
+**The XUI resource provider cannot load resources.** That single fact
+explains the long-standing measured absence - "the resource provider is only
+ever asked to open one thing, `strings.xus`; no `xam://` resource is ever
+requested" - and it explains why a fully-correct render pipeline draws
+nothing: the elements have visuals, but the visuals have no imagery, because
+the provider returns E_NOTIMPL for whatever slots [1] and [2] are.
+
+This also retro-explains several dead ends:
+* `XuiTextElementSetText -> 80300016` (no font/resource to lay text out with)
+* `GetVisual -> 8030000A` on some nodes
+* 281 visuals in the registry yet nothing rasterisable
+
+### Next
+
+Identify what slots [1] and [2] are (`817924E0` in slot [0] is presumably the
+real "open"), find the non-stub provider xam uses for its own UI, and register
+that instead. This is the first explanation in many ticks that accounts for
+the empty payload without being contradicted by an existing measurement.
+
+## CORRECTION: that provider is the memory:// handler, not "the" provider
+
+The previous section's headline - "THE RESOURCE PROVIDER IS A STUB" - is
+**wrong** and is retracted.
+
+Dumping the whole vtable rather than the three slots the bootstrap logged:
+
+```
+81608258  [0] 817924E0   [1] E_NOTIMPL  [2] E_NOTIMPL  [3] 8178F588
+          [4] E_NOTIMPL  [5] E_NOTIMPL  [6] E_NOTIMPL
+81608274  "memory://%.*ws"      <- UTF-16, immediately after the 7 slots
+```
+
+`81D22A54` is the **memory://** provider. Two implemented methods and five
+`E_NOTIMPL` is a normal shape for a minimal scheme handler, not evidence of
+breakage. Reading three slots and stopping produced a conclusion that one
+more command overturned.
+
+Direct evidence it is not the blocker: `section://301BA000,hud#strings.xus`
+**loads successfully** (`-> 00000000, table 407D2F90`), so resource loading
+through the section provider works.
+
+What survives from that tick is only the negative measurement, which was
+already known: no `xam://` resource is ever requested. That still needs
+explaining - but the explanation is not "the provider is a stub".
+
+### Standing, verified state
+
+Everything below has been confirmed by measurement in the current stack and
+none of it is the blocker:
+
+* device, wrapper, front buffer, render target, command buffer
+* present gate (`818F92E4` nopped) - Present reaches `vtable[24]`
+* null-render flag cleared at **both** `[ctx+0x1C]` and `[dc+0x134]`
+* `vtable[20]` runs; no crash; 600+ composite draws
+* hud calls `XuiSceneCreate`, `XuiSceneNavigateFirst`, `XuiRenderBegin`,
+  `XuiRenderEnd` - the scene is created, navigated and bracketed
+* the scene is populated and its controls have visuals
+* the title renders normally throughout (54k GPU draws)
+
+And the Guide emits one word - xam's own begin - with 0 GPU draws.
+
+### Scheme strings present in xam
+
+```
+memory://    81608274   (vtable 81608258 immediately before it)
+section://   8160815C
+xam://       81601668
+file://      815FC6E0
+hud://       ABSENT
+game://      ABSENT
+```
+
+So `xam://` *is* a scheme xam knows about. But the memory:// layout - vtable
+then string - does **not** repeat for it: `8160164C` decodes as the text
+"smartglass", so `xam://` sits in an unrelated data region with no vtable
+in front of it.
+
+`img.xrefs(0x81601668)` returns **0** references from xam's `.text`.
+
+Caveat, stated because it matters: `xrefs()` scans `.text` for `lis`/`addi`
+pairs only. A pointer to the string held in an `.rdata` table would not be
+found by it, so "0 xrefs" means "xam never builds this address inline", not
+"nothing uses it". Do not upgrade this to "xam has no xam:// handler" without
+a data-section scan.
+
+What this does suggest: `xam://` URLs in hud's scenes are resolved by
+something other than an inline xam reference - most likely
+`XamBuildResourceLocator`, which the title itself uses (observed producing
+`section://30013000,shrdres#B-Button_32.png` from dash). If the Guide's
+scenes never call it, their imagery is never located, which matches "no
+`xam://` resource is ever requested" without requiring any component to be
+broken.
+
+### Closing the xrefs caveat: the pointer exists, and it is an icon table
+
+The caveat from the previous tick was correct - "0 xrefs from `.text`" was not
+conclusive. A scan of every non-`.text` section finds exactly one pointer to
+the `xam://` string:
+
+```
+.rdata 81601E2C -> 81601668
+```
+
+and its neighbourhood is a table of `{id, 0, id2, string_ptr}` records:
+
+```
+81601E1C  816016A4  "xam://ico_18x_kinect..."
+81601E2C  81601668  "xam://ico_32x_MaxBin..."
+81601E3C  816017AC  "xam://download_compl..."
+```
+
+So the `xam://` strings in xam are **its own icon resource names**, held in an
+ID-to-URL table. This is not a scheme-handler registration and says nothing
+about how hud's scenes resolve their imagery. The lead is closed as a
+dead end rather than left dangling.
+
+It is worth noting what the caveat bought: without it, "0 xrefs" would have
+been recorded as "xam has no `xam://` handler", which is both false and the
+kind of claim that would have shaped several later ticks.
+
+(Also: the dump script must encode UTF-16 output carefully - printing a
+decoded string straight to a cp1252 console raises `UnicodeEncodeError` and
+truncates the run. Use `errors='replace'` on the *output* as well as the
+decode.)
+
+### Element rendering DOES run - and still emits nothing
+
+Breakpoint-free, from demand-JIT after the press (line 21465):
+
+* **48** distinct xam render-area functions execute after the Guide press.
+* Among them a contiguous family that looks like the element/visual render
+  methods: `819E3780 819E37D8 819E3EF8 819E3F50 819E3FB0 819E4010 819E4180
+  819E4420 819E4988`, plus `819DCBF0 819DCC48 819DCCA0 819DD1E8 819DD460
+  819DDBC0`.
+* Also `819F5620 819F57B0 819F5D18 819F7F20 81A013B8 81A01648 81A01808`.
+
+So the render bracket is not merely entered - a substantial amount of XUI
+render code runs inside it. Element rendering executes and produces no PM4.
+
+The resource side is the sharp part:
+
+```
+XamBuildResourceLocator #1..#4   all lr=92181B34 (DASH), all shrdres#*.png
+"texture|.png|bitmap" after press: 0 occurrences
+```
+
+hud imports `XamBuildResourceLocator` too (thunk `913FE8C4`), and the Guide
+**never calls it**. Only `strings.xus` is ever opened for the Guide.
+
+So the picture is now specific: xam's element render methods run over a
+populated scene whose controls have visuals, and emit nothing, while not a
+single image is ever located or opened. A visual with no imagery has nothing
+to rasterise, which is consistent with every measurement taken so far and
+requires no component to be broken.
+
+Next: find where the XUR loader turns an element's image reference into a
+locator call, and why that never happens for hud's scenes - hud has the
+import, so the call site exists.
+
+## Why hud never loads any imagery: [guide_obj+0x08] != -1
+
+hud imports `XamBuildResourceLocator` (thunk `913FE8C4`) and has **5** call
+sites. Note hud's extracted PE has ImageBase `98000000` but loads at
+`913E0000`, so file VA -> runtime is `va - 0x98000000 + 0x913E0000`; the
+earlier "0 callers" result was that mapping being wrong, not an absence.
+
+```
+runtime call sites: 913EB550  913EB9AC  913EC774  913EC7C0  913ECB9C
+hud functions entered near them: 913EB940  913EBAA8  913EC578  913ECA00 ...
+```
+
+Three of the five sites lie inside functions that **did execute**
+(`913EB940`, `913EC578`, `913ECA00`), yet the locator is never called by hud -
+only by dash (`lr=92181B34`). So those functions run and branch around it.
+
+The guard, disassembled from hud's image:
+
+```
+913EB984  lwz   r3,0x08(r31)     ; [guide_obj+0x08]
+913EB988  addis r11,r0,0x9140
+913EB98C  cmpwi cr6,r3,-1
+913EB990  addis r10,r0,0x913E
+913EB994  bne   cr6,+0x20        ; <- skips the call unless [+0x08] == -1
+913EB998  addi  r7,r0,0x80
+913EB99C  lwz   r3,0x04(r31)     ; skin module
+913EB9A0  addi  r4,r10,0x1B24    ; "hud" container string
+913EB9A4  lwz   r5,0x168(r11)
+913EB9A8  addi  r6,r1,0x60
+913EB9AC  bl    XamBuildResourceLocator
+```
+
+`r31` is the **guide object**: `[+0x04]` is the skin module and `913E1B24` is
+the "hud" container string - both exactly as the bootstrap logs them
+(`guide object 401587E0, [guide+4] = skin module 301BA000`;
+`hud container@913E1B24 = "hud"`). That identification is measured, not
+assumed.
+
+So `0xFFFFFFFF` is the "not loaded yet" sentinel, and hud only builds a
+resource locator when the slot still holds it. `[guide+0x08]` is evidently
+something else, so **every** hud resource load is skipped - which is precisely
+the long-standing measured absence.
+
+Next: read `[guide_obj+0x08]` at runtime, and if it is not `-1`, try setting
+it to `-1` before the draw so hud takes the load path. Note our own bootstrap
+already loads `strings.xus` by hand and stores it at `[guide+4E8]`; if it also
+writes `[guide+0x08]`, that would be self-inflicted and is the first thing to
+check.
+
+### The flag already existed: guide_static_locator
+
+`[guide+0x08]` is **0**, not `-1`, and there is already a cvar for it. Its
+description independently states the mechanism my hud disassembly found, and
+adds the consequence:
+
+> "hud's scene creator tests [guide+8] against -1 and takes the dynamic path
+> for anything else, passing [guide+8] itself as the module - and it is 0,
+> which produces the locator `section://@0,hud#strings.xus`: a null package,
+> so `XuiSceneCreate("InfoUpsellLive.xur")` finds nothing and **returns an
+> empty scene**. The static path uses [guide+4] instead, which the bootstrap
+> already sets to hud's module."
+
+Two independent derivations agreeing - the `cmpwi r3,-1 / bne` guard read out
+of hud's image, and this description - is as good as confirmation gets short
+of running it.
+
+An empty scene from a null package explains the whole present state: every
+render stage works, element render methods execute, and there is nothing in
+the scene to rasterise. It also explains the resource absence without any
+component being broken, which is what the last several leads all failed to do.
+
+Testing it on the full working stack. If the payload stays at one word, the
+"empty scene" explanation is wrong too and the scene contents seen in
+`GuideScene` (btnJoinLive, btnB, labelHeading with visuals) need re-examining
+- those came from a scene that this description says should be empty, which is
+a tension worth resolving either way.
+
+## guide_static_locator applies, and exposes an instrumentation blind spot
+
+The flag works and is correctly ordered:
+
+```
+21541  GuideBootstrap: [guide+8] = FFFFFFFF (static locator path)
+21727  DemandFunction: enter 913FE6D4        (XuiSceneCreate)
+```
+
+So `[guide+8]` is `-1` **before** hud creates its scene, and the
+`cmpwi r3,-1 / bne` guard should now fall through to the locator call.
+Payload unchanged: 1 word, GPU draws +0.
+
+But the premise this was chasing is now in doubt.
+
+```
+XamBuildResourceLocator HLE log:  4 calls, all lr=92181B34 (dash)
+log limit:                        200, so 4 really is the total *HLE* count
+DemandFunction: enter 913FE8C4:   1   <- hud's own locator thunk WAS entered
+```
+
+hud executed its `XamBuildResourceLocator` thunk, and no HLE line appeared for
+it. The thunks are Xenia import stubs (`0100031B 0200031B mtctr bctr`, ordinal
+`0x31B`=795) patched at load; dash's calls reach Xenia's HLE
+(`xam_info.cc`) and log, hud's evidently resolve to the **real LLE xam** and
+do not.
+
+### The correction
+
+"**The Guide never requests any imagery**" - repeated across many ticks and
+used to justify several leads - is **not established**. It rests on an HLE-side
+log that structurally cannot observe hud->LLE-xam calls. The absence measured
+was an instrumentation blind spot, not a fact about the guest.
+
+This is the second blind spot of exactly this shape, after `cpu::Breakpoint`
+wedging the title thread. Both produced confident negative claims from an
+instrument that was never able to see the thing being claimed absent.
+
+Any measurement of hud's behaviour must therefore come from something that
+observes the LLE path: demand-JIT (which does), or a hook inside xam's own
+code (not on Xenia's HLE export).
+
+## CONFIRMED: guide_static_locator works - hud takes the static path
+
+The `GuideScene` diagnostic already resolves xam ordinals to their **real LLE
+addresses**, which is the instrument the HLE log could not be:
+
+```
+xam ordinal 31B (XamBuildResourceLocator)        -> 8178E340
+xam ordinal 31E (XamBuildDynamicResourceLocator) -> 8178E420
+```
+
+Demand-JIT on those addresses:
+
+```
+8178E340  enter=1     <- static locator RAN
+8178E420  enter=0     <- dynamic locator never ran
+```
+
+So with `[guide+8] = -1`, hud builds its locator through
+`XamBuildResourceLocator` exactly as intended, and never touches the dynamic
+path that would have produced the null-package `section://@0,...`.
+
+**"The Guide never requests any imagery" is refuted.** It requests through
+real xam; the HLE log simply cannot see it. Every lead that rested on that
+absence - including the retracted "resource provider is a stub" - was built on
+nothing.
+
+### Where that leaves things
+
+The scene loads, hud locates resources through the correct path, the package
+demonstrably works (`strings.xus` loads from `section://301BA000,hud#`), every
+render stage is correct, element render methods execute - and the Guide still
+emits one word.
+
+So the next question is narrow: do the located resources actually **open and
+decode**, and do the visuals end up with imagery? That must be measured on the
+LLE side. Useful handles already in the log: the visual-class global
+`[81D6CDDC] = 40887070`, the string `"XuiVisualCreateInstance(%S)"` at
+`816462C4`, and the XUI registry with **38 non-null of 48** entries.
+
+### Visuals ARE created; the gap is between visual and geometry
+
+`"XuiVisualCreateInstance(%S)"` at `816462C4` has exactly one xref, at
+`8193B6D0`, inside function **`8193B6B0`** (len 0x114, 3 callers:
+`8193B7F4`, `819591E0`, `819592B8`).
+
+```
+DemandFunction: enter 8193B6B0   = 1     <- visual instances ARE created
+```
+
+So the chain is intact end to end: the scene loads, `guide_static_locator`
+puts hud on the working locator path, resources are located through real xam,
+visual instances are created, and the element render methods execute.
+
+And the emitter is still only ever called from `XuiRenderPresent`. So xam's
+element rendering runs and **early-outs per element** rather than failing.
+
+Candidate reason, from data already in the log:
+
+```
+0001012D GetPosition -> 00000000 00000000 00000000 00000000
+000100B1 GetPosition -> 00000000 00000000 00000000 00000000
+000100E2 GetPosition -> 431C0000 42100000 00000000 00000000
+                        =156.0f   =36.0f   =0.0f    =0.0f
+```
+
+`labelHeading` has a real position (156, 36) and the trailing two floats are
+**0.0**. If those are width/height, every element is zero-sized and there is
+nothing to rasterise - which would explain an intact pipeline emitting
+nothing, and would be a layout problem rather than a resource one.
+
+This is *not* established: `XuiElementGetPosition` may well return x/y/z/w
+rather than x/y/w/h, in which case two trailing zeros are unremarkable. Check
+the function's semantics in xam before building on it - the last several
+dead ends all came from treating a plausible reading as a fact.
+
+### Zero-size lead: dead (the caveat was right again)
+
+`XuiElementGetPosition(handle, buf)` is called with a 32-byte buffer and
+returns a position vector, so
+
+```
+000100E2 GetPosition -> 431C0000 42100000 00000000 00000000
+                        x=156.0  y=36.0   z=0.0    pad
+```
+
+means x/y/z + padding, **not** x/y/width/height. Element sizes are simply not
+being read by this diagnostic, and nothing here says elements are zero-sized.
+
+Third consecutive lead where flagging "this is not established" before acting
+prevented a wrong turn (`0 xrefs`, the memory:// provider, and now this). The
+pattern is consistent enough to state as a rule: **a plausible reading of a
+number is worth one command to verify and several ticks if assumed.**
+
+### Standing state after the static-locator work
+
+Confirmed working, all measured on the LLE side:
+
+* `[guide+8] = -1` before scene creation; hud takes the **static** locator
+  path (`8178E340` entered, `8178E420` never)
+* scene loads; `XuiSceneCreate` / `NavigateFirst` / `RenderBegin` / `RenderEnd`
+  all execute
+* `XuiVisualCreateInstance` (`8193B6B0`) executes - visuals are instantiated
+* 48 xam render-area functions execute after the press
+* every device/buffer/gate/RT stage verified correct
+* the title renders normally throughout
+
+Unexplained: element rendering runs and never reaches the draw emitter, which
+is called exactly once per run, from `XuiRenderPresent`.
+
+Next candidate to measure (not assume): element **size/bounds** via whatever
+xam API supplies them, and per-element visibility/alpha. Both are read with
+the same `GuideScene` diagnostic pattern that already resolves handles, so
+neither needs a breakpoint.
+
+### Back-buffer size is sane: 852x480
+
+```
+xam ordinal 350 -> 818FAF48   (XuiRenderGetBackBufferSize)
+xam ordinal 336 -> 81932110   (XuiElementSetBounds)
+GetBackBufferSize(dc 408BE3A0) -> 00000000; w=852 h=480 (raw 354 1E0)
+```
+
+hud calls this (thunk `913FE8A4` entered) and lays out against it, so a 0x0
+answer would have collapsed the layout. It returns **852x480**. Dead end -
+but a cheap one, and it removes an entire class of explanation.
+
+Caveat: this probes the **bootstrap's** DC `408BE3A0`, while the draw path
+uses `407D4C80`. The two could differ; if this line is ever load-bearing,
+re-probe with the draw's DC.
+
+Also measured, both LLE-visible:
+
+```
+XuiElementSetBounds   913FE884  entered      <- hud does lay elements out
+XuiElementSetOpacity  913FE684  NOT entered  <- never set, so default opaque
+```
+
+### Where the search stands
+
+Everything nameable has been verified working: device, wrapper, front buffer,
+render target, command buffer, present gate, both null-render flags, the
+static locator path, scene creation/navigation, the render bracket, visual
+instantiation, element bounds, and a sane back-buffer size. The title renders
+normally. And xam's element rendering runs without ever reaching the draw
+emitter, which fires exactly once per run, from `XuiRenderPresent`.
+
+The remaining question lives **inside xam's element render path** - between
+"element with bounds and a visual" and "a DRAW_INDX packet". The two obvious
+instruments are both unavailable there: `cpu::Breakpoint` wedges the title
+thread, and `guide_coverage_fn`'s per-instruction counters crash the
+skin-init path. Any further progress needs an instrument that survives the
+title thread - demand-JIT of specific candidate functions is the one tool
+that has kept working.
+
+## XuiRenderEnd is the draw dispatcher
+
+Runtime ordinal resolution (Xenia's own module lookup - the `.edata` parse in
+`pe360` returns nonsense and should not be trusted):
+
+```
+xam ordinal 34B -> 818FAE68   XuiRenderBegin
+xam ordinal 34F -> 818FAEE0   XuiRenderEnd
+xam ordinal 350 -> 818FAF48   XuiRenderGetBackBufferSize
+xam ordinal 336 -> 81932110   XuiElementSetBounds
+xam ordinal 3DF -> 81932190   XuiElementGetPosition
+```
+
+`818FAEE0` = **XuiRenderEnd**, and it is where drawing is dispatched:
+
+```
+818FAEF0  or     r31,r3,r3      ; r31 = arg1
+818FAEF8  cmplwi cr6,r31,0
+818FAEFC  bne    cr6,+0x14
+818FAF08  ori    r3,r3,0x0057   ; null -> E_INVALIDARG, no draw
+818FAF10  lwz    r11,0(r31)
+818FAF18  lwz    r11,0x4C(r11)  ; arg1->vtable[19]
+818FAF20  bctrl
+```
+
+So "the Guide draws nothing" reduces to: **XuiRenderEnd's dispatch does not
+produce a draw.**
+
+### Correction to my own inference
+
+I matched slot 19 against the **wrapper** vtable `81640680`, got `8191B250`,
+confirmed by demand-JIT that `8191B250` never runs, and concluded hud passes
+null. That reasoning is unsound: `XuiRenderEnd` takes the **DC**, and the DC
+has its own vtable, so its slot 19 is a different function entirely.
+
+This is the second time the same mistake has been made - `8191AFD0` was
+called "vtable[20]" from a flag description when it is slot **11** of the
+wrapper's table. **Whenever a vtable slot is quoted, name which object's
+vtable it belongs to.**
+
+The DC's vtable is now printed (`[11]`, `[19]`, `[20]`) so the correct slot 19
+is read rather than assumed. Note `[render_obj+12]` is `407D4C80` and non-null
+in every run, so hud does have a DC - the "hud passes null" story was already
+weak on the evidence.
+
+## The entire XUI render path executes - nothing is skipped
+
+DC vtable is `8163E4E8` (same for both DCs), and its slots match everything
+already known independently:
+
+```
+DC 407D4C80 vtable 8163E4E8  slot18=818F82F0  slot19=818F8A90
+                             slot20=818FDDE8  slot21=818F9290
+```
+
+`slot21 = 818F9290` is `XuiRenderPresent` exactly as recorded much earlier,
+and `slot20 = 818FDDE8` is the one `XuiRenderBegin` skips when the null-render
+flag is set. That cross-check confirms the table is the right one.
+
+Demand-JIT on the whole path:
+
+```
+818FAE68  XuiRenderBegin   entered
+818FDDE8  DC vtable[20]    entered     <- render setup RUNS
+818FAEE0  XuiRenderEnd     entered
+818F8A90  DC vtable[19]    entered     <- the DRAW method RUNS
+818F9290  XuiRenderPresent entered
+```
+
+So the "XuiRenderEnd is handed null" story is **dead**: the dispatch happens
+and the draw method runs. Every stage of the pipeline, from device creation to
+present, now demonstrably executes.
+
+That is worth stating plainly because it eliminates the entire class of
+explanation this project has been working through for many ticks - nothing is
+gated off, skipped, null, or unregistered. `818F8A90` runs and emits no
+geometry.
+
+### Next
+
+Examine `818F8A90`'s callees to find where quads should be produced, and which
+of those actually run. The emitter `819F5D18` is reached only from Present, so
+either element drawing uses a different emit path, or it produces zero
+primitives. Demand-JIT over `818F8A90`'s call graph distinguishes those two
+without needing a breakpoint.
+
+### The draw call graph runs four levels deep, entirely
+
+```
+818F8A90 (DC vtable[19], len 0xE8)
+  -> 8180D76C            entered
+  -> 818F83D8 (0x74)     entered
+       -> 81916238 (0x74)      entered
+            -> 81D0F50C        entered
+            -> 819149D0 (0xD8) entered
+            -> 81D0F51C        entered
+                 -> 8180D760   entered
+                 -> 81910188   entered
+                 -> 819100E8   entered
+                 -> 81914088   entered
+```
+
+Every node executes. Walking the call graph further has clearly hit
+diminishing returns: nothing anywhere in this pipeline is skipped, gated, or
+short-circuited.
+
+### A hypothesis that has not yet been tested
+
+`guide_second_context_kb` "resets the cursor, calls xam's own begin
+(81A01358), runs the Guide's draw, then submits whatever was emitted" - and it
+sees **1 word**. That measures only the buffer at `[dev+0x2B4C]` on the
+**Guide's** device.
+
+But `guide_bind_title_rt` deliberately binds the **title's** render target,
+and the composite draw runs inside `VdSwap`. If xam's element rendering emits
+into a different buffer - the title's ring, or an internal batch - then:
+
+* our submit would legitimately see 1 word, and
+* `GPU draws +0` would be measured around *our* submit, while any real draws
+  would land in the title's own count (`GuideFrame: gpu_draws +14065` per 500
+  frames), where they are indistinguishable from dash's.
+
+So "the Guide emits nothing" may actually be "we are counting the wrong
+buffer". This is the first explanation consistent with a fully-executing
+render path, and it is **testable**: compare the title's per-frame GPU draw
+delta with the Guide open versus closed, and dump the region around
+`[dev+0x2B4C]` and the title's cursor after a composite draw.
+
+### REFUTED: the geometry is not going into another buffer
+
+The title's own GPU draw counter, before and after the Guide opens (same run,
+existing log - no new instrumentation needed):
+
+```
+BEFORE press:  +14094  +14123  +14123  +14123   per 500 frames
+AFTER  press:  +13862  +14123  +14123  +14152  +14123
+```
+
+Identical. The Guide contributes **zero** draws to the title's ring, just as it
+contributes zero to its own second context. So "we are counting the wrong
+buffer" is wrong: no geometry is produced anywhere.
+
+Combined with the previous tick, the position is now tightly bounded:
+
+* the full render path executes, four levels deep, nothing skipped
+* no draws appear in the Guide's buffer **or** the title's
+* therefore xam's element rendering produces **zero primitives**
+
+That points at the elements themselves having nothing renderable - most
+plausibly no imagery, since visual *instances* exist but no image resource has
+been shown to open. `guide_static_locator` proved locators are *built*
+(`8178E340` runs); it did not show anything is opened or decoded.
+
+Next: determine whether an image resource is actually opened and decoded -
+i.e. whether the section provider's open path runs for anything other than
+`strings.xus`. That is the last untested link between "scene with visuals" and
+"pixels".
+
+### Re-testing label injection now that the locator works
+
+The section provider's vtable is **not** adjacent to its format string - the
+words before `section://` are all UTF-16 (`file://`, `media://`,
+`%s.xzp#%s`), so the memory:// vtable-then-string adjacency was coincidence,
+not a layout convention. Do not assume it for other schemes.
+
+Rather than keep hunting providers statically, re-running
+`guide_inject_label_text`. It was tried before and returned `80300016` on
+every node - but that was **before** `guide_static_locator`, when hud was
+building `section://@0,...` against a null package. Every prerequisite has
+changed since:
+
+* hud now takes the static locator path (`8178E340` runs)
+* the null-render flag is cleared at both levels
+* the full render path executes four levels deep
+* RT, front buffer, command buffer and present gate are all correct
+
+If `SetText` now succeeds and geometry appears, the render path works and the
+content was the whole problem. If it succeeds and *still* nothing is emitted,
+that separates "no content" from "content that cannot be rasterised" - which
+is a distinction nothing measured so far can make.
+
+## Fonts: xam does request the typeface (user-suggested line of inquiry)
+
+`F:\FuzionFrenzy` is not a raw 360 disc - it is an **Xbox One/Series
+backward-compatibility package**: `Emu.exe`, `D3D12Core.dll`,
+`DX12DirectResolveShaders.sbin`, `DX12EdramResolveShaders.sbin`, `EmuMenu`
+(a modern WinUI/WebView2 Guide replacement), and the firmware partitions.
+`Flash/` holds `xam.xex`, `hud.xex`, `huduiskin.xex`, `ximecore.xex` and
+**`xenonjklatin.xtt`**.
+
+Those `.sbin` shaders belong to Microsoft's BC emulator (EDRAM/direct resolve)
+and are not Guide assets; they cannot help Xenia, whose blocker is upstream of
+shaders - no draw packets are produced at all.
+
+The font angle is more interesting. Strings in xam's own image:
+
+```
+815FC6E0  "file://media:/XenonJKLatin.xtt"   (also SCLatin / CLatin variants)
+81640222  "gXTTCache.head.next == &gXTTCache..."   (an XTT font cache)
+8163F970  "XUIFONT::Init -- must specify a typeface."
+```
+
+Measured, LLE-visible:
+
+```
+81754C10  references the font path         entered
+81913770  XUIFONT::Init                     entered
+```
+
+So LLE xam uses the **same `media:` convention** as Xenia's HLE
+(`XamGetLanguageTypeface` returns `file://media:/XenonJKLatin.xtt`), it does
+resolve that path, and `XUIFONT::Init` runs. `dashroot/` contains
+`xenonjklatin.xtt` (plus SegoeXbox-Light, xenonclatin, xenonsclatin), so the
+file is present where xam looks. hud does **not** import the typeface APIs -
+only dash does - so font handling is internal to xam.
+
+**Unresolved:** whether the `.xtt` open actually succeeds and whether
+`XUIFONT::Init` takes its "must specify a typeface" error path. Two cautions:
+
+* `.xtt` never appears in the log, but **data-file opens are not logged by
+  name** - only module loads are. That absence proves nothing (the same trap
+  as the HLE resource log and the breakpoint silence).
+* `81913C8C`, the error site, shows `enter=0`, but it is a **mid-function**
+  address and demand-JIT only records function entries. That zero is
+  meaningless.
+
+A font that fails to initialise would leave text elements with no glyphs and
+therefore no primitives - which fits the symptom exactly. Needs a real
+measurement of the open result, not an inference from silence.
+
+## VERIFIED: no font file is ever opened
+
+VFS-level logging at `VirtualFileSystem::ResolvePath` - the chokepoint every
+guest file lookup passes through - prints any `.xtt` lookup and its result.
+Result: **no font lookup line at all.**
+
+Unlike the earlier false negatives, this one was checked before being
+believed:
+
+* the `"font lookup"` string is present in the built binary (so the code
+  shipped)
+* `xe::utf8::find_first_of(haystack, needle)` is **substring** search, not
+  character-set search - the condition is correct
+* `ResolvePath` is demonstrably exercised: 72 logged calls in the same run,
+  including `\xam.xex` and `\dash.xex`
+
+So the absence is real: **xam resolves the typeface path but never opens the
+file.**
+
+Measured alongside it:
+
+```
+81754C10  references "file://media:/XenonJKLatin.xtt"   entered
+81913770  XUIFONT::Init                                  entered
+```
+
+`81754C10` is almost certainly xam's own `XamGetLanguageTypeface` (ordinal
+0x58C) - it *returns* a path; it does not open anything. Whoever receives that
+path is responsible for the open, and that open never happens.
+
+A Guide with no font has no glyphs, therefore no primitives - which fits the
+symptom exactly: a render path that executes completely and emits nothing.
+
+Fonts present and real in `dashroot/`: `xenonjklatin.xtt` (1.7MB, the default
+for non-Chinese locales), `xenonclatin.xtt` (1.2MB, TChinese),
+`xenonsclatin.xtt` (1.4MB, SChinese), `SegoeXbox-Light.xtt` (24KB). No
+language override in the config, so `XenonJKLatin.xtt` is the expected
+request.
+
+Next: find the callers of `81754C10` and determine which should perform the
+open, then why it does not.
+
+### The font path runs, but four of its branches never do
+
+Chain, all confirmed entered:
+
+```
+81795548  skin loader (driven by lle_xam_skin_init)
+  -> 8178DE50  (len 0x98)          entered
+       -> 81754C10  typeface path provider   entered
+       -> 81AA5AD8 817AC550 81754A60 81755430 81970BD0  all entered
+```
+
+So the font-loading function and every one of its immediate callees execute,
+and still no `.xtt` reaches the VFS.
+
+The divergence is one level down, inside `81970BD0` (len 0x1D4):
+
+```
+entered:      8196B1C8  81970748  819705F0  8196C738  81970398  8193F730
+NOT entered:  81970E90  81970DA8  817F68C0  81970A78
+```
+
+Four branches never run. Their shapes:
+
+```
+817F68C0  len 0x88  -> 81801D00 81D104EC 81800D78 818007A0
+81970E90  len 0xCC  -> 81D0F8EC
+81970DA8  len 0xE4  -> 8180D764 81D0F30C 817F7778 8193F8B0 81C85D68
+81970A78  len 0xE4  -> 8180D768 81D0F50C 819706C8 8196D098 ...
+```
+
+`817F68C0` calls into the `8180xxxx` range, which is where xam's lower-level
+helpers live - the most plausible I/O path of the four.
+
+This is the first genuine branch divergence found anywhere in the Guide's
+render or resource path: everything else measured has simply run. Worth
+pursuing carefully rather than quickly - identifying which of these four is
+the file open, and what condition gates it, is the concrete next step.
+
+## The font block is gated on a ';' in a string at [r31+0x10]
+
+Inside `81970BD0` (reached from the skin loader via `8178DE50`), the four
+never-executed branches are all downstream of one gate:
+
+```
+81970C3C  lwz   r3,0x10(r31)   ; a string pointer
+81970C40  cmpli r3,0
+81970C44  beq   +0x54          ; null -> skip the whole block
+81970C48  addi  r4,r0,0x3B     ; 0x3B = ';'
+81970C4C  bl    81813270       ; wide-string char search (lhz/cmp loop)
+81970C50  cmpli r3,0
+81970C54  beq   +0x44          ; NOT FOUND -> skip the whole block
+81970C58  lis   r11,0x8165
+81970C60  bl    81970E90       <<< never runs
+81970C84  bl    81970DA8       <<< never runs
+81970C90  bl    817F68C0       <<< never runs
+```
+
+`81813270` ran (demand-JIT), which proves execution got **past** the null
+check - so `[r31+0x10]` is non-null and the skip happens at the second gate:
+**the string contains no `;`**.
+
+So the Guide's font loading is gated on a semicolon-delimited typeface list.
+No semicolon, no font block, no `.xtt` open - which is exactly the verified
+absence at the VFS, and would leave text elements with no glyphs and therefore
+no primitives.
+
+Caveat worth keeping: `81813270` is a generic helper with no `.pdata` entry,
+so demand-JIT "entered" only proves it ran *somewhere*, not necessarily from
+this call site. The inference that we passed the null check is strong but not
+airtight; reading `[r31+0x10]` directly would settle it.
+
+### Next
+
+Read the actual string at `[r31+0x10]` on the skin-init path. Note the skin
+loader runs on the bootstrap thread, **not** the title thread, so a
+`cpu::Breakpoint` there may be safe - the wedge documented earlier was
+specifically on the title thread (`F8000144`). That needs verifying before
+relying on it.
+
+## RETRACTED: the semicolon gate is an error path, not the font gate
+
+The previous section concluded that font loading is gated on a semicolon in
+`[r31+0x10]`, and that the absence of one skips the `.xtt` open. **That is
+backwards.** The branch polarity was read from a disassembly of the wrong
+image.
+
+Two errors compounded:
+
+1. **Wrong image.** The addresses quoted in the previous section do not decode
+   as described in `work/xam.pe` (Flash xam, 17003) - `81970C3C` there is a
+   `blr` epilogue. The run uses **`xam17489`**. Every address in that section
+   only makes sense against `work/xam17489.pe`.
+
+2. **Inverted polarity.** Decoded against the correct image:
+
+```
+81970C30: bl     0x81813270
+81970C34: cmpli  cr0,r3,0x0
+81970C38: bne    0x81970C58   (+32)    ; found -> error block
+81970C3C: lwz    r3,16(r31)
+81970C40: cmpli  cr6,r3,0x0
+81970C44: beq    0x81970C98   (+84)    ; null -> skip error block
+81970C48: addi   r4,r0,59              ; ';'
+81970C4C: bl     0x81813270
+81970C50: cmpli  cr0,r3,0x0
+81970C54: beq    0x81970C98   (+68)    ; NOT found -> skip error block
+81970C58: lis    r11,0x8165
+81970C5C: addi   r3,r11,-29376         ; = 0x81648D40
+81970C60: bl     0x81970E90            ; <-- the "never executed" branch
+```
+
+`0x81650000 - 29376 = 0x81648D40`, which is the string:
+
+```
+XuiRegisterTypeface: Semicolon character found in typeface descriptor string
+```
+
+So `81970E90`, `81970DA8`, `817F68C0` and `81970A78` are the **diagnostic /
+error path for a malformed typeface descriptor**. A semicolon is *rejected*,
+not required. Their never running is the **healthy** state and means the
+descriptor is well-formed. `beq +68` is the normal path.
+
+Consequence: the "first genuine branch divergence" was not a divergence. The
+font block is not gated on a semicolon and nothing here explains the missing
+`.xtt` open. That inference chain is dead and should not be pursued further.
+
+Supporting string evidence in `work/xam17489.pe` (absent from `xam.pe`, another
+confirmation of which image is live):
+
+```
+81648D40  XuiRegisterTypeface: Semicolon character found in typeface descriptor string
+8163F970  XUIFONT::Init -- must specify a typeface.
+8163FAC4  XUIFONT::Init -- Failed to copy typeface descriptor (0x%08X)
+81648CD4  Could not look up '%S' typeface
+81645B27   Failed to create typeface %ls (hr=0x%08X)
+```
+
+Nine typeface paths exist, none containing a semicolon, e.g.
+`file://media:/XenonJKLatin.xtt` at `815FC9A1` plus `p1`/`p2` variants.
+
+### Where to look instead
+
+`XUIFONT::Init` was already measured as entered. The three messages above are
+its own failure reports and none has been observed. The open question is
+unchanged from before the semicolon detour: **who receives the path from
+`81754C10` and why no open reaches the VFS.** Reading the descriptor string at
+`[r31+0x10]` is still worth doing, but as a *well-formedness check*, not as the
+suspected gate.
+
+Method note: this is the second finding in this file invalidated by
+disassembling the wrong xam build. Every address quoted from here on should
+state which image it was decoded against.
+
+## RETRACTED: `81A0FE48` can be lifted out - it was called with a null argument
+
+*(All addresses below decoded against `work/xam17489.pe` with
+`tools/ppc.py`, which resolves branch targets absolutely.)*
+
+The section "Driving the skipped setup directly does not work either"
+concluded that the front-buffer setup depends on device state `819F4D28`
+establishes earlier, and therefore cannot be lifted out of the mode-1 path.
+**That conclusion does not follow from the crash it was based on.** The crash
+is a null *argument*, supplied by our own call.
+
+`guide_force_front_buffer` calls `81A0FE48(device, 0)`, described in its cvar
+help as "with the argument its own call site would have used". That is the
+error: the real call site passes a pointer, not zero.
+
+### The crash decodes exactly
+
+Recorded crash: `GUEST CRASH at 81A04648  fault_addr ...4C  r3=0`, unwind
+`81A0FF7C`. That unwind value is a **return address**, so the fault is inside
+the call made at `81A0FF78`:
+
+```
+81A0FF70: addi   r4,r30,72          ; r4 = arg2 + 0x48
+81A0FF74: mr     r3,r31             ; r3 = device
+81A0FF78: bl     0x81A04570         ; faults inside, at 81A04648
+81A0FF7C: cmpi   cr0,r3,0           ; <- the recorded unwind address
+```
+
+`r30` is `81A0FE48`'s second parameter. With our `0`, `r4 = 0x48`, and the
+fault address ends in `4C` - `0x48 + 4`. That is the reported fault address,
+digit for digit. Nothing about device state is implicated.
+
+### What the argument actually is
+
+`81A0FE48` has exactly one real caller, `819F4E8C`, inside `819F4D28`:
+
+```
+819F4E84: mr     r4,r28
+819F4E88: mr     r3,r31
+819F4E8C: bl     0x81A0FE48
+```
+
+and `r28` is written exactly once in `819F4D28`, in the prologue:
+
+```
+819F4D34: mr     r31,r3      ; arg1  device
+819F4D38: mr     r29,r4      ; arg2  mode  (cmpi r29,1 at 819F4D58)
+819F4D3C: mr     r30,r6      ; arg4
+819F4D40: mr     r28,r7      ; arg5  <-- passed to 81A0FE48
+819F4D44: mr     r27,r8      ; arg6
+```
+
+So the second argument to `81A0FE48` is **`819F4D28`'s fifth parameter
+(`r7`)**. It is a live structure pointer - `819F4D74` dereferences it at
+`+0x20` early in the function, and `81A0FE48` reads it at `+0x48`.
+
+**Mode 2 already supplies it.** `8178F748` calls `819F4D28` with mode 2 and
+the same six arguments; `819F4D28` simply skips the `81A0FE48` call on that
+path. The pointer is therefore live and correct in every mode-2 run.
+
+### The concrete fix
+
+Capture `r7` on entry to `819F4D28` (or at the `8178F748` call site) and pass
+it as the second argument instead of `0`:
+
+```
+81A0FE48(device, captured_r7)
+```
+
+`81A0FE48` is what allocates `[dev+0x2B10]` and performs the setup that fills
+`[dev+0x3F74]` - the null front buffer the emitter `819F5D18` faults on. This
+is the documented mode-2 blocker, and it now has a small, specific fix rather
+than an unbounded one.
+
+### Related: what `[dev+0x2B10]` is
+
+Only two instructions in xam write it:
+
+```
+81A0FEF8: stw r3,0x2B10(r31)   ; in 81A0FE48 - the allocation
+81A0F9D0: stw r30,0x2B10(r31)  ; in 81A0F858 - preceded by two frees
+```
+
+The allocation is 128 bytes from `81A0A290(0x80, 5, 2)`:
+
+```
+81A0FEF0: li     r3,128
+81A0FEEC: li     r4,5
+81A0FEF4: bl     0x81A0A290
+81A0FEF8: stw    r3,11024(r31)
+```
+
+The wait loop `819F4488` polls the **first word of that block**:
+
+```
+819F44C0: lwz    r11,11024(r29)   ; r11 = [dev+0x2B10]  (a pointer)
+819F44CC: lwz    r8,0(r11)        ; progress = [[dev+0x2B10]+0]
+819F44D4: cmpl   cr6,r9,r8        ; vs last seen at [r31+8]
+```
+
+So the "async calls never retire" symptom is precisely: *nothing ever
+increments the first word of that 128-byte block.* That is a much narrower
+statement than "cause unknown", and it is the thing to instrument next on the
+mode-1 path.
+
+Note also that `81A0F858` writes `[dev+0x2B10]` **after freeing it** (frees
+`[+0x2B14]` and `[+0x2B10]` via `81A0A3A0`, then stores `r30` into both). Its
+`guide_device_begin` cvar help calls it "the single routine that writes
+`[dev+0x2B10]`", which reads as setup; the surrounding code is a teardown
+shape. Worth confirming `r30` is zero there before relying on that cvar.
+
+## Correction to the section above: the crash decode was right, the fix was not
+
+The preceding section correctly identified *why* `81A0FE48(dev, 0)` crashes,
+and then drew a wrong conclusion about how to fix it. Measured, not inferred:
+
+```
+DevCreate #1: device=00000000 mode=1 r6=00000100 arg5(r7)=709DF190 r8=709DF170 lr=8178EB68
+DevCreate #1: device=00000000 mode=2 r6=00000000 arg5(r7)=00000000 r8=81D43684 lr=8178F7D4
+```
+
+**Mode 2's `r7` is genuinely zero.** The claim "mode 2 already supplies it, the
+pointer is live and correct in every mode-2 run" is false. `0` was what the
+real call site would have passed on that path all along.
+
+What survives from that section, and what does not:
+
+| claim | status |
+|---|---|
+| The crash is a null-argument deref: `r4 = r30+0x48`, fault on `0x4C` | **holds** - matches the recorded fault address exactly |
+| `81A0FE48`'s arg2 is `819F4D28`'s arg5 (`r7`), via `r28` | **holds** - one caller, one write to r28 |
+| Mode 2 supplies that pointer, so it can just be passed through | **refuted** - mode 2's r7 is 0 |
+| `81A0FE48` can be lifted out of the mode-1 path | **refuted again** - the original conclusion stands |
+
+So the original "cannot be lifted out" conclusion is **reinstated**, but for a
+sharper reason than "it depends on device state": it depends on a **caller-built
+parameter block that only the mode-1 creator constructs**.
+
+### What that block is
+
+In mode 1 the pointer is `709DF190`, and `r8` is `709DF170` - 32 bytes below
+it. Both are stack addresses inside `8178E9F0`'s frame, so the mode-1 creator
+builds a structure on its own stack and passes interior pointers to it.
+`r6=0x100` on that path and `0` on the other. In mode 2 the corresponding `r8`
+is `81D43684`, xam's device global, not a stack address at all - the two
+creators do not even pass the same *kind* of argument.
+
+This also means the value is **not capturable for later reuse**: it dies when
+`8178E9F0`'s frame returns. Any attempt to drive `81A0FE48` outside that frame
+must *synthesize* the block, not borrow a pointer to it.
+
+### Concrete next step
+
+Disassemble `8178E9F0` and record what it stores into the stack block it
+passes as `r7`, and what `81A0FE48` reads at `+0x48`. That gives the layout
+needed to fabricate one. `81A0FE48` passes `r30+0x48` to `81A04570`, so at
+minimum offset `+0x48` must be a valid sub-structure - `81A04570` faulted
+reading `+0x4C` of it.
+
+### Instrumentation added
+
+* `tools/ppc.py` - PowerPC BE disassembler with absolute branch-target
+  resolution. Written because two findings in this file were invalidated by
+  hand-decoding errors. It prints the image name in its header; quote that.
+* `DevCreate` breakpoint at `819F4D28` (under `guide_trace_devsetup`), logging
+  `device / mode / r6 / arg5(r7) / r8 / lr`. Unlike the existing `DevSetup`
+  breakpoint at `81A0FE48`, this one fires on **both** device paths, which is
+  what made the mode-1 vs mode-2 comparison above possible in two runs.
+* `guide_force_front_buffer` now refuses to call `81A0FE48` with a zero second
+  argument and logs a warning instead of reproducing the known crash. With
+  mode 2 that means it is now a no-op, which is the honest behaviour until the
+  block above can be synthesized.
+
+## The mode-1 parameter block: layout, from `8178E9F0`
+
+*(Decoded against `work/xam17489.pe` with `tools/ppc.py`.)*
+
+The block `81A0FE48` needs is built on `8178E9F0`'s stack and is **124 bytes**
+at `r1+0x90`:
+
+```
+8178EA70: li     r5,124            ; 0x7C
+8178EA74: li     r4,0
+8178EA78: addi   r3,r1,144         ; r1+0x90
+8178EA7C: bl     0x818019E8        ; memset(block, 0, 124)
+...
+8178EB3C: addi   r8,r1,112         ; r8 = r1+0x70
+8178EB44: addi   r7,r1,144         ; r7 = r1+0x90  = the block
+8178EB64: bl     0x819F4D28
+```
+
+Cross-check against the measured run: `r7=709DF190`, `r8=709DF170`, so
+`r1=709DF100`, `r1+0x90 = 709DF190`. Exact match, both pointers.
+
+The mode-2 site hardcodes `li r7,0` at `8178F7BC` - it has no block at all,
+which is why the pass-through fix in the earlier section could not work.
+
+### Field map (offsets relative to the block, i.e. `r1` offset minus 0x90)
+
+The whole 124 bytes are zeroed first, so **only these fields are non-zero** -
+which is what makes synthesizing one realistic.
+
+| offset | value | source |
+|---|---|---|
+| `+0x00` | **width** | `640` on the fallback path (`8178EAE4`), else `[r31+4]`-ish from the display mode |
+| `+0x04` | **height** | `480` on the fallback path (`8178EAEC`), else `lhz r10,6(r31)` |
+| `+0x08` | `0x28280186` | `lis 0x2828 / ori 0x0186` at `8178EB08`/`8178EB18` |
+| `+0x34` | `0x80000000` | `lis r8,0x8000` at `8178EB14` |
+| `+0x3C` | `1` | `li r24,1` at `8178EB30` |
+| `+0x40` | r29 / r9 | branch-dependent |
+| `+0x44` | byte | `lbz r11,340(r1)` at `8178EB10` |
+| `+0x4C` | **4096** | `li r10,4096` at `8178EB2C`, stored at `8178EB50` |
+| `+0x54` | `0x00010000` | `lis r7,0x0001` at `8178EB20` |
+| `+0x60`,`+0x64` | r30 | `8178EAF0`, `8178EAFC` |
+| `+0x68`,`+0x6C` | width, height again | `8178EB00`, `8178EB04` |
+| `+0x70` | `[r1+0x168]` | `lwz r9,360(r1)` |
+| `+0x74` | `[r1+0x16C]` | `lwz r5,364(r1)` |
+
+Two width/height pairs (`+0x00/+0x04` and `+0x68/+0x6C`) and a format-looking
+constant at `+0x08` make this a **D3D presentation-parameters** structure.
+
+**`+0x4C` is the field that faulted.** `81A0FE48` computes `r4 = block+0x48`
+at `81A0FF70` and `81A04570` reads `[r4+4]` = `block+0x4C`. On the fallback
+path that field is simply `4096`.
+
+### Why this is now synthesizable
+
+124 zero bytes plus roughly a dozen fields, most of them literal constants, and
+the two that are not (`width`/`height`) have a documented 640x480 fallback the
+guest itself uses. That is a much smaller thing to fabricate than "device state
+mode 2 never establishes".
+
+Note also `8191BAC8` memcpy's **124 bytes** from its third argument into
+`wrapper+0x10` - the same size. Worth checking whether `wrapper+0x10` on a
+mode-2 device already holds a populated copy of this structure, in which case
+`81A0FE48(real_dev, wrapper+0x10)` needs no fabrication at all. That is the
+cheapest experiment and should be run before writing any synthesis code.
+
+### Next
+
+1. Dump `wrapper+0x10` (124 bytes) on a mode-2 run and compare against the
+   field map above. If `+0x00/+0x04` look like a resolution and `+0x4C` is
+   4096, pass it straight to `81A0FE48`.
+2. Only if that fails, fabricate a block from the table.
+
+## Measured now: the draw loop has no DC and no root element in this tree
+
+Before continuing with the front buffer, the current tree was measured against
+the configuration this file calls verified. It does not reproduce.
+
+Run: `press.ps1 -Boot 40 -After 90 -Extra '--guide_auto_press_seconds=45
+--lle_xam_skin_init=true --guide_reuse_xui_ctx=true'`
+
+```
+GuideFrame 0:    dc=00000000 [134]=FFFFFFFF gpu_draws +0 (total 39)
+GuideFrame 500:  dc=00000000 [134]=FFFFFFFF gpu_draws +0 (total 39)
+...
+GuideFrame 5500: dc=00000000 [134]=FFFFFFFF gpu_draws +0 (total 39)
+```
+
+The loop itself runs fine - 5500+ frames, which is the "runs continuously"
+behaviour recorded earlier. What it does **not** have is anything to draw with.
+`dc` is `[obj+0x0C]`, and the object dump from the same run reads:
+
+```
+Guide: obj 401EA600 head 00:913E1CB4 04:00000000 08:00000000 0C:00000000 10:00000001 ...
+```
+
+* `[obj+0x08] = 0` - **no root XUI element**. `XuiElementLayoutTree` is handed
+  nothing.
+* `[obj+0x0C] = 0` - **no device context**. `[dc+0x134]` reads as `FFFFFFFF`
+  only because the emulator substitutes that sentinel when `dc` is null; it is
+  not a real flag value.
+
+`gpu_draws` stays at 39 for the entire run - the title's, not the Guide's.
+
+This is **upstream of the front-buffer work**. `[dev+0x3F74]`, `81A0FE48` and
+its parameter block are all downstream of having a DC at all; with `dc = 0` the
+emitter is never reached, so none of that can be the active blocker in this
+tree.
+
+Two possibilities, not yet distinguished:
+
+1. The tree has regressed since the "Verified working now" entries were
+   written. The working copy has uncommitted edits to
+   `xboxkrnl_video.cc` and `virtual_file_system.cc`.
+2. Those entries depended on flags not recorded next to them. The header block
+   names `lle_xam_skin_init` and `guide_reuse_xui_ctx`; both were passed here.
+
+**Do not chase the front buffer further until `dc` is non-zero in a run.**
+Establishing which of the two above applies - ideally by stashing the working
+copy and re-running the same command - is the cheapest next step, and it is a
+prerequisite for interpreting any front-buffer result.
+
+### Red herring recorded so the next reader does not chase it
+
+The module import dump marks `XuiSceneCreate`, `XuiRenderCreateDC` and other
+XUI imports with `!!`. Per `user_module.cc:1121` that marker means
+"not implemented", but the check is `GetModule(library)->
+GetProcAddressByOrdinal(...)` evaluated when the dump is printed, which is
+before LLE xam registers its exports. The same run logs
+`Guide: HLE map empty (LLE xam owns the registration)`. The `!!` on XUI
+imports is therefore expected and is not evidence of an unresolved import.
+
+### Why `dc` is null: the title-thread bootstrap never runs
+
+Follow-up to the section above, same runs.
+
+`dc` is `[obj+0x0C]`, and it is filled by `RunGuideBootstrapOnTitleThread`
+(`xboxkrnl_video.cc:770`). In the measured runs that function **never
+executes**: zero `GuideBootstrap` lines in a 22,525-line log.
+
+The dispatch chain is:
+
+```
+emulator.cc:2050   QueueGuideBootstrap(...)      -> guide_bs_pending_ = true
+xboxkrnl_video.cc:2047  VdSwap_entry:
+                     if (guide_bs_pending_.exchange(false))
+                       RunGuideBootstrapOnTitleThread(bth)
+```
+
+The dispatch at `:2047` sits **outside** the sampled `SwapDraws` block, so it is
+evaluated on every swap - it is not gated by any diagnostic cvar. Therefore the
+failure is upstream: `guide_bs_pending_` is never set.
+
+Consistent with that, `Guide button: queued XUI bootstrap` (`emulator.cc:2175`)
+does not appear in the full-flag run either.
+
+What *does* run is the `GuideFrame` loop in `emulator.cc:5379`. Per the
+`guide_bootstrap_on_title_thread` cvar help, that is the **older fallback
+sequence** that "predates the class registrars, the skin module and the scene
+creator's out-pointer, so it gets an XUI init and nothing else". Its behaviour
+matches exactly: XUI init returns `0`, `[obj+8]` and `[obj+0x0C]` stay null, and
+6000 frames draw nothing.
+
+So the observed state is the fallback path running while the real one does not,
+even though every relevant cvar is set correctly:
+
+```
+guide_bootstrap_on_title_thread = true
+guide_create_scene              = true
+guide_scene_off_thread          = false
+guide_init_only                 = false
+```
+
+**Not yet isolated:** why the queue call is not reached. Both call sites are in
+`emulator.cc` (`:1753`, `:2050`), and the log line that follows the second one
+is absent, so execution diverges before it. Note the baseline run
+(`--guide_auto_press_seconds=45` alone) *did* log `queued XUI bootstrap` once
+while the full-flag run did not - so one of `lle_xam_skin_init`,
+`guide_reuse_xui_ctx`, `guide_trace_devsetup` or `guide_force_front_buffer`
+suppresses it. `guide_trace_devsetup` is the prior suspect: this file already
+records "guide_trace_devsetup makes the crash disappear, so it is
+timing-dependent".
+
+**Next probe:** bisect those four flags against the presence of the
+`queued XUI bootstrap` line. That is four short runs and it isolates the
+suppressor without reading any more disassembly.
+
+Until the bootstrap runs, `dc` stays null, and no front-buffer work can be
+evaluated.
+
+## Root blocker found: the dashboard never presents
+
+The bisect in the previous section led somewhere more fundamental. Measured by
+screenshotting the emulator window directly (`PrintWindow` with
+`PW_RENDERFULLCONTENT`, so occlusion cannot confound it) 35 s into a run:
+
+**The dashboard renders a pure black frame.** The window title confirms the
+title is loaded - `[FFFE07D1 v2.0.17489.0] Xbox 360 Dashboard <Direct3D 12 -
+RTV/DSV - XAudio2>` - but nothing is drawn.
+
+Alongside it, `SwapDraws` is **0** in every run measured, including a 90 s one.
+That counter increments once per `VdSwap_entry` and logs every 200 swaps, so
+zero lines means **fewer than 200 swaps in 90 seconds**. The dashboard is not
+presenting.
+
+### This is not caused by the uncommitted work
+
+Tested by stashing `src/` back to `fb7fb20` and rebuilding:
+
+| | working tree | clean HEAD |
+|---|---|---|
+| dashboard frame | black | black |
+| `SwapDraws` | 0 | 0 |
+| `queued XUI bootstrap` | 1 | 1 |
+| `GuideBootstrap` | 0 | 0 |
+
+Identical. The tree has been restored and rebuilt; this was a measurement, not
+a change.
+
+### Why this explains everything downstream
+
+```
+no VdSwap  ->  guide_bs_pending_ never consumed at xboxkrnl_video.cc:2047
+           ->  RunGuideBootstrapOnTitleThread never runs
+           ->  no scene creator, no XuiRenderCreateDC
+           ->  [obj+8] = 0 and [obj+0x0C] = 0
+           ->  the GuideFrame fallback loop draws nothing, forever
+```
+
+The bootstrap *is* queued (`queued XUI bootstrap` = 1 at HEAD and in the
+working tree). It is never dispatched, because dispatch happens inside
+`VdSwap_entry` and the title never gets there.
+
+And more basically: **the Guide composites over the title's frame.** A title
+that never presents cannot have anything composited over it. No amount of
+front-buffer work can produce a visible Guide while this holds.
+
+### Re-reading an earlier claim in this file
+
+`SUMMARY.md` states "The dashboard is unaffected throughout (framebuffer
+byte-identical to baseline)." That is consistent with what is measured here if
+the baseline framebuffer was **also black** - "byte-identical" then means
+identically empty, not identically correct. The claim was probably never
+evidence that the dashboard was rendering.
+
+Likewise, "the composite draw loop runs continuously to draw #2700+" describes
+the `GuideFrame` loop in `emulator.cc`, which calls hud's draw entry directly
+on a timer. It is not evidence of presentation either.
+
+### What to do next
+
+The question is no longer about the Guide. It is: **why does `dash.xex` not
+present under this build?** Concrete starting points:
+
+1. Whether `VdSwap_entry` is entered at all - add an unsampled first-call log
+   rather than inferring from the 200-swap sampler.
+2. The `GUEST CRASH` at `92193720` (`fault_addr 0000000100000000`, in
+   `dash.xex`) that occurs at boot in every run. This file records it as
+   survivable; that should be re-checked, because if it kills the render
+   thread it is a complete explanation.
+3. Whether the dashboard presents with the Guide machinery entirely off
+   (no `--guide_*` flags at all) - separating "dash is broken here" from
+   "the Guide flags break dash".
+
+Item 3 is the cheapest and should come first.
+
+### Controlled: it is dash.xex, not the Guide flags, and not the emulator
+
+Item 3 from the list above, run:
+
+| run | flags | frame | `SwapDraws` |
+|---|---|---|---|
+| dash, full Guide config | `guide_auto_press_seconds`, `lle_xam_skin_init`, `guide_reuse_xui_ctx` | black | 0 |
+| dash, clean HEAD build | same | black | 0 |
+| dash, **no guide flags at all** | `--break_on_debugbreak=false` only | black | 0 |
+| **Sonic & All-Stars Racing Transformed (5345085D)** | none | **renders correctly** | logs normally |
+
+The Sonic run is the control that was missing from all previous reasoning here:
+the same binary, same GPU backend (`Direct3D 12 - RTV/DSV`), presenting a real
+frame at 1280x720. So the emulator's presentation path is intact, and the Guide
+cvars are not what stops the dashboard - **`dash.xex` alone does not present**.
+
+That reframes the whole objective. Every entry in this file assumes the
+dashboard is running and the Guide needs to composite over it. The Guide cannot
+become visible over a title that draws nothing, so the Guide work is blocked on
+a dashboard problem that is not a Guide problem.
+
+Two ways forward, and they are genuinely different projects:
+
+* **Fix dash.xex presentation.** Start with the boot-time `GUEST CRASH` at
+  `92193720` and whether it kills the render thread, then whether
+  `VdSwap_entry` is entered at all (unsampled log, not the 200-swap sampler).
+* **Change the host title.** The Guide is designed to composite over *any*
+  running title. Sonic demonstrably presents. Running the Guide over a title
+  that actually draws would sidestep the dashboard entirely and test the
+  Guide path against a live frame for the first time.
+
+The second is cheap to try and does not depend on diagnosing dash at all.
+
+## BREAKTHROUGH: run the Guide over a title that presents
+
+Acting on the previous section's option 2. Launching the same build with
+`5345085D.iso` (Sonic & All-Stars Racing Transformed) instead of `dash.xex`,
+identical Guide flags:
+
+| marker | over dash.xex | over Sonic |
+|---|---|---|
+| `SwapDraws` | 0 | 13 and climbing |
+| `queued XUI bootstrap` | 1 | 1 |
+| **`GuideBootstrap`** | **0** | **31** |
+| **`GuideScene`** | **0** | **43** |
+| scene creator | never ran | `913EB940 -> 00000000, scene=00010054` |
+| DC | null | **`4089AAF0`** |
+
+**The real bootstrap runs for the first time.** The scene creator returns
+`S_OK` with a live scene handle, and the device context is non-null. Every
+"verified working" claim in this file is reproducible again - just not over the
+dashboard, which never presents.
+
+### Two long-standing worries, both settled
+
+```
+GuideScene: GetBackBufferSize(dc 4089AAF0) -> 00000000; w=852 h=480 (raw 00000354 000001E0)
+```
+
+Returns `S_OK` with a **real 852x480**. The recorded fear that "our Guide device
+is synthetic, so if it reports 0x0 the layout collapses" is refuted - the layout
+has genuine dimensions.
+
+```
+GuideBootstrap: DC present gates: [11C]=00000000 [134]=00000001 [1CC]=40877E00
+```
+
+`[11C]=0` is the required state, but **`[134]=1`** - the null-render flag is
+SET. Per this file, that makes `XuiRenderPresent` return `S_OK` without
+presenting and `XuiRenderBegin` skip `vtable[20]`. That is precisely the
+symptom recorded since the beginning: "a render path that executes completely
+and emits nothing." `--guide_clear_null_render=true` clears it to `00000000`.
+
+### Walking the crash chain forward
+
+With the null-render flag cleared, the real draw path executes and the failure
+moves - each time to a deeper, more specific site. Every step is a cvar that
+already existed in this tree.
+
+**1. `--guide_clear_null_render=true`** -> draw path now runs, faults at:
+
+```
+GUEST CRASH at 819DE94C  fault_addr 0x24  r3=0
+unwind: 819DEB30 8191B024 818FDE60 818F8374 818FAEB8 913EAB4C
+```
+
+`913EAB4C` is hud's own draw, so this is inside the Guide's render path.
+Decoded:
+
+```
+819DE938: lwz   r8,12960(r31)    ; [dev+0x32A0]  RT0
+819DE944: bne   819DE94C         ; non-null -> use it
+819DE948: lwz   r11,12976(r31)   ; else [dev+0x32B0]
+819DE94C: lwz   r9,36(r11)       ; [r11+0x24]   <-- r11 = 0
+```
+
+Both render-target slots are null. Confirmed independently in the bootstrap
+dump - **on both devices**:
+
+```
+xam device   408A2F00: [32A0]=00000000 [32B0]=00000000 [3F74]=00000000
+title device 409B4780: [32A0]=00000000 [32B0]=00000000 [3F74]=A280A380
+```
+
+**2. `+ --guide_borrow_front_buffer=true`** -> front buffer lent
+(`A280A380 -> guide device 40870D00`), `[134]=0`, same crash site.
+
+**3. `+ --guide_bind_title_rt=true` (with `XENIA_PRESENT_RT=1`)** -> crash
+moves to:
+
+```
+GUEST CRASH at 81A01638  fault_addr 0x4
+```
+
+`81A01638` is `0x80` into **`81A015B8`, the packet emitter**. Fault address `4`
+matches this file's own prediction exactly: "on a mode-2 device the cursor is 0
+so the first word stores to guest address 4."
+
+**4. `+ --guide_bind_cmdbuf_kb=64`** -> the buffer is created:
+
+```
+Guide: cmdbuf init 81A01358(dev 40870D00, 30175000, 16384) -> 30174FFC;
+       base=30175000 cursor=30174FFC limit=30184FFC
+```
+
+but the crash is **unchanged** - still `81A01638`, still guest address `4`. So
+the emitter reads its cursor as 0 despite `40870D00` having a real one. The
+cursor is being taken from a **different device object** than the one
+`guide_bind_cmdbuf_kb` writes to.
+
+### Where this leaves things
+
+The Guide is not yet visible, but the pipeline is further along than anything
+recorded in this file: bootstrap runs, scene builds with a handle, DC is live,
+back-buffer size is real, null-render is off, front buffer and RT are bound,
+and execution now reaches the **packet emitter** - the function that actually
+builds `DRAW_INDX`.
+
+**Immediate next step:** identify which device object `81A015B8` reads
+`+0x2B4C` from at the crash, and point `guide_bind_cmdbuf_kb` at that one
+instead of `40870D00`. The bootstrap dump already shows the *title* device has
+a populated cursor (`+2B4C=E4FF7000 +2B50=0000061F +2B54=00001FFF`) while the
+xam device's is all zero - so reading r31 at the fault would settle it in one
+run.
+
+**Standing correction to this file's premise:** the dashboard was never a valid
+host for this work. Use a presenting title.
+
+### The emitter crash resolved: `guide_bind_cmdbuf_kb` writes the wrong field
+
+Traced the `81A01638` fault to its source. Registers at the crash:
+
+```
+PC 81A01638  fault_addr 0x4   r3=40870D00  r31=40870D00  r11=00000004  r30=7091F280
+```
+
+`81A015B8` (the emitter) does:
+
+```
+81A015C4: mr   r31,r3          ; device
+81A015C8: mr   r30,r4          ; POINTER TO THE CALLER'S CURSOR
+81A015D8: lwz  r11,0(r30)      ; r11 = caller's cursor
+81A015DC: lwz  r10,11084(r31)  ; [dev+0x2B4C]
+...
+81A0162C: addi r11,r11,4
+81A01638: stw  r10,0(r11)      ; <-- store through cursor+4
+```
+
+`r11 = 4` therefore `[r30] = 0`: it is the **caller's** cursor that is zero, not
+the device field. `r30 = 7091F280` is a stack address, so the cursor is a local.
+
+The caller, at `81A0A678`:
+
+```
+81A0A684: li   r4,2309
+81A0A688: bl   0x81A042E0      ; RESERVE - returns the cursor in r3
+81A0A68C: stw  r3,80(r1)       ; -> local at r1+0x50   (returned 0)
+81A0A69C: addi r4,r1,80        ; &local
+81A0A6A0: bl   0x81A015B8      ; emit with a null cursor
+```
+
+So the reserve `81A042E0(dev, 2309)` returns 0. Its body:
+
+```
+81A042F8: lwz    r11,52(r31)      ; limit  = [dev+0x34]
+81A042FC: lwz    r10,48(r31)      ; cursor = [dev+0x30]
+81A04300: cmpl   cr6,r10,r11
+81A04304: ble    81A0430C         ; else assert (0FE00019)
+81A0430C: lwz    r11,14848(r31)   ; [dev+0x3A00]
+81A04310: cmpi   cr6,r11,0
+81A04314: beq    81A0431C         ; must be zero, else assert
+81A0431C: lwz    r11,48(r31)      ; cursor
+81A04320: rlwinm r30,r29,2,0,29   ; bytes = count * 4
+81A04324: lwz    r10,52(r31)      ; limit
+81A04328: add    r11,r30,r11
+81A0432C: cmpl   cr6,r11,r10
+81A04330: ble    81A0439C         ; fits -> success path
+81A04338: bl     81A03D40         ; else flush/grow -> fails, returns 0
+```
+
+**The command-buffer cursor and limit live at `[dev+0x30]` and `[dev+0x34]`.**
+`guide_bind_cmdbuf_kb` calls `81A01358`, which writes `[dev+0x2B4C]` - a
+different field that the reserve never reads. That is why binding a 64 KB
+buffer changed nothing and the crash site was identical with and without it.
+
+Note both are on the *same* device object (`r3 = r31 = 40870D00` at both the
+reserve call and the emitter call), so this is not a wrong-device problem as
+the previous entry guessed. It is a wrong-field problem.
+
+**Concrete fix to try:** allocate a buffer and set
+
+```
+[dev+0x30] = base            (cursor)
+[dev+0x34] = base + size     (limit)
+[dev+0x3A00] = 0             (asserted zero by the reserve)
+```
+
+on the device the emitter uses (`40870D00`), rather than `[dev+0x2B4C]`. With
+`cursor <= limit` and room for `2309 * 4 = 9236` bytes, `81A042E0` takes the
+`ble 81A0439C` success path and returns a real cursor.
+
+### The chain closes: it all returns to `81A0FE48`
+
+The reserve's grow path `81A03D40`, taken whenever the request does not fit:
+
+```
+81A03D5C: bl     0x817F6C30       ; current-thread query
+81A03D60: lwz    r11,11016(r31)   ; [dev+0x2B08] - owning thread
+81A03D64: cmpl   cr6,r11,r3
+81A03D68: beq    81A03D70         ; else assert - the device is thread-affine
+81A03D70: lwz    r11,11024(r31)   ; [dev+0x2B10]   <-- the 128-byte block
+81A03D74: cmpli  cr6,r11,0x0
+81A03D78: beq    81A03D80
+81A03D7C: lwz    r11,0(r11)       ; its first word - the progress counter
+81A03D80: lwz    r11,14576(r31)   ; [dev+0x38F0]
+```
+
+`[dev+0x2B10]` is allocated **only** by `81A0FE48` (`81A0A290(0x80, 5, 2)` at
+`81A0FEF4`, stored at `81A0FEF8`), and `81A0FE48` is called **only** from
+`819F4E8C`, which `819F4D28` skips when its mode argument is 2.
+
+So the complete causal chain, end to end:
+
+```
+mode 2 skips 81A0FE48
+  -> [dev+0x2B10] is null, and [dev+0x30]/[dev+0x34] are never established
+  -> 81A042E0 (reserve) finds no room: cursor 0, limit 0
+  -> falls through to 81A03D40 (grow), which itself depends on [dev+0x2B10]
+  -> grow provides no space
+  -> reserve returns 0
+  -> 81A015B8 (emitter) stores a packet word through cursor 0
+  -> GUEST CRASH at 81A01638, guest address 4
+```
+
+Every symptom recorded in this file is one link in that chain, and they all
+terminate at the same place: **`81A0FE48` does not run on the mode-2 device.**
+
+That makes the earlier parameter-block analysis the root fix rather than a
+detour. The requirement is unchanged from that section: synthesize the
+124-byte block `8178E9F0` builds at `r1+0x90` (memset to zero, then ~13 fields,
+`+0x00/+0x04` = width/height with a 640x480 fallback, `+0x08` = 0x28280186,
+`+0x4C` = 4096, `+0x54` = 0x00010000, `+0x34` = 0x80000000, `+0x3C` = 1), pass
+it as `81A0FE48`'s second argument, and call it on the Guide's device.
+
+Two constraints now known that were not before:
+
+* It must run **on the owning thread** - `81A03D40` asserts
+  `[dev+0x2B08] == 817F6C30()`, so the whole sequence is thread-affine. The
+  bootstrap already runs on the title thread, which is the right place.
+* `[dev+0x3A00]` must be zero when the reserve runs (it asserts), and
+  `[dev+0x30] <= [dev+0x34]`.
+
+**Do not hand-write `[dev+0x30]`/`[dev+0x34]`.** They are outputs of whatever
+`81A0FE48` sets up; writing them directly is the same one-field-at-a-time
+approach that this file has already recorded as non-convergent, and the grow
+path would still fault on the null `[dev+0x2B10]` the moment a second packet
+needed space.
+
+## `guide_force_front_buffer` is structurally dead: it runs after the draw
+
+An unconditional one-shot probe was added immediately before the
+`guide_force_front_buffer` block, reporting its three conditions
+(`cvar`, `real_dev`, `[3F74]`). **The probe never logged.** Neither did the
+block's own skip-warning. So the block is not failing a condition - the code is
+never reached at all.
+
+Cause, by line number in `xboxkrnl_video.cc`:
+
+```
+2237  if (guide_bind_cmdbuf_kb > 0)     <- setup, runs
+2313  if (guide_bind_title_rt)          <- setup, runs ("block entered" logs)
+...
+2694  in_guide_draw_scope = true;
+2695  Execute(..., guide_draw_fn_, ...)  <-- THE GUIDE DRAW
+2697  in_guide_draw_scope = false;
+...
+2977  gdraws counter, diagnostics
+3135  if (guide_force_front_buffer)     <- AFTER the draw
+```
+
+`guide_force_front_buffer` is meant to give the device the front buffer the
+draw needs, but it is placed **after** the draw. The draw faults inside the
+emitter, the guest thread dies, and execution never returns to line 3135. The
+`gdraws` counter at 2977 never increments either, which is the same evidence
+from the other direction.
+
+So this cvar has never run in any configuration, and the crash previously
+recorded against it (`81A04648`, the null-arg2 fault analysed earlier in this
+file) must have come from a different invocation path, not from this block.
+
+**Fix:** move the synthesis-and-call so it executes with the other setup cvars
+before line 2694, not in the post-draw diagnostic region. The block now
+contains a working synthesis of the 124-byte parameter block (zeroed, then
+`+0x00`/`+0x04` = 640x480, `+0x08` = 0x28280186, `+0x34` = 0x80000000,
+`+0x3C` = 1, `+0x4C` = 4096, `+0x54` = 0x00010000, `+0x68`/`+0x6C` = 640x480),
+so once it is reachable it can be evaluated for the first time.
+
+Note the ordering constraint discovered alongside this:
+`guide_borrow_front_buffer` fills `[real_dev+0x3F74]`, and
+`guide_force_front_buffer` is gated on that field being **null**. The two are
+mutually exclusive by construction - enabling both silently disables the
+second. Whichever survives the move should own the field exclusively.
+
+## The setup runs on the wrong thread - xam says so itself
+
+The `guide_force_front_buffer` work was moved to execute **before** the draw at
+line 2694, alongside the other setup cvars, instead of in the unreachable
+post-draw region. It now runs, and the gate reports exactly the state that was
+wanted:
+
+```
+Guide: pre-draw front-buffer gate: dc=408AD390 wrap=40877E00 dev=40870D00
+                                   [3F74]=00000000 [2B10]=00000000
+```
+
+`81A0FE48` is then entered for real - the JIT compiles it and its callees in
+sequence, including `81A04570`, the function that faulted when the second
+argument was null:
+
+```
+DemandFunction: enter 81A0FE48 / 81A0F5B8 / 81D10AAC / 81D10A9C / 81A0EFC8 / 81A04570
+```
+
+So the synthesized 124-byte block is accepted far enough to reach the routine
+that previously crashed. What stops it is not the block:
+
+```
+(DbgPrint) WRN[D3D]: The current thread (0x16) is trying to use a D3D device
+object that is owned by a different thread (0x6).
+```
+
+**The device is thread-affine and we are on the wrong thread.** Device
+`40870D00` is owned by thread `0x6`; the notification path this code runs from
+is thread `0x16`. The result line never prints because the call does not
+complete.
+
+This is the same constraint already visible in two places and not connected
+until now:
+
+* `RunGuideBootstrapOnTitleThread`'s own header comment - "doing it from the
+  Guide's own thread makes the guest D3D runtime refuse with *trying to use a
+  D3D device object that is owned by a different thread*".
+* `81A03D40` (the command-buffer grow path) asserts
+  `[dev+0x2B08] == 817F6C30()`, i.e. the caller must be the owning thread.
+  `[dev+0x2B08]` is where that owner is recorded.
+
+### What this means
+
+Two possibilities, and they need separating before any more device work:
+
+1. The Guide draw hook is not running on the thread that owns the Guide's
+   device. If so, every device-touching operation in this file - the RT bind,
+   the cursor bind, the front-buffer lend - has been issued from the wrong
+   thread and may have been silently refused the same way. That would explain
+   why so many of them "ran" and changed nothing.
+2. The device is owned by a thread that no longer matches because it was
+   created during a different phase.
+
+**Cheapest next probe:** log `[dev+0x2B08]` next to `817F6C30()` at the top of
+the draw hook, and compare with the thread the hook actually runs on. That
+single line distinguishes the two and tells us which thread the setup has to
+be marshalled onto.
+
+Note the guest's own diagnostic named this in one line after weeks of
+inference - the same lesson recorded earlier in this file about trap type 25:
+**the guest is often the best instrument.**
+
+### Confirmed by direct read: owner 6, caller 0x16
+
+The probe recommended above, run:
+
+```
+Guide: pre-draw front-buffer gate: dc=408AD390 wrap=40877E00 dev=40870D00
+       [3F74]=00000000 [2B10]=00000000 owner[2B08]=00000006
+       817F6C30()=00000016 match=NO
+```
+
+`[dev+0x2B08]` is `6`; xam's current-thread query returns `0x16`. That matches
+the D3D warning digit for digit, and it is read directly rather than inferred.
+
+Where the mismatch comes from:
+
+* The device the **draw** uses is `40870D00`, reached as
+  `[[guide_draw_this_+12]+0x1CC]+0x0C`. All the Guide's device work - the RT
+  bind, the cursor bind, the front-buffer lend, and now `81A0FE48` - is issued
+  against it from the notification/draw path, which is xam thread `0x16`.
+* `guide_create_xam_device` (`emulator.cc:1756`) runs on the **Guide button
+  dispatch thread**, logged as `01000028`:
+
+```
+01000028 Guide button: xam CreateDevice returned 00000000, device now 408A2F00
+```
+
+Note that is a *different* device object (`408A2F00`, not `40870D00`), so there
+are at least two, and the one on the draw path was created on the dispatch
+thread rather than the title's render thread. xam records the creating thread
+in `[dev+0x2B08]` and refuses device calls from anywhere else.
+
+### Consequence for everything already recorded in this file
+
+Every device-touching experiment in this project has been issued from thread
+`0x16` against a device owned by thread `6`. xam's refusal is a `DbgPrint`
+warning, not a failure code, so those calls returned without doing anything and
+without a visible error. That is a strong candidate explanation for the long
+run of changes that "ran" and changed nothing - and it means results recorded
+against them should not be trusted until re-measured.
+
+### Next
+
+Two options, in order of principle:
+
+1. **Create the Guide's device on the title's render thread.** The bootstrap
+   already runs there (`RunGuideBootstrapOnTitleThread`, thread `F80000A4` /
+   xam `0x16`), so moving the `8178F748` call into it should make the created
+   device owned by the thread that later draws with it. This is the fix that
+   matches how the device is meant to be used.
+2. **Transfer ownership** by writing the current thread into `[dev+0x2B08]`
+   before the setup call. Cheap to test and would confirm the diagnosis in one
+   run, but it forges a field xam maintains, so treat it as an experiment
+   rather than a fix.
+
+Do 2 first as a one-run confirmation, then 1 as the actual change.
+
+## The ownership check is real, and forging it lets 81A0FE48 run
+
+The check that produces the "owned by a different thread" warning is at
+`819F4438`, found by locating the format string (`8165DAC8`) and its single
+load site (`819F4464`):
+
+```
+819F4444: lwz    r11,11016(r31)   ; [dev+0x2B08]
+819F4448: cmpli  cr6,r11,0x0
+819F444C: beq    819F4478         ; zero -> check skipped entirely
+819F4450: rlwinm r31,r11,0,0,31
+819F4454: bl     0x817F6C30       ; current thread
+819F4458: cmpl   cr6,r31,r3
+819F445C: beq    819F447C         ; match -> proceed
+819F4460: bl     0x817F6C30       ; else warn
+```
+
+So `[dev+0x2B08]` *is* the field, confirming the previous section. Writing the
+calling thread into it before the setup call (`00000006 -> 00000016`) gets past
+the gate, and `81A0FE48` then executes far deeper than ever before.
+
+### xam validates the synthesized block and names its faults
+
+With the thread gate passed, xam's own D3D validator starts reporting on the
+124-byte block we hand it:
+
+```
+WRN[D3D]: Titles are required to use a minimum frame buffer of 1280x720 when
+          the console is using an HD display mode. The current frame buffer
+          size request will not pass certification.
+WRN[D3D]: Validate: The resource's type doesn't match the type expected by the
+          API.  Expected type Surface, got type .
+WRN[D3D]: Validate: Invalid 'Fence' field (bad time value)
+WRN[D3D]: Validate: The previously set resource has to be 'unset' by having its
+          fence field updated. ...
+```
+
+The first was **our own choice**: `8178E9F0`'s fallback branch writes 640x480
+(`li r10,640` / `li r11,480`), and that was copied literally. But that branch is
+the SD path; the emulator reports an HD mode. Setting the block to **1280x720**
+removes the complaint entirely - confirmed in the following run.
+
+The remaining three are about fields left zero by the synthesis. "Expected type
+Surface, got type ." says a slot that must hold a surface object is empty; the
+`Fence` messages are the same object's lifetime fields. The candidates are
+exactly the fields the field map lists as caller-sourced rather than constant:
+`+0x40`, `+0x44`, `+0x60`, `+0x64`, `+0x70`, `+0x74`. Note branch A of
+`8178E9F0` copies **16 bytes from `[r8]`** into `+0x60..+0x6C`
+(`8178EAB8`-`8178EADC`), which is the right shape for a surface descriptor.
+
+`81A0FE48` still does not return, so the setup is not complete - but it is now
+failing on *content* that xam describes in words, rather than on a null pointer
+or a thread gate.
+
+### Status of the two options from the previous section
+
+* Option 2 (forge `[dev+0x2B08]`) - **done, and it works as a probe.** It is in
+  the tree, clearly commented as an experiment. It should be replaced by
+  option 1 once the block is right; forging a field xam maintains is not a fix.
+* Option 1 (create the device on the title's render thread) - not yet done.
+
+### Next
+
+Fill `+0x60..+0x6C` with a real surface. The title's device has one
+(`[title_dev+0x3F74] = A280A380` was lent successfully in an earlier run), and
+`8178E9F0` sources those 16 bytes from a caller-provided descriptor, so the
+shape to copy is available. Then re-read the validator output - it has been
+more informative in two runs than weeks of inference, which is the same lesson
+this file already records twice.
+
+## Ground truth: the real parameter block, dumped
+
+Rather than inferring the block field-by-field from validator complaints, the
+`819F4D28` breakpoint now dumps 124 bytes at `arg5` when it is non-zero. One
+`--guide_create_primary_device` run over Sonic gives the real thing:
+
+```
+DevCreateBlock @7113F190:
+00:00000280 04:000001E0 08:28280186 0C..30:0
+34:80000000 38:00000000 3C:00000001 40:24900106 44:00000000 48:00000000
+4C:00001000 50:00000000 54:00010000 58:00000000 5C:00000000
+60:00000000 64:00000000 68:00000280 6C:000001E0
+70:00000780 74:00000438 78:00000000
+```
+
+Three corrections to the synthesized version:
+
+| field | synthesized | real | note |
+|---|---|---|---|
+| `+0x00`/`+0x04` | 1280x720 | **640x480** | the earlier change was wrong |
+| `+0x40` | 0 | **`24900106`** | was missed entirely |
+| `+0x70`/`+0x74` | 0 | **1920x1080** | was missed entirely |
+
+**640x480 was right all along.** The
+"minimum frame buffer of 1280x720" validator line is a *certification
+advisory*, not a rejection - the genuine mode-1 block is 640x480 and triggers
+it too. Changing the synthesis to 1280x720 on the strength of that message was
+a mis-read of a warning as an error.
+
+Also settled: `+0x60`/`+0x64` are **zero** in the real block, so the earlier
+theory that they hold a surface descriptor ("Expected type Surface") is wrong.
+The synthesis now reproduces every non-zero word verbatim.
+
+## `guide_bind_title_rt` is actively harmful
+
+Single-variable test, everything else held constant:
+
+| configuration | `WRN[D3D]` lines |
+|---|---|
+| with `--guide_bind_title_rt` (+`XENIA_PRESENT_RT`) | **5** |
+| without it | **1** |
+
+The three "Validate:" complaints - wrong resource type, invalid `Fence` field,
+previously-set resource not unset - come **from that cvar**, not from the
+parameter block. Dropping it leaves only the harmless 1280x720 advisory.
+
+That matches the warning already in its own help text: it binds RT0 on an
+object reached via `[dc+0x1CC]`, which is the 140-byte *wrapper*, so `+0x32A0`
+lands ~12 KB past the end of it. The `[32A0]=00000060` seen in the pre-draw
+diagnostic is that same out-of-bounds read, not a render target.
+
+**Recommendation: leave `guide_bind_title_rt` off.** It has been part of the
+"working" flag set in several earlier measurements, and it was corrupting them.
+
+## Where it stops now
+
+With the correct block and `guide_bind_title_rt` off, one crash remains:
+
+```
+GUEST CRASH at 819F5EC4  fault_addr 0x20
+819F5EC4: lwz r11,32(r14)          ; [r14+0x20], r14 null
+unwind: 819F7FB4 819FEC68 8191B438 818F930C 818FB020 913EABC4
+```
+
+`913EABC4` is hud's draw, so this is the draw path, not `81A0FE48`.
+
+**This is a fault this file already predicted.** The `guide_bind_depth_copy`
+cvar help describes it exactly: "the post-redirect fault is an unguarded read
+of `[r14+20]`, the low 6 bits of which are compared against 0x3D by a caller -
+the shape of a surface format field - and the device never gets a depth surface
+because 819F38C8 is never called in any run."
+
+The next instruction confirms the reading:
+
+```
+819F5EC8: rlwinm r3,r11,0,26,31    ; low 6 bits of [r14+0x20]
+819F5ECC: bl     0x819F4FE0
+```
+
+So the device needs a **depth surface**. `guide_bind_depth_copy` exists to
+supply one and has never been tried in a configuration that got this far.
+
+### Next
+
+Run with `--guide_bind_depth_copy=true`, correct block, `guide_bind_title_rt`
+off. That is the one untested cvar sitting directly on the current fault.
+
+### Correction to the table above, and a re-attribution
+
+The "5 vs 1" figures in the previous section were wrong: `5` was a count of
+*thread-ownership* warnings and `1` a count of `WRN[D3D]` lines - two different
+metrics compared against each other. A clean A/B, everything else held
+constant, counting both the same way in both runs:
+
+| configuration | `WRN[D3D]` | "owned by a different thread" | crashes |
+|---|---:|---:|---:|
+| **with** `guide_bind_title_rt` (+`XENIA_PRESENT_RT`) | **11** | **5** | 1 |
+| **without** | **1** | **0** | 1 |
+
+The conclusion stands and is stronger than recorded - 11 versus 1, not 5 versus
+1 - but one attribution changes:
+
+**The thread-ownership warnings come from `guide_bind_title_rt`, not from the
+`81A0FE48` setup call.** With that cvar off they disappear entirely (5 -> 0),
+even though the ownership forge still runs. So the earlier reading that our
+setup call was being refused for thread reasons was measuring that cvar's
+calls, not ours.
+
+That also means the forge of `[dev+0x2B08]` has **not** been shown to be
+necessary. It should be re-tested on its own now that the noise source is
+known: if `81A0FE48` behaves identically with the forge removed, remove it -
+it writes a field xam maintains and was only ever justified as a probe.
+
+Also note the pre-draw `guide_bind_title_rt` block at line 2313 does resolve
+`rdev = [[dc+0x1CC]+0x0C]`, i.e. the real device rather than the wrapper, so
+the "binds into the wrapper" explanation offered for it above applies to the
+*other*, post-draw block and not to this one. Why the correct block still
+produces ten extra validator complaints is not established.
+
+### `guide_bind_depth_copy` cannot fire in this configuration
+
+Tested with the correct block and `guide_bind_title_rt` off: no depth-copy log
+line, crash unchanged at `819F5EC4`.
+
+Its own condition explains it - it clones RT0 "if the device has a colour
+surface on RT0 but nothing on the depth slot". With `guide_bind_title_rt` off
+there is no colour surface on RT0, so it does nothing. The two cvars are
+therefore coupled: the depth fix needs the RT bind, and the RT bind brings ten
+validator complaints with it.
+
+Resolving that coupling - a correct RT0 bind that does not upset the validator -
+is the next real step, and it is a prerequisite for testing the depth surface
+at all.

@@ -101,9 +101,13 @@ dword_result_t XexGetModuleSection_entry(lpvoid_t hmodule, lpstring_t name,
       auto* th = XThread::GetCurrentThread();
       auto* c = th && th->thread_state() ? th->thread_state()->context()
                                          : nullptr;
-      XELOGI("XexGetModuleSection: module='{}' section='{}' -> {:08X} size={} "
-             "lr={:08X}",
-             module->name(), name.value(), result, section_size,
+      // NOTE: this line used to print `result` under a bare "-> {:08X}",
+      // which reads exactly like a returned pointer. It is the STATUS
+      // (0 = SUCCESS) and was misread that way once. Print the section base
+      // explicitly and label both.
+      XELOGI("XexGetModuleSection: module='{}' section='{}' status={:08X} "
+             "data={:08X} size={} lr={:08X}",
+             module->name(), name.value(), result, section_data, section_size,
              c ? static_cast<uint32_t>(c->lr) : 0);
     }
   } else {

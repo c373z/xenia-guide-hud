@@ -18,6 +18,15 @@ namespace xboxkrnl {
 
 void GuideSetMode1Device(uint32_t dev);
 
+// 819F4D28's fifth argument (r7), captured on entry. It is the pointer the
+// one real call site of 81A0FE48 passes as that function's second argument
+// (819F4E84: mr r4,r28, where r28 <- r7 in the prologue at 819F4D40).
+// 819F4D28 runs in both device modes, so this is populated even on the mode-2
+// path where 81A0FE48 itself is skipped - which is exactly the case that needs
+// it. Passing 0 instead faults at 81A04648 on r30+0x48.
+void GuideSetDevCreateArg5(uint32_t ptr);
+uint32_t GuideGetDevCreateArg5();
+
 void VdQueryVideoMode(X_VIDEO_MODE* video_mode, bool is_internal_resolution);
 
 // Runs a guest function on the title's own render thread from inside
@@ -28,6 +37,21 @@ void VdQueryVideoMode(X_VIDEO_MODE* video_mode, bool is_internal_resolution);
 extern thread_local bool in_xam_createdevice_scope;
 
 void SetGuideDrawHook(uint32_t fn, uint32_t self);
+// Extent of the loaded xam image, published by the emulator at load. Guide
+// code here reads dashroot-derived constants (0x81D42520 and friends); on a
+// build whose image ends lower those are unmapped and reading them host-faults.
+void SetHudEntries(uint32_t xuiinit, uint32_t render);
+void SetXamImageExtent(uint32_t lo, uint32_t hi);
+bool XamAddrInImage(uint32_t addr, uint32_t len);
+uint32_t XamUiThreadSlot();
+uint32_t XamDeviceSlot();
+uint32_t XamRenderHost();
+uint32_t XamXuiCtxSlot();
+uint32_t XamXuiCreateDC();
+uint32_t XamProviderSlot();
+bool XamIsDashrootLayout();
+void* GuideStallThread();
+void GuidePublishStallThread(void* h);
 
 // Queue the whole XUI bootstrap to run on the title's render thread. The
 // title's D3D device is thread-affine, so every XUI call that touches it -
@@ -35,6 +59,11 @@ void SetGuideDrawHook(uint32_t fn, uint32_t self);
 // True once the title-thread bootstrap has finished its device-touching
 // work. Scene creation waits for this and then runs off the render thread.
 bool GuideBootstrapReady();
+
+// The bootstrap's own device context - the only one whose [+0x1C8]/[+0x1CC]
+// are populated. hud's DC is constructed but never gets the vtable dispatch
+// that lands in 818FDE98, so those fields hold allocation garbage.
+uint32_t GuideBootDc();
 
 // xam's mode-1 device creator re-points the GPU ring from the title's ring to
 // its own, which is why the title stops swapping at the button press. Save the

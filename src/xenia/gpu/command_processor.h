@@ -20,6 +20,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "xenia/base/logging.h"
 #include "xenia/base/math.h"
 #include "xenia/base/ring_buffer.h"
 #include "xenia/gpu/register_file.h"
@@ -478,6 +479,46 @@ class CommandProcessor {
 
   void ExecuteGuestBufferUnsafe(uint32_t ptr, uint32_t count) {
     ExecuteIndirectBuffer(ptr, count);
+  }
+
+  // A command stream the Guide has finished building, to be run on the GPU
+  // thread just before the title's next swap. Set by the Guide draw hook on
+  // the title thread; consumed and cleared in ExecutePacketType3_XE_SWAP.
+  //
+  // Running it from the title thread - which is what every experiment up to
+  // now did - drives the command processor from the wrong thread while the
+  // GPU thread may be mid-packet, and lands the work at an arbitrary point in
+  // the title's frame. An overlay wants the opposite: the title's frame fully
+  // built, its render target still bound, and the Guide's geometry drawn on
+  // top immediately before present. The swap packet is exactly that point.
+  volatile uint32_t guide_overlay_ptr_ = 0;
+  volatile uint32_t guide_overlay_words_ = 0;
+
+  // Execute a PM4 stream that lives in the guest VIRTUAL address space.
+  //
+  // ExecuteIndirectBuffer resolves its pointer with TranslatePhysical, which
+  // is `physical_membase_ + (addr & 0x1FFFFFFF)`. That is correct for a real
+  // indirect buffer, whose address always comes out of physical memory. The
+  // Guide's command buffer does not: xam allocates it through 81A01358 and it
+  // lands at 3009C000, inside the 4KB-page virtual heap, which is a separate
+  // host mapping. Masking that address yields physical 1009C000 - unrelated
+  // memory that happens to be zeroed - so every attempt to run the Guide's
+  // stream so far has parsed zeros and correctly reported nothing.
+  void ExecuteGuestBufferVirtualUnsafe(uint32_t ptr, uint32_t count) {
+    if (!count) {
+      return;
+    }
+    RingBuffer old_reader = reader_;
+    new (&reader_) RingBuffer(memory_->TranslateVirtual(ptr),
+                              count * sizeof(uint32_t));
+    reader_.set_write_offset(count * sizeof(uint32_t));
+    do {
+      if (!ExecutePacket()) {
+        XELOGE("**** GUIDE BUFFER: failed to execute packet.");
+        break;
+      }
+    } while (reader_.read_count());
+    reader_ = old_reader;
   }
 
  protected:
