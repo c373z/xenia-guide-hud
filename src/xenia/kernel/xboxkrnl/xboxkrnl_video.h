@@ -50,6 +50,8 @@ uint32_t XamXuiCtxSlot();
 uint32_t XamXuiCreateDC();
 uint32_t XamProviderSlot();
 bool XamIsDashrootLayout();
+uint32_t GuideConst(uint32_t addr);
+uint32_t GuideNopFn();
 void* GuideStallThread();
 void GuidePublishStallThread(void* h);
 

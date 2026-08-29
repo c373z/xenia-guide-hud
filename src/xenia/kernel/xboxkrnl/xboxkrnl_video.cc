@@ -717,6 +717,49 @@ bool XamIsDashrootLayout() {
   return XamDeviceSlot() == 0x81D43684u && XamUiThreadSlot() == 0x81D42520u;
 }
 
+// Phase 440 left 22 hardcoded dashroot addresses that this research code calls
+// outright. Four have now been caught one crash at a time (817503E8,
+// 81A01358, XuiObjectFromHandle, 818FB2B8). Rewriting the 39 call sites is
+// what destroyed this file, so instead each constant is wrapped in place:
+// GuideConst(0x818FB038u) is a token swap, which cannot reorder anything.
+//
+// On a non-dashroot build it returns the address of a `blr` inside the loaded
+// xam image - a real, executable, already-mapped instruction that returns
+// immediately - so the call is harmless instead of jumping into an unrelated
+// function. Returning 0 would just move the fault to address 0.
+static uint32_t g_nop_fn = 0;
+uint32_t GuideNopFn() {
+  if (g_nop_fn) return g_nop_fn;
+  if (!kernel_state() || !g_xam_lo) return 0;
+  uint32_t lo = g_xam_lo, hi = g_xam_hi;
+  auto* mem = kernel_state()->memory();
+  for (uint32_t a = lo; a && a + 4 <= hi; a += 4) {
+    if (xe::load_and_swap<uint32_t>(mem->TranslateVirtual(a)) == 0x4E800020u) {
+      g_nop_fn = a;
+      XELOGI("GuideConst: using blr at {:08X} as the no-op for this build", a);
+      break;
+    }
+  }
+  return g_nop_fn;
+}
+
+uint32_t GuideConst(uint32_t addr) {
+  if (XamIsDashrootLayout()) return addr;
+  static uint32_t reported[64] = {};
+  static size_t reported_n = 0;
+  bool seen = false;
+  for (size_t i = 0; i < reported_n; ++i) {
+    if (reported[i] == addr) { seen = true; break; }
+  }
+  if (!seen) {
+    if (reported_n < xe::countof(reported)) reported[reported_n++] = addr;
+    XELOGW("GuideConst: {:08X} is a dashroot address - substituting a no-op",
+           addr);
+  }
+  uint32_t nop = GuideNopFn();
+  return nop ? nop : addr;
+}
+
 uint32_t XamProviderSlot() {
   if (g_provider_slot_done) {
     return g_provider_slot;
@@ -2132,7 +2175,7 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
                           if (cls) {
                             uint64_t ka[] = {cls};
                             uint32_t nm = uint32_t(processor->Execute(
-                                ts, 0x81934170u, ka, xe::countof(ka)));
+                                ts, GuideConst(0x81934170u), ka, xe::countof(ka)));
                             std::string cname;
                             auto* nh = nm ? memory->LookupHeap(nm) : nullptr;
                             if (nh && nh->QueryRangeAccess(nm, nm + 0x3Fu) !=
@@ -2942,7 +2985,7 @@ void VdSwap_entry(
         uint32_t cdv2 = crd(cwr2 + 0x0Cu);
         if (cdv2) {
           uint32_t tid = uint32_t(kernel_state()->processor()->Execute(
-              gth->thread_state(), 0x817F6C30u, nullptr, 0));
+              gth->thread_state(), GuideConst(0x817F6C30u), nullptr, 0));
           uint32_t owner = crd(cdv2 + 0x2B08u);
           if (tid && owner != tid) {
             xe::store_and_swap<uint32_t>(
@@ -3337,7 +3380,7 @@ void VdSwap_entry(
               uint64_t cargs[] = {cdev, cbuf, csize / 4};
               uint64_t cres =
                   cth ? kernel_state()->processor()->Execute(
-                            cth->thread_state(), 0x81A01358u, cargs,
+                            cth->thread_state(), GuideConst(0x81A01358u), cargs,
                             xe::countof(cargs))
                       : 0;
               guide_cmdbuf_base_ = cbuf;
@@ -3592,7 +3635,7 @@ void VdSwap_entry(
             uint64_t sargs[] = {rdev, 0ull, surf};
             uint64_t sres =
                 bth ? kernel_state()->processor()->Execute(
-                          bth->thread_state(), 0x819F31A8u, sargs,
+                          bth->thread_state(), GuideConst(0x819F31A8u), sargs,
                           xe::countof(sargs))
                     : 0;
             XELOGI("Guide: SetRenderTarget(dev {:08X}, 0, {:08X} "
@@ -3689,7 +3732,7 @@ void VdSwap_entry(
                           dm->TranslateVirtual(rt0), 0x100);
               uint64_t dargs[] = {ddev, clone};
               uint64_t dr = kernel_state()->processor()->Execute(
-                  gth->thread_state(), 0x819F38C8u, dargs,
+                  gth->thread_state(), GuideConst(0x819F38C8u), dargs,
                   xe::countof(dargs));
               XELOGI("Guide: SetDepthStencilSurface(dev {:08X}, clone {:08X} "
                      "of RT0 {:08X}) -> {:08X}; depth now {:08X}",
@@ -3879,7 +3922,7 @@ void VdSwap_entry(
           // "the device was created in another phase".
           uint32_t owner = fdev ? fr2(fdev + 0x2B08u) : 0;
           uint64_t cur = kernel_state()->processor()->Execute(
-              gth->thread_state(), 0x817F6C30u, nullptr, 0);
+              gth->thread_state(), GuideConst(0x817F6C30u), nullptr, 0);
           XELOGI("Guide: pre-draw front-buffer gate: dc={:08X} wrap={:08X} "
                  "dev={:08X} [3F74]={:08X} [2B10]={:08X} owner[2B08]={:08X} "
                  "817F6C30()={:08X} match={}",
@@ -3941,7 +3984,7 @@ void VdSwap_entry(
                      fdev, blk);
               uint64_t fa[] = {fdev, blk};
               uint64_t fres = kernel_state()->processor()->Execute(
-                  gth->thread_state(), 0x81A0FE48u, fa, xe::countof(fa));
+                  gth->thread_state(), GuideConst(0x81A0FE48u), fa, xe::countof(fa));
               XELOGI("Guide: 81A0FE48 RETURNED {:08X}",
                      static_cast<uint32_t>(fres));
               XELOGI("Guide: pre-draw 81A0FE48(dev {:08X}, blk {:08X}) -> "
@@ -4404,7 +4447,7 @@ void VdSwap_entry(
               {
                 uint64_t ra[] = {root};
                 so_int = uint32_t(kernel_state()->processor()->Execute(
-                    gth->thread_state(), 0x81931040u, ra, xe::countof(ra)));
+                    gth->thread_state(), GuideConst(0x81931040u), ra, xe::countof(ra)));
               }
               XELOGI("GuideBounds: XuiObjectFromHandle={:08X} "
                      "internal 81931040={:08X} {}",
@@ -4487,7 +4530,7 @@ void VdSwap_entry(
         if (root_h) {
           uint64_t ra2[] = {root_h};
           uint32_t root_i = uint32_t(kernel_state()->processor()->Execute(
-              gth->thread_state(), 0x81931040u, ra2, xe::countof(ra2)));
+              gth->thread_state(), GuideConst(0x81931040u), ra2, xe::countof(ra2)));
           if (root_i) {
             objdiff_addr.push_back(root_i);
             // [+8] and [+0x0C] both point at the same object on the scene -
@@ -4523,7 +4566,7 @@ void VdSwap_entry(
         if (rh) {
           uint64_t ra3[] = {rh};
           uint32_t ri = uint32_t(kernel_state()->processor()->Execute(
-              gth->thread_state(), 0x81931040u, ra3, xe::countof(ra3)));
+              gth->thread_state(), GuideConst(0x81931040u), ra3, xe::countof(ra3)));
           uint32_t marked = 0;
           for (uint32_t o = ri; o; o = drd(o + 8u)) {
             uint32_t f = drd(o + 0xB4u);
@@ -4661,7 +4704,7 @@ void VdSwap_entry(
                      hh, api_hr, api_obj);
             }
             root_i2 = uint32_t(kernel_state()->processor()->Execute(
-                gth->thread_state(), 0x81931040u, rr, xe::countof(rr)));
+                gth->thread_state(), GuideConst(0x81931040u), rr, xe::countof(rr)));
             // Phase 329: is "XuiTabScene" resolvable by name? Call the class
             // registry lookup 81949B60 directly with the name and compare the
             // result against the class object the census already identified
@@ -4687,7 +4730,7 @@ void VdSwap_entry(
                       vm->TranslateVirtual(buf + uint32_t(len * 2)), 0);
                   uint64_t la2[] = {buf};
                   uint32_t got = uint32_t(kernel_state()->processor()->Execute(
-                      gth->thread_state(), 0x81949B60u, la2,
+                      gth->thread_state(), GuideConst(0x81949B60u), la2,
                       xe::countof(la2)));
                   out += fmt::format("{}->{:08X} ", nm, got);
                 }
@@ -4714,7 +4757,7 @@ void VdSwap_entry(
                   xe::store_and_swap<uint32_t>(vm->TranslateVirtual(obuf2), 0);
                   uint64_t ca2[] = {nbuf, obuf2};
                   uint32_t hr2 = uint32_t(kernel_state()->processor()->Execute(
-                      gth->thread_state(), 0x8194F568u, ca2,
+                      gth->thread_state(), GuideConst(0x8194F568u), ca2,
                       xe::countof(ca2)));
                   mk += fmt::format("{}: hr={:08X} obj={:08X} | ", nm, hr2,
                                     vrd(obuf2));
@@ -4743,7 +4786,7 @@ void VdSwap_entry(
                     xe::store_and_swap<uint32_t>(vm->TranslateVirtual(ob), 0);
                     uint64_t ma[] = {nb, ob};
                     uint32_t chr = uint32_t(kernel_state()->processor()->Execute(
-                        gth->thread_state(), 0x8194F568u, ma, xe::countof(ma)));
+                        gth->thread_state(), GuideConst(0x8194F568u), ma, xe::countof(ma)));
                     uint32_t sh = vrd(ob);
                     uint32_t ahr = 0;
                     if (!chr && sh) {
@@ -5142,7 +5185,7 @@ void VdSwap_entry(
         for (int d = 0; d < 6 && hh && f_last3 && vob; ++d) {
           uint64_t ra4[] = {hh};
           uint32_t oi = uint32_t(kernel_state()->processor()->Execute(
-              gth->thread_state(), 0x81931040u, ra4, xe::countof(ra4)));
+              gth->thread_state(), GuideConst(0x81931040u), ra4, xe::countof(ra4)));
           if (oi) {
             uint32_t fl = vrd(oi + 0xB4u);
             if (!(fl & 1u)) {
@@ -6608,7 +6651,7 @@ void VdSwap_entry(
           static bool probed = false;
           // 818FB2B8 is a dashroot address (one of the 22 in phase 440);
           // on retail it is a different function and executing it faults.
-          if (!probed && ddc && XamIsDashrootLayout()) {
+          if (!probed && ddc) {
             probed = true;
             auto* pm3 = kernel_state()->memory();
             uint32_t pbuf = pm3->SystemHeapAlloc(16, 16);
@@ -6616,7 +6659,7 @@ void VdSwap_entry(
               xe::store_and_swap<uint32_t>(pm3->TranslateVirtual(pbuf), 0);
               uint64_t pa[] = {ddc, pbuf};
               uint32_t phr = uint32_t(kernel_state()->processor()->Execute(
-                  XThread::GetCurrentThread()->thread_state(), 0x818FB2B8u, pa,
+                  XThread::GetCurrentThread()->thread_state(), GuideConst(0x818FB2B8u), pa,
                   xe::countof(pa)));
               uint32_t got = xe::load_and_swap<uint32_t>(
                   pm3->TranslateVirtual(pbuf));
@@ -6760,7 +6803,7 @@ void VdSwap_entry(
               auto* rth = XThread::GetCurrentThread();
               uint64_t rargs[] = {dev, target, dev + 0x10u};
               uint64_t rr = rth ? kernel_state()->processor()->Execute(
-                                      rth->thread_state(), 0x8191BAC8u, rargs,
+                                      rth->thread_state(), GuideConst(0x8191BAC8u), rargs,
                                       xe::countof(rargs))
                                 : 0;
               XELOGI("Guide: rebound wrapper {:08X} from device {:08X} to "
@@ -6856,7 +6899,7 @@ void VdSwap_entry(
                 auto* fth = XThread::GetCurrentThread();
                 uint64_t fargs[] = {real_dev, arg5};
                 uint64_t fr = fth ? kernel_state()->processor()->Execute(
-                                        fth->thread_state(), 0x81A0FE48u,
+                                        fth->thread_state(), GuideConst(0x81A0FE48u),
                                         fargs, xe::countof(fargs))
                                   : 0;
                 XELOGI("Guide: forced front-buffer setup on {:08X} arg5={:08X}"
@@ -6896,7 +6939,7 @@ void VdSwap_entry(
               auto* pth = XThread::GetCurrentThread();
               uint64_t pargs[] = {real_dev, 0ull, guide_title_surface_};
               uint64_t pres = pth ? kernel_state()->processor()->Execute(
-                                        pth->thread_state(), 0x819F31A8u,
+                                        pth->thread_state(), GuideConst(0x819F31A8u),
                                         pargs, xe::countof(pargs))
                                   : 0;
               XELOGI("Guide: bound RT0 {:08X} on the present's device {:08X} "

@@ -1287,7 +1287,7 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                   if (!ictx) {
                     uint64_t ia2[] = {0};
                     uint64_t ir2 = ks->processor()->Execute(
-                        ts, 0x817C2B68u, ia2, xe::countof(ia2));
+                        ts, kernel::xboxkrnl::GuideConst(0x817C2B68u), ia2, xe::countof(ia2));
                     ictx = xe::load_and_swap<uint32_t>(
                         ks->memory()->TranslateVirtual(0x81D4F610u));
                     XELOGI("Guide button: xam input ctx init -> {:08X}, "
@@ -2907,7 +2907,7 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                 XELOGI("Guide button: D3D device global 81D43684 = {:08X}",
                        rd(kernel::xboxkrnl::XamDeviceSlot()));
                 uint64_t ha[] = {0};
-                uint64_t hr = ks->processor()->Execute(ts, 0x8178DC58u, ha,
+                uint64_t hr = ks->processor()->Execute(ts, kernel::xboxkrnl::GuideConst(0x8178DC58u), ha,
                                                        xe::countof(ha));
                 XELOGI("Guide button: render host returned {:08X}, "
                        "XUI ctx now {:08X}",
@@ -2929,7 +2929,7 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                 // rather than to hud's init wrapper.
                 uint32_t dcp = ks->memory()->SystemHeapAlloc(16, 16);
                 uint64_t da2[] = {dcp};
-                uint64_t dr2 = ks->processor()->Execute(ts, 0x818FB038u, da2,
+                uint64_t dr2 = ks->processor()->Execute(ts, kernel::xboxkrnl::GuideConst(0x818FB038u), da2,
                                                         xe::countof(da2));
                 XELOGI("Guide button: direct XuiRenderCreateDC -> {:08X}, "
                        "dc={:08X}",
@@ -5058,7 +5058,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
               if (cvars::lle_xam_heap_init) {
                 uint64_t hargs[] = {0};
                 XELOGI("LLE xam: calling heap init 817B4B70");
-                ks->processor()->Execute(ts, 0x817B4B70u, hargs,
+                ks->processor()->Execute(ts, kernel::xboxkrnl::GuideConst(0x817B4B70u), hargs,
                                          xe::countof(hargs));
                 XELOGI("LLE xam: heap init returned");
               }
@@ -5094,7 +5094,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                 }
                 uint64_t sargs[] = {0};
                 XELOGI("LLE xam: calling skin loader 81795548");
-                uint64_t sr = ks->processor()->Execute(ts, 0x81795548u, sargs,
+                uint64_t sr = ks->processor()->Execute(ts, kernel::xboxkrnl::GuideConst(0x81795548u), sargs,
                                                        0);
                 XELOGI("LLE xam: skin loader returned {:08X}",
                        static_cast<uint32_t>(sr));
@@ -5739,7 +5739,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                   // which creates XamApp's thread - the only thing that can
                   // register 0xFE. The root blocks, so run it last.
                   XELOGI("Guide: sysapp table walk 8177FE50");
-                  ks->processor()->Execute(ts, 0x8177FE50u, sa,
+                  ks->processor()->Execute(ts, kernel::xboxkrnl::GuideConst(0x8177FE50u), sa,
                                            xe::countof(sa));
                   // 81751428 turned out to be a teardown path: it runs an
                   // app whose main is the ExTerminateTitleProcess wrapper.
@@ -5769,7 +5769,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                         XELOGI("Guide: XamApp factory 81A34E78 this={:08X}",
                                self);
                         uint64_t aa[] = {self};
-                        ks->processor()->Execute(ats, 0x81A34E78u, aa,
+                        ks->processor()->Execute(ats, kernel::xboxkrnl::GuideConst(0x81A34E78u), aa,
                                                  xe::countof(aa));
                         XELOGI("Guide: XamApp factory returned");
                         // The factory constructs three XamApp instances at
@@ -5783,7 +5783,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                                  "(+{})", obj, inst);
                           uint64_t ea[] = {obj};
                           uint64_t er = ks->processor()->Execute(
-                              ats, 0x81A4E3D0u, ea, xe::countof(ea));
+                              ats, kernel::xboxkrnl::GuideConst(0x81A4E3D0u), ea, xe::countof(ea));
                           XELOGI("Guide: XamApp entry returned {:08X}",
                                  static_cast<uint32_t>(er));
                         }
@@ -5853,7 +5853,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                                            "this={:08X} buf={:08X}", ctx,
                                            scratch);
                                     ks->processor()->Execute(
-                                        pts, 0x81A5F220u, pa, xe::countof(pa));
+                                        pts, kernel::xboxkrnl::GuideConst(0x81A5F220u), pa, xe::countof(pa));
                                     XELOGI("Guide: XamApp pump returned");
                                     return 0;
                                   },
