@@ -1,5 +1,6 @@
 /**
- ******************************************************************************
+ *****
+*************************************************************************
  * Xenia : Xbox 360 Emulator Research Project                                 *
  ******************************************************************************
  * Copyright 2013 Ben Vanik. All rights reserved.                             *
@@ -558,6 +559,20 @@ DEFINE_int32(guide_second_context_kb, 0,
              "title is about to present.",
              "Kernel");
 
+DEFINE_bool(guide_predraw_surfaces, false,
+            "Before EVERY composite draw, point the drawing device's "
+            "render-target slots and front buffer at the title's live "
+            "surface. The RTs are an indexed array - [dev+(idx+0xCA8)*4], "
+            "i.e. 0x32A0 + idx*4 for idx 0..3, with idx==4 special-cased "
+            "to the depth slot 0x32B0 - plus the front buffer at 0x3F74, "
+            "which 819F5D50 shows is the draw emitter's sixth argument. "
+            "guide_bind_depth_scan writes the same slots but at button "
+            "time on the dispatch thread, and 819F4C00 (the unbind-all) "
+            "clears them before the title thread ever draws, which is why "
+            "it changes nothing. This writes them on the drawing thread "
+            "against [dc+0x1CC] - the device the draw actually uses - so "
+            "they survive to 819DE94C and 819F5EC4.",
+            "Kernel");
 DEFINE_int32(guide_bind_cmdbuf_kb, 0,
              "Allocate a command buffer of this many KB and point the Guide "
              "device's write cursor [dev+0x2B4C] at it. Packet emission "

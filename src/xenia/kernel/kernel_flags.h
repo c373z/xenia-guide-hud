@@ -119,6 +119,7 @@ DECLARE_bool(lle_xam_heap0_alias);
 DECLARE_bool(lle_xam_heap_init);
 DECLARE_bool(lle_xam_device_init);
 DECLARE_bool(guide_bind_depth_scan);
+DECLARE_bool(guide_predraw_surfaces);
 DECLARE_bool(guide_fix_draw_device);
 DECLARE_bool(guide_make_surface);
 DECLARE_bool(guide_fix_hud_dc);
