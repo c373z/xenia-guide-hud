@@ -114,6 +114,10 @@ enum class GammaRampType {
 // reference to the command processor, and the RT-identity question has to be
 // answered from inside it.
 extern bool g_guide_in_draw_scope;
+// Phase 536: set while the captured IB is being replayed, so the render target
+// cache can report what state the replayed draws actually get - the suspicion
+// is that they run against the title's state, not the Guide's.
+extern bool g_guide_replaying;
 
 class CommandProcessor {
  public:

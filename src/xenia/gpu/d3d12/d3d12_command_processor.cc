@@ -3211,19 +3211,29 @@ bool D3D12CommandProcessor::IssueCopy() {
     };
     bool ok_a = IssueCopy();
     uint32_t sum_a = sum();
+    // Control: resolve again with nothing in between. If this differs from
+    // sum_a the resolve is not idempotent and the comparison below is noise; if
+    // it matches, a later difference is genuinely the Guide's geometry. Without
+    // this, "the replay changed nothing" could equally mean "the second resolve
+    // was skipped as redundant", and phase 535 could not tell them apart.
+    bool ok_c = IssueCopy();
+    uint32_t sum_c = sum();
     guide_replaying_ = true;
+    xe::gpu::g_guide_replaying = true;
     ExecuteGuestBufferVirtualUnsafe(guide_replay_addr_, guide_replay_words_);
+    xe::gpu::g_guide_replaying = false;
     guide_replaying_ = false;
     bool ok_b = IssueCopy();
     uint32_t sum_b = sum();
     static uint32_t ablog = 0, abdiff = 0, abtot = 0;
     ++abtot;
-    if (sum_a != sum_b) ++abdiff;
+    if (sum_c != sum_b) ++abdiff;
     if (ablog++ < 8 || (abtot % 100u) == 0u) {
-      XELOGI("GuideAB: without={:08X} with={:08X} {} | {}/{} frames the Guide "
-             "changed the resolved image (copies {}/{})",
-             sum_a, sum_b, (sum_a != sum_b) ? "DIFFERENT" : "same", abdiff,
-             abtot, ok_a, ok_b);
+      XELOGI("GuideAB: a={:08X} control={:08X} {} | with_guide={:08X} {} | "
+             "{}/{} frames changed (copies {}/{}/{})",
+             sum_a, sum_c, (sum_a == sum_c) ? "idempotent" : "NOT-IDEMPOTENT",
+             sum_b, (sum_c != sum_b) ? "DIFFERENT" : "same", abdiff, abtot,
+             ok_a, ok_c, ok_b);
     }
     guide_in_ab_ = false;
     return ok_b;
@@ -3234,6 +3244,7 @@ bool D3D12CommandProcessor::IssueCopy() {
   if (cvars::guide_replay_before_resolve && !guide_resolve_replay_ &&
       !guide_replaying_ && guide_replay_armed_ && guide_replay_words_) {
     guide_replaying_ = true;
+    xe::gpu::g_guide_replaying = true;
     static uint32_t rplog = 0;
     if (rplog++ < 8) {
       XELOGI("GuideReplay: {} words at {:08X} before the title's resolve",
@@ -3242,6 +3253,7 @@ bool D3D12CommandProcessor::IssueCopy() {
     uint32_t before_draws = guide_draw_count_;
     ExecuteGuestBufferVirtualUnsafe(guide_replay_addr_, guide_replay_words_);
     guide_replaying_ = false;
+    xe::gpu::g_guide_replaying = false;
     // Executing the packets is not the same as issuing draws - confirm the
     // replay actually rasterises rather than just replaying state.
     static uint32_t rdlog = 0;

@@ -213,6 +213,7 @@ namespace gpu {
 // Phase 528: defined in command_processor.cc; this file does not include its
 // header, so declare it locally.
 extern bool g_guide_in_draw_scope;
+extern bool g_guide_replaying;
 
 void RenderTargetCache::GetPSIColorFormatInfo(
     xenos::ColorRenderTargetFormat format, uint32_t write_mask,
@@ -956,13 +957,16 @@ bool RenderTargetCache::Update(bool is_rasterization_done,
   // matters. Report that slot, split by whether the draw is the Guide's: if the
   // keys differ, the Guide renders into a target the title never resolves.
   {
-    static uint32_t gk = 0, tk = 0;
+    static uint32_t gk = 0, tk = 0, rk = 0;
     bool in_guide = g_guide_in_draw_scope;
-    if (in_guide ? (gk++ < 5) : (tk++ < 5)) {
+    bool in_replay = g_guide_replaying;
+    bool show = in_replay ? (rk++ < 5) : (in_guide ? (gk++ < 5) : (tk++ < 5));
+    if (show) {
       const RenderTarget* c0 = last_update_used_render_targets_[1];
       const RenderTarget* d0 = last_update_used_render_targets_[0];
       XELOGI("RTUsed[{}]: colour0 key={:08X} depth key={:08X} used_bits={:02X}",
-             in_guide ? "guide" : "title", c0 ? c0->key().key : 0xFFFFFFFFu,
+             in_replay ? "replay" : (in_guide ? "guide" : "title"),
+             c0 ? c0->key().key : 0xFFFFFFFFu,
              d0 ? d0->key().key : 0xFFFFFFFFu, depth_and_color_rts_used_bits);
     }
   }
