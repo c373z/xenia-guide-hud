@@ -7322,8 +7322,17 @@ void VdSwap_entry(
       uint32_t cd_r0 = cq(cd_dev + 0x30u);
       uint32_t cd_b0 = cq(cd_dev + 0x2B4Cu);
       in_guide_draw_scope = true;
+      // Phase 525: tell the command processor which draws are the Guide's, so
+      // its blend state can be overridden without touching the title's.
+      auto* gs_scope = kernel_state()->emulator()->graphics_system();
+      if (gs_scope && gs_scope->command_processor()) {
+        gs_scope->command_processor()->guide_in_draw_scope_ = true;
+      }
       uint64_t gr = kernel_state()->processor()->Execute(
           gth->thread_state(), guide_draw_fn_, gargs, xe::countof(gargs));
+      if (gs_scope && gs_scope->command_processor()) {
+        gs_scope->command_processor()->guide_in_draw_scope_ = false;
+      }
       in_guide_draw_scope = false;
       if (cd_dev) {
         uint32_t cd_r1 = cq(cd_dev + 0x30u), cd_b1 = cq(cd_dev + 0x2B4Cu);
@@ -7838,9 +7847,29 @@ void VdSwap_entry(
               // advancing while the Guide keeps drawing, the geometry is landing
               // in EDRAM after the frame has already been resolved and is
               // cleared unseen.
+              XELOGI("GuideScoped: {} draws seen by the GPU thread inside the "
+                     "Guide's scope (delta attributes {})",
+                     gsx->command_processor()->guide_scoped_draws_, gpu_total);
               XELOGI("GuideSeq: +{} draws | resolves={} swaps={} (total draws {})",
                      gd_delta, gsx->command_processor()->guide_resolve_count_,
                      gsx->command_processor()->guide_swap_count_, gpu_total);
+              // Phase 525: the draws produce no fragments (phase 524), so read
+              // the state that can reject every one of them. Read, do not infer
+              // - this is a value question and those have gone wrong here.
+              if (rf && rtlog < 6) {
+                float xs, xo;
+                uint32_t xs_u = (*rf)[0x210F], xo_u = (*rf)[0x2110];
+                std::memcpy(&xs, &xs_u, 4);
+                std::memcpy(&xo, &xo_u, 4);
+                XELOGI("GuideDrawState: scissor TL={:08X} BR={:08X} | "
+                       "DEPTHCONTROL={:08X} BLENDCONTROL0={:08X} "
+                       "COLORCONTROL={:08X} | CLIP_CNTL={:08X} "
+                       "SU_SC_MODE={:08X} VTE_CNTL={:08X} | vport x scale={} "
+                       "offset={}",
+                       (*rf)[0x2081], (*rf)[0x2082], (*rf)[0x2200],
+                       (*rf)[0x2201], (*rf)[0x2202], (*rf)[0x2204],
+                       (*rf)[0x2205], (*rf)[0x2206], xs, xo);
+              }
               if (rf && rtlog++ < 6) {
                 XELOGI("GuideDrawRT: +{} draws | RB_SURFACE_INFO={:08X} "
                        "RB_COLOR_INFO={:08X} RB_MODECONTROL={:08X} "

@@ -450,6 +450,17 @@ class CommandProcessor {
   // poor witness - they under-report writes that rewrite an existing value -
   // whereas a draw either dispatches or it does not.
   uint32_t guide_draw_count_ = 0;
+  // Phase 525: set by the kernel around the Guide's own Execute, so draws
+  // belonging to the Guide can be told from the title's - ++guide_draw_count_
+  // fires for every DRAW_INDX in the stream, not just the Guide's.
+  bool guide_in_draw_scope_ = false;
+  // Phase 525: draws seen by the GPU thread while the scope flag is set.
+  // The flag is set on the TITLE thread around the Guide's Execute, but
+  // packets are consumed asynchronously here, so a delta of
+  // guide_draw_count_ across that window can be the title's draws. If this
+  // counter stays near zero while the delta does not, the 2071 draws that
+  // phases 520-522 attributed to the Guide were never the Guide's.
+  uint32_t guide_scoped_draws_ = 0;
   // Phase 522: ordering instrumentation. The Guide's geometry reaches the
   // primary EDRAM target (phase 521), but EDRAM is only visible once it is
   // resolved. If the composite draws land after the frame's resolve they

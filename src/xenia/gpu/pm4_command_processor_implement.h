@@ -471,14 +471,31 @@ bool COMMAND_PROCESSOR::ExecutePacketType3(uint32_t packet) XE_RESTRICT {
                                                                        count);
         break;
       case PM4_DRAW_INDX:
+      case PM4_DRAW_INDX_2: {
         ++guide_draw_count_;
-        result = COMMAND_PROCESSOR::ExecutePacketType3_DRAW_INDX(packet, count);
-        break;
-      case PM4_DRAW_INDX_2:
-        ++guide_draw_count_;
-        result =
-            COMMAND_PROCESSOR::ExecutePacketType3_DRAW_INDX_2(packet, count);
-        break;
+        // Phase 525: the Guide's blend state is src=kSrcAlpha, dst=
+        // kOneMinusSrcAlpha (RB_BLENDCONTROL0 = 01010706). With a source alpha
+        // of zero that computes exactly the destination, which is what phase
+        // 524 measured - a resolve producing byte-identical output. Force the
+        // Guide's own draws opaque to find out whether the geometry covers
+        // anything; if the image changes, coverage is fine and alpha is the
+        // problem.
+        uint32_t saved_blend = 0;
+        bool forced = false;
+        if (guide_in_draw_scope_) ++guide_scoped_draws_;
+        if (guide_in_draw_scope_ && cvars::guide_force_opaque) {
+          RegisterFile& brf = *register_file_;
+          saved_blend = brf[0x2201];
+          brf[0x2201] = 0x00000001u;  // src=kOne, dst=kZero, add
+          forced = true;
+        }
+        result = (opcode == PM4_DRAW_INDX)
+                     ? COMMAND_PROCESSOR::ExecutePacketType3_DRAW_INDX(packet,
+                                                                       count)
+                     : COMMAND_PROCESSOR::ExecutePacketType3_DRAW_INDX_2(
+                           packet, count);
+        if (forced) (*register_file_)[0x2201] = saved_blend;
+      } break;
       case PM4_SET_CONSTANT:
         result =
             COMMAND_PROCESSOR::ExecutePacketType3_SET_CONSTANT(packet, count);

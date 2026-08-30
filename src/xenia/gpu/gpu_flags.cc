@@ -150,3 +150,10 @@ DEFINE_bool(guide_verify_resolve, false,
             "Checksum the resolve destination before and after the Guide's "
             "extra resolve and report how many frames it changes.",
             "GPU");
+
+// Phase 525: force the Guide's own draws to opaque blending, to separate "the
+// geometry covers nothing" from "the geometry is drawn fully transparent".
+DEFINE_bool(guide_force_opaque, false,
+            "Override RB_BLENDCONTROL0 to src=One dst=Zero for draws issued "
+            "inside the Guide's render call.",
+            "GPU");
