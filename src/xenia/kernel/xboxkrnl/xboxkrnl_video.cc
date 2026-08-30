@@ -1978,7 +1978,11 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
         // disassembled offline. The hud module is not in xam.bin, so this is
         // the only way to read it - the same approach the ImageCheck probe used.
         {
-          for (uint32_t base : {0x913EA940u, 0x913EA9C0u}) {
+          // Phase 574: 913EA9EC calls a hud thunk at 913FE7D4. Resolving it
+          // says which xam function hud is really invoking, and therefore
+          // whether that function takes a handle or an object - which is the
+          // question three phases of value-substitution failed to settle.
+          for (uint32_t base : {0x913EA9C0u, 0x913FE7D0u}) {
             std::string hx;
             for (uint32_t a = base; a < base + 0x60u; a += 4) {
               hx += fmt::format("{:08X} ", rd(a));
