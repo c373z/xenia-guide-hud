@@ -2000,13 +2000,16 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
         // Dump those so the failing method is a named address rather than an
         // inference.
         {
-          uint32_t nvt = rd(nav_obj);
-          XELOGI("GuideNavVT: navObj={:08X} [+10]={:08X} [+14]={:08X} "
-                 "[+0C]={:08X} vtable={:08X} | [+1C]={:08X} [+24]={:08X} "
-                 "[+04]={:08X}",
-                 nav_obj, rd(nav_obj + 0x10u), rd(nav_obj + 0x14u),
-                 rd(nav_obj + 0x0Cu), nvt, nvt ? rd(nvt + 0x1Cu) : 0,
-                 nvt ? rd(nvt + 0x24u) : 0, nvt ? rd(nvt + 4u) : 0);
+          // Phase 582: 913EA898's `this` is navObj+0x10 (581), so its vtable
+          // is [navObj+0x10] and the field it branches on is [navObj+0x24].
+          uint32_t sub = nav_obj + 0x10u;
+          uint32_t svt = rd(sub);
+          XELOGI("GuideNavVT: sub={:08X} vtable={:08X} | [+1C]={:08X} "
+                 "[+24]={:08X} [+04]={:08X} | [sub+14]=[navObj+24]={:08X} "
+                 "[sub+0C]={:08X}",
+                 sub, svt, svt ? rd(svt + 0x1Cu) : 0,
+                 svt ? rd(svt + 0x24u) : 0, svt ? rd(svt + 4u) : 0,
+                 rd(sub + 0x14u), rd(sub + 0x0Cu));
         }
         // Phase 579: the dispatcher now completes and returns 8000FFFF, so
           // dump 913EC6D0 to find which check produces it. Note the documented
