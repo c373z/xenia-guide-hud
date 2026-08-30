@@ -357,6 +357,74 @@ bool COMMAND_PROCESSOR::ExecutePacketType0(uint32_t packet) XE_RESTRICT {
                  base_index, count, trf[0x4800], trf[0x4801], trf[0x4802],
                  trf[0x4803], trf[0x4804], trf[0x4805]);
         }
+      } else if (base_index >= 0x4000u && base_index < 0x4800u) {
+        // Phase 548: the draws are kAutoIndex with no vertex fetch (547), so the
+        // geometry comes from these ALU constants. Print them as floats - if the
+        // positions are degenerate or off-screen that is visible directly, and
+        // it is the last untested stage.
+        // Phase 548: the crux is whether the Guide ever writes VERTEX shader
+        // constants (vec4 0-255, 0x4000-0x43FF) as opposed to pixel ones. A
+        // capped log cannot answer that, so count both ranges over the whole
+        // run and report periodically.
+        {
+          static uint32_t n_vs = 0, n_ps = 0, rep = 0;
+          if (base_index < 0x4400u) ++n_vs; else ++n_ps;
+          if ((++rep % 200u) == 0u) {
+            XELOGI("GuideALURange: {} vertex-range writes (0x4000-0x43FF), "
+                   "{} pixel-range writes (0x4400+)",
+                   n_vs, n_ps);
+          }
+        }
+        // Log the rare vertex-range writes in full - 13 in a run, against 2187
+        // pixel-range - since those carry the transform the geometry depends on.
+        static uint32_t vslog = 0;
+        if (base_index < 0x4400u && vslog++ < 8) {
+          RegisterFile& vrf = *register_file_;
+          std::string vv;
+          for (uint32_t k = 0; k < 16 && k < count; ++k) {
+            uint32_t raw = vrf[base_index + k];
+            float fv;
+            std::memcpy(&fv, &raw, 4);
+            vv += fmt::format("{} ", fv);
+          }
+          XELOGI("GuideVS: base={:04X} (vec4 {}) count={} | {}", base_index,
+                 (base_index - 0x4000u) / 4u, count, vv);
+          // Only the first 16 of 1024 registers were visible above, so the quad
+          // rect could sit anywhere in the bank. Report every non-zero vec4 -
+          // if the bank is empty apart from vec4 0, the geometry has nothing to
+          // be built from.
+          std::string nz;
+          uint32_t nz_count = 0;
+          for (uint32_t v = 0; v < 256u && base_index + v * 4 + 3 < 0x4400u;
+               ++v) {
+            uint32_t a0 = vrf[0x4000 + v * 4], a1 = vrf[0x4001 + v * 4];
+            uint32_t a2 = vrf[0x4002 + v * 4], a3 = vrf[0x4003 + v * 4];
+            if (a0 | a1 | a2 | a3) {
+              ++nz_count;
+              if (nz_count <= 8) {
+                float g[4];
+                uint32_t rr[4] = {a0, a1, a2, a3};
+                for (uint32_t q = 0; q < 4; ++q) std::memcpy(&g[q], &rr[q], 4);
+                nz += fmt::format("[{}]={} {} {} {} ", v, g[0], g[1], g[2],
+                                  g[3]);
+              }
+            }
+          }
+          XELOGI("GuideVSNonZero: {} of 256 vec4s non-zero | {}", nz_count, nz);
+        }
+        static uint32_t alulog = 0;
+        if (alulog++ < 6) {
+          RegisterFile& arf = *register_file_;
+          std::string vals;
+          for (uint32_t k = 0; k < 12 && k < count; ++k) {
+            uint32_t raw = arf[base_index + k];
+            float fv;
+            std::memcpy(&fv, &raw, 4);
+            vals += fmt::format("{} ", fv);
+          }
+          XELOGI("GuideALU: base={:04X} (vec4 {}) count={} | {}", base_index,
+                 (base_index - 0x4000u) / 4u, count, vals);
+        }
       } else {
         static uint32_t t0other = 0;
         if (t0other++ < 12) {
