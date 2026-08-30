@@ -715,6 +715,21 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
   // in EDRAM after the displayed pixels were already copied out. Resolve again
   // here, with the copy registers the title's own resolve just used, so the
   // Guide's pixels reach the same destination before the swap.
+  // Phase 531: the extra resolve writes to whichever buffer the title last
+  // resolved (guide_saved_copy_[1]). With double buffering that need not be the
+  // buffer about to be presented, in which case the Guide's pixels are put into
+  // the back one and never shown - a simpler failure than the ordering one, and
+  // worth ruling out before moving the draw hook.
+  {
+    static uint32_t sblog = 0;
+    if (sblog++ < 8) {
+      XELOGI("GuideSwapBuf: presenting {:08X} | extra resolve wrote {:08X} | {}",
+             frontbuffer_ptr, guide_saved_copy_[1] & ~0xFFFu,
+             ((guide_saved_copy_[1] & ~0xFFFu) == (frontbuffer_ptr & ~0xFFFu))
+                 ? "SAME"
+                 : "DIFFERENT");
+    }
+  }
   guide_draws_at_last_swap_ = guide_draw_count_;
   ++guide_swap_count_;  // phase 522
   COMMAND_PROCESSOR::IssueSwap(frontbuffer_ptr, frontbuffer_width,
