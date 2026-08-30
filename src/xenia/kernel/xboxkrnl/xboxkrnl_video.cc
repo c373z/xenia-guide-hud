@@ -803,6 +803,24 @@ uint32_t GuideConst(uint32_t addr) {
 // heap's Protect() does not lift that, so this goes at the host page directly;
 // a bare store faults at the host mapping and kills the run before logging,
 // which reads exactly like "the patch code never executed".
+// Phase 567: resolve a XUI handle to its object through the generation-checked
+// table at 81D6D0D8. Phases 558-566 traced every remaining failure to this
+// harness installing handles where hud and xam expect object pointers; the fix
+// has to be applied at every install, not one, which is why phase 559's
+// single-site change moved the fault instead of clearing it.
+uint32_t GuideResolveHandle(uint32_t handle) {
+  if (!handle) return 0;
+  auto* m = kernel_state()->memory();
+  auto r = [m](uint32_t a) {
+    return xe::load_and_swap<uint32_t>(m->TranslateVirtual(a));
+  };
+  uint32_t idx = handle & 0xFFFFu, tag = handle >> 16;
+  uint32_t bucket = r(0x81D6D0D8u + (idx >> 8) * 4u);
+  if (!bucket) return 0;
+  uint32_t entry = bucket + (idx & 0xFFu) * 8u;
+  return (r(entry) == tag) ? r(entry + 4u) : 0;
+}
+
 bool GuidePatchWord(uint32_t addr, uint32_t expect, uint32_t value,
                     const char* name) {
   auto* pm = kernel_state()->memory();
@@ -2023,8 +2041,20 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
           XELOGI("GuideNav: keeping guide_scene_name draw root; NOT "
                  "re-pointing to hud-built Status {:08X}", hud_scene);
         } else if (!nr && hud_scene) {
+          // Phase 567: this is the branch that runs when guide_navigate_manual
+          // is off - the configuration phase 559 was testing - so the fix
+          // applied there never executed.
+          uint32_t hud_stored = hud_scene;
+          if (::cvars::guide_draw_root_object) {
+            uint32_t ho = GuideResolveHandle(hud_scene);
+            if (ho) {
+              hud_stored = ho;
+              XELOGI("GuideNav: draw root as object {:08X} (handle {:08X})", ho,
+                     hud_scene);
+            }
+          }
           xe::store_and_swap<uint32_t>(
-              memory->TranslateVirtual(guide_bs_obj_ + 0x18u), hud_scene);
+              memory->TranslateVirtual(guide_bs_obj_ + 0x18u), hud_stored);
           guide_bs_scene_ = hud_scene;
           XELOGI("GuideNav: draw root [this+8] -> {:08X} (hud-built Status)",
                  hud_scene);
