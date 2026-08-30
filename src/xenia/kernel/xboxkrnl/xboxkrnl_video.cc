@@ -760,6 +760,32 @@ uint32_t GuideConst(uint32_t addr) {
   return nop ? nop : addr;
 }
 
+// Phase 509: a fixed 1280x720 surface needs 0x2AA blocks and the pool typically
+// has fewer free, so 819E7528 fails its fit check at 819E75EC and the Guide ends
+// up with no render target at all (phase 508). Fall back through smaller sizes
+// and take the first that fits - 852x480 matches the measured element bounds and
+// is what this picks in practice.
+//
+// This is a workaround, not the fix: a smaller target means the Guide renders at
+// the wrong resolution. It exists so the open question from phase 506 - whether
+// the missing render target is what stops the elements emitting - can be tested.
+static uint32_t GuideMakeSurface(xe::cpu::Processor* proc,
+                                 xe::cpu::ThreadState* ts) {
+  static const uint32_t kSizes[][2] = {{1280, 720}, {852, 480}, {640, 480},
+                                       {640, 640},  {512, 512}, {256, 256}};
+  for (const auto& wh : kSizes) {
+    uint64_t ca[] = {wh[0], wh[1], 0x18280186u, 0, 0};
+    uint32_t s = static_cast<uint32_t>(
+        proc->Execute(ts, GuideConst(0x819E7528u), ca, xe::countof(ca)));
+    if (s) {
+      XELOGI("GuideMakeSurface: {}x{} -> {:08X}", wh[0], wh[1], s);
+      return s;
+    }
+    XELOGW("GuideMakeSurface: {}x{} did not fit", wh[0], wh[1]);
+  }
+  return 0;
+}
+
 uint32_t XamProviderSlot() {
   if (g_provider_slot_done) {
     return g_provider_slot;
@@ -3237,11 +3263,22 @@ void VdSwap_entry(
           uint32_t swrap = sdc ? srd(sdc + 0x1CCu) : 0;
           uint32_t sdev = swrap ? srd(swrap + 0x0Cu) : 0;
           if (sdev) {
-            uint64_t ca[] = {1280, 720, 0x18280186u, 0, 0};
-            uint32_t surf = static_cast<uint32_t>(
-                proc->Execute(sts, GuideConst(0x819E7528u), ca, xe::countof(ca)));
-            uint32_t fb = static_cast<uint32_t>(
-                proc->Execute(sts, GuideConst(0x819E7528u), ca, xe::countof(ca)));
+            // This block runs per frame and used to create two fresh surfaces
+            // each time without ever freeing them, which walks the pool down:
+            // the first call got 1280x720, the next fell back to 852x480, then
+            // 640x480, and so on. That exhaustion is the harness's own doing and
+            // would make any later "did not fit" reading meaningless. Create
+            // once and reuse.
+            static uint32_t cached_predraw_surf = 0;
+            static uint32_t cached_predraw_fb = 0;
+            if (!cached_predraw_surf) {
+              cached_predraw_surf = GuideMakeSurface(proc, sts);
+            }
+            if (!cached_predraw_fb) {
+              cached_predraw_fb = GuideMakeSurface(proc, sts);
+            }
+            uint32_t surf = cached_predraw_surf;
+            uint32_t fb = cached_predraw_fb;
             if (surf) {
               uint64_t ra[] = {sdev, 0, surf};
               proc->Execute(sts, GuideConst(0x819F31A8u), ra, xe::countof(ra));
@@ -6915,10 +6952,19 @@ void VdSwap_entry(
                 if (tsurf && (tw0 & 0x40000000u)) {
                   surf = tsurf;
                 } else {
-                  uint64_t ca[] = {1280, 720, 0x18280186u, 0, 0};
-                  surf = uint32_t(kernel_state()->processor()->Execute(
-                      gth->thread_state(), GuideConst(0x819E7528u), ca,
-                      xe::countof(ca)));
+                  // Phase 509: 1280x720 needs 0x2AA blocks and only ~0x286 are
+                  // free, so 819E7528 fails its fit check at 819E75EC and the
+                  // Guide gets no render target at all (phase 508). A surface
+                  // that fits is strictly better than none: fall back through
+                  // smaller sizes and take the first that succeeds. 640x640 and
+                  // below were measured to work against the same pool.
+                  //
+                  // This is a diagnostic fallback, not the fix - a smaller
+                  // target means the Guide renders at the wrong resolution. It
+                  // exists to answer whether "no render target" is what stops
+                  // the elements emitting, which is the open question from 506.
+                  surf = GuideMakeSurface(kernel_state()->processor(),
+                                          gth->thread_state());
                 }
                 cached_surf = surf;
               }
