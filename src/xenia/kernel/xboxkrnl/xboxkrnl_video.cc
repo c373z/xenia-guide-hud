@@ -3327,7 +3327,12 @@ void VdSwap_entry(
   // (e.g. with guide_clear_cmd_overflow). One-shot inside the function.
   {
     static uint32_t cov_frames = 0;
-    if (::cvars::guide_coverage_fn && ++cov_frames == 2000) {
+    // Phase 585: was 2000 swaps. covrun kills at 60s and the title swaps at
+    // ~30fps, so the one-shot landed ~6s AFTER every run ended and the
+    // instrument never reported - the readback in emulator.cc sits behind a
+    // 6000-frame (~96s) loop and is equally unreachable. 900 swaps is ~30s:
+    // well after the 10s auto-press, well before the kill.
+    if (::cvars::guide_coverage_fn && ++cov_frames == 900) {
       EmitGuideCoverageOnce();
     }
   }

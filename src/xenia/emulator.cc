@@ -6270,7 +6270,13 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                   auto* cpd = gsd ? gsd->command_processor() : nullptr;
                   uint32_t prev_draws =
                       cpd ? cpd->guide_draw_count_ : 0u;
-                  for (int frame = 0; frame < 6000; ++frame) {
+                  // Phase 585: the coverage readback sits AFTER this loop,
+                  // and 6000 frames outlasts every run (covrun kills at 60s;
+                  // the loop reaches ~frame 3000 by then), so the instrument
+                  // could never report from here. When coverage is requested,
+                  // bound the loop so the readback is actually reached.
+                  const int kGuideFrames = cvars::guide_coverage_fn ? 2000 : 6000;
+                  for (int frame = 0; frame < kGuideFrames; ++frame) {
                     uint64_t da[] = {obj};
                     ks->processor()->Execute(ts, (g_hud_render ? g_hud_render : hb + 0xAB28u), da,
                                              xe::countof(da));
@@ -6310,6 +6316,22 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                              "{:08X} (+0x{:X})",
                              uint32_t(cvars::guide_coverage_fn), ex, n, last,
                              last - td.start_address());
+                      // Phase 585: "17 of 203 executed" says the function
+                      // bailed early but not down WHICH path. The executed
+                      // set is the path; print it. Capped so a hot function
+                      // cannot flood the log.
+                      if (ex <= 96) {
+                        std::string ep;
+                        for (uint32_t i = 0; i < n; ++i) {
+                          if (cnt[i]) {
+                            ep += fmt::format("{:08X}x{} ",
+                                              td.start_address() + i * 4,
+                                              cnt[i]);
+                          }
+                        }
+                        XELOGI("CoveragePath {:08X}: {}",
+                               uint32_t(cvars::guide_coverage_fn), ep);
+                      }
                     } else {
                       XELOGI("Coverage {:08X}: no counts - lookup={}, "
                              "guest_fn={}, trace_valid={}",

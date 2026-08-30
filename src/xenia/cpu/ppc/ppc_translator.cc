@@ -223,7 +223,17 @@ bool PPCTranslator::Translate(GuestFunction* function,
   }
 
   // Setup trace data, if needed.
-  if (debug_info_flags & DebugInfoFlags::kDebugInfoTraceFunctions) {
+  //
+  // Phase 585: this used to require kDebugInfoTraceFunctions, so per-function
+  // coverage could only be collected with the global --trace_functions, whose
+  // per-instruction instrumentation of EVERY function is heavy enough that the
+  // title never reaches the code under study (phases 465, 492, 570 each hit
+  // this and abandoned the measurement). The coverage flag is already
+  // restricted to one address by trace_coverage_only_fn, so allocating trace
+  // data when EITHER flag is set makes single-function coverage usable on its
+  // own, with instrumentation on exactly one function.
+  if (debug_info_flags & (DebugInfoFlags::kDebugInfoTraceFunctions |
+                          DebugInfoFlags::kDebugInfoTraceFunctionCoverage)) {
     // Base trace data.
     size_t trace_data_size = FunctionTraceData::SizeOfHeader();
     if (debug_info_flags & DebugInfoFlags::kDebugInfoTraceFunctionCoverage) {
