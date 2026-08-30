@@ -70,6 +70,7 @@ DECLARE_bool(guide_fake_ring);
 DECLARE_int32(guide_second_context_kb);
 DECLARE_bool(guide_predraw_surfaces);
 DECLARE_int32(guide_vis_extra_mask);
+DECLARE_bool(guide_call_present_bracket);
 DECLARE_bool(guide_force_drawgate);
 DECLARE_int32(guide_bind_cmdbuf_kb);
 DECLARE_uint32(guide_device_init_fn);

@@ -579,6 +579,14 @@ DEFINE_int32(guide_vis_extra_mask, 0,
              "lost in the refactor incident; type and default recovered from "
              "the pre-loss run-log config dump.",
              "Guide");
+DEFINE_bool(guide_call_present_bracket, false,
+            "Call 819FEB78(dev) - the device function that brackets the draw - "
+            "instead of relying on our injected paint. The emitter reads its "
+            "cursor from a CALLER STACK LOCAL (phase 485), so no device field "
+            "we write can supply it; the cursor has to come from the begin that "
+            "819FEB78's own call chain performs. Its unwind chain is exactly "
+            "819FECB4 -> 819FE9B4 -> 819FDD74 -> 81A0A6A4 -> the emitter.",
+            "Guide");
 DEFINE_bool(guide_force_drawgate, false,
             "Set the low 12 bits of [dev+0x10] before each composite draw. "
             "819F6BC0 keeps exactly those bits (rldicl r10,r11,0,52) and skips "

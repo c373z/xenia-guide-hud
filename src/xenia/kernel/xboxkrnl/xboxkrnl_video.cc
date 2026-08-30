@@ -5755,6 +5755,15 @@ void VdSwap_entry(
                            prd2(pdev + 0x2B4Cu));
                   }
                 }
+                if (::cvars::guide_call_present_bracket && pdev) {
+                  uint32_t bres = pcall(GuideConst(0x819FEB78u), {pdev});
+                  static uint32_t bl2 = 0;
+                  if (bl2++ < 3) {
+                    XELOGI("PresentBracket: 819FEB78(dev {:08X}) -> {:08X} | "
+                           "cur[2B4C]={:08X} [30]={:08X}",
+                           pdev, bres, prd2(pdev + 0x2B4Cu), prd2(pdev + 0x30u));
+                  }
+                }
                 uint32_t e0 = pdev
                                   ? prd2(pdev + 0x30u) : 0;
                 uint32_t gg = pcall(0x81954468u, {oi2});
