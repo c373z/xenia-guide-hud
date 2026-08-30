@@ -1937,6 +1937,24 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
         // the inner helper: it checks [navObj+0x508] with XuiHandleIsValid and
         // navigates back from the current scene first, which is the sequence
         // hud performs and the inner helper assumes has happened.
+        // Phase 558: the dispatcher faults dereferencing 00010135, a XUI
+        // handle, which is what the generation-checked table returns on a miss.
+        // Resolve the scene handle through that table by hand and report the
+        // tag comparison, so "the scene is not registered" is measured rather
+        // than assumed. Layout from phases 458-472: bucket = [base+(idx>>8)*4],
+        // entry = bucket + (idx & 0xFF)*8, entry[0] = tag, entry[1] = object,
+        // tag = handle >> 16.
+        {
+          uint32_t hnd = guide_bs_scene_;
+          uint32_t idx = hnd & 0xFFFFu, tag = hnd >> 16;
+          uint32_t bucket = rd(0x81D6D0D8u + (idx >> 8) * 4u);
+          uint32_t entry = bucket ? bucket + (idx & 0xFFu) * 8u : 0;
+          XELOGI("GuideHandle: scene {:08X} idx={:04X} tag={:04X} | "
+                 "bucket={:08X} entry={:08X} stored_tag={:08X} obj={:08X} -> {}",
+                 hnd, idx, tag, bucket, entry, entry ? rd(entry) : 0,
+                 entry ? rd(entry + 4u) : 0,
+                 (entry && rd(entry) == tag) ? "resolves" : "MISS");
+        }
         // Phase 557: [navObj+76] is 1 in every run. Per the dispatch documented
         // above, 913EC6D0 selects GuideMain.xur only for 0 or 4, specific
         // scenes for 7/3/5/6/8, and returns E_FAIL for anything else - so 1
