@@ -5842,7 +5842,22 @@ void VdSwap_entry(
             std::memset(pm2->TranslateVirtual(pout), 0, 16);
             // The return value was discarded; only `out` was checked. An
             // HRESULT says why 0x395 declines, which a null out cannot.
-            uint32_t vhr = pcall(f_v, {hp, pout});
+            // Phase 568: 0x395 (81935B60) uses its first argument directly as
+            // an object - it null-checks only the OUT pointer, then casts arg0
+            // against the visual class at 81935BA4. It does not resolve
+            // handles. The walk carries XUI handles, so pass the resolved
+            // object.
+            uint32_t hp_obj = ::cvars::guide_resolve_paint_handles
+                                  ? GuideResolveHandle(hp)
+                                  : 0;
+            uint32_t vhr = pcall(f_v, {hp_obj ? hp_obj : hp, pout});
+            if (hp_obj) {
+              static uint32_t rhlog = 0;
+              if (rhlog++ < 4) {
+                XELOGI("PaintResolve: handle {:08X} -> object {:08X} for 0x395",
+                       hp, hp_obj);
+              }
+            }
             uint32_t vh2 = prd2(pout);
             if (d < 3) {
               // 81931C90 returns S_OK with *out = 0 when [obj+8] is zero
@@ -5880,7 +5895,7 @@ void VdSwap_entry(
               // succeeds, the first call changed state and no amount of
               // decomposing the second one explains the first.
               std::memset(pm2->TranslateVirtual(pout), 0, 16);
-              uint32_t again = pcall(f_v, {hp, pout});
+              uint32_t again = pcall(f_v, {hp_obj ? hp_obj : hp, pout});
               XELOGI("VisualAgain: 0x395({:08X}) 2nd call -> hr={:08X} out={:08X}",
                      hp, again, prd2(pout));
               // 0x395 validates TWICE. The second check (81935BE8) takes the

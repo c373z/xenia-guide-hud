@@ -1040,3 +1040,10 @@ DEFINE_bool(guide_draw_root_object, false,
             "Store the resolved scene object pointer at the draw root instead "
             "of the XUI handle.",
             "Kernel");
+
+// Phase 568: 0x395 takes an object pointer, not a XUI handle - it casts its
+// first argument directly. Resolve handles before calling it from the walk.
+DEFINE_bool(guide_resolve_paint_handles, false,
+            "Resolve XUI handles to objects before passing them to xam calls "
+            "that expect object pointers.",
+            "Kernel");
