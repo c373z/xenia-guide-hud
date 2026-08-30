@@ -985,3 +985,13 @@ DEFINE_bool(guide_trace_cursor, false,
 DEFINE_bool(guide_patch_cursor_writers, false,
              "Guide research flag. Definition recovered 2026-08-29; the declaration survived but the definition did not.",
              "Guide");
+
+// Phase 502: force 819F4C00's slot-vs-default compare to always skip, so the
+// helper never calls SetRenderTarget(dev, idx, NULL). It is the only remaining
+// code path in the image that can zero an RT slot on this device; see the
+// comment at the patch site for the enumeration that establishes that.
+DEFINE_bool(guide_patch_rt_unbind, false,
+            "Patch 819F4C34 to an unconditional branch so the Guide's own "
+            "render target is not unbound between the paint and the read at "
+            "819F5F60.",
+            "Kernel");

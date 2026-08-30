@@ -2719,6 +2719,64 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   // the `guide_draw_fn_ && guide_draw_this_` test in the notification path
   // silently false. "Installed" logged without values cannot distinguish that
   // from a notification that never fires.
+  // Phase 502: 819F4C00 is the sole surviving producer of a NULL RT slot.
+  //
+  // A complete sweep of the image (research/slotscan.py) shows the RT slots are
+  // never written by a D-form store and never by the indexed path - all seven
+  // 0xCA8 sites are lwzx. The only writer is the setter 819F31A8, and of its 11
+  // callers exactly two pass a literal NULL surface: 819F4C44 (here) and
+  // 81A0F21C (the teardown, which phase 500 showed does not run). So every
+  // 408070C0 -> 00000000 transition on this device comes through this compare:
+  //
+  //   819F4C28  r11 = [dev + 0x32A0 + idx*4]   slot
+  //   819F4C2C  r10 = [dev + 0x3F78]           RT default
+  //   819F4C34  beq -> skip                    matches default, leave alone
+  //   819F4C38  r5  = 0                        else unbind: SetRenderTarget(NULL)
+  //
+  // Phase 500 eliminated this by observing slot == default at the paint site,
+  // but the compare that matters runs later - after the Guide binds its own RT,
+  // which makes the slot differ and drives it to NULL. Testing a precondition at
+  // the wrong moment, the same error phase 494 made about paths.
+  //
+  // Forcing the branch unconditional stops the unbind. If the chain above is
+  // right the 819F5F60 fault must disappear; if it survives unchanged with the
+  // readback confirming the patch landed, suspect the function was already
+  // translated and the JIT is running the pre-patch body.
+  if (::cvars::guide_patch_rt_unbind && XamIsDashrootLayout()) {
+    auto* pm = kernel_state()->memory();
+    uint32_t site = 0x819F4C34u;
+    // The xam text pages are mapped read-only; the first attempt at this took a
+    // host fault at 1819F4C34 (the host mapping of the guest address) and killed
+    // the run before the store landed, which reads exactly like "the patch code
+    // never executed". Unprotect first.
+    // The guest heap's Protect() did not make the host mapping writable (the
+    // second attempt faulted at the same host address with no log line), so go
+    // at the host page directly.
+    uint8_t* hp = pm->TranslateVirtual(site);
+    xe::memory::PageAccess old_access = xe::memory::PageAccess::kNoAccess;
+    bool unprot = xe::memory::Protect(
+        reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(hp) & ~0xFFFull),
+        0x1000, xe::memory::PageAccess::kReadWrite, &old_access);
+    XELOGI("RtUnbindPatch: host={} unprotect={}", static_cast<void*>(hp),
+           unprot ? "ok" : "FAILED");
+    if (!unprot) {
+      XELOGW("RtUnbindPatch: cannot unprotect - skipping patch");
+    } else {
+    uint32_t was = xe::load_and_swap<uint32_t>(pm->TranslateVirtual(site));
+    if (was == 0x419A0014u) {
+      xe::store_and_swap<uint32_t>(pm->TranslateVirtual(site), 0x48000014u);
+      XELOGI("RtUnbindPatch: {:08X} {:08X} -> {:08X} (readback {:08X})", site,
+             was, 0x48000014u,
+             xe::load_and_swap<uint32_t>(pm->TranslateVirtual(site)));
+    } else {
+      XELOGW("RtUnbindPatch: {:08X} reads {:08X}, expected 419A0014 - not "
+             "patching", site, was);
+    }
+    xe::memory::Protect(
+        reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(hp) & ~0xFFFull),
+        0x1000, old_access, nullptr);
+    }
+  }
   SetGuideDrawHook((g_hud_render ? g_hud_render : guide_bs_hud_base_ + 0xAB28u), render_obj);
   XELOGI("GuideBootstrap: draw hook args fn={:08X} self={:08X}",
          (g_hud_render ? g_hud_render : guide_bs_hud_base_ + 0xAB28u), render_obj);
