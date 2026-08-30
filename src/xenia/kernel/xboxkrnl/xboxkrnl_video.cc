@@ -5428,8 +5428,15 @@ void VdSwap_entry(
             uint32_t vhr = pcall(f_v, {hp, pout});
             uint32_t vh2 = prd2(pout);
             if (d < 3) {
-              XELOGI("VisualCall: 0x395@{:08X}({:08X}) hr={:08X} out={:08X} d={}",
-                     f_v, hp, vhr, vh2, d);
+              // 81931C90 returns S_OK with *out = 0 when [obj+8] is zero
+              // (81931D08: r3=0 / stw r3,0(r30) / return 0), and the export
+              // then reports 80300017. Resolve the object the same way it
+              // does and read +8 directly, rather than trusting the read.
+              uint32_t obj = pcall(0x81931040u, {hp});
+              XELOGI("VisualCall: 0x395@{:08X}({:08X}) hr={:08X} out={:08X} "
+                     "d={} | obj={:08X} [obj+8]={:08X}",
+                     f_v, hp, vhr, vh2, d, obj,
+                     obj ? prd2(obj + 8u) : 0);
             }
             if (vh2) {
               uint32_t oi2 = pcall(0x81931040u, {hp});
