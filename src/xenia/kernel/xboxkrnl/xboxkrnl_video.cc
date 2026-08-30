@@ -5487,6 +5487,27 @@ void VdSwap_entry(
               }
               XELOGI("VisualChain: visobj={:08X} want={:08X} chain: {}end",
                      vo, typid2, chain);
+              // Distinguishing test (phase 468): is +0x18 a type-id field that
+              // these objects fill wrongly, or are these objects simply not
+              // class descriptors? Dump the two type ids themselves - if a
+              // real descriptor has a different shape from a widget, the
+              // second reading holds.
+              static bool td_once = false;
+              if (!td_once) {
+                td_once = true;
+                for (uint32_t td : {typid, typid2}) {
+                  std::string wds;
+                  for (uint32_t q = 0; q < 8; ++q) {
+                    wds += fmt::format("+{:X}:{:08X} ", q * 4, prd2(td + q * 4u));
+                  }
+                  XELOGI("TypeDesc: {:08X} {}", td, wds);
+                }
+                std::string ww;
+                for (uint32_t q = 0; q < 8; ++q) {
+                  ww += fmt::format("+{:X}:{:08X} ", q * 4, prd2(vo + q * 4u));
+                }
+                XELOGI("WidgetObj: {:08X} {}", vo, ww);
+              }
             }
             if (vh2) {
               uint32_t oi2 = pcall(0x81931040u, {hp});
