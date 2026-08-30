@@ -2061,14 +2061,22 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
         // guide_bs_scene_ - a handle straight from hud's scene creator. The
         // draw-root field was not the source of the faulting handle; this is
         // the other place the same value is handed on.
+        // Phase 575: this second argument was assumed to be a parent scene,
+        // taken from 913EB7D8's signature. The dispatcher is a different
+        // function and hud caches this value at [this+0xC] - the field it then
+        // releases through 818FB110, the render-DC release (phase 574). The
+        // fault address confirms it: [ [r31+0xC] + 0 ] was 000100A9, and the
+        // structure with that at +0 is 40881894, which is exactly what phase
+        // 572 passed here. So the parameter is a DC, and every scene value
+        // tried in phases 559-573 was the wrong kind of thing.
         uint32_t parent_arg = guide_bs_scene_;
-        if (::cvars::guide_draw_root_object) {
+        if (::cvars::guide_nav_state >= 0 && guide_boot_dc_) {
+          XELOGI("GuideNav: passing DC {:08X} as arg2 instead of scene {:08X}",
+                 guide_boot_dc_, guide_bs_scene_);
+          parent_arg = guide_boot_dc_;
+        } else if (::cvars::guide_draw_root_object) {
           uint32_t po_ = GuideResolveHandle(guide_bs_scene_);
-          if (po_) {
-            XELOGI("GuideNav: parent scene arg {:08X} -> object {:08X}",
-                   guide_bs_scene_, po_);
-            parent_arg = po_;
-          }
+          if (po_) parent_arg = po_;
         }
         uint64_t na[] = {nav_obj, parent_arg};
         uint32_t nav_entry =
