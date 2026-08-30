@@ -1995,7 +1995,20 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
           // says which xam function hud is really invoking, and therefore
           // whether that function takes a handle or an object - which is the
           // question three phases of value-substitution failed to settle.
-          // Phase 579: the dispatcher now completes and returns 8000FFFF, so
+          // Phase 581: 913EA898 branches on [navObj+0x14] and then calls
+        // vtable[7] (+0x1C) and vtable[9] (+0x24), forwarding whichever fails.
+        // Dump those so the failing method is a named address rather than an
+        // inference.
+        {
+          uint32_t nvt = rd(nav_obj);
+          XELOGI("GuideNavVT: navObj={:08X} [+10]={:08X} [+14]={:08X} "
+                 "[+0C]={:08X} vtable={:08X} | [+1C]={:08X} [+24]={:08X} "
+                 "[+04]={:08X}",
+                 nav_obj, rd(nav_obj + 0x10u), rd(nav_obj + 0x14u),
+                 rd(nav_obj + 0x0Cu), nvt, nvt ? rd(nvt + 0x1Cu) : 0,
+                 nvt ? rd(nvt + 0x24u) : 0, nvt ? rd(nvt + 4u) : 0);
+        }
+        // Phase 579: the dispatcher now completes and returns 8000FFFF, so
           // dump 913EC6D0 to find which check produces it. Note the documented
           // "anything else -> 0x80004005" is a different constant, so this is a
           // failure further in, not the state check.
@@ -2003,7 +2016,9 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
           // dispatcher forwards as 8000FFFF. Every phase since 557 has looked
           // at its callers and callees through crash addresses without reading
           // it.
-          for (uint32_t base : {0x913EA898u, 0x913EA918u, 0x913EA998u}) {
+          // Phase 581: vtable[7] and vtable[9] are the same address,
+          // 913EACA8 - the shape of a shared stub. Dump it.
+          for (uint32_t base : {0x913EACA8u, 0x913EAD28u}) {
             std::string hx;
             for (uint32_t a = base; a < base + 0x80u; a += 4) {
               hx += fmt::format("{:08X} ", rd(a));
