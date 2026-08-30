@@ -2708,12 +2708,30 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
                 normalized_depth_control, apply_host_depth_polygon_offset)
           : DxbcShaderTranslator::Modification(0);
 
+  // Phase 527: the Guide's draws are well-formed, issued, and successful, and
+  // write nothing (phases 524-526). Two values computed just above decide
+  // whether a draw can write colour at all: is_rasterization_done, and the
+  // normalized colour mask - a zero mask means no channel is written, which
+  // would produce exactly the byte-identical EDRAM that has been measured.
+  if (guide_in_draw_scope_) {
+    static uint32_t gdlog = 0;
+    if (gdlog++ < 8) {
+      XELOGI("GuideDrawPipe: rasterization_done={} normalized_color_mask={:08X} "
+             "depth_control={:08X}",
+             is_rasterization_done, normalized_color_mask,
+             normalized_depth_control.value);
+    }
+  }
   // Set up the render targets - this may perform dispatches and draws.
   if (!render_target_cache_->Update(is_rasterization_done,
                                     normalized_depth_control,
                                     normalized_color_mask, *vertex_shader)) {
+    if (guide_in_draw_scope_) {
+      XELOGW("GuideDrawPipe: render target Update REJECTED the draw");
+    }
     return false;
   }
+
 
   // Create the pipeline (for this, need the actually used render target formats
   // from the render target cache), translating the shaders - doing this now to

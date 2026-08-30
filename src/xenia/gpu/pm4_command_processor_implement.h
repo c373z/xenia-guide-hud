@@ -1199,8 +1199,14 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
       // a silent skip that looks exactly like what is being seen: the packet is
       // counted, no backend failure appears, and no pixels are written.
       auto vq = register_file_->Get<reg::PA_SC_VIZ_QUERY>();
-      XELOGI("GuideDrawIndx: prim_type={} source_select={} num_indices={} "
-             "| viz_query_ena={} kill_pix_post_hi_z={} -> {}",
+      // Phase 527: phase 522 concluded "the Guide draws after the frame's
+      // resolve" from counters read on the TITLE thread while they are updated
+      // here on the GPU thread. This log runs on the GPU thread, so printing the
+      // same counters here settles the ordering without a cross-thread read.
+      XELOGI("GuideDrawIndx: [resolves={} swaps={}] prim_type={} "
+             "source_select={} num_indices={} | viz_query_ena={} "
+             "kill_pix_post_hi_z={} -> {}",
+             guide_resolve_count_, guide_swap_count_,
              uint32_t(vgt_draw_initiator.prim_type),
              uint32_t(vgt_draw_initiator.source_select),
              uint32_t(vgt_draw_initiator.num_indices),
