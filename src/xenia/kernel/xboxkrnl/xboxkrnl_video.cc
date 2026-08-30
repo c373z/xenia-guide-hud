@@ -7821,6 +7821,27 @@ void VdSwap_entry(
                      "geometry",
                      gpu_total, gpu_calls, gpu_frames);
             }
+            // Phase 521: 2071 submitted draws is not a visible overlay. Where do
+            // they land? The composite-draw line reports realdev[32A0]=0 even on
+            // the calls that produce geometry, so read the GPU's own view rather
+            // than the guest device's: RB_COLOR_INFO carries the colour target
+            // base and format, RB_SURFACE_INFO the pitch. If these name a
+            // surface the title never presents, that is geometry rendered
+            // nowhere.
+            if (gd_delta) {
+              auto* rf = kernel_state()->emulator()->graphics_system()
+                             ? kernel_state()->emulator()->graphics_system()
+                                   ->register_file()
+                             : nullptr;
+              static uint32_t rtlog = 0;
+              if (rf && rtlog++ < 6) {
+                XELOGI("GuideDrawRT: +{} draws | RB_SURFACE_INFO={:08X} "
+                       "RB_COLOR_INFO={:08X} RB_MODECONTROL={:08X} "
+                       "RB_COLOR_MASK={:08X}",
+                       gd_delta, (*rf)[0x2000], (*rf)[0x2001],
+                       (*rf)[0x2208], (*rf)[0x2104]);
+              }
+            }
           }
         }
       }
