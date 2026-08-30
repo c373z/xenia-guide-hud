@@ -22,6 +22,7 @@ DECLARE_bool(guide_verify_resolve);
 DECLARE_bool(guide_force_opaque);
 DECLARE_bool(guide_composite_frontbuffer);
 DECLARE_bool(guide_replay_before_resolve);
+DECLARE_bool(guide_replay_at_draw);
 
 DECLARE_uint64(framerate_limit);
 

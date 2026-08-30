@@ -583,6 +583,25 @@ bool COMMAND_PROCESSOR::ExecutePacketType3(uint32_t packet) XE_RESTRICT {
         if (!guide_replaying_ && guide_in_draw_scope_) {
           guide_ib_had_draw_ = true;
         }
+        // Phase 554: replay at the first title draw of the frame, inside the
+        // render pass, rather than inside the resolve.
+        if (cvars::guide_replay_at_draw && guide_frame_needs_replay_ &&
+            !guide_in_draw_scope_ && !guide_replaying_ && guide_replay_armed_ &&
+            guide_replay_words_) {
+          guide_frame_needs_replay_ = false;
+          guide_replaying_ = true;
+          xe::gpu::g_guide_replaying = true;
+          uint32_t before_rd = guide_draw_count_;
+          COMMAND_PROCESSOR::ExecuteGuestBufferVirtualUnsafe(
+              guide_replay_addr_, guide_replay_words_);
+          xe::gpu::g_guide_replaying = false;
+          guide_replaying_ = false;
+          static uint32_t rdlog2 = 0;
+          if (rdlog2++ < 6) {
+            XELOGI("GuideReplayAtDraw: {} draws replayed inside the render pass",
+                   guide_draw_count_ - before_rd);
+          }
+        }
         // Phase 530: the Guide's draws arrive as a burst. Resolve at the first
         // draw that is NOT the Guide's after one, which is the last moment its
         // pixels are still in EDRAM untouched by the title.
@@ -891,6 +910,7 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
                  : "DIFFERENT");
     }
   }
+  guide_frame_needs_replay_ = true;  // phase 554: arm for the next frame
   guide_draws_at_last_swap_ = guide_draw_count_;
   ++guide_swap_count_;  // phase 522
   COMMAND_PROCESSOR::IssueSwap(frontbuffer_ptr, frontbuffer_width,

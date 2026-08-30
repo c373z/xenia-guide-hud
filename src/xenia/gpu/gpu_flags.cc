@@ -171,3 +171,10 @@ DEFINE_bool(guide_composite_frontbuffer, false,
 DEFINE_bool(guide_replay_before_resolve, false,
             "Re-execute the Guide's draw burst just before the title's resolve.",
             "GPU");
+
+// Phase 554: replay the Guide's buffer at the first title draw of a frame,
+// inside an active render pass, rather than inside IssueCopy.
+DEFINE_bool(guide_replay_at_draw, false,
+            "Replay the Guide's captured buffer at the frame's first title "
+            "draw instead of during the resolve.",
+            "GPU");

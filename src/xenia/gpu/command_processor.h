@@ -523,6 +523,12 @@ class CommandProcessor {
   // the resolved frame" without needing to compare across runs of an animating
   // game, and without needing eyes.
   bool guide_in_ab_ = false;
+  // Phase 554: the replay currently runs inside IssueCopy - during a resolve,
+  // which is a copy rather than a render pass, so the render target may already
+  // be transitioned and correctly-configured draws would still not land in the
+  // surface the resolve reads. This drives the replay from a title draw
+  // instead, where a render pass is certainly active.
+  bool guide_frame_needs_replay_ = false;
   // Phase 538: the replayed draws fetch geometry through constants the replay
   // never writes - it inherits the burst's values with the valid bit cleared
   // (phase 537). Snapshot the whole fetch block during the burst and restore it
