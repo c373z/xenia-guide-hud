@@ -5482,8 +5482,24 @@ void VdSwap_entry(
           // the rebind that happens inside it - 3009C030 to 40875814 - and so
           // measured a pointer change rather than an amount of output. Taking
           // both samples after the rebind makes the delta the paint's own.
-          uint32_t before = guide_resv_dev_
-                                ? prd2(guide_resv_dev_ + 0x30u) : 0;
+          // Phase 503: this sampled through guide_resv_dev_, which is 0 on this
+          // configuration - the same broken instrument phase 487 found and fixed
+          // at one site only. With a zero base both samples read 0 and the delta
+          // is forced to zero, so "paint wrote 0 words" was a property of the
+          // probe, not of the paint. Derive the device the way the draw-entry
+          // probe does, which yields a real one (40870D00) in these runs.
+          uint32_t paint_dc_ = prd2(guide_draw_this_ + 12u);
+          uint32_t paint_wr_ = paint_dc_ ? prd2(paint_dc_ + 0x1CCu) : 0;
+          uint32_t paint_dev_ = paint_wr_ ? prd2(paint_wr_ + 0x0Cu) : 0;
+          if (!paint_dev_) paint_dev_ = guide_resv_dev_;
+          uint32_t before = paint_dev_ ? prd2(paint_dev_ + 0x30u) : 0;
+          // [dev+0x30] is the reserve window, not the PM4 command block. The
+          // first walk of that range desynced on word 0 (02D00500 parses as a
+          // type-0 header claiming 721 registers) and the raw dump shows
+          // register/value pairs - 1921, 1922, 1925, 1927 - rather than
+          // packets. The command block cursor is [dev+0x2B4C]; sample it too so
+          // the two ranges can be compared instead of assumed equal.
+          uint32_t before_cb = paint_dev_ ? prd2(paint_dev_ + 0x2B4Cu) : 0;
           std::memset(pm2->TranslateVirtual(pmsg), 0, 256);
           std::memset(pm2->TranslateVirtual(ppay), 0, 256);
           pcall(guide_bs_hud_base_ + 0xA888u,
@@ -6038,8 +6054,16 @@ void VdSwap_entry(
             pcall(f_lc, {hp, pout});
             hp = prd2(pout);
           }
-          uint32_t after = guide_resv_dev_
-                               ? prd2(guide_resv_dev_ + 0x30u) : 0;
+          uint32_t after = paint_dev_ ? prd2(paint_dev_ + 0x30u) : 0;
+          uint32_t after_cb = paint_dev_ ? prd2(paint_dev_ + 0x2B4Cu) : 0;
+          XELOGI("PaintCursors: dev={:08X} resv {:08X}->{:08X} ({} words) | "
+                 "cmdblk {:08X}->{:08X} ({} words) base[2B48]={:08X} "
+                 "limit[2B50]={:08X}",
+                 paint_dev_, before, after,
+                 (after > before) ? (after - before) / 4 : 0, before_cb,
+                 after_cb, (after_cb > before_cb) ? (after_cb - before_cb) / 4 : 0,
+                 paint_dev_ ? prd2(paint_dev_ + 0x2B48u) : 0,
+                 paint_dev_ ? prd2(paint_dev_ + 0x2B50u) : 0);
           // Segment the rest of the frame too. The paints emit state and no
           // draws, twice confirmed by executing their ranges - so if XUI
           // batches geometry and submits it when the frame closes, the draws
@@ -6130,6 +6154,13 @@ void VdSwap_entry(
                   if (counts[o]) hist += fmt::format("{:02X}:{} ", o, counts[o]);
                 static uint32_t wlog = 0;
                 if (wlog++ < 2) {
+                  // 688 identical type-3 headers with overrun=1 reads more like
+                  // a fill pattern or a desynced parse than like geometry. Dump
+                  // the raw words so the two can be told apart.
+                  std::string hx;
+                  for (uint32_t k = 0; k < 16 && k < words; ++k)
+                    hx += fmt::format("{:08X} ", prd2(before + k * 4));
+                  XELOGI("GuidePaintWalk: raw {}", hx);
                   XELOGI("GuidePaintWalk: {} words -> {} type3, {} type0, "
                          "{} type2, overrun={}",
                          words, pk, t0, t2, bad);
