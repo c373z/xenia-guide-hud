@@ -2021,7 +2021,11 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
           // it.
           // Phase 581: vtable[7] and vtable[9] are the same address,
           // 913EACA8 - the shape of a shared stub. Dump it.
-          for (uint32_t base : {0x913EACA8u, 0x913EAD28u}) {
+          // Phase 584: read the WHOLE dispatcher this time. Phase 579 dumped
+          // 0x80 bytes, stopped at the first exit-shaped branch, and four
+          // phases followed from assuming the error came from there.
+          for (uint32_t base : {0x913EC750u, 0x913EC7D0u, 0x913EC850u,
+                                0x913EC8D0u, 0x913EC950u, 0x913EC9D0u}) {
             std::string hx;
             for (uint32_t a = base; a < base + 0x80u; a += 4) {
               hx += fmt::format("{:08X} ", rd(a));
