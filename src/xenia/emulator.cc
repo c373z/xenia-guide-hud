@@ -5093,6 +5093,22 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                          mgr);
                 }
                 uint64_t sargs[] = {0};
+                // Phase 517: the loader dies at 81901EAC, a bctrl through
+                // [[obj+0x1C8]+0x0C] where that slot holds 006E0065 - UTF-16
+                // "en" - so the field points at locale text, not an interface
+                // table. Driving 81795548 directly skips whatever its normal
+                // caller initialises. The site has a clean null path (81901E88
+                // bne -> 81901E8C returns E_FAIL), so nop the branch to take it
+                // unconditionally and let the loader continue.
+                //
+                // This must happen HERE, not in GuideBootstrap: the crash is
+                // during this call, and the bootstrap's patch site is never
+                // reached (RtUnbindPatch does not log in this configuration).
+                if (cvars::guide_patch_skin_dispatch) {
+                  kernel::xboxkrnl::GuidePatchWord(0x81901E88u, 0x409A0010u,
+                                                   0x60000000u,
+                                                   "SkinDispatchPatch");
+                }
                 XELOGI("LLE xam: calling skin loader 81795548");
                 uint64_t sr = ks->processor()->Execute(ts, kernel::xboxkrnl::GuideConst(0x81795548u), sargs,
                                                        0);

@@ -770,6 +770,37 @@ uint32_t GuideConst(uint32_t addr) {
 // This is a workaround, not the fix: a smaller target means the Guide renders at
 // the wrong resolution. It exists so the open question from phase 506 - whether
 // the missing render target is what stops the elements emitting - can be tested.
+// Phase 517: patch one guest instruction, with the protect/verify/log dance the
+// RT-unbind patch needed. The xam text pages are mapped read-only and the guest
+// heap's Protect() does not lift that, so this goes at the host page directly;
+// a bare store faults at the host mapping and kills the run before logging,
+// which reads exactly like "the patch code never executed".
+bool GuidePatchWord(uint32_t addr, uint32_t expect, uint32_t value,
+                    const char* name) {
+  auto* pm = kernel_state()->memory();
+  uint8_t* hp = pm->TranslateVirtual(addr);
+  xe::memory::PageAccess old_access = xe::memory::PageAccess::kNoAccess;
+  void* page = reinterpret_cast<void*>(
+      reinterpret_cast<uintptr_t>(hp) & ~0xFFFull);
+  if (!xe::memory::Protect(page, 0x1000, xe::memory::PageAccess::kReadWrite,
+                           &old_access)) {
+    XELOGW("{}: cannot unprotect {:08X}", name, addr);
+    return false;
+  }
+  uint32_t was = xe::load_and_swap<uint32_t>(hp);
+  bool ok = (was == expect);
+  if (ok) {
+    xe::store_and_swap<uint32_t>(hp, value);
+    XELOGI("{}: {:08X} {:08X} -> {:08X} (readback {:08X})", name, addr, was,
+           value, xe::load_and_swap<uint32_t>(hp));
+  } else {
+    XELOGW("{}: {:08X} reads {:08X}, expected {:08X} - not patching", name,
+           addr, was, expect);
+  }
+  xe::memory::Protect(page, 0x1000, old_access, nullptr);
+  return ok;
+}
+
 static uint32_t GuideMakeSurface(xe::cpu::Processor* proc,
                                  xe::cpu::ThreadState* ts) {
   static const uint32_t kSizes[][2] = {{1280, 720}, {852, 480}, {640, 480},
@@ -2769,6 +2800,21 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   // right the 819F5F60 fault must disappear; if it survives unchanged with the
   // readback confirming the patch landed, suspect the function was already
   // translated and the JIT is running the pre-patch body.
+  // Phase 517: 81901EAC is a bctrl through [[obj+0x1C8]+0x0C], and that slot
+  // holds 006E0065 - UTF-16 "en" - so the field points at locale text rather
+  // than an interface table. lle_xam_skin_init calls 81795548 directly and that
+  // function "has no callers inside xam", so it runs without whatever
+  // initialises the field.
+  //
+  // The site already has a clean failure path: 81901E88 `bne` skips the call
+  // when the slot is null and 81901E8C returns 0x80004005 (E_FAIL). Turning the
+  // bne into a nop takes that path unconditionally, which answers whether skin
+  // initialisation can complete - and still register visuals - without this one
+  // dispatch. If it can, the visuals and the draw hook stop being mutually
+  // exclusive (phase 516).
+  if (::cvars::guide_patch_skin_dispatch && XamIsDashrootLayout()) {
+    GuidePatchWord(0x81901E88u, 0x409A0010u, 0x60000000u, "SkinDispatchPatch");
+  }
   if (::cvars::guide_patch_rt_unbind && XamIsDashrootLayout()) {
     auto* pm = kernel_state()->memory();
     uint32_t site = 0x819F4C34u;

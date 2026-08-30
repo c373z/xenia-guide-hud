@@ -1003,3 +1003,10 @@ DEFINE_bool(guide_paint_sentinel, false,
             "walk shows what the paint writes rather than what was already "
             "there.",
             "Kernel");
+
+// Phase 517: skip the 81901EAC indirect call, which dispatches through a field
+// holding locale text and crashes skin initialisation ten times per run.
+DEFINE_bool(guide_patch_skin_dispatch, false,
+            "Patch 81901E88 to a nop so the null path is taken and the bad "
+            "indirect call at 81901EAC is skipped, letting skin init continue.",
+            "Kernel");
