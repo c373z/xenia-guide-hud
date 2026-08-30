@@ -5523,6 +5523,43 @@ void VdSwap_entry(
                                             ? " DESC" : "");
                 }
                 XELOGI("TypeSurvey: {}", survey);
+                // 81931040 returns [tail-of-+8-chain + 0x20], NOT the object
+                // (phase 471), so every "obj" dumped since phase 460 was the
+                // wrong pointer. Resolve entry[1] the way 81943378 does:
+                // bucket = [base + (idx>>6)*4], entry = bucket + (idx&3F)*8.
+                // entry[0] must equal the handle's high half - that tag check
+                // is what tells us the model is right.
+                // Guard every read: an unguarded prd2 on a garbage bucket
+                // faulted the host at guest 0x11B and perturbed the run.
+                auto ok = [](uint32_t a) {
+                  return a >= 0x10000000u && a < 0xA0000000u;
+                };
+                for (uint32_t h : {hp, vis90}) {
+                  if (!h) continue;
+                  uint32_t idx = h & 0xFFFFu, tag = h >> 16;
+                  // Decoded, not guessed: rlwinm r9,r10,26,6,29 masks with
+                  // 0x03FFFFFC, giving (idx>>8)<<2 - the bucket is idx>>8, not
+                  // idx>>6. rlwinm r11,r10,3,21,28 masks with 0x7F8, so the
+                  // entry offset is (idx & 0xFF)*8: 256 entries of 8 bytes per
+                  // bucket, which matches the 0x810 bucket spacing measured.
+                  uint32_t bslot = 0x81D6D0D8u + (idx >> 8) * 4u;
+                  uint32_t bucket = ok(bslot) ? prd2(bslot) : 0;
+                  uint32_t ent = bucket + (idx & 0xFFu) * 8u;
+                  if (!ok(bucket) || !ok(ent)) {
+                    XELOGI("Entry: h={:08X} idx={:04X} bslot={:08X} "
+                           "bucket={:08X} - not a readable bucket",
+                           h, idx, bslot, bucket);
+                    continue;
+                  }
+                  uint32_t e0 = prd2(ent), e1 = prd2(ent + 4u);
+                  XELOGI("Entry: h={:08X} idx={:04X} bucket={:08X} entry={:08X} "
+                         "tag={:04X}/{:04X}{} obj={:08X} [+8]={:08X} "
+                         "[+18]={:08X}",
+                         h, idx, bucket, ent, e0, tag,
+                         (e0 == tag) ? " OK" : " MISMATCH", e1,
+                         ok(e1) ? prd2(e1 + 8u) : 0,
+                         ok(e1) ? prd2(e1 + 0x18u) : 0);
+                }
               }
             }
             if (vh2) {
