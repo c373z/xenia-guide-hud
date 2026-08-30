@@ -3191,6 +3191,20 @@ bool D3D12CommandProcessor::IssueCopy() {
   // Phase 523: capture the state a working resolve runs with, so the extra
   // resolve issued after the Guide's draws can restore it. Only capture on the
   // title's own resolves - guide_resolve_replay_ marks ours.
+  // Phase 533: replay the Guide's burst here, before the title's resolve reads
+  // EDRAM, so its geometry is present in the frame the title copies out. This is
+  // the ordering fix; the phase-532 CPU composite is the workaround it replaces.
+  if (cvars::guide_replay_before_resolve && !guide_resolve_replay_ &&
+      !guide_replaying_ && guide_replay_armed_ && guide_replay_words_) {
+    guide_replaying_ = true;
+    static uint32_t rplog = 0;
+    if (rplog++ < 8) {
+      XELOGI("GuideReplay: {} words at {:08X} before the title's resolve",
+             guide_replay_words_, guide_replay_addr_);
+    }
+    ExecuteGuestBufferVirtualUnsafe(guide_replay_addr_, guide_replay_words_);
+    guide_replaying_ = false;
+  }
   if (!guide_resolve_replay_) {
     RegisterFile& rf = *register_file_;
     for (uint32_t i = 0; i < 4; ++i) guide_saved_copy_[i] = rf[0x2318 + i];

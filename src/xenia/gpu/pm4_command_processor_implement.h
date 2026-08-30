@@ -473,6 +473,32 @@ bool COMMAND_PROCESSOR::ExecutePacketType3(uint32_t packet) XE_RESTRICT {
       case PM4_DRAW_INDX:
       case PM4_DRAW_INDX_2: {
         ++guide_draw_count_;
+        // Phase 533: record the ring range spanning the Guide's burst. Entering
+        // scope marks the start; leaving it marks the end. Never record while
+        // replaying, or the range would capture itself.
+        if (!guide_replaying_ && guide_in_draw_scope_ != guide_prev_scope_) {
+          if (guide_in_draw_scope_) {
+            guide_replay_start_ = reader_.read_offset();
+          } else if (primary_buffer_ptr_) {
+            uint32_t end = reader_.read_offset();
+            if (end > guide_replay_start_) {
+              guide_replay_addr_ = primary_buffer_ptr_ + guide_replay_start_;
+              guide_replay_words_ = (end - guide_replay_start_) / 4u;
+              guide_replay_armed_ = guide_replay_words_ > 0 &&
+                                    guide_replay_words_ < 0x10000u;
+            } else {
+              guide_replay_armed_ = false;  // ring wrapped; range is not usable
+            }
+            static uint32_t trlog = 0;
+            if (trlog++ < 8) {
+              XELOGI("GuideBurst: start={:X} end={:X} base={:08X} words={} "
+                     "armed={}",
+                     guide_replay_start_, end, primary_buffer_ptr_,
+                     guide_replay_words_, guide_replay_armed_);
+            }
+          }
+          guide_prev_scope_ = guide_in_draw_scope_;
+        }
         // Phase 530: the Guide's draws arrive as a burst. Resolve at the first
         // draw that is NOT the Guide's after one, which is the last moment its
         // pixels are still in EDRAM untouched by the title.
@@ -1170,7 +1196,10 @@ void COMMAND_PROCESSOR::GuideExtraResolve() {
     const uint8_t* pp = memory_->TranslatePhysical(dest);
     if (!pp) return 0;
     uint32_t h = 2166136261u;
-    for (uint32_t off = 0; off < 0x180000u; off += 0x400u) {
+    // Phase 533: 0x180000 covered under half a 1280x720 frame, so both the
+    // checksum and the snapshot below missed most of the image. A full frame is
+    // 1280*720*4 = 0x384000.
+    for (uint32_t off = 0; off < 0x384000u; off += 0x400u) {
       h = (h ^ *reinterpret_cast<const uint32_t*>(pp + off)) * 16777619u;
     }
     return h;
@@ -1179,7 +1208,7 @@ void COMMAND_PROCESSOR::GuideExtraResolve() {
 
   // Phase 532: snapshot the destination either side of the copy. Every dword
   // that changes is the Guide's contribution to this frame.
-  const uint32_t kFbWords = 0x180000u / 4u;
+  const uint32_t kFbWords = 0x384000u / 4u;
   bool snap = cvars::guide_composite_frontbuffer && dest;
   const uint8_t* fbp = snap ? memory_->TranslatePhysical(dest) : nullptr;
   if (fbp) {

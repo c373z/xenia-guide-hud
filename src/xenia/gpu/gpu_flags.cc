@@ -165,3 +165,9 @@ DEFINE_bool(guide_composite_frontbuffer, false,
             "Re-apply the Guide's resolved pixels on top of the finished frame "
             "so they survive the title's own resolve.",
             "GPU");
+
+// Phase 533: replay the Guide's recorded ring range immediately before the
+// title's resolve, so its geometry is in EDRAM when the frame is copied out.
+DEFINE_bool(guide_replay_before_resolve, false,
+            "Re-execute the Guide's draw burst just before the title's resolve.",
+            "GPU");

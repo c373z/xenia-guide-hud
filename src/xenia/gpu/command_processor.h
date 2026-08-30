@@ -494,6 +494,16 @@ class CommandProcessor {
   std::vector<uint32_t> guide_fb_after_;
   uint32_t guide_fb_dest_ = 0;
   bool guide_fb_valid_ = false;
+  // Phase 533: the proper fix. Record the ring range of the Guide's burst so it
+  // can be replayed at the top of the title's IssueCopy, putting the geometry in
+  // EDRAM at the moment the title resolves - rather than compositing stale
+  // pixels in CPU memory afterwards.
+  uint32_t guide_replay_start_ = 0;
+  uint32_t guide_replay_addr_ = 0;
+  uint32_t guide_replay_words_ = 0;
+  bool guide_replay_armed_ = false;
+  bool guide_replaying_ = false;
+  bool guide_prev_scope_ = false;
   // Phase 523: the resolve rectangle lives in vertex-fetch slot 0 (a D3D9
   // hack GetResolveInfo depends on) and the copy destination in RB_COPY_*.
   // The Guide's own draws overwrite vf0, so a second IssueCopy after them
