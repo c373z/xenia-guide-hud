@@ -685,6 +685,7 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
            guide_draw_count_ - draws_before);
   }
 
+  ++guide_swap_count_;  // phase 522
   COMMAND_PROCESSOR::IssueSwap(frontbuffer_ptr, frontbuffer_width,
                                frontbuffer_height);
 

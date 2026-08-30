@@ -450,6 +450,13 @@ class CommandProcessor {
   // poor witness - they under-report writes that rewrite an existing value -
   // whereas a draw either dispatches or it does not.
   uint32_t guide_draw_count_ = 0;
+  // Phase 522: ordering instrumentation. The Guide's geometry reaches the
+  // primary EDRAM target (phase 521), but EDRAM is only visible once it is
+  // resolved. If the composite draws land after the frame's resolve they
+  // are cleared unseen, which fits every observation so far. Count resolves
+  // and swaps so the sequence can be read against the draw count.
+  uint32_t guide_resolve_count_ = 0;
+  uint32_t guide_swap_count_ = 0;
 
   // Ring-buffer state, for checking what xam's mode-1 device creator
   // takes from a running title: mode 1 reaches VdInitializeRingBuffer

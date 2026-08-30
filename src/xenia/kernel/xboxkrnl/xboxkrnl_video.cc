@@ -7834,6 +7834,13 @@ void VdSwap_entry(
                                    ->register_file()
                              : nullptr;
               static uint32_t rtlog = 0;
+              // Phase 522: the sequence that matters. If resolves stop
+              // advancing while the Guide keeps drawing, the geometry is landing
+              // in EDRAM after the frame has already been resolved and is
+              // cleared unseen.
+              XELOGI("GuideSeq: +{} draws | resolves={} swaps={} (total draws {})",
+                     gd_delta, gsx->command_processor()->guide_resolve_count_,
+                     gsx->command_processor()->guide_swap_count_, gpu_total);
               if (rf && rtlog++ < 6) {
                 XELOGI("GuideDrawRT: +{} draws | RB_SURFACE_INFO={:08X} "
                        "RB_COLOR_INFO={:08X} RB_MODECONTROL={:08X} "
