@@ -1251,6 +1251,30 @@ void COMMAND_PROCESSOR::GuideExtraResolve() {
 
   uint32_t sum_after = sum_dest();
 
+  // Phase 541: phase 530 showed this resolve changes the destination 1600/1600
+  // times, so it contains the Guide's rendered pixels. Dump it once and look at
+  // it - that answers "what does the Guide actually draw" directly, where every
+  // checksum so far could only say "something changed".
+  if (cvars::guide_verify_resolve && dest) {
+    static bool dumped = false;
+    if (!dumped) {
+      dumped = true;
+      const uint8_t* pp = memory_->TranslatePhysical(dest);
+      if (pp) {
+        auto dpath = xe::filesystem::GetExecutableFolder() / "guide_resolve.raw";
+        FILE* df = xe::filesystem::OpenFile(dpath, "wb");
+        if (df) {
+          uint32_t hdr[3] = {1280u, 720u, 1280u * 4u};
+          fwrite(hdr, sizeof(hdr), 1, df);
+          fwrite(pp, 1, 1280u * 720u * 4u, df);
+          fclose(df);
+          XELOGI("GuideResolveDump: wrote the post-Guide resolve at {:08X}",
+                 dest);
+        }
+      }
+    }
+  }
+
   for (uint32_t i = 0; i < 4; ++i) rf[0x2318 + i] = keep_copy[i];
   rf[0x4800] = keep_vf0[0];
   rf[0x4801] = keep_vf0[1];
