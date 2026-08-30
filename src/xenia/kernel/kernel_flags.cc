@@ -1024,3 +1024,12 @@ DEFINE_bool(guide_patch_addr_passthru, false,
             "Patch 819E0218 to `mr r31, r3` so the CPU-to-GPU conversion "
             "returns its argument, revealing the pointer being converted.",
             "Kernel");
+
+// Phase 557: [navObj+76] selects the scene in hud's real dispatcher 913EC6D0 -
+// 0 or 4 give GuideMain.xur, 7/3/5/6/8 give specific scenes, anything else is
+// E_FAIL. It reads 1 in every run, which selects nothing. Negative leaves it
+// alone and uses the hardcoded Status entry as before.
+DEFINE_int32(guide_nav_state, -1,
+             "Set [navObj+76] to this value and navigate via 913EC6D0 instead "
+             "of the Status-hardcoded 913EB7D8.",
+             "Kernel");

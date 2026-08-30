@@ -1937,12 +1937,27 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
         // the inner helper: it checks [navObj+0x508] with XuiHandleIsValid and
         // navigates back from the current scene first, which is the sequence
         // hud performs and the inner helper assumes has happened.
+        // Phase 557: [navObj+76] is 1 in every run. Per the dispatch documented
+        // above, 913EC6D0 selects GuideMain.xur only for 0 or 4, specific
+        // scenes for 7/3/5/6/8, and returns E_FAIL for anything else - so 1
+        // selects nothing, and the hardcoded Status entry is the only path that
+        // ever runs. Set the state and call the real dispatcher instead.
+        if (::cvars::guide_nav_state >= 0) {
+          uint32_t want = static_cast<uint32_t>(::cvars::guide_nav_state);
+          XELOGI("GuideNav: [navObj+76] {} -> {} and dispatching via 913EC6D0",
+                 rd(nav_obj + 76u), want);
+          xe::store_and_swap<uint32_t>(memory->TranslateVirtual(nav_obj + 76u),
+                                       want);
+        }
         uint64_t na[] = {nav_obj, guide_bs_scene_};
-        uint64_t nr = processor->Execute(ts, hud_base + 0xB7D8u, na,
+        uint32_t nav_entry =
+            (::cvars::guide_nav_state >= 0) ? 0xC6D0u : 0xB7D8u;
+        uint64_t nr = processor->Execute(ts, hud_base + nav_entry, na,
                                          xe::countof(na));
-        XELOGI("GuideNav: 913EB7D8(navObj {:08X}, parent scene {:08X}) -> "
+        XELOGI("GuideNav: hud+{:04X}(navObj {:08X}, parent scene {:08X}) -> "
                "{:08X}; [navObj+500]={:08X} [navObj+508]={:08X}",
-               nav_obj, guide_bs_scene_, static_cast<uint32_t>(nr),
+               nav_entry, nav_obj, guide_bs_scene_,
+               static_cast<uint32_t>(nr),
                rd(nav_obj + 0x500u), rd(nav_obj + 0x508u));
         // hud's own path now succeeds: giving the manually created scene a
         // parent first satisfies NavigateForward's check inside 913EB508, so
