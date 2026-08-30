@@ -523,6 +523,13 @@ class CommandProcessor {
   // the resolved frame" without needing to compare across runs of an animating
   // game, and without needing eyes.
   bool guide_in_ab_ = false;
+  // Phase 538: the replayed draws fetch geometry through constants the replay
+  // never writes - it inherits the burst's values with the valid bit cleared
+  // (phase 537). Snapshot the whole fetch block during the burst and restore it
+  // around the replay, the same save/restore already used for the resolve state.
+  // 0x4800..0x48BF is SHADER_CONSTANT_FETCH_00_0 through _31_5, 192 registers.
+  uint32_t guide_fetch_[0xC0] = {};
+  bool guide_fetch_saved_ = false;
   // Phase 523: the resolve rectangle lives in vertex-fetch slot 0 (a D3D9
   // hack GetResolveInfo depends on) and the copy destination in RB_COPY_*.
   // The Guide's own draws overwrite vf0, so a second IssueCopy after them

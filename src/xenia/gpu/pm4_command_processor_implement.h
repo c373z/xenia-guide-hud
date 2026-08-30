@@ -473,6 +473,17 @@ bool COMMAND_PROCESSOR::ExecutePacketType3(uint32_t packet) XE_RESTRICT {
       case PM4_DRAW_INDX:
       case PM4_DRAW_INDX_2: {
         ++guide_draw_count_;
+        // Phase 538: snapshot the fetch constants as they stand for a real
+        // Guide draw, so the replay can be given the same geometry bindings.
+        // Taken per draw so the last one captured is a state that actually
+        // rasterised.
+        if (guide_in_draw_scope_ && !guide_replaying_) {
+          RegisterFile& srf = *register_file_;
+          for (uint32_t fi = 0; fi < 0xC0u; ++fi) {
+            guide_fetch_[fi] = srf[0x4800 + fi];
+          }
+          guide_fetch_saved_ = true;
+        }
         // Phase 534: mark that this indirect buffer contained a Guide draw;
         // the enclosing IB handler turns that into the replay range.
         if (!guide_replaying_ && guide_in_draw_scope_) {
@@ -1281,8 +1292,13 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
   // count or a degenerate primitive type rasterises to nothing and would explain
   // it exactly.
   if (guide_in_draw_scope_ || guide_replaying_) {
-    static uint32_t dilog = 0;
-    if (dilog++ < 10) {
+    // Phase 538: separate counters for burst and replay. A shared one was
+    // exhausted by the burst's 15 draws per frame before a single replay
+    // entry printed, which reads as "the replay is not drawing" when it is
+    // only "the log was full". The phase-537 attempt to widen it silently
+    // did nothing - the patch text had the wrong indentation.
+    static uint32_t dilog_burst = 0, dilog_replay = 0;
+    if (guide_replaying_ ? (dilog_replay++ < 6) : (dilog_burst++ < 6)) {
       // IssueDraw is skipped entirely - without setting draw_succeeded false
       // and without logging - when viz_query_ena && kill_pix_post_hi_z. That is
       // a silent skip that looks exactly like what is being seen: the packet is

@@ -3243,6 +3243,16 @@ bool D3D12CommandProcessor::IssueCopy() {
   // the ordering fix; the phase-532 CPU composite is the workaround it replaces.
   if (cvars::guide_replay_before_resolve && !guide_resolve_replay_ &&
       !guide_replaying_ && guide_replay_armed_ && guide_replay_words_) {
+    // Phase 538: install the fetch constants captured during the burst, so the
+    // replayed draws bind the same geometry rather than the title's residue.
+    uint32_t keep_fetch[0xC0];
+    RegisterFile& frf = *register_file_;
+    if (guide_fetch_saved_) {
+      for (uint32_t fi = 0; fi < 0xC0u; ++fi) {
+        keep_fetch[fi] = frf[0x4800 + fi];
+        frf[0x4800 + fi] = guide_fetch_[fi];
+      }
+    }
     guide_replaying_ = true;
     xe::gpu::g_guide_replaying = true;
     static uint32_t rplog = 0;
@@ -3254,6 +3264,9 @@ bool D3D12CommandProcessor::IssueCopy() {
     ExecuteGuestBufferVirtualUnsafe(guide_replay_addr_, guide_replay_words_);
     guide_replaying_ = false;
     xe::gpu::g_guide_replaying = false;
+    if (guide_fetch_saved_) {
+      for (uint32_t fi = 0; fi < 0xC0u; ++fi) frf[0x4800 + fi] = keep_fetch[fi];
+    }
     // Executing the packets is not the same as issuing draws - confirm the
     // replay actually rasterises rather than just replaying state.
     static uint32_t rdlog = 0;
