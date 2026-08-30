@@ -5474,6 +5474,19 @@ void VdSwap_entry(
               uint32_t typid2 = prd2(0x81D6CDE0u);
               XELOGI("VisualType: visual={:08X} typeid2={:08X} validate->{:08X}",
                      vis90, typid2, vis90 ? pcall(0x81943378u, {vis90, typid2}) : 0);
+              // 8193F1B8 walks the base chain via +8, comparing [node+0x18]
+              // against the required type id, and returns 0 if it runs off the
+              // end. Walk the same chain here: if every [node+0x18] is null or
+              // none equals typeid2, that is why the cast fails.
+              uint32_t vo = vis90 ? pcall(0x81931040u, {vis90}) : 0;
+              std::string chain;
+              for (uint32_t nptr = vo, k = 0; nptr && k < 6; ++k) {
+                chain += fmt::format("{:08X}(type={:08X}) -> ", nptr,
+                                     prd2(nptr + 0x18u));
+                nptr = prd2(nptr + 8u);
+              }
+              XELOGI("VisualChain: visobj={:08X} want={:08X} chain: {}end",
+                     vo, typid2, chain);
             }
             if (vh2) {
               uint32_t oi2 = pcall(0x81931040u, {hp});
