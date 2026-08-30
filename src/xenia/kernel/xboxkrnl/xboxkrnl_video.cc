@@ -6211,6 +6211,31 @@ void VdSwap_entry(
                       mid += fmt::format("{:08X} ", prd2(before + (base_w + k) * 4));
                     XELOGI("GuidePaintWalk: at word {} {}", base_w, mid);
                   }
+                  // Phase 511: static hunting for "the draw emitter" has now
+                  // mis-read constants twice - [sp+0x1CC] is an index-offset
+                  // argument, not a draw gate, and the li r5, 0x22 / 0x36 sites
+                  // are register indices, not PM4 opcodes. Measure instead:
+                  // histogram everything in the range that looks like a GPU
+                  // register index, so "the paint only touches display LUT
+                  // registers" is a finding rather than an inference from a
+                  // 48-word window.
+                  {
+                    uint32_t dc = 0, gfx = 0, other = 0;
+                    uint32_t lo_gfx = 0xFFFFFFFFu, hi_gfx = 0;
+                    for (uint32_t k = 0; k < words; ++k) {
+                      uint32_t v = prd2(before + k * 4);
+                      if (v >= 0x1900u && v <= 0x19FFu) ++dc;
+                      else if (v >= 0x2000u && v <= 0x2FFFu) {
+                        ++gfx;
+                        if (v < lo_gfx) lo_gfx = v;
+                        if (v > hi_gfx) hi_gfx = v;
+                      } else if (v >= 0x1000u && v <= 0x4FFFu) ++other;
+                    }
+                    XELOGI("GuidePaintRegs: {} words | DC_LUT-range={} "
+                           "gfx-range={} (lo={:04X} hi={:04X}) other={}",
+                           words, dc, gfx,
+                           gfx ? lo_gfx : 0, hi_gfx, other);
+                  }
                   XELOGI("GuidePaintWalk: {} words -> {} type3, {} type0, "
                          "{} type2, overrun={}",
                          words, pk, t0, t2, bad);
