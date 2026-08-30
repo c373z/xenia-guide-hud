@@ -6059,10 +6059,15 @@ void VdSwap_entry(
                   float fbw, fbh;
                   std::memcpy(&fbw, &bw, 4);
                   std::memcpy(&fbh, &bh, 4);
-                  XELOGI("GuideElem: h={:08X} obj={:08X} vis={:08X} gate={} "
-                         "[B4]={:08X} bounds {}x{} -> first {} words, "
-                         "repeat {} words",
-                         hp, oi2, vh2, gg, prd2(oi2 + 0xB4u), fbw, fbh,
+                  // pdev is printed because "0 words" is exactly the shape of
+                  // the phase-503 false negative: if the device is zero then
+                  // e0/e1/e2 all read zero and the deltas are forced to zero no
+                  // matter what the element emits. The reading is worthless
+                  // without it.
+                  XELOGI("GuideElem: dev={:08X} [30]={:08X} h={:08X} obj={:08X} "
+                         "vis={:08X} gate={} [B4]={:08X} bounds {}x{} -> "
+                         "first {} words, repeat {} words",
+                         pdev, e0, hp, oi2, vh2, gg, prd2(oi2 + 0xB4u), fbw, fbh,
                          (e1 > e0) ? (e1 - e0) / 4 : 0,
                          (e2 > e1) ? (e2 - e1) / 4 : 0);
                   // Execute the REPEAT range - the element's own steady-state
