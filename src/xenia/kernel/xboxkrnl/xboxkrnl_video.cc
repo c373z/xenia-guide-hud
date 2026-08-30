@@ -5755,15 +5755,15 @@ void VdSwap_entry(
                            prd2(pdev + 0x2B4Cu));
                   }
                 }
-                uint32_t e0 = guide_resv_dev_
-                                  ? prd2(guide_resv_dev_ + 0x30u) : 0;
+                uint32_t e0 = pdev
+                                  ? prd2(pdev + 0x30u) : 0;
                 uint32_t gg = pcall(0x81954468u, {oi2});
                 pcall(0x81968890u, {oi2, pmsg});
-                uint32_t e1 = guide_resv_dev_
-                                  ? prd2(guide_resv_dev_ + 0x30u) : 0;
+                uint32_t e1 = pdev
+                                  ? prd2(pdev + 0x30u) : 0;
                 pcall(0x81968890u, {oi2, pmsg});
-                uint32_t e2 = guide_resv_dev_
-                                  ? prd2(guide_resv_dev_ + 0x30u) : 0;
+                uint32_t e2 = pdev
+                                  ? prd2(pdev + 0x30u) : 0;
                 static uint32_t el_logs = 0;
                 if (el_logs++ < 8) {
                   uint32_t bw = prd2(oi2 + 0x1Cu), bh = prd2(oi2 + 0x20u);
