@@ -949,6 +949,23 @@ bool RenderTargetCache::Update(bool is_rasterization_done,
     last_update_used_render_targets_[i] =
         (depth_and_color_rts_used_bits & (uint32_t(1) << i)) ? rts[i] : nullptr;
   }
+  // Phase 529: this is the authoritative "what this draw renders into", set for
+  // every draw and every slot. The phase-528 probe sat in a branch reached only
+  // when both the current and accumulated targets are null, which is why it
+  // reported key 0 and never showed slot 1 - colour RT0, the only slot that
+  // matters. Report that slot, split by whether the draw is the Guide's: if the
+  // keys differ, the Guide renders into a target the title never resolves.
+  {
+    static uint32_t gk = 0, tk = 0;
+    bool in_guide = g_guide_in_draw_scope;
+    if (in_guide ? (gk++ < 5) : (tk++ < 5)) {
+      const RenderTarget* c0 = last_update_used_render_targets_[1];
+      const RenderTarget* d0 = last_update_used_render_targets_[0];
+      XELOGI("RTUsed[{}]: colour0 key={:08X} depth key={:08X} used_bits={:02X}",
+             in_guide ? "guide" : "title", c0 ? c0->key().key : 0xFFFFFFFFu,
+             d0 ? d0->key().key : 0xFFFFFFFFu, depth_and_color_rts_used_bits);
+    }
+  }
   if (are_accumulated_render_targets_valid_) {
     // Check if the only re-enabling a previously bound render target.
     for (uint32_t i = 0; i < 1 + xenos::kMaxColorRenderTargets; ++i) {
@@ -968,18 +985,6 @@ bool RenderTargetCache::Update(bool is_rasterization_done,
         }
         // Append the new render target.
         last_update_accumulated_render_targets_[i] = current_rt;
-        // Phase 528: report the render target the Guide's draws are bound to.
-        // If it differs from the one the title renders and resolves, both
-        // observations hold at once - the Guide's pixels are written, and the
-        // resolve of the title's target is unchanged.
-        {
-          static uint32_t gk = 0, tk = 0;
-          bool in_guide = g_guide_in_draw_scope;
-          if (in_guide ? (gk++ < 4) : (tk++ < 4)) {
-            XELOGI("RTBind[{}]: slot={} key={:08X}", in_guide ? "guide" : "title",
-                   i, current_rt ? current_rt->key().key : 0u);
-          }
-        }
         continue;
       }
       if (current_rt) {
