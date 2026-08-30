@@ -58,6 +58,8 @@ DECLARE_bool(guide_patch_addr_passthru);
 DECLARE_int32(guide_nav_state);
 DECLARE_bool(guide_draw_root_object);
 DECLARE_bool(guide_resolve_paint_handles);
+DECLARE_bool(guide_bind_boot_rt);
+DECLARE_bool(guide_patch_present_rt);
 DECLARE_bool(guide_set_render_dc);
 DECLARE_bool(guide_nav_clear_slot);
 DECLARE_bool(guide_nav_dc_null);

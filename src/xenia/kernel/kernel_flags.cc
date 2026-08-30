@@ -1051,6 +1051,24 @@ DEFINE_bool(guide_resolve_paint_handles, false,
 // Phase 578: pass null as the dispatcher's DC argument so hud skips its release
 // path and constructs its own, instead of releasing the bootstrap's DC and then
 // calling through it.
+DEFINE_bool(guide_bind_boot_rt, false,
+            "Create a surface and bind it as the render target on the device "
+            "hud's render is driven against, reached as "
+            "[[bootDC+0x1CC]+0x0C]. Phase 588: both [dev+0x32A0] and "
+            "[dev+0x32B0] are null there, which is what makes the render "
+            "fault once it is given a real DC.",
+            "Kernel");
+
+DEFINE_bool(guide_patch_present_rt, false,
+            "Make 819DE934 an unconditional branch so the block that reads "
+            "[dev+0x32A0] / [dev+0x32B0] is skipped. Phase 588: with a real "
+            "DC installed, hud's render reaches 819DE94C and faults - both "
+            "render-target slots are null on the device it is handed, and "
+            "819DE94C dereferences +0x24 of the result. The code already "
+            "skips this block when r30 != 0, so the branch target is a path "
+            "xam itself takes.",
+            "Kernel");
+
 DEFINE_bool(guide_set_render_dc, false,
             "Store the bootstrap device context into [renderObj+0xC] before "
             "driving hud's render. Phase 587: 913EAB28 loads [this+0xC] and "

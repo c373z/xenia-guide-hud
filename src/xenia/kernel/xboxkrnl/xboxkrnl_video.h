@@ -71,6 +71,10 @@ bool GuideBootstrapReady();
 // that lands in 818FDE98, so those fields hold allocation garbage.
 uint32_t GuideBootDc();
 
+// Bind a freshly created surface as `dev`'s render target. `ts` is a
+// xe::cpu::ThreadState*. Returns the surface, or 0 if creation failed.
+uint32_t GuideBindDeviceRt(uint32_t dev, void* ts);
+
 // xam's mode-1 device creator re-points the GPU ring from the title's ring to
 // its own, which is why the title stops swapping at the button press. Save the
 // title's ring before that call and restore it once the Guide has drawn, so

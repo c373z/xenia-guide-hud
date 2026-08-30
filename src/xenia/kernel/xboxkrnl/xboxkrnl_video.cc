@@ -864,6 +864,41 @@ static uint32_t GuideMakeSurface(xe::cpu::Processor* proc,
   return 0;
 }
 
+// Phase 588: bind a render target on an arbitrary device. DrawSurfBind
+// already does exactly this, but only for the device the draw hook happens to
+// hold; the device hud's render is driven against is a different one, reached
+// as [[bootDC+0x1CC]+0x0C], and nothing has ever bound a surface on it.
+// `ts` is a xe::cpu::ThreadState* (kept as void* so this header does not have
+// to pull in the cpu headers, matching GuidePublishStallThread).
+uint32_t GuideBindDeviceRt(uint32_t dev, void* ts) {
+  if (!dev || !ts) {
+    return 0;
+  }
+  auto* mem = kernel_state()->memory();
+  auto rdv = [&](uint32_t a) {
+    return xe::load_and_swap<uint32_t>(mem->TranslateVirtual(a));
+  };
+  uint32_t existing = rdv(dev + 0x32B0u);
+  if (existing) {
+    return existing;
+  }
+  uint32_t surf = GuideMakeSurface(kernel_state()->processor(),
+                                   static_cast<xe::cpu::ThreadState*>(ts));
+  if (!surf) {
+    XELOGW("GuideBindDeviceRt: surface creation returned 0 for dev {:08X}",
+           dev);
+    return 0;
+  }
+  for (uint32_t off : {0x32A0u, 0x32B0u, 0x3F70u, 0x3F74u, 0x3F78u}) {
+    xe::store_and_swap<uint32_t>(mem->TranslateVirtual(dev + off), surf);
+  }
+  XELOGI("GuideBindDeviceRt: dev={:08X} surf={:08X} -> [32A0]={:08X} "
+         "[32B0]={:08X} [3F78]={:08X}",
+         dev, surf, rdv(dev + 0x32A0u), rdv(dev + 0x32B0u),
+         rdv(dev + 0x3F78u));
+  return surf;
+}
+
 uint32_t XamProviderSlot() {
   if (g_provider_slot_done) {
     return g_provider_slot;
@@ -3213,6 +3248,15 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   if (::cvars::guide_patch_addr_passthru && XamIsDashrootLayout()) {
     GuidePatchWord(0x819E0218u, 0x7FEB5214u, 0x7C7F1B78u, "AddrPassthruPatch");
   }
+  // 819DE934 is `bne cr6, 0x819dea30`, guarding a block that loads the
+  // device's current render target ([dev+0x32A0]), falls back to
+  // [dev+0x32B0], and dereferences +0x24 of it. Both slots are null on the
+  // device hud's render is handed, so the fallback yields null and 819DE94C
+  // faults. Forcing the branch takes the same exit the function already uses
+  // whenever r30 != 0.
+  // (Applied from the paint loop in emulator.cc instead: this bootstrap
+  // runs AFTER hud's render has already faulted - the patch landed at log
+  // line 3259 and the crash was at 3131.)
   if (::cvars::guide_patch_rt_unbind && XamIsDashrootLayout()) {
     auto* pm = kernel_state()->memory();
     uint32_t site = 0x819F4C34u;

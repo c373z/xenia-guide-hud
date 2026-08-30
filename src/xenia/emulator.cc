@@ -6282,6 +6282,13 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                   // null (the same field this loop reads as obj+12), so the
                   // render never begins. Hand it the one DC known to be
                   // fully constructed.
+                  // Must be applied here, not from the xam bootstrap: that
+                  // path runs after hud's render has already faulted.
+                  if (cvars::guide_patch_present_rt) {
+                    kernel::xboxkrnl::GuidePatchWord(0x819DE934u, 0x409A00FCu,
+                                                     0x480000FCu,
+                                                     "PresentRTPatch");
+                  }
                   const int kGuideFrames = cvars::guide_coverage_fn ? 2000 : 6000;
                   for (int frame = 0; frame < kGuideFrames; ++frame) {
                     // The bootstrap DC is published on the title's render
@@ -6298,6 +6305,75 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                               mem->TranslateVirtual(obj + 12), bdc);
                           XELOGI("GuideSetRenderDC: frame {} [{:08X}+0C] "
                                  "-> {:08X}", frame, obj, bdc);
+                          // The device hud renders against is not the DC and
+                          // not the one XamDeviceSlot reports - it is one hop
+                          // out, and both its render-target slots are null.
+                          if (cvars::guide_bind_boot_rt) {
+                            uint32_t sub = xe::load_and_swap<uint32_t>(
+                                mem->TranslateVirtual(bdc + 0x1CCu));
+                            uint32_t dev =
+                                sub ? xe::load_and_swap<uint32_t>(
+                                          mem->TranslateVirtual(sub + 0x0Cu))
+                                    : 0u;
+                            XELOGI("GuideBindBootRt: dc={:08X} sub={:08X} "
+                                   "dev={:08X}", bdc, sub, dev);
+                            kernel::xboxkrnl::GuideBindDeviceRt(dev, ts);
+                          }
+                          // Phase 588: the fault in 819DE94C is on device
+                          // 40870D00, which is NOT the device the bootstrap
+                          // probe reported (407CB880) - so the device must
+                          // be identified here, at render time. Dump the xam
+                          // device slot and the head of the DC; whichever
+                          // holds 40870D00 is the path to the render-target
+                          // slots that need binding.
+                          uint32_t xds = kernel::xboxkrnl::XamDeviceSlot();
+                          uint32_t xdev = xds
+                              ? xe::load_and_swap<uint32_t>(
+                                    mem->TranslateVirtual(xds))
+                              : 0u;
+                          XELOGI("GuideRTProbe: xam_dev={:08X} "
+                                 "[32A0]={:08X} [32B0]={:08X}",
+                                 xdev,
+                                 xdev ? xe::load_and_swap<uint32_t>(
+                                            mem->TranslateVirtual(
+                                                xdev + 0x32A0u)) : 0u,
+                                 xdev ? xe::load_and_swap<uint32_t>(
+                                            mem->TranslateVirtual(
+                                                xdev + 0x32B0u)) : 0u);
+                          // 819DE8F8 does `mr r31, r3`, so the device is the
+                          // caller's first argument, not a global we can
+                          // read. Scan the DC for heap-pointer-shaped words
+                          // and correlate the offsets against the r31 the
+                          // crash dump prints for the same run.
+                          std::string dh;
+                          for (uint32_t w = 0; w < 128; ++w) {
+                            uint32_t v = xe::load_and_swap<uint32_t>(
+                                mem->TranslateVirtual(bdc + w * 4));
+                            if ((v & 0xFF000000u) == 0x40000000u) {
+                              dh += fmt::format("{:03X}:{:08X} ", w * 4, v);
+                            }
+                          }
+                          XELOGI("GuideDCPtrs: {:08X} {}", bdc, dh);
+                          // The device (40870D00 in the crash dump) is not
+                          // in the DC itself, but [dc+0x1C8]/[dc+0x1CC] point
+                          // into the same 4087xxxx region. Walk one hop and
+                          // print their pointer-shaped words so the device
+                          // can be reached from something we hold.
+                          for (uint32_t off : {0x1C8u, 0x1CCu}) {
+                            uint32_t sub = xe::load_and_swap<uint32_t>(
+                                mem->TranslateVirtual(bdc + off));
+                            if (!sub) continue;
+                            std::string sp;
+                            for (uint32_t w = 0; w < 96; ++w) {
+                              uint32_t v = xe::load_and_swap<uint32_t>(
+                                  mem->TranslateVirtual(sub + w * 4));
+                              if ((v & 0xFF000000u) == 0x40000000u) {
+                                sp += fmt::format("{:03X}:{:08X} ", w * 4, v);
+                              }
+                            }
+                            XELOGI("GuideDCSub +{:03X} = {:08X}: {}", off,
+                                   sub, sp);
+                          }
                         }
                       }
                     }
