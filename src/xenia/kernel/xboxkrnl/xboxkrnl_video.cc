@@ -1340,6 +1340,20 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   XELOGI("GuideBootstrap: render host -> {:08X}, XUI ctx {:08X}, "
          "provider {:08X}",
          static_cast<uint32_t>(hr), rd(XamXuiCtxSlot()), rd(XamProviderSlot()));
+  {
+    // 81901EAC crashes calling through [ctx+0x0C]: the skin-init path does
+    // lwz r11,0x1c8(r31) / lwz r11,0xc(r11) / mtctr / bctrl, and CTR held
+    // UTF-16 text ("en"). It null-checks the slot but cannot tell text from
+    // code. Dump the context head so the slot's real content is visible.
+    uint32_t cx = rd(XamXuiCtxSlot());
+    if (cx) {
+      std::string w;
+      for (uint32_t q = 0; q < 8; ++q) {
+        w += fmt::format("+{:X}:{:08X} ", q * 4, rd(cx + q * 4u));
+      }
+      XELOGI("XuiCtxHead: ctx={:08X} {}", cx, w);
+    }
+  }
 
   {
     // Read-only: the null-render flag as the render host left it. It is
@@ -3174,11 +3188,8 @@ void VdSwap_entry(
               uint64_t ra[] = {sdev, 0, surf};
               proc->Execute(sts, GuideConst(0x819F31A8u), ra, xe::countof(ra));
               uint64_t da[] = {sdev, surf};
-              proc->Execute(sts, 0x819F38C8u, da, xe::countof(da));
+              proc->Execute(sts, GuideConst(0x819F38C8u), da, xe::countof(da));
             }
-            if (fb) {
-              xe::store_and_swap<uint32_t>(
-                  sm->TranslateVirtual(sdev + 0x3F74u), fb);
               // 819F4C00 does not null the RT slots - it restores them from
               // the device's own defaults at [dev+0x3F78] (RT) and
               // [dev+0x3F70] (depth). When those are null the restore is what
@@ -3187,8 +3198,19 @@ void VdSwap_entry(
               // why re-binding more often could never have worked.
               xe::store_and_swap<uint32_t>(
                   sm->TranslateVirtual(sdev + 0x3F78u), surf);
+              // Same asymmetry as [3F78] in phase 454: 819F4C00 restores the
+              // depth slot from [dev+0x3F70], which was left null - the log
+              // there read "defaults [3F78]=408C4B90 [3F70]=00000000". With
+              // skin init on, the crash lands at 819F5EC4, the second address
+              // predraw is documented to make survivable.
+              xe::store_and_swap<uint32_t>(
+                  sm->TranslateVirtual(sdev + 0x3F70u), surf);
               XELOGI("PreDrawBind: defaults [3F78]={:08X} [3F70]={:08X}",
                      srd(sdev + 0x3F78u), srd(sdev + 0x3F70u));
+            if (fb) {
+              xe::store_and_swap<uint32_t>(
+                  sm->TranslateVirtual(sdev + 0x3F74u), fb);
+
             }
             XELOGI("PreDrawBind: dev={:08X} rt={:08X} fb={:08X} -> "
                    "[32A0]={:08X} [32B0]={:08X} [3F74]={:08X}",
