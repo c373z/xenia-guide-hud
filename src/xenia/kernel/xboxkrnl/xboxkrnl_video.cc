@@ -3207,9 +3207,16 @@ void VdSwap_entry(
                   sm->TranslateVirtual(sdev + 0x3F70u), surf);
               XELOGI("PreDrawBind: defaults [3F78]={:08X} [3F70]={:08X}",
                      srd(sdev + 0x3F78u), srd(sdev + 0x3F70u));
-            if (fb) {
+            // 819FEB78 - which takes the device in r3 - traps outright unless
+            // [dev+0x3F74] and [dev+0x3F78] are both non-null:
+            //   lwz r11,0x3f74(r31) / bne / twui   and the same for 0x3f78.
+            // Under skin init the second 819E7528 returns 0, so 3F74 was left
+            // null and that assert is reachable. Fall back to the surface we
+            // do have rather than leaving it zero.
+            uint32_t front = fb ? fb : surf;
+            if (front) {
               xe::store_and_swap<uint32_t>(
-                  sm->TranslateVirtual(sdev + 0x3F74u), fb);
+                  sm->TranslateVirtual(sdev + 0x3F74u), front);
 
             }
             XELOGI("PreDrawBind: dev={:08X} rt={:08X} fb={:08X} -> "
