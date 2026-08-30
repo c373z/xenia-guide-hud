@@ -5432,11 +5432,30 @@ void VdSwap_entry(
               // (81931D08: r3=0 / stw r3,0(r30) / return 0), and the export
               // then reports 80300017. Resolve the object the same way it
               // does and read +8 directly, rather than trusting the read.
-              uint32_t obj = pcall(0x81931040u, {hp});
+              // 0x395 does NOT hand hp to 81931040. It first calls
+              // 81943378(hp, typeid) - which clobbers r3 - and passes THAT
+              // result on (phase 465). Probing with hp directly resolved a
+              // different object, which is what made phases 462-464
+              // contradict the disassembly. Mirror the export exactly.
+              uint32_t typid = prd2(0x81D6CDDCu);
+              uint32_t h2 = pcall(0x81943378u, {hp, typid});
+              uint32_t obj = h2 ? pcall(0x81931040u, {h2}) : 0;
+              uint32_t obj_old = pcall(0x81931040u, {hp});
               XELOGI("VisualCall: 0x395@{:08X}({:08X}) hr={:08X} out={:08X} "
                      "d={} | obj={:08X} [obj+8]={:08X}",
                      f_v, hp, vhr, vh2, d, obj,
                      obj ? prd2(obj + 8u) : 0);
+              XELOGI("VisualObj: hp={:08X} typeid={:08X} 81943378->{:08X} "
+                     "obj={:08X} [obj+8]={:08X} | hp-direct obj={:08X}",
+                     hp, typid, h2, obj, obj ? prd2(obj + 8u) : 0, obj_old);
+              // The objects match, so phase 465's account of the contradiction
+              // is wrong too. Decompose one level further: call 81931C90 with
+              // exactly what the export passes it and see what IT writes,
+              // instead of inferring from the pieces.
+              std::memset(pm2->TranslateVirtual(pout), 0, 16);
+              uint32_t r90 = pcall(0x81931C90u, {h2, pout});
+              XELOGI("VisualInner: 81931C90({:08X},out) -> hr={:08X} out={:08X}",
+                     h2, r90, prd2(pout));
             }
             if (vh2) {
               uint32_t oi2 = pcall(0x81931040u, {hp});
