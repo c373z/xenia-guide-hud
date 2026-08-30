@@ -582,6 +582,7 @@ void* GuideStallThread() { return guide_stall_thread_.load(); }
 void GuidePublishStallThread(void* h) { guide_stall_thread_ = h; }
 static uint32_t guide_first_visual_node_ = 0;
 static uint32_t guide_resv_dev_ = 0;
+static uint32_t g_draw_entry_reserve = 0;
 
 // Resolve the guest thread xam recorded as its XUI render thread.
 //
@@ -6202,9 +6203,23 @@ void VdSwap_entry(
               // Phase 507: set when the PM4 walk desyncs, so the range is not
               // handed to the command processor. See the guard below.
               uint32_t parse_bad = 0;
+              // Phase 514: every walk since phase 504 began on word 0, which
+              // the sentinel proved is never written - it is stale memory that
+              // decodes as a type-0 header claiming 721 registers, desyncing
+              // the parse immediately. With the sentinel on, skip the words the
+              // paint did not write and start where it actually did.
+              uint32_t skip = 0;
+              while (skip < words &&
+                     prd2(before + skip * 4u) == 0xDEADBEEFu) {
+                ++skip;
+              }
+              if (skip) {
+                XELOGI("GuidePaintWalk: skipping {} unwritten word(s) at {:08X}",
+                       skip, before);
+              }
               {
                 uint32_t counts[128] = {0};
-                uint32_t t0 = 0, t2 = 0, pk = 0, bad = 0, iw = 0;
+                uint32_t t0 = 0, t2 = 0, pk = 0, bad = 0, iw = skip;
                 std::string first;
                 while (iw < words) {
                   uint32_t wd = prd2(before + iw * 4);
@@ -6930,10 +6945,18 @@ void VdSwap_entry(
         uint32_t qdc = q(guide_draw_this_ + 12u);
         uint32_t qwr = qdc ? q(qdc + 0x1CCu) : 0;
         uint32_t qdv = qwr ? q(qwr + 0x0Cu) : 0;
+        // Phase 514: the reserve cursor read after the composite draw is
+        // 40875814 - xam's own buffer - while the value read just before it is
+        // whatever DrawWiden/CursorReopen last wrote, so the delta is
+        // meaningless. Capture [dev+0x30] here, at hook entry, before anything
+        // in this file touches it. Disabling the cmdbuf binding instead is not
+        // an option: with --guide_bind_cmdbuf_kb=0 the hook never fires at all
+        // (draws: 0).
+        g_draw_entry_reserve = q(qdv + 0x30u);
         XELOGI("CursorAtDraw #{}: dev={:08X} base[2B48]={:08X} cur[2B4C]={:08X} "
-               "limit[2B50]={:08X} pend[2B54]={:08X}",
+               "limit[2B50]={:08X} pend[2B54]={:08X} reserve[30]={:08X}",
                drawbr, qdv, q(qdv + 0x2B48u), q(qdv + 0x2B4Cu),
-               q(qdv + 0x2B50u), q(qdv + 0x2B54u));
+               q(qdv + 0x2B50u), q(qdv + 0x2B54u), g_draw_entry_reserve);
         // The crash unwinds to 913EABC4, inside the hud render entry
         // (913EAB28) - it is THIS path that faults, not the paint. The reserve
         // 81A042E0 draws its window from [dev+0x30]/[dev+0x34]; every widening
@@ -7163,10 +7186,63 @@ void VdSwap_entry(
                  static_cast<uint32_t>(br2), q(qdv + 0x2B4Cu));
         }
       }
+      // Phase 514: the paint path (hud_base + 0xA888) emits only LUT
+      // programming - 768 COND_WRITE packets, 0 DRAW_INDX, now confirmed with a
+      // valid parse. But the geometry path is this one, the composite draw
+      // (0xAB28), which is where the phase-502 crash lived and is therefore
+      // definitely doing graphics work. It has never been measured. Sample both
+      // cursors across it and walk whatever it writes.
+      auto* cdm = kernel_state()->memory();
+      auto cq = [cdm](uint32_t a) {
+        return a ? xe::load_and_swap<uint32_t>(cdm->TranslateVirtual(a)) : 0u;
+      };
+      uint32_t cd_dc = cq(guide_draw_this_ + 12u);
+      uint32_t cd_wr = cd_dc ? cq(cd_dc + 0x1CCu) : 0;
+      uint32_t cd_dev = cd_wr ? cq(cd_wr + 0x0Cu) : 0;
+      uint32_t cd_r0 = cq(cd_dev + 0x30u);
+      uint32_t cd_b0 = cq(cd_dev + 0x2B4Cu);
       in_guide_draw_scope = true;
       uint64_t gr = kernel_state()->processor()->Execute(
           gth->thread_state(), guide_draw_fn_, gargs, xe::countof(gargs));
       in_guide_draw_scope = false;
+      if (cd_dev) {
+        uint32_t cd_r1 = cq(cd_dev + 0x30u), cd_b1 = cq(cd_dev + 0x2B4Cu);
+        static uint32_t cdlog = 0;
+        if (cdlog++ < 4) {
+          uint32_t pre = g_draw_entry_reserve;
+        XELOGI("CompositeEmit #{}: entry[30]={:08X} -> {:08X} ({} words in "
+               "xam's buffer)",
+               drawbr, pre, cd_r1,
+               (cd_r1 > pre) ? (cd_r1 - pre) / 4 : 0);
+        XELOGI("CompositeEmit #{}: reserve {:08X}->{:08X} ({} words) | "
+                 "block {:08X}->{:08X} ({} words)",
+                 drawbr, cd_r0, cd_r1,
+                 (cd_r1 > cd_r0) ? (cd_r1 - cd_r0) / 4 : 0, cd_b0, cd_b1,
+                 (cd_b1 > cd_b0) ? (cd_b1 - cd_b0) / 4 : 0);
+          uint32_t ws = 0, we2 = 0;
+          if (cd_r1 > cd_r0) { ws = cd_r0; we2 = cd_r1; }
+          else if (cd_b1 > cd_b0) { ws = cd_b0; we2 = cd_b1; }
+          if (ws && (we2 - ws) < 0x40000u) {
+            uint32_t nw = (we2 - ws) / 4u, t3 = 0, dr = 0;
+            std::string firstp;
+            for (uint32_t i = 0; i < nw;) {
+              uint32_t hd = cq(ws + i * 4u);
+              if ((hd >> 30) == 3) {
+                uint32_t op = (hd >> 8) & 0x7Fu;
+                uint32_t cn = ((hd >> 16) & 0x3FFFu) + 1u;
+                ++t3;
+                if (op == 0x22u || op == 0x36u) ++dr;
+                if (t3 <= 10) firstp += fmt::format("{:02X}x{} ", op, cn);
+                i += cn + 1u;
+              } else {
+                ++i;
+              }
+            }
+            XELOGI("CompositeEmit #{}: {} words, {} type3, DRAW_INDX={} | {}",
+                   drawbr, nw, t3, dr, firstp);
+          }
+        }
+      }
       if (brk) {
         XELOGI("GuideDrawLeave #{} -> {:08X}", drawbr,
                static_cast<uint32_t>(gr));
