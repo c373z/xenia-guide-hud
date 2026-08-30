@@ -1610,6 +1610,19 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   // therefore constructed with [+0x1C8] holding whatever the allocation
   // contained, and 81901E40 bctrls through [[dc+0x1C8]+0x0C] into it.
   guide_boot_dc_ = rd(dcp);
+  // Phase 576: the dispatcher path calls [DC_vtable + 0x104] and CTR was zero
+  // (575). Log the vtable and the slots around 0x104 - if the table is a xam
+  // address its real contents are in xam.bin, and a null here means our DC was
+  // built from the wrong table rather than that the method does not exist.
+  if (guide_boot_dc_) {
+    uint32_t vt = rd(guide_boot_dc_);
+    std::string sl;
+    for (uint32_t off = 0xF8u; off <= 0x110u; off += 4) {
+      sl += fmt::format("+{:X}:{:08X} ", off, vt ? rd(vt + off) : 0);
+    }
+    XELOGI("GuideDCVtable: dc={:08X} vtable={:08X} | {}", guide_boot_dc_, vt,
+           sl);
+  }
 
   uint32_t render_obj = guide_bs_obj_ + 16;
   xe::store_and_swap<uint32_t>(memory->TranslateVirtual(render_obj + 20), 1u);
@@ -2071,8 +2084,21 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
         // tried in phases 559-573 was the wrong kind of thing.
         uint32_t parent_arg = guide_bs_scene_;
         if (::cvars::guide_nav_state >= 0 && guide_boot_dc_) {
-          XELOGI("GuideNav: passing DC {:08X} as arg2 instead of scene {:08X}",
-                 guide_boot_dc_, guide_bs_scene_);
+          // Phase 576: the vtable slot is populated at creation
+          // (+104:818FA168), so a null CTR at the call means the DC's vtable
+          // pointer changed in between. Read it here, at the point of use.
+          uint32_t vt_now = rd(guide_boot_dc_);
+          XELOGI("GuideNav: passing DC {:08X} as arg2 instead of scene {:08X} "
+                 "| [dc+0]={:08X} [vt+104]={:08X}",
+                 guide_boot_dc_, guide_bs_scene_, vt_now,
+                 vt_now ? rd(vt_now + 0x104u) : 0);
+          // The vtable target 818FA168 reads [DC+0x1CC] and dereferences it at
+          // 818FA188, which faults at 0 if the field is null. This file claims
+          // our DC is the only one with [+0x1C8]/[+0x1CC] populated - check it
+          // here rather than trusting the note.
+          XELOGI("GuideNav: DC [+1C8]={:08X} [+1CC]={:08X} [+134]={:08X}",
+                 rd(guide_boot_dc_ + 0x1C8u), rd(guide_boot_dc_ + 0x1CCu),
+                 rd(guide_boot_dc_ + 0x134u));
           parent_arg = guide_boot_dc_;
         } else if (::cvars::guide_draw_root_object) {
           uint32_t po_ = GuideResolveHandle(guide_bs_scene_);
