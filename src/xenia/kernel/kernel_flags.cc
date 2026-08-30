@@ -558,6 +558,16 @@ DEFINE_int32(guide_second_context_kb, 0,
              "title is about to present.",
              "Kernel");
 
+DEFINE_bool(guide_force_drawgate, false,
+            "Set the low 12 bits of [dev+0x10] before each composite draw. "
+            "819F6BC0 keeps exactly those bits (rldicl r10,r11,0,52) and skips "
+            "DRAW_INDX when they are zero; on dashroot they are measured as "
+            "000 every draw, which is why its 9623-word stream carries no draw "
+            "packets. Neither guide_force_dirty nor guide_dirty_via_api moves "
+            "them, so the render-tree dirty API is not what sets this. Writing "
+            "them directly asks whether the gate is the only thing suppressing "
+            "the draw, or merely the first.",
+            "Guide");
 DEFINE_int32(guide_bind_cmdbuf_kb, 0,
              "Allocate a command buffer of this many KB and point the Guide "
              "device's write cursor [dev+0x2B4C] at it. Packet emission "

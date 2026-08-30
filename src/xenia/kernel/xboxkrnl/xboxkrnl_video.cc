@@ -6716,6 +6716,11 @@ void VdSwap_entry(
         if (dev) {
           uint32_t rdev = rdw(dev + 0x0Cu);
           if (rdev) {
+            if (::cvars::guide_force_drawgate) {
+              xe::store_and_swap<uint32_t>(
+                  kernel_state()->memory()->TranslateVirtual(rdev + 0x14u),
+                  rdw(rdev + 0x14u) | 0xFFFu);
+            }
             XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
                    "[28]={:08X}:{:08X} low12={:03X}",
                    gn, rdev, rdw(rdev + 0x10u), rdw(rdev + 0x14u),
