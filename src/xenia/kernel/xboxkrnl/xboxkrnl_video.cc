@@ -6707,6 +6707,22 @@ void VdSwap_entry(
                (dev && rdw(dev + 0x0Cu))
                    ? rdw(rdw(dev + 0x0Cu) + 0x32B0u)
                    : 0);
+        // The DRAW_INDX gate, read off the REAL device (wrapper+0x0C).
+        // 819F6BC0 keeps the low 12 bits of [dev+0x10] (rldicl r10,r11,0,52)
+        // and skips the draw when they are zero; [dev+0x28] gates the block
+        // above it. Both are 64-bit, so log the low words too. This is the
+        // question a 00000000 composite-draw return does not answer: whether
+        // geometry ever marks the device dirty.
+        if (dev) {
+          uint32_t rdev = rdw(dev + 0x0Cu);
+          if (rdev) {
+            XELOGI("DrawGate #{}: dev={:08X} [10]={:08X}:{:08X} "
+                   "[28]={:08X}:{:08X} low12={:03X}",
+                   gn, rdev, rdw(rdev + 0x10u), rdw(rdev + 0x14u),
+                   rdw(rdev + 0x28u), rdw(rdev + 0x2Cu),
+                   rdw(rdev + 0x14u) & 0xFFFu);
+          }
+        }
         // The real present path (819DE94C) picks a surface as
         //   r11 = [dev+32A0] ? [dev+32A0] : [dev+32B0]
         // and immediately does lwz r9,36(r11). Both null => null deref at
