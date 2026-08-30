@@ -1338,6 +1338,33 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
                "vf2={:08X}/{:08X}",
                guide_replaying_ ? "replay" : "burst", frf[0x4800], frf[0x4801],
                frf[0x4802], frf[0x4803], frf[0x4804], frf[0x4805]);
+        // Phase 542: the question never asked - WHERE is this geometry? The
+        // fetch constant carries the vertex buffer address in its upper bits;
+        // read the first vertices and print them as floats. Off-screen or
+        // degenerate positions would explain draws that are well-formed,
+        // correctly targeted, and cover nothing.
+        for (uint32_t slot = 0; slot < 3; ++slot) {
+          uint32_t w0 = frf[0x4800 + slot * 2], w1 = frf[0x4801 + slot * 2];
+          uint32_t type = w0 & 3u;
+          if (type != 3u) continue;              // kVertex only
+          // xe_gpu_vertex_fetch_t: address is a 30-bit field at bit 2 holding
+          // an address in DWORDS, so the byte address is (w0 >> 2) * 4, i.e.
+          // w0 & ~3. The first version shifted left instead and produced
+          // out-of-range addresses that read as zeros - which looked like null
+          // geometry and was purely the arithmetic.
+          uint32_t addr = w0 & ~3u;
+          uint32_t size_dw = (w1 >> 2) & 0xFFFFFFu;  // size:24 at bit 2
+          const uint8_t* vp = memory_->TranslatePhysical(addr);
+          if (!vp || size_dw < 4) continue;
+          float f[6];
+          for (uint32_t k = 0; k < 6; ++k) {
+            uint32_t raw = xe::load_and_swap<uint32_t>(vp + k * 4);
+            std::memcpy(&f[k], &raw, 4);
+          }
+          XELOGI("GuideVerts[slot {}]: addr={:08X} dwords={} | {} {} {} | "
+                 "{} {} {}",
+                 slot, addr, size_dw, f[0], f[1], f[2], f[3], f[4], f[5]);
+        }
       }
       // Phase 527: phase 522 concluded "the Guide draws after the frame's
       // resolve" from counters read on the TITLE thread while they are updated
