@@ -5896,6 +5896,23 @@ void VdSwap_entry(
                 };
                 XELOGI("VisualMissing: type {:08X} = '{}' / '{}'", typid2,
                        nm(prd2(typid2 + 4u)), nm(prd2(typid2 + 8u)));
+                // Phase 566: 0x8030000A is a failed cast to XuiVisual, not a
+                // lookup miss, so the question is what class the object we pass
+                // actually is. Resolve the handle and walk its descriptor chain,
+                // naming each level - the same +8 chain and +4/+8 names used
+                // above.
+                uint32_t oidx = hp & 0xFFFFu, otag = hp >> 16;
+                uint32_t obkt = prd2(0x81D6D0D8u + (oidx >> 8) * 4u);
+                uint32_t oent = obkt ? obkt + (oidx & 0xFFu) * 8u : 0;
+                uint32_t oobj = (oent && prd2(oent) == otag) ? prd2(oent + 4u) : 0;
+                std::string cls;
+                for (uint32_t d = oobj ? prd2(oobj) : 0, k = 0; d && k < 6; ++k) {
+                  cls += fmt::format("{:08X}'{}' -> ", d, nm(prd2(d + 4u)));
+                  d = prd2(d + 8u);
+                }
+                XELOGI("SceneClass: handle {:08X} obj={:08X} [obj+0]={:08X} "
+                       "chain: {}end",
+                       hp, oobj, oobj ? prd2(oobj) : 0, cls);
               }
               // Distinguishing test (phase 468): is +0x18 a type-id field that
               // these objects fill wrongly, or are these objects simply not
