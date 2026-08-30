@@ -5559,6 +5559,21 @@ void VdSwap_entry(
                          (e0 == tag) ? " OK" : " MISMATCH", e1,
                          ok(e1) ? prd2(e1 + 8u) : 0,
                          ok(e1) ? prd2(e1 + 0x18u) : 0);
+                  // Walk exactly as 8193F1B8 does: objects via +8, comparing
+                  // each [+0x18] against the required type. Does 40881D10
+                  // appear anywhere in the chain, or is the visual simply a
+                  // different class?
+                  std::string w;
+                  bool found = false;
+                  for (uint32_t nd = e1, k = 0; ok(nd) && k < 10; ++k) {
+                    uint32_t ty = prd2(nd + 0x18u);
+                    if (ty == typid2) found = true;
+                    w += fmt::format("{:08X}[t={:08X}]{} -> ", nd, ty,
+                                     (ty == typid2) ? "*MATCH*" : "");
+                    nd = prd2(nd + 8u);
+                  }
+                  XELOGI("TypeWalk: from={:08X} want={:08X} {}end | {}",
+                         e1, typid2, w, found ? "REACHES IT" : "never reaches it");
                 }
               }
             }
