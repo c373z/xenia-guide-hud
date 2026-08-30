@@ -5423,8 +5423,14 @@ void VdSwap_entry(
                  ((hp & 0xFFFFu) < 0x400u) ? "in range" : "OUT OF RANGE");
           for (int d = 0; d < 6 && hp; ++d) {
             std::memset(pm2->TranslateVirtual(pout), 0, 16);
-            pcall(f_v, {hp, pout});
+            // The return value was discarded; only `out` was checked. An
+            // HRESULT says why 0x395 declines, which a null out cannot.
+            uint32_t vhr = pcall(f_v, {hp, pout});
             uint32_t vh2 = prd2(pout);
+            if (d < 3) {
+              XELOGI("VisualCall: 0x395@{:08X}({:08X}) hr={:08X} out={:08X} d={}",
+                     f_v, hp, vhr, vh2, d);
+            }
             if (vh2) {
               uint32_t oi2 = pcall(0x81931040u, {hp});
               if (oi2) {
