@@ -5401,8 +5401,26 @@ void VdSwap_entry(
           std::memset(pm2->TranslateVirtual(ppay), 0, 256);
           pcall(guide_bs_hud_base_ + 0xA888u,
                 {pmsg, ppay, dc2, 0xFFFFFFFFull, 1});
+          // The paint gets a visual from 81931040 -> 819426F0, which does not read a
+          // field on the widget: it indexes a global table based at 81D6D0D8 with the
+          // bound at [81D6D4F8] and twi traps on the range (phase 459). A zero bound
+          // means the table was never built; a non-zero bound with a miss means the
+          // index is wrong. Those need opposite fixes, so measure before changing.
+          if (XamIsDashrootLayout()) {
+            XELOGI("VisualTable: base=81D6D0D8 [0]={:08X} [4]={:08X} [8]={:08X} "
+                   "bound[81D6D4F8]={:08X}",
+                   prd2(0x81D6D0D8u), prd2(0x81D6D0DCu), prd2(0x81D6D0E0u),
+                   prd2(0x81D6D4F8u));
+          }
           uint32_t painted = 0;
           uint32_t hp = rt2;
+          // 819426F0 indexes the visual table with rlwinm r10,rObj,0,16,31 - the low
+          // 16 bits of what it is handed - and traps/returns 0 when that exceeds the
+          // bound (0x400). A handle like 0001005A gives index 5A; a heap pointer like
+          // 408C5500 gives 5500, which is out of range. rt2 is read as a pointer, so
+          // log the index this walk actually produces.
+          XELOGI("VisualIndex: hp={:08X} low16={:04X} bound=0400 {}", hp, hp & 0xFFFFu,
+                 ((hp & 0xFFFFu) < 0x400u) ? "in range" : "OUT OF RANGE");
           for (int d = 0; d < 6 && hp; ++d) {
             std::memset(pm2->TranslateVirtual(pout), 0, 16);
             pcall(f_v, {hp, pout});
