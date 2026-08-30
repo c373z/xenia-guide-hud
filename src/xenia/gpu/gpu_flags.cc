@@ -132,3 +132,13 @@ DEFINE_bool(
     "guest clipping is enabled. X/Y/W clipping is unaffected. On Vulkan, "
     "this requires depthClamp support.",
     "GPU");
+
+// Phase 522/523: the Guide's geometry reaches the primary EDRAM target, but the
+// per-frame ordering is `title renders -> RESOLVE -> Guide draws -> SWAP`, so it
+// is written after the displayed pixels were copied out and is cleared unseen.
+// This issues a second resolve after the Guide has drawn, immediately before the
+// swap, reusing the copy registers the title's own resolve just used.
+DEFINE_bool(guide_resolve_after_draw, false,
+            "Issue a second EDRAM resolve after the Guide's draws and before "
+            "the swap, so its geometry reaches the front buffer.",
+            "GPU");

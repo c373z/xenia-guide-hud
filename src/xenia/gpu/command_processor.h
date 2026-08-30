@@ -457,6 +457,18 @@ class CommandProcessor {
   // and swaps so the sequence can be read against the draw count.
   uint32_t guide_resolve_count_ = 0;
   uint32_t guide_swap_count_ = 0;
+  uint32_t guide_draws_at_last_swap_ = 0;
+  // Phase 523: the resolve rectangle lives in vertex-fetch slot 0 (a D3D9
+  // hack GetResolveInfo depends on) and the copy destination in RB_COPY_*.
+  // The Guide's own draws overwrite vf0, so a second IssueCopy after them
+  // fails with "Unsupported resolve vertex buffer format" - 3479 times in
+  // one run. Snapshot the state at the title's resolve and restore it for
+  // the extra one.
+  bool guide_resolve_saved_ = false;
+  bool guide_resolve_replay_ = false;
+  uint32_t guide_saved_copy_[4] = {};    // RB_COPY_CONTROL..DEST_INFO
+  uint32_t guide_saved_vf0_[2] = {};     // SHADER_CONSTANT_FETCH_00_0/_1
+  uint32_t guide_saved_surface_[2] = {}; // RB_SURFACE_INFO, RB_COLOR_INFO
 
   // Ring-buffer state, for checking what xam's mode-1 device creator
   // takes from a running title: mode 1 reaches VdInitializeRingBuffer

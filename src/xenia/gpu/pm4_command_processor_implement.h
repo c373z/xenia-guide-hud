@@ -685,6 +685,45 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
            guide_draw_count_ - draws_before);
   }
 
+  // Phase 523: the Guide draws between this frame's resolve and its swap
+  // (phase 522: resolves == swaps + 1 at every Guide draw), so its geometry sits
+  // in EDRAM after the displayed pixels were already copied out. Resolve again
+  // here, with the copy registers the title's own resolve just used, so the
+  // Guide's pixels reach the same destination before the swap.
+  if (cvars::guide_resolve_after_draw && guide_resolve_saved_ &&
+      guide_draw_count_ > guide_draws_at_last_swap_) {
+    // Restore the resolve state captured at the title's own resolve: the
+    // Guide's draws have since overwritten vertex-fetch slot 0, which
+    // GetResolveInfo reads the resolve rectangle from. Save what the Guide left
+    // and put it back afterwards so the next frame is unaffected.
+    RegisterFile& rf = *register_file_;
+    uint32_t keep_copy[4], keep_vf0[2];
+    for (uint32_t i = 0; i < 4; ++i) {
+      keep_copy[i] = rf[0x2318 + i];
+      rf[0x2318 + i] = guide_saved_copy_[i];
+    }
+    keep_vf0[0] = rf[0x4800];
+    keep_vf0[1] = rf[0x4801];
+    rf[0x4800] = guide_saved_vf0_[0];
+    rf[0x4801] = guide_saved_vf0_[1];
+
+    guide_resolve_replay_ = true;
+    bool ok = COMMAND_PROCESSOR::IssueCopy();
+    guide_resolve_replay_ = false;
+
+    for (uint32_t i = 0; i < 4; ++i) rf[0x2318 + i] = keep_copy[i];
+    rf[0x4800] = keep_vf0[0];
+    rf[0x4801] = keep_vf0[1];
+
+    static uint32_t reslog = 0;
+    if (reslog++ < 8) {
+      XELOGI("GuideResolve: {} Guide draws this frame -> IssueCopy {} "
+             "(dest_base={:08X})",
+             guide_draw_count_ - guide_draws_at_last_swap_,
+             ok ? "ok" : "FAILED", guide_saved_copy_[1]);
+    }
+  }
+  guide_draws_at_last_swap_ = guide_draw_count_;
   ++guide_swap_count_;  // phase 522
   COMMAND_PROCESSOR::IssueSwap(frontbuffer_ptr, frontbuffer_width,
                                frontbuffer_height);

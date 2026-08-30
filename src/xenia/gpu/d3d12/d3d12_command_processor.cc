@@ -3170,6 +3170,18 @@ void D3D12CommandProcessor::InitializeTrace() {
 
 bool D3D12CommandProcessor::IssueCopy() {
   ++guide_resolve_count_;  // phase 522: see command_processor.h
+  // Phase 523: capture the state a working resolve runs with, so the extra
+  // resolve issued after the Guide's draws can restore it. Only capture on the
+  // title's own resolves - guide_resolve_replay_ marks ours.
+  if (!guide_resolve_replay_) {
+    RegisterFile& rf = *register_file_;
+    for (uint32_t i = 0; i < 4; ++i) guide_saved_copy_[i] = rf[0x2318 + i];
+    guide_saved_vf0_[0] = rf[0x4800];
+    guide_saved_vf0_[1] = rf[0x4801];
+    guide_saved_surface_[0] = rf[0x2000];
+    guide_saved_surface_[1] = rf[0x2001];
+    guide_resolve_saved_ = true;
+  }
 #if XE_GPU_FINE_GRAINED_DRAW_SCOPES
   SCOPE_profile_cpu_f("gpu");
 #endif  // XE_GPU_FINE_GRAINED_DRAW_SCOPES
