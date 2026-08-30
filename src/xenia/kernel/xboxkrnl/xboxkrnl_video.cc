@@ -5530,6 +5530,24 @@ void VdSwap_entry(
           uint32_t paint_dev_ = paint_wr_ ? prd2(paint_wr_ + 0x0Cu) : 0;
           if (!paint_dev_) paint_dev_ = guide_resv_dev_;
           uint32_t before = paint_dev_ ? prd2(paint_dev_ + 0x30u) : 0;
+          // Phase 513: the 6927 words are three 0x905-word reserve calls this
+          // harness makes itself, one per element (ReserveCall returns exactly
+          // the measured cursors). A reserve hands out memory without writing
+          // it, so the "gamma ramp" phases 505/506/511/512 analysed may simply
+          // be whatever was already there. Stamp the range with a sentinel: if
+          // the LUT pattern comes back, something really writes it; if the
+          // sentinel survives, the paint emits nothing at all.
+          if (before && ::cvars::guide_paint_sentinel) {
+            static bool stamped = false;
+            if (!stamped) {
+              stamped = true;
+              for (uint32_t k = 0; k < 0x4000u; ++k) {
+                xe::store_and_swap<uint32_t>(
+                    pm2->TranslateVirtual(before + k * 4u), 0xDEADBEEFu);
+              }
+              XELOGI("PaintSentinel: stamped 0x4000 words at {:08X}", before);
+            }
+          }
           // [dev+0x30] is the reserve window, not the PM4 command block. The
           // first walk of that range desynced on word 0 (02D00500 parses as a
           // type-0 header claiming 721 registers) and the raw dump shows
@@ -6044,15 +6062,22 @@ void VdSwap_entry(
                     }
                   }
                 }
-                uint32_t e0 = pdev
-                                  ? prd2(pdev + 0x30u) : 0;
+                // Phase 513: [dev+0x30] is the RESERVE cursor. Writing into an
+                // already-reserved block advances the block cursor [2B4C], not
+                // this one, so sampling 0x30 around the render reports zero for
+                // an element that emits normally. Phase 512 concluded "the
+                // element render emits nothing" off exactly that mistake - the
+                // phase-504 two-buffer lesson, not applied one level down.
+                // Sample both.
+                uint32_t e0 = pdev ? prd2(pdev + 0x30u) : 0;
+                uint32_t b0 = pdev ? prd2(pdev + 0x2B4Cu) : 0;
                 uint32_t gg = pcall(0x81954468u, {oi2});
                 pcall(0x81968890u, {oi2, pmsg});
-                uint32_t e1 = pdev
-                                  ? prd2(pdev + 0x30u) : 0;
+                uint32_t e1 = pdev ? prd2(pdev + 0x30u) : 0;
+                uint32_t b1 = pdev ? prd2(pdev + 0x2B4Cu) : 0;
                 pcall(0x81968890u, {oi2, pmsg});
-                uint32_t e2 = pdev
-                                  ? prd2(pdev + 0x30u) : 0;
+                uint32_t e2 = pdev ? prd2(pdev + 0x30u) : 0;
+                uint32_t b2 = pdev ? prd2(pdev + 0x2B4Cu) : 0;
                 static uint32_t el_logs = 0;
                 if (el_logs++ < 8) {
                   uint32_t bw = prd2(oi2 + 0x1Cu), bh = prd2(oi2 + 0x20u);
@@ -6070,6 +6095,10 @@ void VdSwap_entry(
                          pdev, e0, hp, oi2, vh2, gg, prd2(oi2 + 0xB4u), fbw, fbh,
                          (e1 > e0) ? (e1 - e0) / 4 : 0,
                          (e2 > e1) ? (e2 - e1) / 4 : 0);
+                  XELOGI("GuideElem:   block cursor {:08X}->{:08X}->{:08X} "
+                         "(first {} words, repeat {} words)",
+                         b0, b1, b2, (b1 > b0) ? (b1 - b0) / 4 : 0,
+                         (b2 > b1) ? (b2 - b1) / 4 : 0);
                   // Execute the REPEAT range - the element's own steady-state
                   // output, with the one-time setup already paid. Two prior
                   // streams were confirmed draw-free this way; this is the

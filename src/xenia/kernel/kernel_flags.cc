@@ -995,3 +995,11 @@ DEFINE_bool(guide_patch_rt_unbind, false,
             "render target is not unbound between the paint and the read at "
             "819F5F60.",
             "Kernel");
+
+// Phase 513: stamp the paint's reserve range with a sentinel before the paint,
+// to distinguish words the paint actually writes from memory it merely reserves.
+DEFINE_bool(guide_paint_sentinel, false,
+            "Fill the paint's output range with 0xDEADBEEF beforehand so the "
+            "walk shows what the paint writes rather than what was already "
+            "there.",
+            "Kernel");
