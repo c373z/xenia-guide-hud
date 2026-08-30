@@ -3141,6 +3141,48 @@ void VdSwap_entry(
         }
       }
       uint64_t gargs[] = {guide_draw_this_};
+      if (::cvars::guide_predraw_surfaces) {
+        // Bind through xam's OWN setters, on the title thread, once, before
+        // the first draw. Raw stores here suppress the draw entirely: the
+        // setters do bookkeeping around the store (819F4348 first, more
+        // after) that a bare store_and_swap skips. Doing it at button time
+        // loses to 819F4C00, which unbinds by calling these same two
+        // functions with null (819F4C44 / 819F4C70).
+        static bool bound = false;
+        if (!bound) {
+          bound = true;
+          auto* sm = kernel_state()->memory();
+          auto srd = [sm](uint32_t a) {
+            return xe::load_and_swap<uint32_t>(sm->TranslateVirtual(a));
+          };
+          auto* sts = gth->thread_state();
+          auto* proc = kernel_state()->processor();
+          uint32_t sdc = srd(guide_draw_this_ + 12);
+          uint32_t swrap = sdc ? srd(sdc + 0x1CCu) : 0;
+          uint32_t sdev = swrap ? srd(swrap + 0x0Cu) : 0;
+          if (sdev) {
+            uint64_t ca[] = {1280, 720, 0x18280186u, 0, 0};
+            uint32_t surf = static_cast<uint32_t>(
+                proc->Execute(sts, 0x819E7528u, ca, xe::countof(ca)));
+            uint32_t fb = static_cast<uint32_t>(
+                proc->Execute(sts, 0x819E7528u, ca, xe::countof(ca)));
+            if (surf) {
+              uint64_t ra[] = {sdev, 0, surf};
+              proc->Execute(sts, 0x819F31A8u, ra, xe::countof(ra));
+              uint64_t da[] = {sdev, surf};
+              proc->Execute(sts, 0x819F38C8u, da, xe::countof(da));
+            }
+            if (fb) {
+              xe::store_and_swap<uint32_t>(
+                  sm->TranslateVirtual(sdev + 0x3F74u), fb);
+            }
+            XELOGI("PreDrawBind: dev={:08X} rt={:08X} fb={:08X} -> "
+                   "[32A0]={:08X} [32B0]={:08X} [3F74]={:08X}",
+                   sdev, surf, fb, srd(sdev + 0x32A0u), srd(sdev + 0x32B0u),
+                   srd(sdev + 0x3F74u));
+          }
+        }
+      }
       {
         // Log BEFORE the draw: with guide_force_real_present the draw faults,
         // so anything logged after Execute never appears.
