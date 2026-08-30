@@ -6708,6 +6708,52 @@ void VdSwap_entry(
                "limit[2B50]={:08X} pend[2B54]={:08X}",
                drawbr, qdv, q(qdv + 0x2B48u), q(qdv + 0x2B4Cu),
                q(qdv + 0x2B50u), q(qdv + 0x2B54u));
+        // The crash unwinds to 913EABC4, inside the hud render entry
+        // (913EAB28) - it is THIS path that faults, not the paint. The reserve
+        // 81A042E0 draws its window from [dev+0x30]/[dev+0x34]; every widening
+        // so far was applied at the paint site, which this path never reaches.
+        // Widen here, on the device this draw actually uses.
+        if (qdv && guide_cmdbuf_base_ && guide_cmdbuf_size_) {
+          uint32_t dc0 = q(qdv + 0x30u), de0 = q(qdv + 0x34u);
+          if (de0 <= dc0 || (de0 - dc0) < 0x905u * 4u) {
+            auto* dm = kernel_state()->memory();
+            xe::store_and_swap<uint32_t>(dm->TranslateVirtual(qdv + 0x30u),
+                                         guide_cmdbuf_base_);
+            xe::store_and_swap<uint32_t>(
+                dm->TranslateVirtual(qdv + 0x34u),
+                guide_cmdbuf_base_ + guide_cmdbuf_size_);
+            XELOGI("DrawWiden #{}: dev={:08X} was {} -> cur={:08X} end={:08X}",
+                   drawbr, qdv, (de0 > dc0) ? (de0 - dc0) : 0,
+                   q(qdv + 0x30u), q(qdv + 0x34u));
+            // Widening cleared 81A01638 and the failure moved to 819F5F60 -
+            // the RT-slot fault of phase 453 (lwz r11,0x32B0(r31), null slot).
+            // Phase 454 fixed that by binding the device's default surfaces,
+            // but at the predraw site, which this path does not reach either.
+            // Bind them here on the same device.
+            if (!q(qdv + 0x3F78u) || !q(qdv + 0x32B0u)) {
+              uint64_t ca[] = {1280, 720, 0x18280186u, 0, 0};
+              uint32_t surf = uint32_t(kernel_state()->processor()->Execute(
+                  gth->thread_state(), GuideConst(0x819E7528u), ca,
+                  xe::countof(ca)));
+              if (surf) {
+                for (uint32_t off : {0x32A0u, 0x32B0u, 0x3F70u, 0x3F74u,
+                                     0x3F78u}) {
+                  xe::store_and_swap<uint32_t>(
+                      dm->TranslateVirtual(qdv + off), surf);
+                }
+                XELOGI("DrawSurfBind #{}: dev={:08X} surf={:08X} -> "
+                       "[32A0]={:08X} [32B0]={:08X} [3F78]={:08X}",
+                       drawbr, qdv, surf, q(qdv + 0x32A0u), q(qdv + 0x32B0u),
+                       q(qdv + 0x3F78u));
+              } else {
+                XELOGW("DrawSurfBind #{}: surface creation returned 0", drawbr);
+              }
+            }
+          } else {
+            XELOGI("DrawWiden #{}: dev={:08X} window {} already sufficient",
+                   drawbr, qdv, de0 - dc0);
+          }
+        }
         // Measured: our begin sets base/cursor/limit, but by draw entry the
         // block is closed and the limit belongs to xam's own buffer - xam runs
         // its own begin/end cycles and ours is overwritten. The emitter is
