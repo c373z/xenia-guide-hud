@@ -744,6 +744,34 @@ uint32_t GuideNopFn() {
   return g_nop_fn;
 }
 
+// Phase 519: [81D6C9C8] holds the stand-in at bootstrap entry and reads zero by
+// XuiRenderCreateDC, so one of the early bootstrap calls clears it wholesale -
+// no store to it exists anywhere in the image. Installing once is therefore not
+// enough; re-establish it wherever it is found null.
+static void GuideEnsureStandin(const char* tag) {
+  if (!::cvars::guide_patch_skin_dispatch) return;
+  auto* m = kernel_state()->memory();
+  uint32_t cur = xe::load_and_swap<uint32_t>(m->TranslateVirtual(0x81D6C9C8u));
+  if (cur) {
+    XELOGI("Standin @{}: already {:08X}", tag, cur);
+    return;
+  }
+  uint32_t blk = m->SystemHeapAlloc(0x80, 16);
+  uint32_t nopfn = GuideNopFn();
+  if (!blk || !nopfn) {
+    XELOGW("Standin @{}: cannot build (blk={:08X} nop={:08X})", tag, blk, nopfn);
+    return;
+  }
+  std::memset(m->TranslateVirtual(blk), 0, 0x80);
+  uint32_t vt = blk + 0x40u;
+  xe::store_and_swap<uint32_t>(m->TranslateVirtual(blk), vt);
+  for (uint32_t sl = 0; sl < 16; ++sl) {
+    xe::store_and_swap<uint32_t>(m->TranslateVirtual(vt + sl * 4u), nopfn);
+  }
+  xe::store_and_swap<uint32_t>(m->TranslateVirtual(0x81D6C9C8u), blk);
+  XELOGI("Standin @{}: installed {:08X}", tag, blk);
+}
+
 uint32_t GuideConst(uint32_t addr) {
   if (XamIsDashrootLayout()) return addr;
   static uint32_t reported[64] = {};
@@ -1556,6 +1584,7 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   }
   XELOGI("GuideBootstrap: XuiRenderCreateDC -> {:08X} dc={:08X}",
          static_cast<uint32_t>(dr), rd(dcp));
+  GuideEnsureStandin("createdc");
   // Remember our DC. It is the only one in the process whose [+0x1C8]/[+0x1CC]
   // are populated - 81900E70 (the constructor) writes [+0x134] and nothing
   // else, and only 818FDE98 writes those two, reached solely through a vtable
@@ -1643,6 +1672,7 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
              "[guide+4E8] now {:08X}",
              l, static_cast<uint32_t>(st_r), table,
              rd(guide_bs_obj_ + 0x4E8));
+  GuideEnsureStandin("string_table");
     }
   }
   if (::cvars::guide_static_locator) {
@@ -1661,6 +1691,7 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
     XELOGI("GuideBootstrap: render obj {:08X} vtable {:08X} [7]={:08X} "
            "[1]={:08X}",
            render_obj, rvt, rvt ? rd(rvt + 28) : 0, rvt ? rd(rvt + 4) : 0);
+  GuideEnsureStandin("render_obj");
   }
   // First call in that registration routine is xam's
   // GamerCardRegisterControls; read its thunk to get the real target.
