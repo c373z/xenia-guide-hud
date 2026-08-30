@@ -1051,6 +1051,14 @@ DEFINE_bool(guide_resolve_paint_handles, false,
 // Phase 578: pass null as the dispatcher's DC argument so hud skips its release
 // path and constructs its own, instead of releasing the bootstrap's DC and then
 // calling through it.
+DEFINE_bool(guide_set_render_dc, false,
+            "Store the bootstrap device context into [renderObj+0xC] before "
+            "driving hud's render. Phase 587: 913EAB28 loads [this+0xC] and "
+            "passes it to 913FE874; that field is null, the call fails, and "
+            "the render returns at 913EAB50 on all 2000 frames without "
+            "drawing anything.",
+            "Kernel");
+
 DEFINE_bool(guide_nav_clear_slot, false,
             "Zero [navObj+0x18] before invoking the navigation dispatcher. "
             "Phase 585: 913EABE0 (vtable[0x24] of the sub-object at "

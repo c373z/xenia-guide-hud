@@ -6275,14 +6275,49 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                   // the loop reaches ~frame 3000 by then), so the instrument
                   // could never report from here. When coverage is requested,
                   // bound the loop so the readback is actually reached.
+                  // Phase 587: coverage on 913EAB28 shows it executes 17 of
+                  // 46 instructions on every one of 2000 frames - it loads
+                  // [this+0xC], passes it to 913FE874, and returns at
+                  // 913EAB50 when that call reports failure. [this+0xC] is
+                  // null (the same field this loop reads as obj+12), so the
+                  // render never begins. Hand it the one DC known to be
+                  // fully constructed.
                   const int kGuideFrames = cvars::guide_coverage_fn ? 2000 : 6000;
                   for (int frame = 0; frame < kGuideFrames; ++frame) {
+                    // The bootstrap DC is published on the title's render
+                    // thread and is still null when this loop starts (it
+                    // appears by ~frame 500), so this cannot be a one-shot
+                    // before the loop - retry until it lands.
+                    if (cvars::guide_set_render_dc) {
+                      uint32_t cur = xe::load_and_swap<uint32_t>(
+                          mem->TranslateVirtual(obj + 12));
+                      if (!cur) {
+                        uint32_t bdc = kernel::xboxkrnl::GuideBootDc();
+                        if (bdc) {
+                          xe::store_and_swap<uint32_t>(
+                              mem->TranslateVirtual(obj + 12), bdc);
+                          XELOGI("GuideSetRenderDC: frame {} [{:08X}+0C] "
+                                 "-> {:08X}", frame, obj, bdc);
+                        }
+                      }
+                    }
                     uint64_t da[] = {obj};
                     ks->processor()->Execute(ts, (g_hud_render ? g_hud_render : hb + 0xAB28u), da,
                                              xe::countof(da));
                     if (frame < 3 || frame % 500 == 0) {
+                      // Phase 587: [obj+12] is null on every frame of every
+                      // run, so `flag` below was the 0xFFFFFFFF "no dc"
+                      // sentinel throughout - every [dc+0x134] reading taken
+                      // through this loop since phase 524 was of that
+                      // sentinel, not of the null-render flag. The live DC is
+                      // the bootstrap's (GuideDCVtable reports it as
+                      // 408CEEE0); fall back to it so the loop reports on a
+                      // pointer that exists.
                       uint32_t dcp = xe::load_and_swap<uint32_t>(
                           mem->TranslateVirtual(obj + 12));
+                      if (!dcp) {
+                        dcp = kernel::xboxkrnl::GuideBootDc();
+                      }
                       uint32_t flag =
                           dcp ? xe::load_and_swap<uint32_t>(
                                     mem->TranslateVirtual(dcp + 0x134u))
