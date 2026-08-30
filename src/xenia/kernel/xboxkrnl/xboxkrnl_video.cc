@@ -5507,6 +5507,22 @@ void VdSwap_entry(
                   ww += fmt::format("+{:X}:{:08X} ", q * 4, prd2(vo + q * 4u));
                 }
                 XELOGI("WidgetObj: {:08X} {}", vo, ww);
+                // Does ANY widget in this scene have +0x18 pointing into the
+                // descriptor range (4088xxxx)? If some do and some do not,
+                // construction is incomplete for a subset; if none do, +0x18
+                // is not a type field on widgets and the cast is being handed
+                // the wrong kind of object entirely (phase 469's open pair).
+                std::string survey;
+                for (uint32_t h = 0x00010040u; h <= 0x00010060u; ++h) {
+                  uint32_t o = pcall(0x81931040u, {h});
+                  if (!o) continue;
+                  uint32_t t = prd2(o + 0x18u);
+                  survey += fmt::format("{:04X}->{:08X}[+18={:08X}{}] ",
+                                        h & 0xFFFF, o, t,
+                                        (t >= 0x40880000u && t < 0x40890000u)
+                                            ? " DESC" : "");
+                }
+                XELOGI("TypeSurvey: {}", survey);
               }
             }
             if (vh2) {
