@@ -2155,6 +2155,39 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
         uint64_t na[] = {nav_obj, parent_arg};
         uint32_t nav_entry =
             (::cvars::guide_nav_state >= 0) ? 0xC6D0u : 0xB7D8u;
+        // Phase 585: coverage located the failure precisely. 913EC6D0 does
+        // `addi r3, r3, 0x10` then `bl 913EA898`, and 913EA898 dispatches
+        // through the sub-object's vtable: slot 0x1C at 913EA938, then slot
+        // 0x24 at 913EA968. Branch counts show slot 0x24 returning a negative
+        // HRESULT on one of three invocations, and 913EC6D0 forwards it
+        // unchanged as 8000FFFF. Name the slots so the failing method can be
+        // traced in turn.
+        if (::cvars::guide_nav_state >= 0) {
+          uint32_t sub = nav_obj + 0x10u;
+          uint32_t vt = rd(sub);
+          XELOGI("GuideNavVT: sub={:08X} vtable={:08X} [+04]={:08X} "
+                 "[+1C]={:08X} [+24]={:08X}",
+                 sub, vt, vt ? rd(vt + 0x04u) : 0u, vt ? rd(vt + 0x1Cu) : 0u,
+                 vt ? rd(vt + 0x24u) : 0u);
+          // 913EABE0 fails when [this+8] != 0 and when [this+0x10] == 0.
+          // Coverage says the second condition always held and the first is
+          // what tripped, so dump the head of the sub-object to see what
+          // occupies the slot.
+          {
+            std::string sh;
+            for (uint32_t w = 0; w < 8; ++w) {
+              sh += fmt::format("{:02X}:{:08X} ", w * 4, rd(sub + w * 4));
+            }
+            XELOGI("GuideNavSub: {:08X} {}", sub, sh);
+          }
+          if (::cvars::guide_nav_clear_slot) {
+            uint32_t prev = rd(sub + 8u);
+            xe::store_and_swap<uint32_t>(memory->TranslateVirtual(sub + 8u),
+                                         0u);
+            XELOGI("GuideNavClear: [sub+8] {:08X} -> {:08X}", prev,
+                   rd(sub + 8u));
+          }
+        }
         uint64_t nr = processor->Execute(ts, hud_base + nav_entry, na,
                                          xe::countof(na));
         XELOGI("GuideNav: hud+{:04X}(navObj {:08X}, parent scene {:08X}) -> "

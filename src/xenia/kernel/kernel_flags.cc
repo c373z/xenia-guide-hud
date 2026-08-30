@@ -1051,6 +1051,15 @@ DEFINE_bool(guide_resolve_paint_handles, false,
 // Phase 578: pass null as the dispatcher's DC argument so hud skips its release
 // path and constructs its own, instead of releasing the bootstrap's DC and then
 // calling through it.
+DEFINE_bool(guide_nav_clear_slot, false,
+            "Zero [navObj+0x18] before invoking the navigation dispatcher. "
+            "Phase 585: 913EABE0 (vtable[0x24] of the sub-object at "
+            "navObj+0x10) returns E_UNEXPECTED when [this+8] is already "
+            "non-null, and that slot is the out-parameter it fills on "
+            "success - so an earlier caller having filled it is what makes "
+            "our call fail.",
+            "Kernel");
+
 DEFINE_bool(guide_nav_dc_null, false,
             "Pass null rather than the bootstrap DC as the navigation "
             "dispatcher's second argument.",
