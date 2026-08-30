@@ -7327,11 +7327,13 @@ void VdSwap_entry(
       auto* gs_scope = kernel_state()->emulator()->graphics_system();
       if (gs_scope && gs_scope->command_processor()) {
         gs_scope->command_processor()->guide_in_draw_scope_ = true;
+        xe::gpu::g_guide_in_draw_scope = true;
       }
       uint64_t gr = kernel_state()->processor()->Execute(
           gth->thread_state(), guide_draw_fn_, gargs, xe::countof(gargs));
       if (gs_scope && gs_scope->command_processor()) {
         gs_scope->command_processor()->guide_in_draw_scope_ = false;
+        xe::gpu::g_guide_in_draw_scope = false;
       }
       in_guide_draw_scope = false;
       if (cd_dev) {

@@ -5518,6 +5518,7 @@ void D3D12RenderTargetCache::PerformTransfersAndResolveClears(
             dest_d3d12_rt.SetResourceState(D3D12_RESOURCE_STATE_DEPTH_WRITE),
             D3D12_RESOURCE_STATE_DEPTH_WRITE);
         command_processor_.SubmitBarriers();
+        ++command_processor_.guide_clear_count_;  // phase 528: depth clear
         command_list.D3DClearDepthStencilView(
             dest_d3d12_rt.descriptor_draw().GetHandle(),
             D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
@@ -5634,9 +5635,11 @@ void D3D12RenderTargetCache::PerformTransfersAndResolveClears(
                                          [size_t(dest_rt_key.msaa_samples)]);
           command_processor_.SetPrimitiveTopology(
               D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+          ++command_processor_.guide_clear_count_;  // phase 528: clear-by-draw
           command_list.D3DDrawInstanced(3, 1, 0, 0);
         } else {
           command_processor_.SubmitBarriers();
+          ++command_processor_.guide_clear_count_;  // phase 528
           command_list.D3DClearRenderTargetView(
               dest_d3d12_rt.descriptor_load_separate().IsValid()
                   ? dest_d3d12_rt.descriptor_load_separate().GetHandle()

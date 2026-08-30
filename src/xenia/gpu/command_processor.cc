@@ -125,6 +125,8 @@ bool GetGPUSetting(GPUSetting setting) {
   return false;
 }
 
+bool g_guide_in_draw_scope = false;  // phase 528
+
 ReadbackResolveMode GetReadbackResolveMode() {
   const std::string& mode = cvars::readback_resolve;
   if (mode == "full") {

@@ -110,7 +110,25 @@ enum class GammaRampType {
   kPWL,
 };
 
+// Phase 528: namespace-scope because the base RenderTargetCache holds no
+// reference to the command processor, and the RT-identity question has to be
+// answered from inside it.
+extern bool g_guide_in_draw_scope;
+
 class CommandProcessor {
+ public:
+  // Phase 528: EDRAM colour clears, counted so the render target cache can bump
+  // it. Public because D3D12RenderTargetCache is not a friend of this class.
+  // The question is whether a clear falls between the Guide's draws (which land
+  // on the frame boundary, phase 527) and the next resolve - if so, its pixels
+  // are written and then erased before anything copies them out.
+  uint32_t guide_clear_count_ = 0;
+  // Phase 528: also public so the render target cache can report which target
+  // the Guide's draws are given. Clears are ruled out (0 across all three
+  // paths), leaving RT identity as the remaining explanation for pixels that
+  // are written and never resolved.
+  bool guide_in_draw_scope_ = false;
+
  protected:
   RingBuffer
       reader_;  // chrispy: instead of having ringbuffer on stack, have it near
@@ -450,10 +468,6 @@ class CommandProcessor {
   // poor witness - they under-report writes that rewrite an existing value -
   // whereas a draw either dispatches or it does not.
   uint32_t guide_draw_count_ = 0;
-  // Phase 525: set by the kernel around the Guide's own Execute, so draws
-  // belonging to the Guide can be told from the title's - ++guide_draw_count_
-  // fires for every DRAW_INDX in the stream, not just the Guide's.
-  bool guide_in_draw_scope_ = false;
   // Phase 525: draws seen by the GPU thread while the scope flag is set.
   // The flag is set on the TITLE thread around the Guide's Execute, but
   // packets are consumed asynchronously here, so a delta of

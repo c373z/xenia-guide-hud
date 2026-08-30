@@ -773,8 +773,9 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
 
     static uint32_t reslog = 0;
     if (reslog++ < 8) {
-      XELOGI("GuideResolve: {} Guide draws this frame -> IssueCopy {} "
+      XELOGI("GuideResolve: [clears={}] {} draws this frame -> IssueCopy {} "
              "(dest_base={:08X})",
+             guide_clear_count_,
              guide_draw_count_ - guide_draws_at_last_swap_,
              ok ? "ok" : "FAILED", guide_saved_copy_[1]);
     }
@@ -1203,10 +1204,10 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
       // resolve" from counters read on the TITLE thread while they are updated
       // here on the GPU thread. This log runs on the GPU thread, so printing the
       // same counters here settles the ordering without a cross-thread read.
-      XELOGI("GuideDrawIndx: [resolves={} swaps={}] prim_type={} "
+      XELOGI("GuideDrawIndx: [resolves={} swaps={} clears={}] prim_type={} "
              "source_select={} num_indices={} | viz_query_ena={} "
              "kill_pix_post_hi_z={} -> {}",
-             guide_resolve_count_, guide_swap_count_,
+             guide_resolve_count_, guide_swap_count_, guide_clear_count_,
              uint32_t(vgt_draw_initiator.prim_type),
              uint32_t(vgt_draw_initiator.source_select),
              uint32_t(vgt_draw_initiator.num_indices),

@@ -210,6 +210,10 @@ DEFINE_bool(
 namespace xe {
 namespace gpu {
 
+// Phase 528: defined in command_processor.cc; this file does not include its
+// header, so declare it locally.
+extern bool g_guide_in_draw_scope;
+
 void RenderTargetCache::GetPSIColorFormatInfo(
     xenos::ColorRenderTargetFormat format, uint32_t write_mask,
     float& clamp_rgb_low, float& clamp_alpha_low, float& clamp_rgb_high,
@@ -964,6 +968,18 @@ bool RenderTargetCache::Update(bool is_rasterization_done,
         }
         // Append the new render target.
         last_update_accumulated_render_targets_[i] = current_rt;
+        // Phase 528: report the render target the Guide's draws are bound to.
+        // If it differs from the one the title renders and resolves, both
+        // observations hold at once - the Guide's pixels are written, and the
+        // resolve of the title's target is unchanged.
+        {
+          static uint32_t gk = 0, tk = 0;
+          bool in_guide = g_guide_in_draw_scope;
+          if (in_guide ? (gk++ < 4) : (tk++ < 4)) {
+            XELOGI("RTBind[{}]: slot={} key={:08X}", in_guide ? "guide" : "title",
+                   i, current_rt ? current_rt->key().key : 0u);
+          }
+        }
         continue;
       }
       if (current_rt) {
