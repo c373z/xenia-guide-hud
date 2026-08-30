@@ -5800,6 +5800,30 @@ void VdSwap_entry(
                     // reserve itself: 81A042E0(dev, words) is what hands the
                     // emitter its cursor, and a zero from here is the whole
                     // failure. Same args the caller uses (0x905).
+                    // Does the dispatch use a different device? Scan the
+                    // element object for pointers whose [+0x30]/[+0x34] form a
+                    // reserve window like pdev's - another device would have
+                    // its own, and its [+0x30] may be the zero that fails.
+                    {
+                      std::string cand;
+                      for (uint32_t w = 0; w < 48; ++w) {
+                        uint32_t v = prd2(oi2 + w * 4u);
+                        // A bare 0x4xxxxxxx range test is not a mapped test:
+                        // candidate 44550000 faulted the host at +0x30. Devices
+                        // live near pdev, so bound the scan to its neighbourhood
+                        // rather than the whole range.
+                        if (!pdev) continue;
+                        uint32_t lo = (pdev > 0x100000u) ? pdev - 0x100000u : 0;
+                        if (v < lo || v > pdev + 0x100000u) continue;
+                        uint32_t c0 = prd2(v + 0x30u), c1 = prd2(v + 0x34u);
+                        if (c1 > c0 && (c1 - c0) < 0x1000000u) {
+                          cand += fmt::format("+{:X}:{:08X}[30={:08X} 34={:08X}] ",
+                                              w * 4, v, c0, c1);
+                        }
+                      }
+                      XELOGI("DevCandidates: obj={:08X} pdev={:08X} | {}",
+                             oi2, pdev, cand.empty() ? "none" : cand);
+                    }
                     if (pdev) {
                       uint32_t rr = pcall(GuideConst(0x81A042E0u), {pdev, 0x905u});
                       XELOGI("ReserveCall: 81A042E0(dev {:08X}, 0x905) -> {:08X}"
