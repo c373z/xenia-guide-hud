@@ -2025,6 +2025,29 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
           uint32_t as_obj = GuideResolveHandle(cur_root);
           XELOGI("GuideNav: pre-dispatch draw root {:08X} resolves to {:08X}",
                  cur_root, as_obj);
+          // Phase 573: [as_obj+0] read back the handle rather than a vtable
+          // (572), so this structure is not the object 818FB110 wants. Dump its
+          // first words: a vtable pointer is a code address (81xxxxxx), so
+          // whichever field holds one names the real object or the way to it.
+          if (as_obj) {
+            std::string w;
+            for (uint32_t k = 0; k < 16; ++k) {
+              w += fmt::format("+{:X}:{:08X} ", k * 4, rd(as_obj + k * 4u));
+            }
+            XELOGI("HandleObj {:08X}: {}", as_obj, w);
+            // 818FB110 wants an object whose +0 is a vtable, i.e. a code
+            // address in the 81xxxxxx range. Check each pointer field for that
+            // shape rather than guessing which one is the object.
+            for (uint32_t off : {0x08u, 0x18u, 0x20u, 0x3Cu}) {
+              uint32_t cand = rd(as_obj + off);
+              uint32_t first = cand ? rd(cand) : 0;
+              XELOGI("HandleCand +{:X} = {:08X}, [it+0]={:08X} {}", off, cand,
+                     first,
+                     (first >= 0x81000000u && first < 0x82000000u)
+                         ? "<- vtable-shaped"
+                         : "");
+            }
+          }
           if (as_obj) {
             xe::store_and_swap<uint32_t>(
                 memory->TranslateVirtual(guide_bs_obj_ + 0x18u), as_obj);
