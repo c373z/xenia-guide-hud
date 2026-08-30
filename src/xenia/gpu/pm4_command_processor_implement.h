@@ -601,7 +601,13 @@ bool COMMAND_PROCESSOR::ExecutePacketType3(uint32_t packet) XE_RESTRICT {
         uint32_t saved_blend = 0;
         bool forced = false;
         if (guide_in_draw_scope_) ++guide_scoped_draws_;
-        if (guide_in_draw_scope_ && cvars::guide_force_opaque) {
+        // Phase 552: apply during the replay too. The replay's A/B has always
+        // read 0/2900, which was attributed to the replay being ineffective -
+        // but geometry drawn with alpha 0 through a kSrcAlpha blend produces
+        // exactly that, so the two explanations are indistinguishable until the
+        // override covers the replayed draws.
+        if ((guide_in_draw_scope_ || guide_replaying_) &&
+            cvars::guide_force_opaque) {
           RegisterFile& brf = *register_file_;
           saved_blend = brf[0x2201];
           brf[0x2201] = 0x00000001u;  // src=kOne, dst=kZero, add

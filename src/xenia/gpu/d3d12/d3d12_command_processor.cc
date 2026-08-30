@@ -3218,6 +3218,23 @@ bool D3D12CommandProcessor::IssueCopy() {
     // was skipped as redundant", and phase 535 could not tell them apart.
     bool ok_c = IssueCopy();
     uint32_t sum_c = sum();
+    // Phase 552: sensitivity control. Every hypothesis tested through this A/B
+    // has come back "same", including two that should have differed, and phase
+    // 536 noted it cannot separate "nothing changed" from "the resolve was
+    // skipped". Corrupt the destination deliberately: if the next resolve
+    // restores it, the copy really runs and a null result means something; if
+    // the corruption survives, this instrument has been reporting nothing for
+    // many phases.
+    uint32_t sum_dirty = 0;
+    if (dest) {
+      uint8_t* dp2 = memory_->TranslatePhysical(dest);
+      if (dp2) {
+        for (uint32_t k = 0; k < 0x1000u; k += 4) {
+          *reinterpret_cast<uint32_t*>(dp2 + k) ^= 0xFFFFFFFFu;
+        }
+        sum_dirty = sum();
+      }
+    }
     guide_replaying_ = true;
     xe::gpu::g_guide_replaying = true;
     ExecuteGuestBufferVirtualUnsafe(guide_replay_addr_, guide_replay_words_);
@@ -3229,9 +3246,10 @@ bool D3D12CommandProcessor::IssueCopy() {
     ++abtot;
     if (sum_c != sum_b) ++abdiff;
     if (ablog++ < 8 || (abtot % 100u) == 0u) {
-      XELOGI("GuideAB: a={:08X} control={:08X} {} | with_guide={:08X} {} | "
-             "{}/{} frames changed (copies {}/{}/{})",
+      XELOGI("GuideAB: a={:08X} control={:08X} {} | dirty={:08X} restored={} | "
+             "with_guide={:08X} {} | {}/{} frames changed (copies {}/{}/{})",
              sum_a, sum_c, (sum_a == sum_c) ? "idempotent" : "NOT-IDEMPOTENT",
+             sum_dirty, (sum_b == sum_c) ? "yes" : "NO - resolve is not writing",
              sum_b, (sum_c != sum_b) ? "DIFFERENT" : "same", abdiff, abtot,
              ok_a, ok_c, ok_b);
     }
