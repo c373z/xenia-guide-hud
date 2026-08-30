@@ -2111,7 +2111,13 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
                    w, wvt, fn,
                    (!w || !wvt || !fn) ? "<- BREAKS HERE" : "complete");
           }
-          parent_arg = guide_boot_dc_;
+          // Phase 578: at the fault r31 is our DC and r11/ctr are zero, so the
+          // vtable read returned null during the call although it was valid
+          // before it. hud's sequence is release-then-store: passing a live DC
+          // as arg2 makes it release ours and then call through the corpse.
+          // Passing null takes the `beq` that skips the release, leaving hud to
+          // create its own.
+          parent_arg = ::cvars::guide_nav_dc_null ? 0u : guide_boot_dc_;
         } else if (::cvars::guide_draw_root_object) {
           uint32_t po_ = GuideResolveHandle(guide_bs_scene_);
           if (po_) parent_arg = po_;

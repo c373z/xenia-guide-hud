@@ -1047,3 +1047,11 @@ DEFINE_bool(guide_resolve_paint_handles, false,
             "Resolve XUI handles to objects before passing them to xam calls "
             "that expect object pointers.",
             "Kernel");
+
+// Phase 578: pass null as the dispatcher's DC argument so hud skips its release
+// path and constructs its own, instead of releasing the bootstrap's DC and then
+// calling through it.
+DEFINE_bool(guide_nav_dc_null, false,
+            "Pass null rather than the bootstrap DC as the navigation "
+            "dispatcher's second argument.",
+            "Kernel");

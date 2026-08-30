@@ -3384,6 +3384,21 @@ bool Emulator::ExceptionCallback(Exception* ex) {
       XELOGE("GUEST CRASH: lr={:08X} r3={:016X} r4={:016X} r5={:016X}",
              static_cast<uint32_t>(ectx->lr), ectx->r[3], ectx->r[4],
              ectx->r[5]);
+      // Phase 578: the comment below has said since it was written that the
+      // callee-saved registers are what identify the faulting object, and only
+      // r3-r5 were ever printed. Phases 575-577 each named a wrong faulting
+      // instruction because the register holding the bad pointer was not
+      // visible, and each was refuted by sampling state before the call - which
+      // says nothing about state during it. Print the registers a faulting
+      // `lwz rX, off(rY)` actually uses.
+      XELOGE("GUEST CRASH: r11={:08X} r28={:08X} r29={:08X} r30={:08X} "
+             "r31={:08X} ctr={:08X}",
+             static_cast<uint32_t>(ectx->r[11]),
+             static_cast<uint32_t>(ectx->r[28]),
+             static_cast<uint32_t>(ectx->r[29]),
+             static_cast<uint32_t>(ectx->r[30]),
+             static_cast<uint32_t>(ectx->r[31]),
+             static_cast<uint32_t>(ectx->ctr));
       // Xenon MSVC keeps "this" and the other long-lived pointers in the
       // callee-saved range, and by the time a load faults r3-r5 are usually
       // already clobbered. Without these it is not possible to tell which
