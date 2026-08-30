@@ -6934,6 +6934,106 @@ void VdSwap_entry(
                        q(qdv + 0x3F78u));
               } else {
                 XELOGW("DrawSurfBind #{}: surface creation returned 0", drawbr);
+                // Phase 508: 819E7528 has THREE failure exits, not one. The
+                // first is the descriptor allocation at its top:
+                //   819E754C  li r3, 0x30
+                //   819E7550  bl 81A0A148        <- allocate 0x30 bytes
+                //   819E7558  bne                <- non-zero: continue
+                //   819E7560  li r3, 0           <- zero: return 0
+                // so it is not failing on its arguments. Walk the allocator
+                // ladder directly and report which rung fails, rather than
+                // reading four more levels of disassembly:
+                //   81A0A148(size)          -> 817B5588(size, tag 0x64800000)
+                //   817B5588(size, tag)     -> 817B53B0(0x02000000, size, out)
+                //   817B53B0 returns NTSTATUS; 817B5588 maps <0 to a null ptr
+                // ...but that ladder succeeds when called directly (40807740 /
+                // 40807780), so the failure is one of the other two exits:
+                //   819E75CC  bl 81A00E50   <- surface backing store
+                //   819E75D4  bne           <- zero: free descriptor, return 0
+                //   819E75EC  cmplwi r10, 0x800 / bgt -> same failure path
+                // 81A00E50(size, &out) is the one that actually allocates the
+                // surface memory, so probe it at a plausible surface size.
+                static bool alloc_probe_done = false;
+                if (!alloc_probe_done && guide_cmdbuf_base_ &&
+                    guide_cmdbuf_size_ > 0x200u) {
+                  alloc_probe_done = true;
+                  uint32_t scratch =
+                      guide_cmdbuf_base_ + guide_cmdbuf_size_ - 0x100u;
+                  xe::store_and_swap<uint32_t>(dm->TranslateVirtual(scratch), 0);
+                  // 819E75EC compares blockIndex + size against 0x800 and
+                  // fails when the surface does not fit in what is LEFT of
+                  // the pool. This must run FIRST: the 81A00E50 probes below
+                  // leak 0x494 blocks, which pushes the index past 0x800 and
+                  // makes every size fail for a reason that is the probe's
+                  // own doing. The previous ordering did exactly that, so its
+                  // "all sizes fail" reading established nothing.
+                  for (uint32_t dim : {64u, 256u, 640u}) {
+                    uint64_t sa[] = {dim, dim, 0x18280186u, 0, 0};
+                    uint32_t sv = uint32_t(kernel_state()->processor()->Execute(
+                        gth->thread_state(), GuideConst(0x819E7528u), sa,
+                        xe::countof(sa)));
+                    XELOGI("AllocProbe: 819E7528({}x{})={:08X}", dim, dim, sv);
+                  }
+                  uint64_t a1[] = {0x30};
+                  uint32_t r1v = uint32_t(kernel_state()->processor()->Execute(
+                      gth->thread_state(), GuideConst(0x81A0A148u), a1,
+                      xe::countof(a1)));
+                  uint64_t a2[] = {0x30, 0x64800000u};
+                  uint32_t r2v = uint32_t(kernel_state()->processor()->Execute(
+                      gth->thread_state(), GuideConst(0x817B5588u), a2,
+                      xe::countof(a2)));
+                  uint64_t a3[] = {0x02000000u, 0x30, scratch};
+                  uint32_t r3v = uint32_t(kernel_state()->processor()->Execute(
+                      gth->thread_state(), GuideConst(0x817B53B0u), a3,
+                      xe::countof(a3)));
+                  uint32_t scratch2 = scratch + 0x40u;
+                  xe::store_and_swap<uint32_t>(dm->TranslateVirtual(scratch2), 0);
+                  // 81A00E50 takes a BLOCK COUNT capped at 0x1800, not bytes:
+                  //   81A00E7C  cmplwi r28, 0x1800
+                  //   81A00E84  twui              <- over: trap (a no-op here)
+                  // The first version of this probe passed 0x384000 (1280*720*4)
+                  // and read the resulting 0 as "the allocator fails". It only
+                  // showed the argument was out of range. Probe in range.
+                  for (uint32_t nblk : {0x384u, 0x100u, 0x10u}) {
+                    xe::store_and_swap<uint32_t>(
+                        dm->TranslateVirtual(scratch2), 0);
+                    uint64_t a4[] = {nblk, scratch2};
+                    uint32_t r4v = uint32_t(kernel_state()->processor()->Execute(
+                        gth->thread_state(), GuideConst(0x81A00E50u), a4,
+                        xe::countof(a4)));
+                    XELOGI("AllocProbe: 81A00E50({:X} blocks)={:08X} out={:08X}",
+                           nblk, r4v,
+                           xe::load_and_swap<uint32_t>(
+                               dm->TranslateVirtual(scratch2)));
+                  }
+                  // The image's own call site 81790304 passes exactly these
+                  // arguments (852, 980, 0x18280186, 0, 0), and every size
+                  // fails, so the sizing call is the suspect. 819E6F10 takes
+                  // the descriptor in r8 and two out-pointers in r9/r10 and
+                  // fills [sp+0x50]/[sp+0x54], which 819E7528 then feeds to
+                  // 81A00E50 and to the 0x800 block check.
+                  if (r1v) {
+                    uint32_t o50 = scratch2 + 0x10u, o54 = scratch2 + 0x14u;
+                    xe::store_and_swap<uint32_t>(dm->TranslateVirtual(o50), 0);
+                    xe::store_and_swap<uint32_t>(dm->TranslateVirtual(o54), 0);
+                    uint64_t ga[] = {852, 980, 0x18280186u, 0, 0, r1v, o50, o54};
+                    uint32_t gv = uint32_t(kernel_state()->processor()->Execute(
+                        gth->thread_state(), GuideConst(0x819E6F10u), ga,
+                        xe::countof(ga)));
+                    XELOGI("AllocProbe: 819E6F10(852,980,18280186)={:08X} "
+                           "size[50]={:08X} [54]={:08X} (cap 0x1800, total cap "
+                           "0x800)",
+                           gv,
+                           xe::load_and_swap<uint32_t>(dm->TranslateVirtual(o50)),
+                           xe::load_and_swap<uint32_t>(dm->TranslateVirtual(o54)));
+                  }
+                  XELOGI("AllocProbe: 81A0A148(0x30)={:08X} | "
+                         "817B5588(0x30,64800000)={:08X} | "
+                         "817B53B0(02000000,0x30)=status {:08X} out={:08X}",
+                         r1v, r2v, r3v,
+                         xe::load_and_swap<uint32_t>(
+                             dm->TranslateVirtual(scratch)));
+                }
               }
             }
           } else {
