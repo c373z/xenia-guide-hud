@@ -56,6 +56,7 @@ DECLARE_bool(guide_patch_skin_dispatch);
 DECLARE_int32(guide_capture_seconds);
 DECLARE_bool(guide_patch_addr_passthru);
 DECLARE_int32(guide_nav_state);
+DECLARE_bool(guide_draw_root_object);
 DECLARE_uint32(guide_coverage_fn);
 DECLARE_int32(guide_front_buffer_shift);
 DECLARE_int32(guide_front_buffer_format);

@@ -1033,3 +1033,10 @@ DEFINE_int32(guide_nav_state, -1,
              "Set [navObj+76] to this value and navigate via 913EC6D0 instead "
              "of the Status-hardcoded 913EB7D8.",
              "Kernel");
+
+// Phase 559: store the resolved scene object as the draw root rather than its
+// handle. 818FB110 dereferences its argument as an object and never resolves.
+DEFINE_bool(guide_draw_root_object, false,
+            "Store the resolved scene object pointer at the draw root instead "
+            "of the XUI handle.",
+            "Kernel");

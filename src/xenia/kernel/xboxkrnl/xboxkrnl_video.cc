@@ -1890,8 +1890,27 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
             // guide_bs_obj_+0x18, the draw object being the bootstrap object
             // plus 0x10.
             if (!vr && new_scene) {
+              // Phase 559: 818FB110 takes an object POINTER - it null-checks
+              // and dereferences a vtable, returning E_INVALIDARG for null, and
+              // never resolves a handle. On the dispatcher path hud passes this
+              // field straight to it, so a handle here faults. Store the
+              // resolved object instead when asked.
+              uint32_t stored = new_scene;
+              if (::cvars::guide_draw_root_object) {
+                uint32_t idx = new_scene & 0xFFFFu, tg = new_scene >> 16;
+                uint32_t bkt = rd(0x81D6D0D8u + (idx >> 8) * 4u);
+                uint32_t ent = bkt ? bkt + (idx & 0xFFu) * 8u : 0;
+                if (ent && rd(ent) == tg) {
+                  stored = rd(ent + 4u);
+                  XELOGI("GuideNavM: draw root as object {:08X} (handle {:08X})",
+                         stored, new_scene);
+                } else {
+                  XELOGW("GuideNavM: handle {:08X} does not resolve; storing it",
+                         new_scene);
+                }
+              }
               xe::store_and_swap<uint32_t>(
-                  memory->TranslateVirtual(guide_bs_obj_ + 0x18u), new_scene);
+                  memory->TranslateVirtual(guide_bs_obj_ + 0x18u), stored);
               guide_bs_scene_ = new_scene;
               XELOGI("GuideNavM: draw root [this+8] -> {:08X} (Status.xur)",
                      new_scene);
@@ -1937,6 +1956,18 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
         // the inner helper: it checks [navObj+0x508] with XuiHandleIsValid and
         // navigates back from the current scene first, which is the sequence
         // hud performs and the inner helper assumes has happened.
+        // Phase 559: dump the hud code around the unwind frames so it can be
+        // disassembled offline. The hud module is not in xam.bin, so this is
+        // the only way to read it - the same approach the ImageCheck probe used.
+        {
+          for (uint32_t base : {0x913EA940u, 0x913EA9C0u}) {
+            std::string hx;
+            for (uint32_t a = base; a < base + 0x60u; a += 4) {
+              hx += fmt::format("{:08X} ", rd(a));
+            }
+            XELOGI("HudCode {:08X}: {}", base, hx);
+          }
+        }
         // Phase 558: the dispatcher faults dereferencing 00010135, a XUI
         // handle, which is what the generation-checked table returns on a miss.
         // Resolve the scene handle through that table by hand and report the
