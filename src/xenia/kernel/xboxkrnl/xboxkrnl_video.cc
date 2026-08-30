@@ -6158,7 +6158,7 @@ void VdSwap_entry(
                   // a fill pattern or a desynced parse than like geometry. Dump
                   // the raw words so the two can be told apart.
                   std::string hx;
-                  for (uint32_t k = 0; k < 16 && k < words; ++k)
+                  for (uint32_t k = 0; k < 48 && k < words; ++k)
                     hx += fmt::format("{:08X} ", prd2(before + k * 4));
                   XELOGI("GuidePaintWalk: raw {}", hx);
                   XELOGI("GuidePaintWalk: {} words -> {} type3, {} type0, "
