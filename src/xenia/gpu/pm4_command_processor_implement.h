@@ -347,9 +347,15 @@ bool COMMAND_PROCESSOR::ExecutePacketType0(uint32_t packet) XE_RESTRICT {
       if (hi > 0x4800u && lo < 0x48C0u) {
         static uint32_t t0log = 0;
         if (t0log++ < 12) {
-          XELOGI("GuideType0Fetch: base={:04X} count={} one_reg={} covers the "
-                 "fetch range",
-                 base_index, count, write_one_reg);
+          // Phase 544: print the values, not just the range. Slot 2 is written
+          // with a null address (phase 543); seeing all three slots shows
+          // whether the others are sane - i.e. whether one allocation failed or
+          // the whole setup is empty.
+          RegisterFile& trf = *register_file_;
+          XELOGI("GuideType0Fetch: base={:04X} count={} | s0={:08X}/{:08X} "
+                 "s1={:08X}/{:08X} s2={:08X}/{:08X}",
+                 base_index, count, trf[0x4800], trf[0x4801], trf[0x4802],
+                 trf[0x4803], trf[0x4804], trf[0x4805]);
         }
       } else {
         static uint32_t t0other = 0;
