@@ -5741,7 +5741,14 @@ void VdSwap_entry(
                 uint32_t pdc = prd2(guide_draw_this_ + 12u);
                 uint32_t pwr = pdc ? prd2(pdc + 0x1CCu) : 0;
                 uint32_t pdev = pwr ? prd2(pwr + 0x0Cu) : 0;
-                if (pdev && !prd2(pdev + 0x2B4Cu) &&
+                // 81A042E0 SETS [dev+0x2B4C] itself and expects it zero on
+                // entry (81A0439C: lwz / beq-skip-trap), then bails to 81A043FC
+                // when [dev+0x30] is zero. Re-opening the block beforehand
+                // leaves 2B4C non-zero and may be what breaks the reserve in
+                // place while a direct call succeeds. Gate it so the default
+                // run tests without it.
+                if (::cvars::guide_call_present_bracket && pdev &&
+                    !prd2(pdev + 0x2B4Cu) &&
                     guide_cmdbuf_base_ && guide_cmdbuf_size_) {
                   uint32_t pr = pcall(GuideConst(0x81A01358u),
                                       {pdev, guide_cmdbuf_base_,
