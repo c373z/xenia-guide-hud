@@ -1995,9 +1995,13 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
           // says which xam function hud is really invoking, and therefore
           // whether that function takes a handle or an object - which is the
           // question three phases of value-substitution failed to settle.
-          for (uint32_t base : {0x913EA9C0u, 0x913FE7D0u}) {
+          // Phase 579: the dispatcher now completes and returns 8000FFFF, so
+          // dump 913EC6D0 to find which check produces it. Note the documented
+          // "anything else -> 0x80004005" is a different constant, so this is a
+          // failure further in, not the state check.
+          for (uint32_t base : {0x913EC6D0u, 0x913EC750u, 0x913EC7D0u}) {
             std::string hx;
-            for (uint32_t a = base; a < base + 0x60u; a += 4) {
+            for (uint32_t a = base; a < base + 0x80u; a += 4) {
               hx += fmt::format("{:08X} ", rd(a));
             }
             XELOGI("HudCode {:08X}: {}", base, hx);
