@@ -7745,10 +7745,15 @@ void VdSwap_entry(
         auto* gsx = kernel_state()->emulator()->graphics_system();
         if (gsx && gsx->command_processor()) {
           uint32_t gd_after = gsx->command_processor()->guide_draw_count_;
+          // Phase 520: this cap meant the GPU-draw counter sampled 5 of 2700+
+          // composite draws. "15 draws on #2, zero on #1 and #3-#5" was that
+          // sample, not a property of the draws. Always accumulate; only the
+          // verbose walk stays capped.
           static uint32_t reported = 0;
-          if (reported < 5) {
+          ++reported;
+          {
             ++reported;
-            if (guide_resv_dev_ && guide_resv_pre_) {
+            if (reported <= 5 && guide_resv_dev_ && guide_resv_pre_) {
               auto* rm = kernel_state()->memory();
               uint32_t post = xe::load_and_swap<uint32_t>(
                   rm->TranslateVirtual(guide_resv_dev_ + 0x30u));
@@ -7796,8 +7801,26 @@ void VdSwap_entry(
                        guide_resv_pre_, post);
               }
             }
-            XELOGI("GuideDrawGPU: the guest draw dispatched {} GPU draws",
-                   gd_after - gd_before);
+            // Phase 520: this log is capped, and the composite-draw numbering
+            // reaches #600+, so seeing "15 draws" on #2 and zero on #1/#3-#5
+            // sampled five of several hundred. Accumulate instead, and report a
+            // running total periodically, so the question "how many of the
+            // draws produce geometry" has an answer rather than a sample.
+            static uint32_t gpu_total = 0, gpu_frames = 0, gpu_calls = 0;
+            uint32_t gd_delta = gd_after - gd_before;
+            gpu_total += gd_delta;
+            ++gpu_calls;
+            if (gd_delta) ++gpu_frames;
+            if (reported <= 5) {
+              XELOGI("GuideDrawGPU: the guest draw dispatched {} GPU draws",
+                     gd_delta);
+            }
+            static uint32_t gpu_log = 0;
+            if ((gpu_calls % 100u) == 0u || (gd_delta && gpu_log++ < 8)) {
+              XELOGI("GuideGPUTotal: {} draws over {} calls; {} calls produced "
+                     "geometry",
+                     gpu_total, gpu_calls, gpu_frames);
+            }
           }
         }
       }
