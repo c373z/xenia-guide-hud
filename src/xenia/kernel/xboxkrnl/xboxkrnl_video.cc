@@ -5792,10 +5792,19 @@ void VdSwap_entry(
                   if (wdiag++ < 3) {
                     uint32_t dc0 = pdev ? prd2(pdev + 0x30u) : 0;
                     uint32_t de0 = pdev ? prd2(pdev + 0x34u) : 0;
+                    // 81A0F1C8 is a teardown: it nulls the RT slots, then
+                    // releases each default surface and zeroes [3F74]/[3F78]/
+                    // [3F70]. Those three fields are its signature - if they
+                    // read zero here, having been bound at the draw hook, the
+                    // teardown ran in between.
                     XELOGI("ReserveState: pdev={:08X} cur={:08X} end={:08X} "
-                           "window={} need={} base={:08X} size={}",
+                           "window={} need={} base={:08X} size={} | "
+                           "[3F74]={:08X} [3F78]={:08X} [3F70]={:08X} "
+                           "[32A0]={:08X}",
                            pdev, dc0, de0, (de0 > dc0) ? (de0 - dc0) : 0,
-                           0x905u * 4u, guide_cmdbuf_base_, guide_cmdbuf_size_);
+                           0x905u * 4u, guide_cmdbuf_base_, guide_cmdbuf_size_,
+                           prd2(pdev + 0x3F74u), prd2(pdev + 0x3F78u),
+                           prd2(pdev + 0x3F70u), prd2(pdev + 0x32A0u));
                     // The window fits and the cursor never advances, so ask the
                     // reserve itself: 81A042E0(dev, words) is what hands the
                     // emitter its cursor, and a zero from here is the whole
@@ -6754,6 +6763,26 @@ void VdSwap_entry(
               // 819F5F60. The original predraw design used the TITLE's live
               // surface ([0x801E6FC4] -> +0x3AC4) rather than making one.
               // Prefer that, and only fall back to creating one.
+              // Phase 496: 819F4C00 nulls any slot whose value differs from
+              // its default - [3F78] governs the four RT slots, [3F70] the
+              // depth slot at [32B0]. The slots already hold a surface here, so
+              // no creation is needed: make the defaults match the slots and
+              // the unbind has nothing to null. This also avoids the early-out
+              // that has been skipping this block entirely.
+              {
+                uint32_t rt = q(qdv + 0x32A0u), dp = q(qdv + 0x32B0u);
+                if (rt && q(qdv + 0x3F78u) != rt) {
+                  xe::store_and_swap<uint32_t>(
+                      dm->TranslateVirtual(qdv + 0x3F78u), rt);
+                }
+                if (dp && q(qdv + 0x3F70u) != dp) {
+                  xe::store_and_swap<uint32_t>(
+                      dm->TranslateVirtual(qdv + 0x3F70u), dp);
+                }
+                XELOGI("DefaultsMatch #{}: rt={:08X} [3F78]={:08X} | dp={:08X} "
+                       "[3F70]={:08X}",
+                       drawbr, rt, q(qdv + 0x3F78u), dp, q(qdv + 0x3F70u));
+              }
               uint32_t surf = cached_surf;
               if (!surf) {
                 uint32_t tdev = q(0x801E6FC4u);
