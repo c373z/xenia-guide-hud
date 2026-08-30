@@ -5114,6 +5114,60 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                                                        0);
                 XELOGI("LLE xam: skin loader returned {:08X}",
                        static_cast<uint32_t>(sr));
+                // Phase 518: the Guide bootstrap then dies at 819138F0, on a
+                // different thread and long after skin init:
+                //
+                //   819138D8  addi r25, r11, -0x363b   r25 = 0x81D6C9C5
+                //   819138EC  lwz  r3, 3(r25)          r3 = [0x81D6C9C8] -> null
+                //   819138F0  lwz  r11, 0(r3)          fault at guest 0
+                //   819138F4  lwz  r11, 0xc(r11)       vtable slot 3
+                //   819138FC  bctrl
+                //   81913900  or. r27, r3, r3
+                //   81913904  blt -> error exit
+                //
+                // Installed AFTER the loader returns, not before: setting the
+                // global up front diverts the loader itself into a crash at
+                // 8191083C two instructions after the call. The global is
+                // null-and-harmless during skin init and null-and-fatal later,
+                // so the stand-in has to appear in between.
+                //
+                // Another uninitialised global dereferenced as an object, the
+                // same shape as the [81D43C50+0x28] gap above. There is no null
+                // check to patch here, so supply the object instead: a block
+                // whose word 0 points at a vtable whose slot 3 is the `blr`
+                // stub GuideConst already uses. The stub returns with r3 still
+                // holding the object pointer, which is non-negative, so the
+                // `blt` is not taken and the caller proceeds.
+                //
+                // Like the manager above this is a stand-in, not the real
+                // object - the call it replaces does not happen. It buys the
+                // bootstrap past this point so the draw hook can install.
+                if (cvars::guide_patch_skin_dispatch) {
+                  uint32_t blk = ks->memory()->SystemHeapAlloc(0x80, 16);
+                  uint32_t nopfn = kernel::xboxkrnl::GuideNopFn();
+                  if (blk && nopfn) {
+                    auto* m = ks->memory();
+                    std::memset(m->TranslateVirtual(blk), 0, 0x80);
+                    uint32_t vt = blk + 0x40u;
+                    xe::store_and_swap<uint32_t>(m->TranslateVirtual(blk), vt);
+                    // Fill EVERY slot, not just the one the crash named. With
+                    // only +0x0C set, the next fault was 81914250 - a bctrl on
+                    // slot 1 (Release) of this very object, jumping to zero. A
+                    // stand-in vtable with holes just relocates the crash.
+                    for (uint32_t sl = 0; sl < 16; ++sl) {
+                      xe::store_and_swap<uint32_t>(
+                          m->TranslateVirtual(vt + sl * 4u), nopfn);
+                    }
+                    xe::store_and_swap<uint32_t>(
+                        m->TranslateVirtual(0x81D6C9C8u), blk);
+                    XELOGI("LLE xam: [81D6C9C8] stand-in obj={:08X} vtable={:08X} "
+                           "16 slots -> {:08X}", blk, vt, nopfn);
+                  } else {
+                    XELOGW("LLE xam: could not build [81D6C9C8] stand-in "
+                           "(blk={:08X} nopfn={:08X})", blk, nopfn);
+                  }
+                }
+
               }
               return 0;
             },

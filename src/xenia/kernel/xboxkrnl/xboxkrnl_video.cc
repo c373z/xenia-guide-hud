@@ -1286,6 +1286,49 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
     uint32_t recorded = rd(XamUiThreadSlot());
     uint32_t r13 = static_cast<uint32_t>(ts->context()->r[13]);
     uint32_t current = r13 ? rd(r13 + 256) : 0;
+    // Phase 518: [81D6C9C8] is null again by the time the bootstrap runs, even
+    // though a stand-in was installed after skin init - the object is released
+    // and the global cleared in between, so the fix has to be re-applied on
+    // this thread rather than once at init time.
+    if (::cvars::guide_patch_skin_dispatch) {
+      auto* sm = kernel_state()->memory();
+      uint32_t cur = xe::load_and_swap<uint32_t>(
+          sm->TranslateVirtual(0x81D6C9C8u));
+      if (!cur) {
+        uint32_t blk = sm->SystemHeapAlloc(0x80, 16);
+        uint32_t nopfn = GuideNopFn();
+        if (blk && nopfn) {
+          std::memset(sm->TranslateVirtual(blk), 0, 0x80);
+          uint32_t vt = blk + 0x40u;
+          xe::store_and_swap<uint32_t>(sm->TranslateVirtual(blk), vt);
+          for (uint32_t sl = 0; sl < 16; ++sl) {
+            xe::store_and_swap<uint32_t>(sm->TranslateVirtual(vt + sl * 4u),
+                                         nopfn);
+          }
+          xe::store_and_swap<uint32_t>(sm->TranslateVirtual(0x81D6C9C8u), blk);
+          XELOGI("GuideBootstrap: re-installed [81D6C9C8] stand-in {:08X}", blk);
+        }
+      } else {
+        XELOGI("GuideBootstrap: [81D6C9C8] already {:08X}", cur);
+      }
+      // The crash at 819138F0 reports r3=0 while this global reads non-null a
+      // few lines earlier, and nothing in the image writes it - only one
+      // instruction anywhere materialises its base. That combination is
+      // impossible if the offline xam.bin matches the loaded image, so check
+      // the assumption every phase since 461 has rested on: dump the actual
+      // guest bytes and compare with what research/ppcdis.py decodes.
+      {
+        std::string got;
+        for (uint32_t a = 0x819138CCu; a <= 0x819138F4u; a += 4) {
+          got += fmt::format("{:08X} ", xe::load_and_swap<uint32_t>(
+                                            sm->TranslateVirtual(a)));
+        }
+        XELOGI("ImageCheck 819138CC: {}", got);
+        XELOGI("ImageCheck expected: 3D6081D7 FC20F890 3B5F0028 3B2BC9C5 "
+               "38E00000 7F48D378 7F86E378 38810060 80790003 81630000 "
+               "816B000C");
+      }
+    }
     XELOGI("GuideBootstrap: xam UI thread recorded={:08X} current={:08X} "
            "(r13={:08X})",
            recorded, current, r13);
