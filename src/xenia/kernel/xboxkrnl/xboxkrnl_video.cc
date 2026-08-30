@@ -2016,7 +2016,34 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
           xe::store_and_swap<uint32_t>(memory->TranslateVirtual(nav_obj + 76u),
                                        want);
         }
-        uint64_t na[] = {nav_obj, guide_bs_scene_};
+        // Phase 572: the re-point added in 571 runs after the dispatcher
+        // returns, and the fault is inside it - so the dispatcher sees whatever
+        // the field held on entry. If that is a handle, fix it before the call
+        // rather than after.
+        if (::cvars::guide_draw_root_object) {
+          uint32_t cur_root = rd(guide_bs_obj_ + 0x18u);
+          uint32_t as_obj = GuideResolveHandle(cur_root);
+          XELOGI("GuideNav: pre-dispatch draw root {:08X} resolves to {:08X}",
+                 cur_root, as_obj);
+          if (as_obj) {
+            xe::store_and_swap<uint32_t>(
+                memory->TranslateVirtual(guide_bs_obj_ + 0x18u), as_obj);
+          }
+        }
+        // Phase 572: the second argument is the parent scene, and this passes
+        // guide_bs_scene_ - a handle straight from hud's scene creator. The
+        // draw-root field was not the source of the faulting handle; this is
+        // the other place the same value is handed on.
+        uint32_t parent_arg = guide_bs_scene_;
+        if (::cvars::guide_draw_root_object) {
+          uint32_t po_ = GuideResolveHandle(guide_bs_scene_);
+          if (po_) {
+            XELOGI("GuideNav: parent scene arg {:08X} -> object {:08X}",
+                   guide_bs_scene_, po_);
+            parent_arg = po_;
+          }
+        }
+        uint64_t na[] = {nav_obj, parent_arg};
         uint32_t nav_entry =
             (::cvars::guide_nav_state >= 0) ? 0xC6D0u : 0xB7D8u;
         uint64_t nr = processor->Execute(ts, hud_base + nav_entry, na,
