@@ -498,12 +498,22 @@ class CommandProcessor {
   // can be replayed at the top of the title's IssueCopy, putting the geometry in
   // EDRAM at the moment the title resolves - rather than compositing stale
   // pixels in CPU memory afterwards.
+  // Phase 534: the Guide's packets run from an indirect buffer, so the range is
+  // the IB's own address and length (both carried by PM4_INDIRECT_BUFFER), not
+  // an offset into the primary ring - phase 533's arithmetic mixed the two.
+  bool guide_ib_had_draw_ = false;
   uint32_t guide_replay_start_ = 0;
   uint32_t guide_replay_addr_ = 0;
   uint32_t guide_replay_words_ = 0;
   bool guide_replay_armed_ = false;
   bool guide_replaying_ = false;
   bool guide_prev_scope_ = false;
+  // Phase 534: the indirect buffer is transient - replaying it at resolve time
+  // faulted reading its own address, so the guest had already reclaimed it.
+  // Copy the packets into a persistent scratch buffer at capture time and
+  // replay from there.
+  uint32_t guide_replay_scratch_ = 0;
+  uint32_t guide_replay_scratch_size_ = 0;
   // Phase 523: the resolve rectangle lives in vertex-fetch slot 0 (a D3D9
   // hack GetResolveInfo depends on) and the copy destination in RB_COPY_*.
   // The Guide's own draws overwrite vf0, so a second IssueCopy after them

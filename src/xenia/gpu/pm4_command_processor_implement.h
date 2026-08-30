@@ -473,31 +473,10 @@ bool COMMAND_PROCESSOR::ExecutePacketType3(uint32_t packet) XE_RESTRICT {
       case PM4_DRAW_INDX:
       case PM4_DRAW_INDX_2: {
         ++guide_draw_count_;
-        // Phase 533: record the ring range spanning the Guide's burst. Entering
-        // scope marks the start; leaving it marks the end. Never record while
-        // replaying, or the range would capture itself.
-        if (!guide_replaying_ && guide_in_draw_scope_ != guide_prev_scope_) {
-          if (guide_in_draw_scope_) {
-            guide_replay_start_ = reader_.read_offset();
-          } else if (primary_buffer_ptr_) {
-            uint32_t end = reader_.read_offset();
-            if (end > guide_replay_start_) {
-              guide_replay_addr_ = primary_buffer_ptr_ + guide_replay_start_;
-              guide_replay_words_ = (end - guide_replay_start_) / 4u;
-              guide_replay_armed_ = guide_replay_words_ > 0 &&
-                                    guide_replay_words_ < 0x10000u;
-            } else {
-              guide_replay_armed_ = false;  // ring wrapped; range is not usable
-            }
-            static uint32_t trlog = 0;
-            if (trlog++ < 8) {
-              XELOGI("GuideBurst: start={:X} end={:X} base={:08X} words={} "
-                     "armed={}",
-                     guide_replay_start_, end, primary_buffer_ptr_,
-                     guide_replay_words_, guide_replay_armed_);
-            }
-          }
-          guide_prev_scope_ = guide_in_draw_scope_;
+        // Phase 534: mark that this indirect buffer contained a Guide draw;
+        // the enclosing IB handler turns that into the replay range.
+        if (!guide_replaying_ && guide_in_draw_scope_) {
+          guide_ib_had_draw_ = true;
         }
         // Phase 530: the Guide's draws arrive as a burst. Resolve at the first
         // draw that is NOT the Guide's after one, which is the last moment its
@@ -795,7 +774,39 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_INDIRECT_BUFFER(
   uint32_t list_length = reader_.ReadAndSwap<uint32_t>();
   assert_zero(list_length & ~0xFFFFF);
   list_length &= 0xFFFFF;
+  // Phase 534: if this IB turns out to contain the Guide's draws, its address
+  // and length are the replayable range. Save and restore the marker so nested
+  // buffers attribute to the innermost one that actually drew.
+  bool saved_had = guide_ib_had_draw_;
+  guide_ib_had_draw_ = false;
   COMMAND_PROCESSOR::ExecuteIndirectBuffer(GpuToCpu(list_ptr), list_length);
+  if (guide_ib_had_draw_ && !guide_replaying_) {
+    uint32_t src = GpuToCpu(list_ptr);
+    uint32_t bytes = list_length * 4u;
+    guide_replay_armed_ = false;
+    if (list_length > 0 && bytes <= 0x40000u) {
+      if (!guide_replay_scratch_) {
+        guide_replay_scratch_ = memory_->SystemHeapAlloc(0x40000u, 256);
+        guide_replay_scratch_size_ = guide_replay_scratch_ ? 0x40000u : 0u;
+      }
+      const uint8_t* sp = memory_->TranslatePhysical(src);
+      uint8_t* dp = guide_replay_scratch_
+                        ? memory_->TranslateVirtual(guide_replay_scratch_)
+                        : nullptr;
+      if (sp && dp && bytes <= guide_replay_scratch_size_) {
+        std::memcpy(dp, sp, bytes);
+        guide_replay_addr_ = guide_replay_scratch_;
+        guide_replay_words_ = list_length;
+        guide_replay_armed_ = true;
+      }
+    }
+    static uint32_t iblog = 0;
+    if (iblog++ < 8) {
+      XELOGI("GuideIB: draws in IB {:08X} len={} -> copied to {:08X} armed={}",
+             src, list_length, guide_replay_addr_, guide_replay_armed_);
+    }
+  }
+  guide_ib_had_draw_ = saved_had || guide_ib_had_draw_;
   return true;
 }
 

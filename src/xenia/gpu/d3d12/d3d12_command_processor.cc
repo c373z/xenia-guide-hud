@@ -3202,8 +3202,16 @@ bool D3D12CommandProcessor::IssueCopy() {
       XELOGI("GuideReplay: {} words at {:08X} before the title's resolve",
              guide_replay_words_, guide_replay_addr_);
     }
+    uint32_t before_draws = guide_draw_count_;
     ExecuteGuestBufferVirtualUnsafe(guide_replay_addr_, guide_replay_words_);
     guide_replaying_ = false;
+    // Executing the packets is not the same as issuing draws - confirm the
+    // replay actually rasterises rather than just replaying state.
+    static uint32_t rdlog = 0;
+    if (rdlog++ < 8) {
+      XELOGI("GuideReplay: dispatched {} draws into EDRAM before the resolve",
+             guide_draw_count_ - before_draws);
+    }
   }
   if (!guide_resolve_replay_) {
     RegisterFile& rf = *register_file_;
