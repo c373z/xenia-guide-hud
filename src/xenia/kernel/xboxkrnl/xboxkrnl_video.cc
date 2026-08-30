@@ -6480,6 +6480,41 @@ void VdSwap_entry(
         XELOGI("GuideDrawEnter #{} fn={:08X} this={:08X}", drawbr,
                guide_draw_fn_, guide_draw_this_);
       }
+      if (brk) {
+        // The cursor is released by a paired end (81A01490 zeroes +2B4C), not
+        // left uninitialised (phase 483). Log the whole block immediately
+        // before the draw - the emitter runs inside this call - to see whether
+        // it is already released by the time we get here.
+        auto* qm = kernel_state()->memory();
+        auto q = [qm](uint32_t a) {
+          return (a >= 0x10000000u && a < 0xA0000000u)
+                     ? xe::load_and_swap<uint32_t>(qm->TranslateVirtual(a))
+                     : 0u;
+        };
+        uint32_t qdc = q(guide_draw_this_ + 12u);
+        uint32_t qwr = qdc ? q(qdc + 0x1CCu) : 0;
+        uint32_t qdv = qwr ? q(qwr + 0x0Cu) : 0;
+        XELOGI("CursorAtDraw #{}: dev={:08X} base[2B48]={:08X} cur[2B4C]={:08X} "
+               "limit[2B50]={:08X} pend[2B54]={:08X}",
+               drawbr, qdv, q(qdv + 0x2B48u), q(qdv + 0x2B4Cu),
+               q(qdv + 0x2B50u), q(qdv + 0x2B54u));
+        // Measured: our begin sets base/cursor/limit, but by draw entry the
+        // block is closed and the limit belongs to xam's own buffer - xam runs
+        // its own begin/end cycles and ours is overwritten. The emitter is
+        // then entered with no block open, which is the address-4 store.
+        // Re-open immediately before the draw when the cursor is cold, which
+        // is what the paired protocol requires.
+        if (qdv && !q(qdv + 0x2B4Cu) && guide_cmdbuf_base_ && guide_cmdbuf_size_) {
+          uint64_t ba[] = {qdv, guide_cmdbuf_base_, guide_cmdbuf_size_ / 4u};
+          uint64_t br2 = kernel_state()->processor()->Execute(
+              gth->thread_state(), GuideConst(0x81A01358u), ba,
+              xe::countof(ba));
+          XELOGI("CursorReopen #{}: 81A01358(dev {:08X}, {:08X}, {}) -> {:08X}"
+                 " | cur now {:08X}",
+                 drawbr, qdv, guide_cmdbuf_base_, guide_cmdbuf_size_ / 4u,
+                 static_cast<uint32_t>(br2), q(qdv + 0x2B4Cu));
+        }
+      }
       in_guide_draw_scope = true;
       uint64_t gr = kernel_state()->processor()->Execute(
           gth->thread_state(), guide_draw_fn_, gargs, xe::countof(gargs));
