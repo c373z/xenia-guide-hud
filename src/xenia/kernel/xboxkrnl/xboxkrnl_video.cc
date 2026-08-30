@@ -5523,6 +5523,63 @@ void VdSwap_entry(
                                             ? " DESC" : "");
                 }
                 XELOGI("TypeSurvey: {}", survey);
+                // Which objects in this scene ARE of the class the second
+                // validation demands? Scan the whole table (bound 0x400),
+                // resolving entries the decoded way and walking each chain.
+                {
+                  auto rok = [](uint32_t a) {
+                    return a >= 0x10000000u && a < 0xA0000000u;
+                  };
+                  uint32_t live = 0, hits = 0;
+                  std::string found;
+                  for (uint32_t i = 0; i < 0x400u; ++i) {
+                    uint32_t bs = 0x81D6D0D8u + (i >> 8) * 4u;
+                    uint32_t bk = prd2(bs);
+                    if (!rok(bk)) continue;
+                    uint32_t en = bk + (i & 0xFFu) * 8u;
+                    if (!rok(en)) continue;
+                    uint32_t o = prd2(en + 4u);
+                    if (!rok(o)) continue;
+                    ++live;
+                    for (uint32_t nd = o, k = 0; rok(nd) && k < 10; ++k) {
+                      if (prd2(nd + 0x18u) == typid2) {
+                        ++hits;
+                        if (hits <= 6) {
+                          found += fmt::format("idx{:03X}:obj{:08X} ", i, o);
+                        }
+                        break;
+                      }
+                      nd = prd2(nd + 8u);
+                    }
+                  }
+                  XELOGI("ClassScan: want={:08X} live={} matching={} {}",
+                         typid2, live, hits, found);
+                  // Nothing in the scene is of that class, so name it: the
+                  // descriptors' +4/+8 look like name/base pointers (the
+                  // widget type 40881270 has the same shape). Read both as
+                  // ASCII and as UTF-16 - XUI class names came through as
+                  // UTF-16 elsewhere in this file.
+                  // These are UTF-16BE: an ASCII char reads as 00 xx, so a
+                  // byte-wise reader stops on the very first character.
+                  auto rdstr = [&](uint32_t a) {
+                    if (!rok(a)) return std::string("<unreadable>");
+                    std::string o;
+                    for (uint32_t w = 0; w < 12; ++w) {
+                      uint32_t v = prd2(a + w * 4u);
+                      for (int h = 1; h >= 0; --h) {
+                        uint16_t u = uint16_t((v >> (h * 16)) & 0xFFFFu);
+                        if (!u) return o.empty() ? std::string("<empty>") : o;
+                        o += (u >= 32 && u < 127) ? char(u) : '.';
+                      }
+                    }
+                    return o;
+                  };
+                  for (uint32_t td : {typid, typid2}) {
+                    XELOGI("ClassName: desc={:08X} +4={:08X} '{}' +8={:08X} '{}'",
+                           td, prd2(td + 4u), rdstr(prd2(td + 4u)),
+                           prd2(td + 8u), rdstr(prd2(td + 8u)));
+                  }
+                }
                 // 81931040 returns [tail-of-+8-chain + 0x20], NOT the object
                 // (phase 471), so every "obj" dumped since phase 460 was the
                 // wrong pointer. Resolve entry[1] the way 81943378 does:
