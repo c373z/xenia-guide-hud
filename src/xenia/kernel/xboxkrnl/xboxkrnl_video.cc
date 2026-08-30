@@ -5759,9 +5759,65 @@ void VdSwap_entry(
                   uint32_t bres = pcall(GuideConst(0x819FEB78u), {pdev});
                   static uint32_t bl2 = 0;
                   if (bl2++ < 3) {
-                    XELOGI("PresentBracket: 819FEB78(dev {:08X}) -> {:08X} | "
-                           "cur[2B4C]={:08X} [30]={:08X}",
-                           pdev, bres, prd2(pdev + 0x2B4Cu), prd2(pdev + 0x30u));
+                    // 81A042E0(dev, words) is what produces the cursor the
+                    // emitter uses, and it reserves from [dev+0x30]..[dev+0x34]
+                    // - not the 0x2B4C block. It needs count*4 bytes to fit.
+                    uint32_t rc = prd2(pdev + 0x30u), re = prd2(pdev + 0x34u);
+                    XELOGI("Reserve: cur[30]={:08X} end[34]={:08X} window={} "
+                           "bytes; 0x905 words needs {} -> {}",
+                           rc, re, (re > rc) ? (re - rc) : 0, 0x905u * 4u,
+                           (re > rc && (re - rc) >= 0x905u * 4u) ? "FITS"
+                                                                 : "TOO SMALL");
+                  }
+                }
+                // 81A042E0(dev, words) reserves from [dev+0x30]..[dev+0x34]
+                // and returns 0 when it will not fit - that zero is the cursor
+                // the emitter then dereferences. The existing widening ran on a
+                // different device instance (3009D000..3011D000) than the paint
+                // uses, leaving this one at 3728 bytes against 9236 needed.
+                // Widen the device actually in play.
+                {
+                  // Log unconditionally: the previous "too small" reading came
+                  // from a run with the bracket flag set, so the window may
+                  // differ here. An absent line would otherwise be ambiguous
+                  // between "did not fire" and "did not need to".
+                  static uint32_t wdiag = 0;
+                  if (wdiag++ < 3) {
+                    uint32_t dc0 = pdev ? prd2(pdev + 0x30u) : 0;
+                    uint32_t de0 = pdev ? prd2(pdev + 0x34u) : 0;
+                    XELOGI("ReserveState: pdev={:08X} cur={:08X} end={:08X} "
+                           "window={} need={} base={:08X} size={}",
+                           pdev, dc0, de0, (de0 > dc0) ? (de0 - dc0) : 0,
+                           0x905u * 4u, guide_cmdbuf_base_, guide_cmdbuf_size_);
+                    // The window fits and the cursor never advances, so ask the
+                    // reserve itself: 81A042E0(dev, words) is what hands the
+                    // emitter its cursor, and a zero from here is the whole
+                    // failure. Same args the caller uses (0x905).
+                    if (pdev) {
+                      uint32_t rr = pcall(GuideConst(0x81A042E0u), {pdev, 0x905u});
+                      XELOGI("ReserveCall: 81A042E0(dev {:08X}, 0x905) -> {:08X}"
+                             " | cur now {:08X}",
+                             pdev, rr, prd2(pdev + 0x30u));
+                    }
+                  }
+                }
+                if (pdev && guide_cmdbuf_base_ && guide_cmdbuf_size_) {
+                  uint32_t wc = prd2(pdev + 0x30u), we = prd2(pdev + 0x34u);
+                  if (we <= wc || (we - wc) < 0x905u * 4u) {
+                    auto* wm = kernel_state()->memory();
+                    xe::store_and_swap<uint32_t>(
+                        wm->TranslateVirtual(pdev + 0x30u), guide_cmdbuf_base_);
+                    xe::store_and_swap<uint32_t>(
+                        wm->TranslateVirtual(pdev + 0x34u),
+                        guide_cmdbuf_base_ + guide_cmdbuf_size_);
+                    static uint32_t wl = 0;
+                    if (wl++ < 3) {
+                      XELOGI("ReserveWiden: dev={:08X} was {} bytes -> "
+                             "cur[30]={:08X} end[34]={:08X} ({} bytes)",
+                             pdev, (we > wc) ? (we - wc) : 0,
+                             prd2(pdev + 0x30u), prd2(pdev + 0x34u),
+                             guide_cmdbuf_size_);
+                    }
                   }
                 }
                 uint32_t e0 = pdev
