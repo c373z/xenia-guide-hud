@@ -637,9 +637,31 @@ bool COMMAND_PROCESSOR::ExecutePacketType3(uint32_t packet) XE_RESTRICT {
             packet, count);
         break;
       case PM4_IM_LOAD:
+        // Phase 553: shaders load through these packets, not through registers -
+        // phase 552's guess at 0x0578 was scratch registers. If the Guide's
+        // indirect buffer contains no IM_LOAD, the replayed draws run whatever
+        // program the title last bound, with the Guide's vertices fed to it.
+        // Counted rather than sampled: a shared cap made phase 538's replay
+        // entries invisible and read as "the replay is not drawing".
+        if (guide_in_draw_scope_ || guide_replaying_) {
+          static uint32_t im_b = 0, im_r = 0, im_rep = 0;
+          if (guide_replaying_) ++im_r; else ++im_b;
+          if ((++im_rep % 300u) == 0u) {
+            XELOGI("GuideShaderLoads: IM_LOAD burst={} replay={}", im_b, im_r);
+          }
+        }
+
         result = COMMAND_PROCESSOR::ExecutePacketType3_IM_LOAD(packet, count);
         break;
       case PM4_IM_LOAD_IMMEDIATE:
+        if (guide_in_draw_scope_ || guide_replaying_) {
+          static uint32_t imi_b = 0, imi_r = 0, imi_rep = 0;
+          if (guide_replaying_) ++imi_r; else ++imi_b;
+          if ((++imi_rep % 300u) == 0u) {
+            XELOGI("GuideShaderLoadsImm: IM_LOAD_IMMEDIATE burst={} replay={}",
+                   imi_b, imi_r);
+          }
+        }
         result = COMMAND_PROCESSOR::ExecutePacketType3_IM_LOAD_IMMEDIATE(packet,
                                                                          count);
         break;
