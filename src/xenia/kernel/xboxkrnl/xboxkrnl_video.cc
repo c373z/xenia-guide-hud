@@ -5454,8 +5454,26 @@ void VdSwap_entry(
               // instead of inferring from the pieces.
               std::memset(pm2->TranslateVirtual(pout), 0, 16);
               uint32_t r90 = pcall(0x81931C90u, {h2, pout});
+              uint32_t vis90 = prd2(pout);  // before VisualAgain clears it
               XELOGI("VisualInner: 81931C90({:08X},out) -> hr={:08X} out={:08X}",
                      h2, r90, prd2(pout));
+              // Does pcall reproduce the real call at all? Invoke 0x395 again,
+              // same handle, immediately after. If the repeat also fails then
+              // pcall is faithful and the difference lies inside 0x395; if it
+              // succeeds, the first call changed state and no amount of
+              // decomposing the second one explains the first.
+              std::memset(pm2->TranslateVirtual(pout), 0, 16);
+              uint32_t again = pcall(f_v, {hp, pout});
+              XELOGI("VisualAgain: 0x395({:08X}) 2nd call -> hr={:08X} out={:08X}",
+                     hp, again, prd2(pout));
+              // 0x395 validates TWICE. The second check (81935BE8) takes the
+              // visual handle 81931C90 returned and validates it against a
+              // different type id at 81D6CDE0; failing that is what raises
+              // 80300017. So the error does not mean "no visual" - for a node
+              // that has one, it means the visual is the wrong type.
+              uint32_t typid2 = prd2(0x81D6CDE0u);
+              XELOGI("VisualType: visual={:08X} typeid2={:08X} validate->{:08X}",
+                     vis90, typid2, vis90 ? pcall(0x81943378u, {vis90, typid2}) : 0);
             }
             if (vh2) {
               uint32_t oi2 = pcall(0x81931040u, {hp});
