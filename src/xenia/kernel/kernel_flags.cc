@@ -1017,3 +1017,10 @@ DEFINE_bool(guide_patch_skin_dispatch, false,
 DEFINE_int32(guide_capture_seconds, 0,
              "Capture the presented frame to guide_capture.raw after N seconds.",
              "Kernel");
+
+// Phase 546: make 819E01E0 return its input instead of the converted address,
+// so the pointer the Guide hands it becomes observable in the fetch constant.
+DEFINE_bool(guide_patch_addr_passthru, false,
+            "Patch 819E0218 to `mr r31, r3` so the CPU-to-GPU conversion "
+            "returns its argument, revealing the pointer being converted.",
+            "Kernel");

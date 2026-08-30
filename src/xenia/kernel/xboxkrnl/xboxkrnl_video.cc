@@ -2889,6 +2889,16 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   if (::cvars::guide_patch_skin_dispatch && XamIsDashrootLayout()) {
     GuidePatchWord(0x81901E88u, 0x409A0010u, 0x60000000u, "SkinDispatchPatch");
   }
+  // Phase 546: 819E01E0 converts a CPU pointer to a GPU address and returns 0
+  // for the Guide's vertex buffer (phase 545). Its input has been inferred from
+  // the arithmetic, never observed, and the two candidate values imply different
+  // upstream faults. Patch the final `add r31, r11, r10` to `mr r31, r3` so the
+  // function returns its own argument: the fetch constant then carries the raw
+  // input pointer, which is already logged. This deliberately breaks the
+  // conversion - it is a diagnostic, not a fix.
+  if (::cvars::guide_patch_addr_passthru && XamIsDashrootLayout()) {
+    GuidePatchWord(0x819E0218u, 0x7FEB5214u, 0x7C7F1B78u, "AddrPassthruPatch");
+  }
   if (::cvars::guide_patch_rt_unbind && XamIsDashrootLayout()) {
     auto* pm = kernel_state()->memory();
     uint32_t site = 0x819F4C34u;
