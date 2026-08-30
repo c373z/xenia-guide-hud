@@ -3261,7 +3261,23 @@ bool D3D12CommandProcessor::IssueCopy() {
              guide_replay_words_, guide_replay_addr_);
     }
     uint32_t before_draws = guide_draw_count_;
+    // Phase 539: does the replayed IB write the fetch block itself? If vf0
+    // changes across the execute, the constants come from the IB and the
+    // invalid value is what the Guide emitted - which would mean the burst's
+    // valid value is established elsewhere and the replay premise is wrong. If
+    // it does not change, something else invalidates them.
+    uint32_t vf0_pre = frf[0x4800], vf1_pre = frf[0x4801];
     ExecuteGuestBufferVirtualUnsafe(guide_replay_addr_, guide_replay_words_);
+    {
+      static uint32_t vflog = 0;
+      if (vflog++ < 6) {
+        XELOGI("GuideFetchIB: vf0 {:08X}/{:08X} -> {:08X}/{:08X} across the "
+               "replay ({})",
+               vf0_pre, vf1_pre, frf[0x4800], frf[0x4801],
+               (vf0_pre == frf[0x4800]) ? "IB does NOT write it"
+                                        : "IB writes it");
+      }
+    }
     guide_replaying_ = false;
     xe::gpu::g_guide_replaying = false;
     if (guide_fetch_saved_) {
