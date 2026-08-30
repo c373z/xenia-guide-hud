@@ -5714,6 +5714,47 @@ void VdSwap_entry(
                   xe::store_and_swap<uint32_t>(
                       pm2->TranslateVirtual(oi2 + 0xB4u), fl17 | 0x20000u);
                 }
+                // The emit happens inside 81968890, and the packet emitter
+                // traps unless a command block is open (phase 483: 81A01358
+                // begins, 81A01490 ends by zeroing [dev+0x2B4C]). Phase 484
+                // re-opened it before the composite draw, which this
+                // configuration never runs - the failing emit is here, on the
+                // paint path. Re-open when the cursor is cold.
+                {
+                  // The re-open produced no log at all last run, which means
+                  // skipped, not failed. Report the guard's inputs once so the
+                  // blocking term is visible instead of inferred.
+                  static bool gonce = false;
+                  if (!gonce) {
+                    gonce = true;
+                    XELOGI("PaintReopenGuard: resv_dev={:08X} cur={:08X} "
+                           "cmdbuf_base={:08X} cmdbuf_size={}",
+                           guide_resv_dev_,
+                           guide_resv_dev_ ? prd2(guide_resv_dev_ + 0x2B4Cu) : 0,
+                           guide_cmdbuf_base_, guide_cmdbuf_size_);
+                  }
+                }
+                // guide_resv_dev_ is 0 here - it is assigned in a block this
+                // configuration does not run. Derive the device the same way
+                // the draw-entry probe does (dc -> [dc+0x1CC] -> [wrap+0x0C]),
+                // which yielded a real device (40870D00) in the same runs.
+                uint32_t pdc = prd2(guide_draw_this_ + 12u);
+                uint32_t pwr = pdc ? prd2(pdc + 0x1CCu) : 0;
+                uint32_t pdev = pwr ? prd2(pwr + 0x0Cu) : 0;
+                if (pdev && !prd2(pdev + 0x2B4Cu) &&
+                    guide_cmdbuf_base_ && guide_cmdbuf_size_) {
+                  uint32_t pr = pcall(GuideConst(0x81A01358u),
+                                      {pdev, guide_cmdbuf_base_,
+                                       guide_cmdbuf_size_ / 4u});
+                  static uint32_t rop = 0;
+                  if (rop++ < 3) {
+                    XELOGI("PaintReopen: 81A01358(dev {:08X}, {:08X}, {}) -> "
+                           "{:08X} | cur now {:08X}",
+                           pdev, guide_cmdbuf_base_,
+                           guide_cmdbuf_size_ / 4u, pr,
+                           prd2(pdev + 0x2B4Cu));
+                  }
+                }
                 uint32_t e0 = guide_resv_dev_
                                   ? prd2(guide_resv_dev_ + 0x30u) : 0;
                 uint32_t gg = pcall(0x81954468u, {oi2});
