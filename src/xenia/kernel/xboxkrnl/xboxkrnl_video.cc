@@ -5874,6 +5874,29 @@ void VdSwap_entry(
               }
               XELOGI("VisualChain: visobj={:08X} want={:08X} chain: {}end",
                      vo, typid2, chain);
+              // Phase 563: when the walk finds nothing, name the type it wanted.
+              // The class descriptor carries its names at +4 and +8 (the
+              // ClassName probe reads them the same way), which turns "some type
+              // has no visual" into a named control - and a name can be looked
+              // for among what skin initialisation registered.
+              if (!vo && typid2) {
+                auto nm = [&](uint32_t a) {
+                  std::string out;
+                  if (!a) return out;
+                  // UTF-16 big-endian: an ASCII character is 00 xx, so a
+                  // byte-wise read stops on the first character and returns
+                  // empty - which is what the first attempt reported.
+                  for (uint32_t c = 0; c < 48; ++c) {
+                    uint16_t ch = xe::load_and_swap<uint16_t>(
+                        pm2->TranslateVirtual(a + c * 2u));
+                    if (!ch) break;
+                    out += (ch >= 0x20 && ch < 0x7F) ? char(ch) : '?';
+                  }
+                  return out;
+                };
+                XELOGI("VisualMissing: type {:08X} = '{}' / '{}'", typid2,
+                       nm(prd2(typid2 + 4u)), nm(prd2(typid2 + 8u)));
+              }
               // Distinguishing test (phase 468): is +0x18 a type-id field that
               // these objects fill wrongly, or are these objects simply not
               // class descriptors? Dump the two type ids themselves - if a
