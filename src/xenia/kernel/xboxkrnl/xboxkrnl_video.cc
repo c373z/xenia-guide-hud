@@ -5858,6 +5858,45 @@ void VdSwap_entry(
                         }
                       }
                     }
+                    // 81A0A668(dev, x) does the reserve AND the emit - it is
+                    // the frame directly above the emitter. If it succeeds when
+                    // called here, the failure is in how the dispatch reaches
+                    // it, not in the function; if it fails the same way, the
+                    // failure is reproducible without the dispatch and can be
+                    // studied directly. Cheaper than hooking the guest.
+                    if (pdev) {
+                      uint32_t c_before = prd2(pdev + 0x30u);
+                      uint32_t ar = pcall(GuideConst(0x81A0A668u), {pdev, 0u});
+                      XELOGI("EmitFrame: 81A0A668(dev {:08X}, 0) -> {:08X} | "
+                             "cur {:08X} -> {:08X} (delta {})",
+                             pdev, ar, c_before, prd2(pdev + 0x30u),
+                             prd2(pdev + 0x30u) - c_before);
+                      // Words are landing in our buffer for the first time.
+                      // Walk them as PM4: type-3 headers carry the opcode in
+                      // bits 8..14 and a count in 16..29. DRAW_INDX is 0x22.
+                      uint32_t wa = c_before, wend = prd2(pdev + 0x30u);
+                      if (wend > wa && (wend - wa) < 0x40000u) {
+                        uint32_t nw = (wend - wa) / 4u, t3 = 0, draws = 0;
+                        std::string first;
+                        for (uint32_t i = 0; i < nw; ) {
+                          uint32_t hdr = prd2(wa + i * 4u);
+                          uint32_t ty = hdr >> 30;
+                          if (ty == 3) {
+                            uint32_t op = (hdr >> 8) & 0x7Fu;
+                            uint32_t cnt = ((hdr >> 16) & 0x3FFFu) + 1u;
+                            ++t3;
+                            if (op == 0x22u || op == 0x36u) ++draws;
+                            if (t3 <= 8) first += fmt::format("{:02X}x{} ", op, cnt);
+                            i += cnt + 1u;
+                          } else {
+                            ++i;
+                          }
+                        }
+                        XELOGI("EmitWalk: {} words, {} type3 packets, DRAW_INDX={} "
+                               "| first: {}",
+                               nw, t3, draws, first);
+                      }
+                    }
                     if (pdev) {
                       uint32_t rr = pcall(GuideConst(0x81A042E0u), {pdev, 0x905u});
                       XELOGI("ReserveCall: 81A042E0(dev {:08X}, 0x905) -> {:08X}"
