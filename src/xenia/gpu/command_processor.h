@@ -514,6 +514,11 @@ class CommandProcessor {
   // replay from there.
   uint32_t guide_replay_scratch_ = 0;
   uint32_t guide_replay_scratch_size_ = 0;
+  // Phase 535: guard for the within-frame A/B - resolve once without the
+  // Guide's geometry, once with, and compare. Answers "does the Guide change
+  // the resolved frame" without needing to compare across runs of an animating
+  // game, and without needing eyes.
+  bool guide_in_ab_ = false;
   // Phase 523: the resolve rectangle lives in vertex-fetch slot 0 (a D3D9
   // hack GetResolveInfo depends on) and the copy destination in RB_COPY_*.
   // The Guide's own draws overwrite vf0, so a second IssueCopy after them

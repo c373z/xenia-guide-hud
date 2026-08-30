@@ -3191,6 +3191,43 @@ bool D3D12CommandProcessor::IssueCopy() {
   // Phase 523: capture the state a working resolve runs with, so the extra
   // resolve issued after the Guide's draws can restore it. Only capture on the
   // title's own resolves - guide_resolve_replay_ marks ours.
+  // Phase 535: within-frame A/B. Resolve the title's frame as-is, checksum it,
+  // then replay the Guide's geometry and resolve again. If the two differ, the
+  // Guide's draws change the image the title copies out - which is the question
+  // "is it visible", answered without looking. Needs --readback_resolve=full so
+  // the destination is in guest memory.
+  if (cvars::guide_verify_resolve && cvars::guide_replay_before_resolve &&
+      !guide_in_ab_ && !guide_resolve_replay_ && guide_replay_armed_) {
+    guide_in_ab_ = true;
+    uint32_t dest = guide_saved_copy_[1] & ~0xFFFu;
+    auto sum = [&]() -> uint32_t {
+      const uint8_t* pp = dest ? memory_->TranslatePhysical(dest) : nullptr;
+      if (!pp) return 0;
+      uint32_t hsh = 2166136261u;
+      for (uint32_t off = 0; off < 0x384000u; off += 0x400u) {
+        hsh = (hsh ^ *reinterpret_cast<const uint32_t*>(pp + off)) * 16777619u;
+      }
+      return hsh;
+    };
+    bool ok_a = IssueCopy();
+    uint32_t sum_a = sum();
+    guide_replaying_ = true;
+    ExecuteGuestBufferVirtualUnsafe(guide_replay_addr_, guide_replay_words_);
+    guide_replaying_ = false;
+    bool ok_b = IssueCopy();
+    uint32_t sum_b = sum();
+    static uint32_t ablog = 0, abdiff = 0, abtot = 0;
+    ++abtot;
+    if (sum_a != sum_b) ++abdiff;
+    if (ablog++ < 8 || (abtot % 100u) == 0u) {
+      XELOGI("GuideAB: without={:08X} with={:08X} {} | {}/{} frames the Guide "
+             "changed the resolved image (copies {}/{})",
+             sum_a, sum_b, (sum_a != sum_b) ? "DIFFERENT" : "same", abdiff,
+             abtot, ok_a, ok_b);
+    }
+    guide_in_ab_ = false;
+    return ok_b;
+  }
   // Phase 533: replay the Guide's burst here, before the title's resolve reads
   // EDRAM, so its geometry is present in the frame the title copies out. This is
   // the ordering fix; the phase-532 CPU composite is the workaround it replaces.
