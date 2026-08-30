@@ -1280,7 +1280,7 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
   // around them is permissive (phase 525), so read the draw itself. A zero index
   // count or a degenerate primitive type rasterises to nothing and would explain
   // it exactly.
-  if (guide_in_draw_scope_) {
+  if (guide_in_draw_scope_ || guide_replaying_) {
     static uint32_t dilog = 0;
     if (dilog++ < 10) {
       // IssueDraw is skipped entirely - without setting draw_succeeded false
@@ -1288,6 +1288,17 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
       // a silent skip that looks exactly like what is being seen: the packet is
       // counted, no backend failure appears, and no pixels are written.
       auto vq = register_file_->Get<reg::PA_SC_VIZ_QUERY>();
+      // Phase 537: auto-indexed draws read geometry through the vertex fetch
+      // constants at 0x4800+. If those are set outside the captured IB, the
+      // replay runs with whatever the title last left there - valid draws,
+      // correct target, geometry pointing at the wrong memory.
+      {
+        RegisterFile& frf = *register_file_;
+        XELOGI("GuideFetch[{}]: vf0={:08X}/{:08X} vf1={:08X}/{:08X} "
+               "vf2={:08X}/{:08X}",
+               guide_replaying_ ? "replay" : "burst", frf[0x4800], frf[0x4801],
+               frf[0x4802], frf[0x4803], frf[0x4804], frf[0x4805]);
+      }
       // Phase 527: phase 522 concluded "the Guide draws after the frame's
       // resolve" from counters read on the TITLE thread while they are updated
       // here on the GPU thread. This log runs on the GPU thread, so printing the
