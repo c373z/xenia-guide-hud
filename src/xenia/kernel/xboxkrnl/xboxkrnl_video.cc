@@ -1999,7 +1999,11 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
           // dump 913EC6D0 to find which check produces it. Note the documented
           // "anything else -> 0x80004005" is a different constant, so this is a
           // failure further in, not the state check.
-          for (uint32_t base : {0x913EC6D0u, 0x913EC750u, 0x913EC7D0u}) {
+          // Phase 580: 913EA898 is the function whose negative return the
+          // dispatcher forwards as 8000FFFF. Every phase since 557 has looked
+          // at its callers and callees through crash addresses without reading
+          // it.
+          for (uint32_t base : {0x913EA898u, 0x913EA918u, 0x913EA998u}) {
             std::string hx;
             for (uint32_t a = base; a < base + 0x80u; a += 4) {
               hx += fmt::format("{:08X} ", rd(a));
