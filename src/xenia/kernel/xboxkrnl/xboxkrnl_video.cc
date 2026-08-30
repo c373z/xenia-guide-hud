@@ -6730,11 +6730,48 @@ void VdSwap_entry(
             // Phase 454 fixed that by binding the device's default surfaces,
             // but at the predraw site, which this path does not reach either.
             // Bind them here on the same device.
-            if (!q(qdv + 0x3F78u) || !q(qdv + 0x32B0u)) {
-              uint64_t ca[] = {1280, 720, 0x18280186u, 0, 0};
-              uint32_t surf = uint32_t(kernel_state()->processor()->Execute(
-                  gth->thread_state(), GuideConst(0x819E7528u), ca,
-                  xe::countof(ca)));
+            // The slots read non-zero here and zero at the fault, so the
+            // unbind-all clears them in between and restores from a default
+            // that is evidently not usable. Bind unconditionally with a surface
+            // created once, and log what was there first - "non-zero" was not
+            // enough to justify skipping.
+            {
+              static uint32_t cached_surf = 0;
+              // All five slots hold the same surface here yet read zero at the
+              // fault, so it is being rejected rather than lost. This file
+              // already records the rule: a real surface has bit 30 set in
+              // word 0. Check ours against it.
+              uint32_t sfc = q(qdv + 0x32B0u);
+              uint32_t w0 = sfc ? q(sfc) : 0;
+              XELOGI("DrawSurfWas #{}: [32A0]={:08X} [32B0]={:08X} [3F70]={:08X}"
+                     " [3F74]={:08X} [3F78]={:08X} | surf w0={:08X} bit30={}",
+                     drawbr, q(qdv + 0x32A0u), q(qdv + 0x32B0u),
+                     q(qdv + 0x3F70u), q(qdv + 0x3F74u), q(qdv + 0x3F78u),
+                     w0, (w0 & 0x40000000u) ? "set" : "CLEAR");
+              // Our synthesised surface has bit 30 CLEAR in word 0 and so
+              // fails SetRenderTarget's validity test - the render path
+              // discards it and writes zero, which is the null slot at
+              // 819F5F60. The original predraw design used the TITLE's live
+              // surface ([0x801E6FC4] -> +0x3AC4) rather than making one.
+              // Prefer that, and only fall back to creating one.
+              uint32_t surf = cached_surf;
+              if (!surf) {
+                uint32_t tdev = q(0x801E6FC4u);
+                uint32_t tsurf = tdev ? q(tdev + 0x3AC4u) : 0;
+                uint32_t tw0 = tsurf ? q(tsurf) : 0;
+                XELOGI("TitleSurf: tdev={:08X} surf={:08X} w0={:08X} bit30={}",
+                       tdev, tsurf, tw0,
+                       (tw0 & 0x40000000u) ? "set" : "CLEAR");
+                if (tsurf && (tw0 & 0x40000000u)) {
+                  surf = tsurf;
+                } else {
+                  uint64_t ca[] = {1280, 720, 0x18280186u, 0, 0};
+                  surf = uint32_t(kernel_state()->processor()->Execute(
+                      gth->thread_state(), GuideConst(0x819E7528u), ca,
+                      xe::countof(ca)));
+                }
+                cached_surf = surf;
+              }
               if (surf) {
                 for (uint32_t off : {0x32A0u, 0x32B0u, 0x3F70u, 0x3F74u,
                                      0x3F78u}) {
