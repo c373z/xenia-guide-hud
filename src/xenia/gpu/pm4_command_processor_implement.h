@@ -1428,10 +1428,19 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
       // correct target, geometry pointing at the wrong memory.
       {
         RegisterFile& frf = *register_file_;
+        // Phase 550: vertex fetch slots are 2 dwords apart - 96 of them
+        // (kVertexFetchConstantCount = 3 * 32), which the dumped shader
+        // confirms by fetching vf95. The Guide writes base=4800 (vf0/1/2) and
+        // base=48BA (vf93/94/95), and the two dumped vertex shaders fetch vf0
+        // and vf95 respectively. Print both so the Guide's actual source is
+        // identifiable rather than guessed.
         XELOGI("GuideFetch[{}]: vf0={:08X}/{:08X} vf1={:08X}/{:08X} "
-               "vf2={:08X}/{:08X}",
+               "vf2={:08X}/{:08X} | vf93={:08X}/{:08X} vf94={:08X}/{:08X} "
+               "vf95={:08X}/{:08X}",
                guide_replaying_ ? "replay" : "burst", frf[0x4800], frf[0x4801],
-               frf[0x4802], frf[0x4803], frf[0x4804], frf[0x4805]);
+               frf[0x4802], frf[0x4803], frf[0x4804], frf[0x4805],
+               frf[0x48BA], frf[0x48BB], frf[0x48BC], frf[0x48BD], frf[0x48BE],
+               frf[0x48BF]);
         // Phase 542: the question never asked - WHERE is this geometry? The
         // fetch constant carries the vertex buffer address in its upper bits;
         // read the first vertices and print them as floats. Off-screen or
@@ -1443,8 +1452,13 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
         // constants, which is where phases 542/544's "slot 2, kVertex,
         // address 0" came from. Walk all 32 slots at the right stride and
         // report only the ones that really are vertex fetches.
-        for (uint32_t slot = 0; slot < 32; ++slot) {
-          uint32_t w0 = frf[0x4800 + slot * 6], w1 = frf[0x4801 + slot * 6];
+        // Phase 550: vf95 is the Guide's real vertex binding - valid kVertex,
+        // 32 dwords, address advancing 0x80 per draw. Its shader
+        // (1E6883FCCDE1F688) reads position straight from the fetch with no
+        // transform, so the floats at that address ARE the screen coordinates.
+        // Read them; this is the last unexamined value in the chain.
+        for (uint32_t slot = 95; slot < 96; ++slot) {
+          uint32_t w0 = frf[0x4800 + slot * 2], w1 = frf[0x4801 + slot * 2];
           uint32_t type = w0 & 3u;
           if (type != 3u) continue;              // kVertex only
           // xe_gpu_vertex_fetch_t: address is a 30-bit field at bit 2 holding
@@ -1456,14 +1470,14 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
           uint32_t size_dw = (w1 >> 2) & 0xFFFFFFu;  // size:24 at bit 2
           const uint8_t* vp = memory_->TranslatePhysical(addr);
           if (!vp || size_dw < 4) continue;
-          float f[6];
-          for (uint32_t k = 0; k < 6; ++k) {
+          float f[7];
+          for (uint32_t k = 0; k < 7; ++k) {
             uint32_t raw = xe::load_and_swap<uint32_t>(vp + k * 4);
             std::memcpy(&f[k], &raw, 4);
           }
-          XELOGI("GuideVerts[fetch slot {}]: addr={:08X} dwords={} | {} {} {} "
-                 "| {} {} {}",
-                 slot, addr, size_dw, f[0], f[1], f[2], f[3], f[4], f[5]);
+          XELOGI("GuideVerts[vf{}]: addr={:08X} dwords={} | pos {} {} {} | "
+                 "next {} {} {} {}",
+                 slot, addr, size_dw, f[0], f[1], f[2], f[3], f[4], f[5], f[6]);
         }
       }
       // Phase 527: phase 522 concluded "the Guide draws after the frame's
