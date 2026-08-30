@@ -5823,6 +5823,40 @@ void VdSwap_entry(
                       }
                       XELOGI("DevCandidates: obj={:08X} pdev={:08X} | {}",
                              oi2, pdev, cand.empty() ? "none" : cand);
+                      // The dispatch may take its device from a global rather
+                      // than the element. XamDeviceSlot is exactly such a
+                      // global and is already resolved; if it names a different
+                      // device, that device's window is what the reserve sees.
+                      uint32_t gslot = XamDeviceSlot();
+                      uint32_t gdev = gslot ? prd2(gslot) : 0;
+                      if (gdev) {
+                        uint32_t g0 = prd2(gdev + 0x30u), g1 = prd2(gdev + 0x34u);
+                        XELOGI("GlobalDev: slot={:08X} dev={:08X} cur={:08X} "
+                               "end={:08X} window={} {}",
+                               gslot, gdev, g0, g1, (g1 > g0) ? (g1 - g0) : 0,
+                               (gdev == pdev) ? "== pdev" : "DIFFERENT from pdev");
+                        // The dispatch reserves from THIS device, not from the
+                        // DC's. Its window is 4676 bytes against 9236 needed -
+                        // the same 4676 phase 439 measured - so 81A042E0 fails
+                        // here and returns the zero the emitter dereferences.
+                        // Every widening so far went to pdev, which the paint
+                        // never touches.
+                        if (guide_cmdbuf_base_ && guide_cmdbuf_size_ &&
+                            (g1 <= g0 || (g1 - g0) < 0x905u * 4u)) {
+                          auto* gm = kernel_state()->memory();
+                          xe::store_and_swap<uint32_t>(
+                              gm->TranslateVirtual(gdev + 0x30u),
+                              guide_cmdbuf_base_);
+                          xe::store_and_swap<uint32_t>(
+                              gm->TranslateVirtual(gdev + 0x34u),
+                              guide_cmdbuf_base_ + guide_cmdbuf_size_);
+                          XELOGI("GlobalDevWiden: dev={:08X} was {} -> cur={:08X}"
+                                 " end={:08X} ({} bytes)",
+                                 gdev, (g1 > g0) ? (g1 - g0) : 0,
+                                 prd2(gdev + 0x30u), prd2(gdev + 0x34u),
+                                 guide_cmdbuf_size_);
+                        }
+                      }
                     }
                     if (pdev) {
                       uint32_t rr = pcall(GuideConst(0x81A042E0u), {pdev, 0x905u});
