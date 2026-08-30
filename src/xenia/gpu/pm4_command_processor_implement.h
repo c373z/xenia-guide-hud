@@ -1369,8 +1369,14 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
         // read the first vertices and print them as floats. Off-screen or
         // degenerate positions would explain draws that are well-formed,
         // correctly targeted, and cover nothing.
-        for (uint32_t slot = 0; slot < 3; ++slot) {
-          uint32_t w0 = frf[0x4800 + slot * 2], w1 = frf[0x4801 + slot * 2];
+        // Phase 547: fetch slots are SIX dwords apart, not two -
+        // SHADER_CONSTANT_FETCH_00_0 .. _31_5 is 32 slots x 6. Indexing by 2
+        // was decoding dwords 2-5 of a texture descriptor as separate vertex
+        // constants, which is where phases 542/544's "slot 2, kVertex,
+        // address 0" came from. Walk all 32 slots at the right stride and
+        // report only the ones that really are vertex fetches.
+        for (uint32_t slot = 0; slot < 32; ++slot) {
+          uint32_t w0 = frf[0x4800 + slot * 6], w1 = frf[0x4801 + slot * 6];
           uint32_t type = w0 & 3u;
           if (type != 3u) continue;              // kVertex only
           // xe_gpu_vertex_fetch_t: address is a 30-bit field at bit 2 holding
@@ -1387,8 +1393,8 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
             uint32_t raw = xe::load_and_swap<uint32_t>(vp + k * 4);
             std::memcpy(&f[k], &raw, 4);
           }
-          XELOGI("GuideVerts[slot {}]: addr={:08X} dwords={} | {} {} {} | "
-                 "{} {} {}",
+          XELOGI("GuideVerts[fetch slot {}]: addr={:08X} dwords={} | {} {} {} "
+                 "| {} {} {}",
                  slot, addr, size_dw, f[0], f[1], f[2], f[3], f[4], f[5]);
         }
       }
