@@ -473,6 +473,14 @@ bool COMMAND_PROCESSOR::ExecutePacketType3(uint32_t packet) XE_RESTRICT {
       case PM4_DRAW_INDX:
       case PM4_DRAW_INDX_2: {
         ++guide_draw_count_;
+        // Phase 530: the Guide's draws arrive as a burst. Resolve at the first
+        // draw that is NOT the Guide's after one, which is the last moment its
+        // pixels are still in EDRAM untouched by the title.
+        if (!guide_in_draw_scope_ && guide_burst_pending_) {
+          guide_burst_pending_ = false;
+          COMMAND_PROCESSOR::GuideExtraResolve();
+        }
+        if (guide_in_draw_scope_) guide_burst_pending_ = true;
         // Phase 525: the Guide's blend state is src=kSrcAlpha, dst=
         // kOneMinusSrcAlpha (RB_BLENDCONTROL0 = 01010706). With a source alpha
         // of zero that computes exactly the destination, which is what phase
@@ -707,79 +715,6 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
   // in EDRAM after the displayed pixels were already copied out. Resolve again
   // here, with the copy registers the title's own resolve just used, so the
   // Guide's pixels reach the same destination before the swap.
-  if (cvars::guide_resolve_after_draw && guide_resolve_saved_ &&
-      guide_draw_count_ > guide_draws_at_last_swap_) {
-    // Restore the resolve state captured at the title's own resolve: the
-    // Guide's draws have since overwritten vertex-fetch slot 0, which
-    // GetResolveInfo reads the resolve rectangle from. Save what the Guide left
-    // and put it back afterwards so the next frame is unaffected.
-    RegisterFile& rf = *register_file_;
-    uint32_t keep_copy[4], keep_vf0[2];
-    for (uint32_t i = 0; i < 4; ++i) {
-      keep_copy[i] = rf[0x2318 + i];
-      rf[0x2318 + i] = guide_saved_copy_[i];
-    }
-    keep_vf0[0] = rf[0x4800];
-    keep_vf0[1] = rf[0x4801];
-    rf[0x4800] = guide_saved_vf0_[0];
-    rf[0x4801] = guide_saved_vf0_[1];
-
-    // Phase 524: verify the extra resolve actually changes what will be
-    // displayed, rather than trusting that it must. With --readback_resolve=full
-    // the resolve writes through to guest memory, so the destination can be
-    // checksummed either side of the copy. Comparing within one frame avoids the
-    // trap of comparing across runs of an animating game.
-    uint32_t dest = guide_saved_copy_[1] & ~0xFFFu;
-    auto sum_dest = [&]() -> uint32_t {
-      if (!cvars::guide_verify_resolve || !dest) return 0;
-      const uint8_t* pp = memory_->TranslatePhysical(dest);
-      if (!pp) return 0;
-      uint32_t h = 2166136261u;
-      for (uint32_t off = 0; off < 0x180000u; off += 0x400u) {
-        h = (h ^ *reinterpret_cast<const uint32_t*>(pp + off)) * 16777619u;
-      }
-      return h;
-    };
-    uint32_t sum_before = sum_dest();
-
-    guide_resolve_replay_ = true;
-    bool ok = COMMAND_PROCESSOR::IssueCopy();
-    guide_resolve_replay_ = false;
-
-    uint32_t sum_after = sum_dest();
-    if (cvars::guide_verify_resolve) {
-      static uint32_t vlog = 0, changed = 0, total = 0;
-      ++total;
-      if (sum_before != sum_after) ++changed;
-      if (vlog++ < 6 || (total % 200u) == 0u) {
-        // The resolve reads its source from RB_SURFACE_INFO/RB_COLOR_INFO,
-        // which are NOT restored above - only the copy registers and vf0 are.
-        // If the Guide's draws left different values than the title's resolve
-        // ran with, the extra copy is reading a different render target than
-        // the one the Guide drew into, which would explain a successful copy
-        // that changes nothing.
-        XELOGI("GuideVerify: dest={:08X} sum {:08X} -> {:08X} {} | {}/{} frames "
-               "changed | surface title={:08X}/{:08X} now={:08X}/{:08X}",
-               dest, sum_before, sum_after,
-               (sum_before != sum_after) ? "CHANGED" : "same", changed, total,
-               guide_saved_surface_[0], guide_saved_surface_[1], rf[0x2000],
-               rf[0x2001]);
-      }
-    }
-
-    for (uint32_t i = 0; i < 4; ++i) rf[0x2318 + i] = keep_copy[i];
-    rf[0x4800] = keep_vf0[0];
-    rf[0x4801] = keep_vf0[1];
-
-    static uint32_t reslog = 0;
-    if (reslog++ < 8) {
-      XELOGI("GuideResolve: [clears={}] {} draws this frame -> IssueCopy {} "
-             "(dest_base={:08X})",
-             guide_clear_count_,
-             guide_draw_count_ - guide_draws_at_last_swap_,
-             ok ? "ok" : "FAILED", guide_saved_copy_[1]);
-    }
-  }
   guide_draws_at_last_swap_ = guide_draw_count_;
   ++guide_swap_count_;  // phase 522
   COMMAND_PROCESSOR::IssueSwap(frontbuffer_ptr, frontbuffer_width,
@@ -1167,6 +1102,64 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_EVENT_WRITE_ZPD(
   XenosZPDReport::WriteSampleCount(report, fake_zpd_sample_count_, false);
   return true;
 }
+
+XE_NOINLINE
+void COMMAND_PROCESSOR::GuideExtraResolve() {
+  // Phase 530: resolve the Guide's geometry immediately after its burst of
+  // draws. This previously ran just before IssueSwap, which phase 529 showed is
+  // BEFORE the Guide draws - so it resolved a frame that did not contain them
+  // and reported "no change" for 3400 frames. Here the pixels are still in
+  // EDRAM and the title has not drawn over them yet.
+  //
+  // The resolve rectangle lives in vertex-fetch slot 0 and the destination in
+  // RB_COPY_*, both of which the Guide's own draws overwrite, so restore the
+  // state captured at the title's resolve and put the Guide's back afterwards.
+  if (!cvars::guide_resolve_after_draw || !guide_resolve_saved_) return;
+  RegisterFile& rf = *register_file_;
+  uint32_t keep_copy[4], keep_vf0[2];
+  for (uint32_t i = 0; i < 4; ++i) {
+    keep_copy[i] = rf[0x2318 + i];
+    rf[0x2318 + i] = guide_saved_copy_[i];
+  }
+  keep_vf0[0] = rf[0x4800];
+  keep_vf0[1] = rf[0x4801];
+  rf[0x4800] = guide_saved_vf0_[0];
+  rf[0x4801] = guide_saved_vf0_[1];
+
+  uint32_t dest = guide_saved_copy_[1] & ~0xFFFu;
+  auto sum_dest = [&]() -> uint32_t {
+    if (!cvars::guide_verify_resolve || !dest) return 0;
+    const uint8_t* pp = memory_->TranslatePhysical(dest);
+    if (!pp) return 0;
+    uint32_t h = 2166136261u;
+    for (uint32_t off = 0; off < 0x180000u; off += 0x400u) {
+      h = (h ^ *reinterpret_cast<const uint32_t*>(pp + off)) * 16777619u;
+    }
+    return h;
+  };
+  uint32_t sum_before = sum_dest();
+
+  guide_resolve_replay_ = true;
+  bool ok = COMMAND_PROCESSOR::IssueCopy();
+  guide_resolve_replay_ = false;
+
+  uint32_t sum_after = sum_dest();
+
+  for (uint32_t i = 0; i < 4; ++i) rf[0x2318 + i] = keep_copy[i];
+  rf[0x4800] = keep_vf0[0];
+  rf[0x4801] = keep_vf0[1];
+
+  static uint32_t reslog = 0, changed = 0, total = 0;
+  ++total;
+  if (sum_before != sum_after) ++changed;
+  if (reslog++ < 8 || (total % 200u) == 0u) {
+    XELOGI("GuideResolve: after burst, IssueCopy {} dest={:08X} sum {:08X} -> "
+           "{:08X} {} | {}/{} resolves changed the image",
+           ok ? "ok" : "FAILED", dest, sum_before, sum_after,
+           (sum_before != sum_after) ? "CHANGED" : "same", changed, total);
+  }
+}
+
 
 bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
     uint32_t packet, const char* opcode_name, uint32_t viz_query_condition,

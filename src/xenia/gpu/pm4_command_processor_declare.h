@@ -62,6 +62,7 @@ bool ExecutePacketType3Draw(uint32_t packet, const char* opcode_name,
 
 bool ExecutePacketType3_DRAW_INDX(uint32_t packet, uint32_t count) XE_RESTRICT;
 
+void GuideExtraResolve();  // phase 530
 bool ExecutePacketType3_DRAW_INDX_2(uint32_t packet,
                                     uint32_t count) XE_RESTRICT;
 XE_FORCEINLINE

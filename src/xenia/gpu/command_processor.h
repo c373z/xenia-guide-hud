@@ -483,6 +483,7 @@ class CommandProcessor {
   uint32_t guide_resolve_count_ = 0;
   uint32_t guide_swap_count_ = 0;
   uint32_t guide_draws_at_last_swap_ = 0;
+  bool guide_burst_pending_ = false;  // phase 530
   // Phase 523: the resolve rectangle lives in vertex-fetch slot 0 (a D3D9
   // hack GetResolveInfo depends on) and the copy destination in RB_COPY_*.
   // The Guide's own draws overwrite vf0, so a second IssueCopy after them
