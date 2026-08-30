@@ -2037,7 +2037,24 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
         // always lands on the loading screen and silently discards a scene
         // chosen with guide_scene_name. If the caller named a scene, that is
         // an explicit choice - leave the draw root where GuideNavM put it.
-        if (!nr && hud_scene && !::cvars::guide_scene_name.empty()) {
+        // Phase 571: this guard was added because 913EB7D8 always lands on
+        // Status, so re-pointing would discard a scene chosen by name. With the
+        // real dispatcher (guide_nav_state >= 0) hud_scene IS the requested
+        // scene, and refusing to re-point leaves the draw root on the bootstrap
+        // scene - which is what rt2 reads, so the paint has been walking the old
+        // tree while the blade sat loaded and unreferenced.
+        if (!nr && hud_scene && ::cvars::guide_nav_state >= 0) {
+          uint32_t st = hud_scene;
+          if (::cvars::guide_draw_root_object) {
+            uint32_t o = GuideResolveHandle(hud_scene);
+            if (o) st = o;
+          }
+          xe::store_and_swap<uint32_t>(
+              memory->TranslateVirtual(guide_bs_obj_ + 0x18u), st);
+          guide_bs_scene_ = hud_scene;
+          XELOGI("GuideNav: draw root -> {:08X} (dispatcher scene {:08X})", st,
+                 hud_scene);
+        } else if (!nr && hud_scene && !::cvars::guide_scene_name.empty()) {
           XELOGI("GuideNav: keeping guide_scene_name draw root; NOT "
                  "re-pointing to hud-built Status {:08X}", hud_scene);
         } else if (!nr && hud_scene) {
