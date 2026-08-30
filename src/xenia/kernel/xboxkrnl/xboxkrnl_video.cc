@@ -3148,9 +3148,13 @@ void VdSwap_entry(
         // after) that a bare store_and_swap skips. Doing it at button time
         // loses to 819F4C00, which unbinds by calling these same two
         // functions with null (819F4C44 / 819F4C70).
-        static bool bound = false;
-        if (!bound) {
-          bound = true;
+        // Every draw, not once. 819F4C00 clears these between the button
+        // press and the draw, so a one-shot bind is already gone by draw
+        // time - which is exactly the [dev+0x32B0]==0 that faults at
+        // 819F5F60 (lwz r11,0x32B0(r31) / lhz r11,24(r11)).
+        static uint32_t bindn = 0;
+        ++bindn;
+        {
           auto* sm = kernel_state()->memory();
           auto srd = [sm](uint32_t a) {
             return xe::load_and_swap<uint32_t>(sm->TranslateVirtual(a));
@@ -3163,12 +3167,12 @@ void VdSwap_entry(
           if (sdev) {
             uint64_t ca[] = {1280, 720, 0x18280186u, 0, 0};
             uint32_t surf = static_cast<uint32_t>(
-                proc->Execute(sts, 0x819E7528u, ca, xe::countof(ca)));
+                proc->Execute(sts, GuideConst(0x819E7528u), ca, xe::countof(ca)));
             uint32_t fb = static_cast<uint32_t>(
-                proc->Execute(sts, 0x819E7528u, ca, xe::countof(ca)));
+                proc->Execute(sts, GuideConst(0x819E7528u), ca, xe::countof(ca)));
             if (surf) {
               uint64_t ra[] = {sdev, 0, surf};
-              proc->Execute(sts, 0x819F31A8u, ra, xe::countof(ra));
+              proc->Execute(sts, GuideConst(0x819F31A8u), ra, xe::countof(ra));
               uint64_t da[] = {sdev, surf};
               proc->Execute(sts, 0x819F38C8u, da, xe::countof(da));
             }
