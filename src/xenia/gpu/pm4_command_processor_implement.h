@@ -338,6 +338,26 @@ bool COMMAND_PROCESSOR::ExecutePacketType0(uint32_t packet) XE_RESTRICT {
 
     uint32_t base_index = (packet & 0x7FFF);
     uint32_t write_one_reg = (packet >> 15) & 0x1;
+    // Phase 543: the Guide writes no SET_CONSTANT packets of any type, and its
+    // stream is largely type-0 (phase 514) - direct register writes. Fetch
+    // constants live at 0x4800+, so this is where they would be set. Report any
+    // type-0 write that covers that range while the Guide is drawing.
+    if (guide_in_draw_scope_ && !guide_replaying_) {
+      uint32_t lo = base_index, hi = base_index + (write_one_reg ? 1 : count);
+      if (hi > 0x4800u && lo < 0x48C0u) {
+        static uint32_t t0log = 0;
+        if (t0log++ < 12) {
+          XELOGI("GuideType0Fetch: base={:04X} count={} one_reg={} covers the "
+                 "fetch range",
+                 base_index, count, write_one_reg);
+        }
+      } else {
+        static uint32_t t0other = 0;
+        if (t0other++ < 12) {
+          XELOGI("GuideType0: base={:04X} count={}", base_index, count);
+        }
+      }
+    }
 
     if (!write_one_reg) {
       COMMAND_PROCESSOR::WriteRegisterRangeFromRing(&reader_, base_index,
@@ -1513,6 +1533,17 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_SET_CONSTANT(
   uint32_t index = offset_type & 0x7FF;
   uint32_t type = (offset_type >> 16) & 0xFF;
   uint32_t countm1 = count - 1;
+  // Phase 543: the Guide writes no FETCH constants at all, so phase 542's
+  // "slot 2 is null" may be about a slot its shaders never read. Log every
+  // constant type it does write - 0 ALU, 1 FETCH, 2 BOOL, 3 LOOP - before
+  // concluding anything about where its geometry comes from.
+  if (guide_in_draw_scope_ && !guide_replaying_) {
+    static uint32_t sclog = 0;
+    if (sclog++ < 16) {
+      XELOGI("GuideSetConst: type={} index={} count={}", type, index,
+             countm1 + 1);
+    }
+  }
   switch (type) {
     case 0:  // ALU
       // index += 0x4000;
@@ -1523,6 +1554,20 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_SET_CONSTANT(
 
       COMMAND_PROCESSOR::WriteFetchRangeFromRing(&reader_, index, countm1);
 
+      // Phase 543: the Guide's draws fetch vertices from address 0 (phase 542).
+      // Either its stream never writes that slot, or it writes a null address.
+      // Log what it actually writes - index is in fetch dwords, so slot N
+      // occupies index 2N and 2N+1.
+      if (guide_in_draw_scope_ && !guide_replaying_) {
+        static uint32_t fclog = 0;
+        if (fclog++ < 12) {
+          RegisterFile& wrf = *register_file_;
+          XELOGI("GuideSetFetch: index={} ({} dwords) -> slot {} now "
+                 "{:08X}/{:08X}",
+                 index, countm1 + 1, index / 2, wrf[0x4800 + (index & ~1u)],
+                 wrf[0x4801 + (index & ~1u)]);
+        }
+      }
       break;
     case 2:  // BOOL
       COMMAND_PROCESSOR::WriteBoolRangeFromRing(&reader_, index, countm1);
