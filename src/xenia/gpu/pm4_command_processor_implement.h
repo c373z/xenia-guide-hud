@@ -1187,6 +1187,28 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
 
   register_file_->values[XE_GPU_REG_VGT_DRAW_INITIATOR] =
       vgt_draw_initiator.value;
+  // Phase 526: the Guide's draws produce no fragments and every piece of state
+  // around them is permissive (phase 525), so read the draw itself. A zero index
+  // count or a degenerate primitive type rasterises to nothing and would explain
+  // it exactly.
+  if (guide_in_draw_scope_) {
+    static uint32_t dilog = 0;
+    if (dilog++ < 10) {
+      // IssueDraw is skipped entirely - without setting draw_succeeded false
+      // and without logging - when viz_query_ena && kill_pix_post_hi_z. That is
+      // a silent skip that looks exactly like what is being seen: the packet is
+      // counted, no backend failure appears, and no pixels are written.
+      auto vq = register_file_->Get<reg::PA_SC_VIZ_QUERY>();
+      XELOGI("GuideDrawIndx: prim_type={} source_select={} num_indices={} "
+             "| viz_query_ena={} kill_pix_post_hi_z={} -> {}",
+             uint32_t(vgt_draw_initiator.prim_type),
+             uint32_t(vgt_draw_initiator.source_select),
+             uint32_t(vgt_draw_initiator.num_indices),
+             uint32_t(vq.viz_query_ena), uint32_t(vq.kill_pix_post_hi_z),
+             (vq.viz_query_ena && vq.kill_pix_post_hi_z) ? "SKIPPED"
+                                                        : "issued");
+    }
+  }
   bool draw_succeeded = true;
   // TODO(Triang3l): Remove IndexBufferInfo and replace handling of all this
   // with PrimitiveProcessor when the old Vulkan renderer is removed.
