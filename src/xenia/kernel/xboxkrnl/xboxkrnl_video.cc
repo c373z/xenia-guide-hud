@@ -3179,6 +3179,16 @@ void VdSwap_entry(
             if (fb) {
               xe::store_and_swap<uint32_t>(
                   sm->TranslateVirtual(sdev + 0x3F74u), fb);
+              // 819F4C00 does not null the RT slots - it restores them from
+              // the device's own defaults at [dev+0x3F78] (RT) and
+              // [dev+0x3F70] (depth). When those are null the restore is what
+              // writes the null that faults at 819F5F60. Binding the defaults
+              // means the unbind-all leaves a real surface behind - which is
+              // why re-binding more often could never have worked.
+              xe::store_and_swap<uint32_t>(
+                  sm->TranslateVirtual(sdev + 0x3F78u), surf);
+              XELOGI("PreDrawBind: defaults [3F78]={:08X} [3F70]={:08X}",
+                     srd(sdev + 0x3F78u), srd(sdev + 0x3F70u));
             }
             XELOGI("PreDrawBind: dev={:08X} rt={:08X} fb={:08X} -> "
                    "[32A0]={:08X} [32B0]={:08X} [3F74]={:08X}",
