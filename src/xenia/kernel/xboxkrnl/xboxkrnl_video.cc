@@ -7223,6 +7223,14 @@ void VdSwap_entry(
           if (cd_r1 > cd_r0) { ws = cd_r0; we2 = cd_r1; }
           else if (cd_b1 > cd_b0) { ws = cd_b0; we2 = cd_b1; }
           if (ws && (we2 - ws) < 0x40000u) {
+            // Dump before parsing. The paint walk spent ten phases reporting
+            // opcode soup because it began on a word that was not a packet
+            // boundary; this one decodes its first header as opcode 00 with a
+            // count of 16257, which is the same symptom.
+            std::string craw;
+            for (uint32_t k = 0; k < 16 && ws + k * 4u < we2; ++k)
+              craw += fmt::format("{:08X} ", cq(ws + k * 4u));
+            XELOGI("CompositeEmit #{}: raw at {:08X}: {}", drawbr, ws, craw);
             uint32_t nw = (we2 - ws) / 4u, t3 = 0, dr = 0;
             std::string firstp;
             for (uint32_t i = 0; i < nw;) {
