@@ -707,9 +707,48 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
     rf[0x4800] = guide_saved_vf0_[0];
     rf[0x4801] = guide_saved_vf0_[1];
 
+    // Phase 524: verify the extra resolve actually changes what will be
+    // displayed, rather than trusting that it must. With --readback_resolve=full
+    // the resolve writes through to guest memory, so the destination can be
+    // checksummed either side of the copy. Comparing within one frame avoids the
+    // trap of comparing across runs of an animating game.
+    uint32_t dest = guide_saved_copy_[1] & ~0xFFFu;
+    auto sum_dest = [&]() -> uint32_t {
+      if (!cvars::guide_verify_resolve || !dest) return 0;
+      const uint8_t* pp = memory_->TranslatePhysical(dest);
+      if (!pp) return 0;
+      uint32_t h = 2166136261u;
+      for (uint32_t off = 0; off < 0x180000u; off += 0x400u) {
+        h = (h ^ *reinterpret_cast<const uint32_t*>(pp + off)) * 16777619u;
+      }
+      return h;
+    };
+    uint32_t sum_before = sum_dest();
+
     guide_resolve_replay_ = true;
     bool ok = COMMAND_PROCESSOR::IssueCopy();
     guide_resolve_replay_ = false;
+
+    uint32_t sum_after = sum_dest();
+    if (cvars::guide_verify_resolve) {
+      static uint32_t vlog = 0, changed = 0, total = 0;
+      ++total;
+      if (sum_before != sum_after) ++changed;
+      if (vlog++ < 6 || (total % 200u) == 0u) {
+        // The resolve reads its source from RB_SURFACE_INFO/RB_COLOR_INFO,
+        // which are NOT restored above - only the copy registers and vf0 are.
+        // If the Guide's draws left different values than the title's resolve
+        // ran with, the extra copy is reading a different render target than
+        // the one the Guide drew into, which would explain a successful copy
+        // that changes nothing.
+        XELOGI("GuideVerify: dest={:08X} sum {:08X} -> {:08X} {} | {}/{} frames "
+               "changed | surface title={:08X}/{:08X} now={:08X}/{:08X}",
+               dest, sum_before, sum_after,
+               (sum_before != sum_after) ? "CHANGED" : "same", changed, total,
+               guide_saved_surface_[0], guide_saved_surface_[1], rf[0x2000],
+               rf[0x2001]);
+      }
+    }
 
     for (uint32_t i = 0; i < 4; ++i) rf[0x2318 + i] = keep_copy[i];
     rf[0x4800] = keep_vf0[0];

@@ -142,3 +142,11 @@ DEFINE_bool(guide_resolve_after_draw, false,
             "Issue a second EDRAM resolve after the Guide's draws and before "
             "the swap, so its geometry reaches the front buffer.",
             "GPU");
+
+// Phase 524: checksum the resolve destination either side of the Guide's extra
+// resolve, to establish that it changes the image rather than assuming it does.
+// Needs --readback_resolve=full so the resolve reaches guest memory.
+DEFINE_bool(guide_verify_resolve, false,
+            "Checksum the resolve destination before and after the Guide's "
+            "extra resolve and report how many frames it changes.",
+            "GPU");
