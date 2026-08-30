@@ -6128,6 +6128,9 @@ void VdSwap_entry(
               // the executor could mean the stream has no draws or that the
               // executor mis-parsed it; decoding the packets distinguishes
               // those, and says what the paint actually produced.
+              // Phase 507: set when the PM4 walk desyncs, so the range is not
+              // handed to the command processor. See the guard below.
+              uint32_t parse_bad = 0;
               {
                 uint32_t counts[128] = {0};
                 uint32_t t0 = 0, t2 = 0, pk = 0, bad = 0, iw = 0;
@@ -6161,6 +6164,16 @@ void VdSwap_entry(
                   for (uint32_t k = 0; k < 48 && k < words; ++k)
                     hx += fmt::format("{:08X} ", prd2(before + k * 4));
                   XELOGI("GuidePaintWalk: raw {}", hx);
+                  // The first dump only covered LUT indices 1-4, the dark end
+                  // of the ramp, where a zero colour is exactly what a normal
+                  // ramp holds - so "ramp to black" cannot be concluded from
+                  // it. Sample the middle and the top before believing that.
+                  for (uint32_t base_w : {words / 2, words > 60 ? words - 60 : 0u}) {
+                    std::string mid;
+                    for (uint32_t k = 0; k < 27 && base_w + k < words; ++k)
+                      mid += fmt::format("{:08X} ", prd2(before + (base_w + k) * 4));
+                    XELOGI("GuidePaintWalk: at word {} {}", base_w, mid);
+                  }
                   XELOGI("GuidePaintWalk: {} words -> {} type3, {} type0, "
                          "{} type2, overrun={}",
                          words, pk, t0, t2, bad);
@@ -6169,7 +6182,25 @@ void VdSwap_entry(
                   XELOGI("GuidePaintWalk: DRAW_INDX(22)={} DRAW_INDX_2(36)={}",
                          counts[0x22], counts[0x36]);
                 }
+                parse_bad = bad;
               }
+              // The reserve range is NOT a command stream - phases 505/506 show
+              // it is a 769-entry gamma ramp - and executing it anyway is not
+              // merely useless. Xenia implements DC_LUT_*: command_processor.cc
+              // keeps a gamma_ramp_256_entry_table_ and handles
+              // XE_GPU_REG_DC_LUT_RW_INDEX. Parsed as packets, an all-zero
+              // 256-entry ramp reaching the register path blacks the display on
+              // its own, independently of the missing geometry. Refuse to
+              // execute a range whose parse overran.
+              if (parse_bad) {
+                static uint32_t skip_logs = 0;
+                if (skip_logs++ < 2) {
+                  XELOGW("GuidePaintFrame: refusing to execute {} words at "
+                         "{:08X} - PM4 parse desynced, this range is not a "
+                         "command stream",
+                         words, before);
+                }
+              } else {
               gso2->command_processor()->guide_overlay_words_ = words;
               gso2->command_processor()->guide_overlay_ptr_ = before;
               if (::cvars::guide_execute_command_stream) {
@@ -6183,6 +6214,7 @@ void VdSwap_entry(
                          words, before,
                          gso2->command_processor()->guide_draw_count_ - d0);
                 }
+              }
               }
             }
           }
