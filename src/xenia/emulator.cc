@@ -49,6 +49,7 @@
 #include "xenia/cpu/thread_state.h"
 #include "xenia/gpu/command_processor.h"
 #include "xenia/gpu/graphics_system.h"
+#include "xenia/ui/presenter.h"
 #include "xenia/hid/input_driver.h"
 #include "xenia/hid/input_system.h"
 #include "xenia/kernel/kernel_flags.h"
@@ -4711,6 +4712,46 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
              "front buffer while the title had one");
     }).detach();
     XELOGI("GuideLendFB: watching for the guide device");
+  }
+
+  // Phase 540: capture the presented frame to a file so the "is the Guide
+  // visible" question can be answered here instead of handed to a person.
+  // Xenia's own screenshot path lives on EmulatorWindow, but the capture it
+  // uses - Presenter::CaptureGuestOutput - is reachable from the graphics
+  // system, and RawImage is plain R8G8B8X8, so the frame can be dumped raw and
+  // turned into a PNG afterwards.
+  if (cvars::guide_capture_seconds > 0) {
+    int cap_delay = cvars::guide_capture_seconds;
+    std::thread([this, cap_delay]() {
+      xe::threading::set_name("GuideCapture");
+      xe::threading::Sleep(std::chrono::seconds(cap_delay));
+      auto* gs = graphics_system();
+      auto* presenter = gs ? gs->presenter() : nullptr;
+      if (!presenter) {
+        XELOGW("GuideCapture: no presenter");
+        return;
+      }
+      xe::ui::RawImage image;
+      if (!presenter->CaptureGuestOutput(image)) {
+        XELOGW("GuideCapture: CaptureGuestOutput failed");
+        return;
+      }
+      auto path = xe::filesystem::GetExecutableFolder() / "guide_capture.raw";
+      FILE* f = xe::filesystem::OpenFile(path, "wb");
+      if (!f) {
+        XELOGW("GuideCapture: cannot open {}", xe::path_to_utf8(path));
+        return;
+      }
+      uint32_t hdr[3] = {image.width, image.height,
+                         static_cast<uint32_t>(image.stride)};
+      fwrite(hdr, sizeof(hdr), 1, f);
+      fwrite(image.data.data(), 1, image.data.size(), f);
+      fclose(f);
+      XELOGI("GuideCapture: wrote {}x{} stride={} bytes={} to {}", image.width,
+             image.height, image.stride, image.data.size(),
+             xe::path_to_utf8(path));
+    }).detach();
+    XELOGI("GuideCapture: armed for {}s", cap_delay);
   }
 
   if (cvars::guide_auto_press_seconds > 0) {

@@ -1010,3 +1010,10 @@ DEFINE_bool(guide_patch_skin_dispatch, false,
             "Patch 81901E88 to a nop so the null path is taken and the bad "
             "indirect call at 81901EAC is skipped, letting skin init continue.",
             "Kernel");
+
+// Phase 540: dump the presented frame to <exe>/guide_capture.raw after N
+// seconds, so the rendered result can be inspected directly rather than
+// inferred from checksums.
+DEFINE_int32(guide_capture_seconds, 0,
+             "Capture the presented frame to guide_capture.raw after N seconds.",
+             "Kernel");
