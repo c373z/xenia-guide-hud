@@ -2099,6 +2099,18 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
           XELOGI("GuideNav: DC [+1C8]={:08X} [+1CC]={:08X} [+134]={:08X}",
                  rd(guide_boot_dc_ + 0x1C8u), rd(guide_boot_dc_ + 0x1CCu),
                  rd(guide_boot_dc_ + 0x134u));
+          // Phase 577: walk the chain 818FA168 takes, one step at a time, so
+          // the failing dereference is identified rather than guessed:
+          //   [DC+0x1CC] -> w ; [w+0] -> vt ; [vt+0x10] -> fn ; bctrl fn
+          {
+            uint32_t w = rd(guide_boot_dc_ + 0x1CCu);
+            uint32_t wvt = w ? rd(w) : 0;
+            uint32_t fn = wvt ? rd(wvt + 0x10u) : 0;
+            XELOGI("GuideNav: chain [DC+1CC]={:08X} -> [w+0]={:08X} -> "
+                   "[vt+10]={:08X} {}",
+                   w, wvt, fn,
+                   (!w || !wvt || !fn) ? "<- BREAKS HERE" : "complete");
+          }
           parent_arg = guide_boot_dc_;
         } else if (::cvars::guide_draw_root_object) {
           uint32_t po_ = GuideResolveHandle(guide_bs_scene_);
