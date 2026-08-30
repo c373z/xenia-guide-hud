@@ -157,3 +157,11 @@ DEFINE_bool(guide_force_opaque, false,
             "Override RB_BLENDCONTROL0 to src=One dst=Zero for draws issued "
             "inside the Guide's render call.",
             "GPU");
+
+// Phase 532: capture the Guide's contribution to the front buffer as a diff and
+// re-apply it after the title's resolve, immediately before the swap. Needs
+// --readback_resolve=full and --guide_resolve_after_draw.
+DEFINE_bool(guide_composite_frontbuffer, false,
+            "Re-apply the Guide's resolved pixels on top of the finished frame "
+            "so they survive the title's own resolve.",
+            "GPU");

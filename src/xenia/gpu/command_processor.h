@@ -484,6 +484,16 @@ class CommandProcessor {
   uint32_t guide_swap_count_ = 0;
   uint32_t guide_draws_at_last_swap_ = 0;
   bool guide_burst_pending_ = false;  // phase 530
+  // Phase 532: the Guide's pixels reach the presented buffer and are then
+  // overwritten by the title's own resolve (phase 531). With
+  // --readback_resolve=full the buffer lives in guest memory, so the Guide's
+  // contribution can be captured as a diff at resolve time and re-applied after
+  // the title's resolve, just before the swap. Cheaper and far less risky than
+  // replaying ring packets, and it answers the visibility question directly.
+  std::vector<uint32_t> guide_fb_before_;
+  std::vector<uint32_t> guide_fb_after_;
+  uint32_t guide_fb_dest_ = 0;
+  bool guide_fb_valid_ = false;
   // Phase 523: the resolve rectangle lives in vertex-fetch slot 0 (a D3D9
   // hack GetResolveInfo depends on) and the copy destination in RB_COPY_*.
   // The Guide's own draws overwrite vf0, so a second IssueCopy after them

@@ -715,6 +715,29 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
   // in EDRAM after the displayed pixels were already copied out. Resolve again
   // here, with the copy registers the title's own resolve just used, so the
   // Guide's pixels reach the same destination before the swap.
+  // Phase 532: re-apply the Guide's contribution on top of the finished frame.
+  // The title's resolve has overwritten the buffer since the diff was taken, so
+  // write back only the dwords the Guide changed.
+  if (cvars::guide_composite_frontbuffer && guide_fb_valid_ &&
+      guide_fb_dest_ == (frontbuffer_ptr & ~0xFFFu)) {
+    uint8_t* fbp = memory_->TranslatePhysical(guide_fb_dest_);
+    if (fbp) {
+      uint32_t* dst = reinterpret_cast<uint32_t*>(fbp);
+      uint32_t n = uint32_t(guide_fb_before_.size()), applied = 0;
+      for (uint32_t i = 0; i < n; ++i) {
+        if (guide_fb_before_[i] != guide_fb_after_[i]) {
+          dst[i] = guide_fb_after_[i];
+          ++applied;
+        }
+      }
+      static uint32_t aplog = 0;
+      if (aplog++ < 8) {
+        XELOGI("GuideComposite: re-applied {} of {} dwords onto {:08X}", applied,
+               n, guide_fb_dest_);
+      }
+    }
+    guide_fb_valid_ = false;
+  }
   // Phase 531: the extra resolve writes to whichever buffer the title last
   // resolved (guide_saved_copy_[1]). With double buffering that need not be the
   // buffer about to be presented, in which case the Guide's pixels are put into
@@ -1154,9 +1177,26 @@ void COMMAND_PROCESSOR::GuideExtraResolve() {
   };
   uint32_t sum_before = sum_dest();
 
+  // Phase 532: snapshot the destination either side of the copy. Every dword
+  // that changes is the Guide's contribution to this frame.
+  const uint32_t kFbWords = 0x180000u / 4u;
+  bool snap = cvars::guide_composite_frontbuffer && dest;
+  const uint8_t* fbp = snap ? memory_->TranslatePhysical(dest) : nullptr;
+  if (fbp) {
+    guide_fb_before_.resize(kFbWords);
+    std::memcpy(guide_fb_before_.data(), fbp, kFbWords * 4u);
+  }
+
   guide_resolve_replay_ = true;
   bool ok = COMMAND_PROCESSOR::IssueCopy();
   guide_resolve_replay_ = false;
+
+  if (fbp) {
+    guide_fb_after_.resize(kFbWords);
+    std::memcpy(guide_fb_after_.data(), fbp, kFbWords * 4u);
+    guide_fb_dest_ = dest;
+    guide_fb_valid_ = true;
+  }
 
   uint32_t sum_after = sum_dest();
 

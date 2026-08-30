@@ -20,6 +20,7 @@ DECLARE_bool(vsync);
 DECLARE_bool(guide_resolve_after_draw);
 DECLARE_bool(guide_verify_resolve);
 DECLARE_bool(guide_force_opaque);
+DECLARE_bool(guide_composite_frontbuffer);
 
 DECLARE_uint64(framerate_limit);
 
