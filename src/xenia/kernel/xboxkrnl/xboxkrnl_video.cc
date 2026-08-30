@@ -1825,6 +1825,40 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
             }
           }
           XELOGI("GuideNavM: scene path ptr={:08X} = L\"{}\"", s_path, sp);
+          // Phase 556: the comment above has said since phase 283 that this
+          // wants GuideMain.xur rather than Status.xur, and the logging was
+          // added to learn the format - but the substitution was never written.
+          // So every run since has navigated to the loading screen, which is
+          // why the paint chain is a spinner and why thirty-five phases of
+          // rendering work found every component correct and nothing to show.
+          //
+          // Build the replacement in the same format: UTF-16, byte-swapped to
+          // match the reads above, NUL-terminated.
+          if (!::cvars::guide_scene_name.empty()) {
+            static uint32_t s_override = 0;
+            if (!s_override) {
+              s_override = memory->SystemHeapAlloc(256, 16);
+              if (s_override) {
+                const std::string& nm = ::cvars::guide_scene_name;
+                for (size_t c = 0; c < nm.size() && c < 100; ++c) {
+                  xe::store_and_swap<uint16_t>(
+                      memory->TranslateVirtual(s_override +
+                                               uint32_t(c) * 2u),
+                      static_cast<uint16_t>(nm[c]));
+                }
+                xe::store_and_swap<uint16_t>(
+                    memory->TranslateVirtual(s_override +
+                                             uint32_t(nm.size()) * 2u),
+                    0);
+              }
+            }
+            if (s_override) {
+              XELOGI("GuideNavM: substituting scene path {:08X} -> {:08X} "
+                     "L\"{}\"",
+                     s_path, s_override, ::cvars::guide_scene_name);
+              s_path = s_override;
+            }
+          }
         }
         if (f_loc && f_scn && f_add && f_nav && buf_loc && buf_out && s_path) {
           std::memset(memory->TranslateVirtual(buf_loc), 0, 512);
