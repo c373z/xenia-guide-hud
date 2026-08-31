@@ -1132,6 +1132,28 @@ DEFINE_uint64(guide_alloc_lr_hi, 0,
               "instead of nine.",
               "Kernel");
 
+DEFINE_bool(guide_patch_resolve_dest, false,
+            "Rewrite RB_COPY_DEST_BASE in the buffer about to be submitted so "
+            "the Guide's resolve lands in a scratch surface we own. Phase 700 "
+            "measured dest_base = 0: the frame renders 16 colour draws and "
+            "resolves them to address zero. Phase 702 closed the route to "
+            "finding the writer statically, so supply the destination instead "
+            "- the move that worked for the allocator in phase 694. Also "
+            "counts non-zero pixels afterwards, which is the first direct test "
+            "of whether the draws rasterise at all.",
+            "Kernel");
+
+DEFINE_bool(guide_submit_from_base, false,
+            "Submit the second context from the composite buffer's base "
+            "rather than from [dev+0x30]. Phase 703: [dev+0x30] is the "
+            "CURRENT cursor, which after emission points at the end of what "
+            "the Guide wrote - so the submission covered 36 words past the "
+            "buffer and the 6917 words holding all 19 draws were never handed "
+            "to the command processor (GPU draws +0 every frame). The comment "
+            "there assumed the cursor gets cleared before we read it, which "
+            "stopped being true once emission worked.",
+            "Kernel");
+
 DEFINE_bool(guide_retarget_interrupt, false,
             "Re-register the graphics interrupt callback with the device the "
             "present path uses. Phase 645: xam registers it with mode 1's "

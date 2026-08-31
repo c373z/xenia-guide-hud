@@ -8693,14 +8693,119 @@ void VdSwap_entry(
             if (sd(xbuf + w * 4)) words = w + 1;
           }
         }
+        // Phase 703: [dev+0x30] is the cursor, and once emission works it
+        // points PAST everything the Guide wrote. Submitting from there hands
+        // the command processor 36 words of tail and none of the 19 draws -
+        // measured as "GPU draws +0" every frame while CompositeScan happily
+        // counted DRAW_INDX=16 in a buffer nobody submitted.
+        if (::cvars::guide_submit_from_base && guide_cmdbuf_base_ &&
+            xbuf > guide_cmdbuf_base_ &&
+            xbuf - guide_cmdbuf_base_ < guide_cmdbuf_size_) {
+          uint32_t base_words = (xbuf - guide_cmdbuf_base_) / 4u;
+          static uint32_t sb = 0;
+          if (++sb <= 3) {
+            XELOGI("GuideSubmitBase #{}: {:08X}+{} words (was {:08X}+{})", sb,
+                   guide_cmdbuf_base_, base_words, xbuf, words);
+          }
+          xbuf = guide_cmdbuf_base_;
+          words = base_words;
+          // The first word reads 00000000, which as a PM4 header is a type-0
+          // write of one register at index 0 - it swallows the real header
+          // behind it and misaligns every packet after. Start at the first
+          // non-zero word instead.
+          uint32_t skip = 0;
+          while (skip < words && sd(xbuf + skip * 4) == 0) ++skip;
+          if (skip && skip < words) {
+            xbuf += skip * 4;
+            words -= skip;
+            if (sb <= 3) {
+              XELOGI("GuideSubmitBase #{}: skipped {} leading zero words -> "
+                     "{:08X}+{}",
+                     sb, skip, xbuf, words);
+            }
+          }
+        }
         static uint32_t sc_n = 0;
         ++sc_n;
+        // Phase 703: the resolve destination is null (700), and the route
+        // to its writer is closed (702). Supply one instead - the move that
+        // worked for the allocator in 694 - and then look at what lands there.
+        static uint32_t resolve_buf = 0;
+        const uint32_t kResolveSize = 4u * 1024u * 1024u;
+        if (::cvars::guide_patch_resolve_dest && xbuf && words) {
+          auto* rm = kernel_state()->memory();
+          if (!resolve_buf) {
+            auto* rheap = rm->LookupHeapByType(true, 64 * 1024);
+            if (rheap &&
+                rheap->Alloc(kResolveSize, 4096,
+                             kMemoryAllocationReserve | kMemoryAllocationCommit,
+                             kMemoryProtectRead | kMemoryProtectWrite, false,
+                             &resolve_buf) &&
+                resolve_buf) {
+              std::memset(rm->TranslateVirtual(resolve_buf), 0, kResolveSize);
+              XELOGI("GuideResolveDest: scratch={:08X} size={}KB", resolve_buf,
+                     kResolveSize / 1024);
+            }
+          }
+          if (resolve_buf) {
+            uint32_t patched = 0;
+            for (uint32_t i = 0; i < words;) {
+              uint32_t hd = sd(xbuf + i * 4);
+              uint32_t ty = hd >> 30;
+              uint32_t cnt = ((hd >> 16) & 0x3FFFu) + 1u;
+              if (ty == 0u) {
+                uint32_t base = hd & 0x7FFFu;
+                bool one = ((hd >> 15) & 1u) != 0u;
+                if (!one && base <= 0x2319u && base + cnt > 0x2319u) {
+                  uint32_t idx = i + 1u + (0x2319u - base);
+                  if (idx < words) {
+                    xe::store_and_swap<uint32_t>(
+                        rm->TranslateVirtual(xbuf + idx * 4), resolve_buf);
+                    ++patched;
+                  }
+                }
+                i += cnt + 1u;
+              } else if (ty == 3u) {
+                i += cnt + 1u;
+              } else {
+                ++i;
+              }
+            }
+            static uint32_t rp = 0;
+            if (patched && ++rp <= 3) {
+              XELOGI("GuideResolveDest #{}: patched {} dest_base -> {:08X}", rp,
+                     patched, resolve_buf);
+            }
+          }
+        }
         if (words) {
           auto* gs3 = kernel_state()->emulator()->graphics_system();
           if (gs3 && gs3->command_processor()) {
             uint32_t before = gs3->command_processor()->guide_draw_count_;
             gs3->command_processor()->ExecuteGuestBufferUnsafe(xbuf, words);
             uint32_t after = gs3->command_processor()->guide_draw_count_;
+            // Did anything actually land? First direct test of rasterisation.
+            if (::cvars::guide_patch_resolve_dest && resolve_buf) {
+              auto* pm2 = kernel_state()->memory();
+              uint32_t nz = 0, first_nz = 0;
+              const uint32_t kCheck = 1u * 1024u * 1024u;
+              for (uint32_t o = 0; o < kCheck; o += 4) {
+                uint32_t v = xe::load_and_swap<uint32_t>(
+                    pm2->TranslateVirtual(resolve_buf + o));
+                if (v) {
+                  if (!nz) first_nz = o;
+                  ++nz;
+                }
+              }
+              static uint32_t pxn = 0;
+              if (++pxn <= 4 || nz) {
+                if (pxn <= 8) {
+                  XELOGI("GuideResolvePixels #{}: {} non-zero dwords in {}KB, "
+                         "first at +{:X}",
+                         pxn, nz, kCheck / 1024, first_nz);
+                }
+              }
+            }
             if (sc_n <= 3 || sc_n % 300 == 0) {
               std::string dump;
               for (uint32_t w = 0; w < 12 && w < span; ++w) {
