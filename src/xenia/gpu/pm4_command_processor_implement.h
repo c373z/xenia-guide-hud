@@ -2013,8 +2013,13 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_IM_LOAD(uint32_t packet,
     // in phase 734. Same indices means one set of events logged twice.
     static uint32_t im_index = 0;
     ++im_index;
+    // Phase 742: every "title" sample so far came from indices 1-6, the first
+    // events in the run - which may be xam's own initialisation, not the
+    // game's. Sample the non-guide side LATE, during gameplay, so the label
+    // means what it claims.
     static uint32_t imlg = 0, imlt = 0;
-    if ((g ? imlg : imlt)++ < 6) {
+    bool want = g ? (imlg < 6) : (im_index > 6000u && imlt < 6);
+    if (want && (g ? ++imlg : ++imlt)) {
       XELOGI("IMLoad[{}] #{}: type={} addr={:08X} size_dw={} -> hash={:016X}",
              g ? "guide" : "title", im_index,
              shader_type == xenos::ShaderType::kVertex ? "VS" : "PS", addr,

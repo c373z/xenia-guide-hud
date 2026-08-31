@@ -2933,7 +2933,9 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
     }
     static uint32_t psg = 0, pst = 0;
     bool g = guide_in_draw_scope_ || xe::gpu::g_guide_replaying;
-    if ((g ? psg : pst)++ < 4) {
+    // Phase 742: same correction - sample non-guide draws late, not at startup.
+    bool want_pso = g ? (psg < 4) : (draw_index > 6000u && pst < 4);
+    if (want_pso && (g ? ++psg : ++pst)) {
       // Phase 736: SQ_PROGRAM_CNTL selects which loaded shaders are active.
       // If the Guide never writes it, its 50 IM_LOAD_IMMEDIATE loads sit
       // unused and the title's shaders stay bound - which is what phase 735
