@@ -6480,6 +6480,25 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                                   m1 ? xe::load_and_swap<uint32_t>(
                                            mem->TranslateVirtual(m1 + 0x2B14u))
                                      : 0u;
+                              // Phase 642: XamDeviceSlot finds its slot by
+                              // scanning the MODE-2 creator, so mode 1 may
+                              // publish its device somewhere else. Log both
+                              // documented globals alongside the captured
+                              // value.
+                              XELOGI("GuideDevGlobals: VdGlobalDevice[801E6FC4]"
+                                     "={:08X} VdGlobalXamDevice[801E6FC8]="
+                                     "{:08X} XamDeviceSlot={:08X} m1={:08X}",
+                                     xe::load_and_swap<uint32_t>(
+                                         mem->TranslateVirtual(0x801E6FC4u)),
+                                     xe::load_and_swap<uint32_t>(
+                                         mem->TranslateVirtual(0x801E6FC8u)),
+                                     kernel::xboxkrnl::XamDeviceSlot()
+                                         ? xe::load_and_swap<uint32_t>(
+                                               mem->TranslateVirtual(
+                                                   kernel::xboxkrnl::
+                                                       XamDeviceSlot()))
+                                         : 0u,
+                                     kernel::xboxkrnl::GuideMode1Device());
                               XELOGI("GuideKickPtr: dev={:08X} [2B14]={:08X} "
                                      "m1={:08X} m1[2B14]={:08X}",
                                      dev, cur, m1, src);
