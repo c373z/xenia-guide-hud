@@ -354,6 +354,18 @@ void VdInitializeRingBuffer_entry(lpvoid_t ptr, int_t size_log2) {
   // r3 = result of MmGetPhysicalAddress
   // r4 = log2(size)
   // Buffer pointers are from MmAllocatePhysicalMemory with WRITE_COMBINE.
+  // Phase 607: this had no logging, so "the ring never moves" (phase 595) was
+  // known only from polling the command processor's state. Record every call
+  // with its caller, so which module installs the live ring - and whether xam
+  // ever tries - is a matter of record rather than inference.
+  {
+    uint32_t lr = 0;
+    if (auto* th = XThread::GetCurrentThread()) {
+      lr = static_cast<uint32_t>(th->thread_state()->context()->lr);
+    }
+    XELOGI("VdInitializeRingBuffer(ptr={:08X}, size_log2={}) from lr={:08X}",
+           ptr.guest_address(), int32_t(size_log2), lr);
+  }
   auto graphics_system = kernel_state()->emulator()->graphics_system();
   graphics_system->InitializeRingBuffer(ptr, size_log2);
 }
