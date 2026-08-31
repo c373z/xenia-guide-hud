@@ -1232,6 +1232,16 @@ DEFINE_int32(guide_capture_count, 1,
              "'visible every other frame'.",
              "Kernel");
 
+DEFINE_bool(guide_arm_overlay, false,
+            "Publish the Guide's stream to guide_overlay_ptr_/words_ instead "
+            "of executing it inline, so ExecutePacketType3_XE_SWAP runs it on "
+            "the GPU thread just before the present. Phase 721: the block that "
+            "normally arms this is unreachable (its unconditional OverlayGate "
+            "log never prints), and the comment dismissing the swap hook - "
+            "'only ONE XE_SWAP packet is seen in a whole run' - is stale: this "
+            "session sees thousands.",
+            "Kernel");
+
 DEFINE_bool(guide_retarget_interrupt, false,
             "Re-register the graphics interrupt callback with the device the "
             "present path uses. Phase 645: xam registers it with mode 1's "

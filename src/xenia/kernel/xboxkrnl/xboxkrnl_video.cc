@@ -8931,6 +8931,20 @@ void VdSwap_entry(
                 }
               }
             }
+            // Phase 722: hand the stream to the swap handler rather than
+            // running it here. The comment on guide_overlay_ptr_ says the
+            // title thread is the wrong thread for this, and phase 721 found
+            // the swap hook fires thousands of times a run, so the reason it
+            // was abandoned no longer holds.
+            if (::cvars::guide_arm_overlay) {
+              gs3->command_processor()->guide_overlay_ptr_ = xbuf;
+              gs3->command_processor()->guide_overlay_words_ = words;
+              static uint32_t armn = 0;
+              if (++armn <= 3) {
+                XELOGI("GuideArmOverlay #{}: {:08X} +{} words", armn, xbuf,
+                       words);
+              }
+            } else
             // Gated with guide_submit_from_base: submitting the real
             // buffer and resolving its address correctly are one change, and
             // the virtual executor genuinely runs the stream - including its
