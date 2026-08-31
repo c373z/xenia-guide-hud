@@ -967,6 +967,20 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_INDIRECT_BUFFER(
       seen[seen_n++] = region;
       XELOGI("GuideIBRegion #{}: {:08X} (first ptr {:08X}, len {})", seen_n,
              region, GpuToCpu(list_ptr), list_length);
+      // Phase 622: dump the buffer itself for a region we have not seen. An
+      // IB that is dispatched but contains only state, or is empty, looks
+      // identical from the outside to one that draws.
+      {
+        uint32_t ib = GpuToCpu(list_ptr);
+        uint32_t n = std::min<uint32_t>(list_length, 24u);
+        std::string body;
+        for (uint32_t w = 0; w < n; ++w) {
+          uint32_t dw =
+              xe::load_and_swap<uint32_t>(memory_->TranslatePhysical(ib + w * 4));
+          body += fmt::format("{:08X} ", dw);
+        }
+        XELOGI("GuideIBBody {:08X} [{}]: {}", ib, list_length, body);
+      }
     }
   }
   bool saved_had = guide_ib_had_draw_;
