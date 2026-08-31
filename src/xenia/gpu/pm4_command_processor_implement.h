@@ -2095,16 +2095,23 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_IM_LOAD_IMMEDIATE(
       if (++sk <= 6) {
         const uint32_t* uc =
             reinterpret_cast<const uint32_t*>(reader_.read_ptr());
+        // Phase 754: phase 751 scanned only the 'skin' section. huduiskin also
+        // exports a 'xam' section at 90FA2880, 152215 bytes, which was never
+        // searched - so "not in the skin" was a statement about half the module.
         bool found = false;
         uint32_t at = 0;
-        const uint8_t* skin = memory_->TranslateVirtual(0x90F90000u);
-        if (skin && size_dwords >= 4) {
-          for (uint32_t o = 0; o + 16 <= 75851u && !found; o += 4) {
-            if (std::memcmp(skin + o, uc, 16) == 0) {
+        struct { uint32_t base, size; } secs[2] = {{0x90F90000u, 75851u},
+                                                   {0x90FA2880u, 152215u}};
+        for (auto& sec : secs) {
+          const uint8_t* p2 = memory_->TranslateVirtual(sec.base);
+          if (!p2 || size_dwords < 4) continue;
+          for (uint32_t o = 0; o + 16 <= sec.size && !found; o += 4) {
+            if (std::memcmp(p2 + o, uc, 16) == 0) {
               found = true;
-              at = 0x90F90000u + o;
+              at = sec.base + o;
             }
           }
+          if (found) break;
         }
         XELOGI("GuideShaderSrc #{}: hash={:016X} dw={} first={:08X} | in skin "
                "section: {} {:08X}",
