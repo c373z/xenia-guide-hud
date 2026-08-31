@@ -2108,6 +2108,17 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_IM_LOAD_IMMEDIATE(
         struct { uint32_t base, size; } secs[2] = {{0x90F90000u, 75851u},
                                                    {0x90FA2880u, 152215u}};
         for (auto& sec : secs) {
+          // TranslateVirtual is base+offset arithmetic: it returns a non-null
+          // pointer whether or not the range is mapped, so the old `!p2` guard
+          // never fired and this swept up to 152KB of unmapped memory. When
+          // huduiskin has not loaded yet that is a HOST FAULT at 90F90000,
+          // which kills the run before the Guide composites (draws 7 -> 0) and
+          // made every measurement taken after it a false negative.
+          auto* hp = memory_->LookupHeap(sec.base);
+          if (!hp || hp->QueryRangeAccess(sec.base, sec.base + sec.size) ==
+                         xe::memory::PageAccess::kNoAccess) {
+            continue;
+          }
           const uint8_t* p2 = memory_->TranslateVirtual(sec.base);
           if (!p2 || size_dwords < 4) continue;
           for (uint32_t o = 0; o + 16 <= sec.size && !found; o += 4) {
