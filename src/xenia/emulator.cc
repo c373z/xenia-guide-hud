@@ -6331,6 +6331,23 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                                     : 0u;
                             XELOGI("GuideBindBootRt: dc={:08X} sub={:08X} "
                                    "dev={:08X}", bdc, sub, dev);
+                            // hud's device is a third device, distinct from
+                            // both xam's and the title's, and only the
+                            // title's buffers are ever submitted. Redirect
+                            // the wrapper's device pointer at the title's.
+                            if (cvars::guide_render_on_title_device && sub) {
+                              uint32_t tdev = xe::load_and_swap<uint32_t>(
+                                  mem->TranslateVirtual(0x801E6FC4u));
+                              if (tdev) {
+                                xe::store_and_swap<uint32_t>(
+                                    mem->TranslateVirtual(sub + 0x0Cu), tdev);
+                                XELOGI("GuideTitleDev: [{:08X}+0C] {:08X} -> "
+                                       "{:08X}", sub, dev, tdev);
+                                dev = tdev;
+                              } else {
+                                XELOGW("GuideTitleDev: title device is null");
+                              }
+                            }
                             kernel::xboxkrnl::GuideBindDeviceRt(dev, ts);
                             if (cvars::guide_bind_boot_cmdbuf_kb) {
                               kernel::xboxkrnl::GuideBindDeviceCmdbuf(

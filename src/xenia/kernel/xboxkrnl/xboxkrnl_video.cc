@@ -480,6 +480,20 @@ void VdGetSystemCommandBuffer_entry(lpunknown_t p0_ptr, lpunknown_t p1_ptr,
 }
 DECLARE_XBOXKRNL_EXPORT1(VdGetSystemCommandBuffer, kVideo, kStub);
 
+// Phase 593: ordinal 0x1D8 is in the export table but had no implementation,
+// so xam's import of it resolved to nothing. It is the call by which the
+// system command buffer is registered, and phase 592 showed the Guide's
+// buffer is never handed to the command processor. Log it to establish
+// whether xam calls it at all, and with what.
+void VdSetSystemCommandBuffer_entry(dword_t r3, dword_t r4) {
+  static std::atomic<uint32_t> once{0};
+  if (once++ < 4) {
+    XELOGI("VdSetSystemCommandBuffer(r3={:08X}, r4={:08X})", uint32_t(r3),
+           uint32_t(r4));
+  }
+}
+DECLARE_XBOXKRNL_EXPORT1(VdSetSystemCommandBuffer, kVideo, kStub);
+
 void VdSetSystemCommandBufferGpuIdentifierAddress_entry(lpunknown_t unk) {
   // r3 = 0x2B10(d3d?) + 8
 }

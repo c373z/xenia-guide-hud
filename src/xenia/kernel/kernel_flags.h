@@ -58,6 +58,7 @@ DECLARE_bool(guide_patch_addr_passthru);
 DECLARE_int32(guide_nav_state);
 DECLARE_bool(guide_draw_root_object);
 DECLARE_bool(guide_resolve_paint_handles);
+DECLARE_bool(guide_render_on_title_device);
 DECLARE_bool(guide_patch_window_reset);
 DECLARE_uint32(guide_bind_boot_cmdbuf_kb);
 DECLARE_bool(guide_bind_boot_rt);

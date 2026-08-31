@@ -1051,6 +1051,14 @@ DEFINE_bool(guide_resolve_paint_handles, false,
 // Phase 578: pass null as the dispatcher's DC argument so hud skips its release
 // path and constructs its own, instead of releasing the bootstrap's DC and then
 // calling through it.
+DEFINE_bool(guide_render_on_title_device, false,
+            "Point [[bootDC+0x1CC]+0x0C] at the title's D3D device so hud "
+            "renders through it. Phase 593: hud renders against 40870D00, "
+            "which is neither xam's device (407CB880) nor the title's "
+            "(40AE4D00); only the title's buffers are ever executed by the "
+            "command processor.",
+            "Kernel");
+
 DEFINE_bool(guide_patch_window_reset, false,
             "Nop the two stores at 81A02B08/81A02B14 that re-point "
             "[dev+0x30]/[dev+0x34] at the device's internal 0x12C0-byte "
