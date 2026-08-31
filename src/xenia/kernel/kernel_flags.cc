@@ -1051,6 +1051,15 @@ DEFINE_bool(guide_resolve_paint_handles, false,
 // Phase 578: pass null as the dispatcher's DC argument so hud skips its release
 // path and constructs its own, instead of releasing the bootstrap's DC and then
 // calling through it.
+DEFINE_bool(guide_transplant_ring, false,
+            "Copy the ring-association fields from mode 1's device onto the "
+            "device the present path uses. Phase 650: the two devices are "
+            "disjoint (phase 648) and the object graph cannot be moved "
+            "(phases 641-649), so the remaining question is whether the ring "
+            "can be moved to the graph instead. Copying [2B14] alone already "
+            "advanced the paint loop by a frame (phase 640).",
+            "Kernel");
+
 DEFINE_bool(guide_patch_class_reg, false,
             "Patch 8194F164 to an unconditional branch so class registration "
             "treats an existing entry as success instead of returning "

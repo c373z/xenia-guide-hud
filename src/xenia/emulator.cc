@@ -6569,6 +6569,29 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                                 }
                               }
                             }
+                            if (cvars::guide_transplant_ring && dev) {
+                              uint32_t m1t =
+                                  kernel::xboxkrnl::GuideMode1Device();
+                              if (m1t && m1t != dev) {
+                                // The command-buffer block (2B48/2B4C/2B50/
+                                // 2B58), the kick pointer (2B14) and the
+                                // submit/service counters.
+                                static const uint32_t kFields[] = {
+                                    0x2B14u, 0x2B48u, 0x2B4Cu, 0x2B50u,
+                                    0x2B58u, 0x462Cu, 0x4634u, 0x4644u,
+                                    0x46C8u, 0x46CCu};
+                                std::string moved;
+                                for (uint32_t f : kFields) {
+                                  uint32_t v = xe::load_and_swap<uint32_t>(
+                                      mem->TranslateVirtual(m1t + f));
+                                  xe::store_and_swap<uint32_t>(
+                                      mem->TranslateVirtual(dev + f), v);
+                                  moved += fmt::format("{:04X}={:08X} ", f, v);
+                                }
+                                XELOGI("GuideTransplant: {:08X} -> {:08X}: {}",
+                                       m1t, dev, moved);
+                              }
+                            }
                             kernel::xboxkrnl::GuideBindDeviceRt(dev, ts);
                             if (cvars::guide_bind_boot_cmdbuf_kb) {
                               kernel::xboxkrnl::GuideBindDeviceCmdbuf(
