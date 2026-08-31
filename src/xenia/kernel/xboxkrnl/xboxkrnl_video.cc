@@ -1592,6 +1592,17 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
                           rd(rhost + 0x108u + w * 4));
       }
       XELOGI("GuideRHostBytes: {}", tw);
+      // Phase 598: the tail bytes matched the file, but the callees were
+      // never checked. If 8196EF30 or 8193F8E0 differ at runtime from the
+      // image being disassembled, "they return 0" is false and the whole
+      // contradiction dissolves.
+      for (uint32_t fnaddr : {0x8193F8E0u, 0x8196EF30u}) {
+        std::string cw;
+        for (uint32_t w = 0; w < 10; ++w) {
+          cw += fmt::format("{:08X} ", rd(fnaddr + w * 4));
+        }
+        XELOGI("GuideCalleeBytes {:08X}: {}", fnaddr, cw);
+      }
     }
     if (!rhost) {
       XELOGW("GuideBootstrap: XUI render host not located on this build - "
@@ -1599,6 +1610,12 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
       hr = 0x80004005u;
     } else {
       hr = processor->Execute(ts, rhost, a0, xe::countof(a0));
+      // Phase 598: coverage says this function falls through all 80
+      // instructions and returns 0, yet the combined log downstream reports
+      // 8000FFFF. Log the raw 64-bit value at the call site so there is no
+      // question which value is being reported.
+      XELOGI("GuideRHostRet: rhost={:08X} hr={:016X}", rhost,
+             static_cast<uint64_t>(hr));
     }
   }
   if (spoofed) {
@@ -3430,6 +3447,20 @@ static void EmitGuideCoverageOnce() {
                "furthest reached {:08X} (+0x{:X})",
                ::cvars::guide_coverage_fn, executed, n,
                n ? counts[0] : 0, last, last - td.start_address());
+        // Phase 597: the summary said "80 of 80 executed, no gaps" for a
+        // function that demonstrably returned via an early branch. Print the
+        // raw per-instruction counts so the array itself can be inspected
+        // rather than a derived total: '.' is zero, a digit is that count,
+        // '+' is 10 or more.
+        if (n <= 256) {
+          std::string raw;
+          for (uint32_t i = 0; i < n; ++i) {
+            uint64_t c = counts[i];
+            raw += (c == 0) ? '.' : (c < 10 ? char('0' + c) : '+');
+          }
+          XELOGI("CoverageRaw {:08X} [{}]: {}",
+                 uint32_t(::cvars::guide_coverage_fn), n, raw);
+        }
         // Report the NOT-executed spans. A function that runs to its last
         // instruction while skipping 40% of its body has taken a set of
         // branches, and the untaken ones are where an alternative path -
