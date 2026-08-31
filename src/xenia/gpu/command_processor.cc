@@ -347,10 +347,20 @@ void CommandProcessor::WorkerThreadMain() {
                pending_fns_.empty() ? 0 : 1);
       }
     }
+    // Phase 613: bracket the drain. If "in" prints without "out", a queued
+    // function is blocking and this names the moment.
     while (!pending_fns_.empty()) {
       auto fn = std::move(pending_fns_.front());
       pending_fns_.pop();
+      static uint32_t fn_seq = 0;
+      uint32_t seq = ++fn_seq;
+      if (seq < 12 || (seq % 200) == 0) {
+        XELOGI("CPFn in #{}", seq);
+      }
       fn();
+      if (seq < 12 || (seq % 200) == 0) {
+        XELOGI("CPFn out #{}", seq);
+      }
     }
 
     uint32_t write_ptr_index = write_ptr_index_.load();
@@ -359,7 +369,16 @@ void CommandProcessor::WorkerThreadMain() {
       // We've run out of commands to execute.
       // We spin here waiting for new ones, as the overhead of waiting on our
       // event is too high.
+      // Phase 613: rate-limiting hid this path - the wait is entered only a
+      // handful of times, so "every 200th" printed once and said nothing
+      // about the handover. Log every entry, and bracket PrepareForWait
+      // itself: it sits between the heartbeat and every probe that fires.
+      static uint32_t pw = 0;
+      uint32_t pw_seq = ++pw;
+      XELOGI("CPWait enter #{} ring={:08X} rptr={} wptr={}", pw_seq,
+             primary_buffer_ptr_, read_ptr_index_, write_ptr_index_.load());
       PrepareForWait();
+      XELOGI("CPWait prepared #{}", pw_seq);
       uint32_t loop_count = 0;
       do {
         // If we spin around too much, revert to a "low-power" state.
@@ -387,6 +406,8 @@ void CommandProcessor::WorkerThreadMain() {
                (write_ptr_index == 0xBAADF00D ||
                 read_ptr_index_ == write_ptr_index));
       ReturnFromWait();
+      XELOGI("CPWait returned #{} rptr={} wptr={}", pw_seq, read_ptr_index_,
+             write_ptr_index);
       if (!worker_running_ || !pending_fns_.empty()) {
         continue;
       }

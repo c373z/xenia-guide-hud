@@ -913,8 +913,25 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
   guide_frame_needs_replay_ = true;  // phase 554: arm for the next frame
   guide_draws_at_last_swap_ = guide_draw_count_;
   ++guide_swap_count_;  // phase 522
+  // Phase 613: the worker is blocked inside a single packet after the ring
+  // handover. A swap that never returns is the likeliest candidate, since it
+  // hands off to the presenter.
+  {
+    static uint32_t sw = 0;
+    ++sw;
+    if (sw < 6 || (sw % 60) == 0) {
+      XELOGI("CPSwap in #{} fb={:08X}", sw, frontbuffer_ptr);
+    }
+  }
   COMMAND_PROCESSOR::IssueSwap(frontbuffer_ptr, frontbuffer_width,
                                frontbuffer_height);
+  {
+    static uint32_t swo = 0;
+    ++swo;
+    if (swo < 6 || (swo % 60) == 0) {
+      XELOGI("CPSwap out #{}", swo);
+    }
+  }
 
   ++counter_;
   return true;
@@ -1021,6 +1038,8 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_WAIT_REG_MEM(
                       poll_reg_addr & ~uint32_t(0x3)))
                 : register_file_->values[poll_reg_addr];
 
+  uint32_t guide_wait_spins = 0;
+  const uint32_t guide_wait_ring = primary_buffer_ptr_;
   bool matched = false;
 
   do {
@@ -1057,7 +1076,27 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_WAIT_REG_MEM(
       } else {
       }
     }
-  } while (!matched);
+  // Phase 613: this loop waits forever if the polled value never changes,
+  // which is the shape of the post-handover hang. Report a wait that has
+  // clearly stopped progressing, with what it is waiting on.
+      if (++guide_wait_spins == 400u) {
+        XELOGW("CPWaitMem: still waiting after 400 polls - is_memory={} "
+               "addr={:08X} ref={:08X} mask={:08X}",
+               is_memory ? 1 : 0, poll_reg_addr, ref, mask);
+      }
+      // Phase 613: a WAIT_REG_MEM polls a fence the GPU is expected to
+      // write. If the ring it came from has been replaced - which is what
+      // the Guide's handover does - that fence can never be written and this
+      // loop never ends, taking the whole command processor with it. Abandon
+      // the wait when the ring underneath us changes; the packet's ring is
+      // gone, so its fence is moot.
+      if (primary_buffer_ptr_ != guide_wait_ring) {
+        XELOGW("CPWaitMem: ring changed {:08X} -> {:08X} while waiting on "
+               "{:08X}; abandoning the wait",
+               guide_wait_ring, primary_buffer_ptr_, poll_reg_addr);
+        break;
+      }
+    } while (!matched);
 
   return true;
 }
