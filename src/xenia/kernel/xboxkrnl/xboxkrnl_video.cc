@@ -1026,6 +1026,14 @@ uint32_t GuideBindDeviceCmdbuf(uint32_t dev, void* ts, uint32_t kb) {
   xe::store_and_swap<uint32_t>(mem->TranslateVirtual(dev + 0x30u), cbuf);
   xe::store_and_swap<uint32_t>(mem->TranslateVirtual(dev + 0x34u),
                                cbuf + csize);
+  // Phase 652: publish the buffer to guide_cmdbuf_base_. The second-context
+  // path (guide_second_context_kb), which executes the Guide's emitted
+  // packets directly via ExecuteGuestBufferUnsafe, is gated on that member -
+  // and only the original draw-hook binder set it, on a hook that does not
+  // fire in this configuration. Without this the whole ring question is
+  // unavoidable; with it there is a submission route that needs no ring.
+  guide_cmdbuf_base_ = cbuf;
+  guide_cmdbuf_size_ = csize;
   XELOGI("GuideBindDeviceCmdbuf: dev={:08X} buf={:08X} +2B48={:08X} "
          "+2B4C={:08X} +2B50={:08X} [30]={:08X} [34]={:08X}",
          dev, cbuf, rdv(dev + 0x2B48u), rdv(dev + 0x2B4Cu),
