@@ -6358,6 +6358,26 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                                     : 0u;
                             XELOGI("GuideBindBootRt: dc={:08X} sub={:08X} "
                                    "dev={:08X}", bdc, sub, dev);
+                            // Phase 628: XuiRenderPresent -> DC vtable[0x54]
+                            // (818F9290) -> wrapper vtable[0x60], and that
+                            // last call never returns. Name it.
+                            {
+                              uint32_t wvt =
+                                  sub ? xe::load_and_swap<uint32_t>(
+                                            mem->TranslateVirtual(sub))
+                                      : 0u;
+                              XELOGI("GuidePresentChain: dc={:08X} "
+                                     "[dc+134]={:08X} wrapper={:08X} "
+                                     "wvt={:08X} wvt[60]={:08X}",
+                                     bdc,
+                                     xe::load_and_swap<uint32_t>(
+                                         mem->TranslateVirtual(bdc + 0x134u)),
+                                     sub, wvt,
+                                     wvt ? xe::load_and_swap<uint32_t>(
+                                               mem->TranslateVirtual(wvt +
+                                                                     0x60u))
+                                         : 0u);
+                            }
                             // Phase 595: 819E2ED0 loads [dev+0x3050] and the
                             // crash shows it holding 5 on the title device.
                             // Compare the same field on both devices - if
