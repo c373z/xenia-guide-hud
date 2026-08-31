@@ -7,6 +7,10 @@
  ******************************************************************************
  */
 
+#include <map>
+#include <set>
+#include <utility>
+
 #include "xenia/gpu/d3d12/d3d12_command_processor.h"
 #include <cstring>
 #include "xenia/apu/audio_system.h"
@@ -2897,6 +2901,36 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
     // genuinely being issued with the title's shaders.
     static uint32_t draw_index = 0;
     ++draw_index;
+    // Phase 737: tally instead of sampling. Phase 735's wrong conclusion came
+    // from four capped samples; counting every draw cannot be unrepresentative.
+    {
+      bool gg = guide_in_draw_scope_ || xe::gpu::g_guide_replaying;
+      static std::map<std::pair<uint64_t, uint64_t>, uint32_t> guide_pairs;
+      static std::set<std::pair<uint64_t, uint64_t>> title_pairs;
+      uint64_t vh = vertex_shader ? vertex_shader->ucode_data_hash() : 0ull;
+      uint64_t ph = pixel_shader ? pixel_shader->ucode_data_hash() : 0ull;
+      if (gg) {
+        ++guide_pairs[{vh, ph}];
+        static uint32_t gtot = 0;
+        if (++gtot % 200u == 0u) {
+          uint32_t nullps = 0, titles = 0, own = 0;
+          std::string detail;
+          for (auto& kv : guide_pairs) {
+            if (!kv.second) continue;
+            if (kv.first.second == 0ull) nullps += kv.second;
+            else if (title_pairs.count(kv.first)) titles += kv.second;
+            else own += kv.second;
+            detail += fmt::format("{:04X}/{:04X}x{} ",
+                                  uint32_t(kv.first.first >> 48),
+                                  uint32_t(kv.first.second >> 48), kv.second);
+          }
+          XELOGI("GuideShaderTally: {} draws | own={} title={} nullps={} | {}",
+                 gtot, own, titles, nullps, detail);
+        }
+      } else {
+        title_pairs.insert({vh, ph});
+      }
+    }
     static uint32_t psg = 0, pst = 0;
     bool g = guide_in_draw_scope_ || xe::gpu::g_guide_replaying;
     if ((g ? psg : pst)++ < 4) {
