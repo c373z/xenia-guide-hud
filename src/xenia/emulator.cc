@@ -6331,6 +6331,28 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                                     : 0u;
                             XELOGI("GuideBindBootRt: dc={:08X} sub={:08X} "
                                    "dev={:08X}", bdc, sub, dev);
+                            // Phase 595: 819E2ED0 loads [dev+0x3050] and the
+                            // crash shows it holding 5 on the title device.
+                            // Compare the same field on both devices - if
+                            // hud's own device has a pointer there and the
+                            // title's has a small integer, the two are not
+                            // layout-compatible and the redirect is wrong in
+                            // principle, not merely incomplete.
+                            {
+                              uint32_t td = xe::load_and_swap<uint32_t>(
+                                  mem->TranslateVirtual(0x801E6FC4u));
+                              XELOGI("GuideDev3050: hud_dev={:08X} "
+                                     "[+3050]={:08X} | title_dev={:08X} "
+                                     "[+3050]={:08X}",
+                                     dev,
+                                     dev ? xe::load_and_swap<uint32_t>(
+                                               mem->TranslateVirtual(
+                                                   dev + 0x3050u)) : 0u,
+                                     td,
+                                     td ? xe::load_and_swap<uint32_t>(
+                                              mem->TranslateVirtual(
+                                                  td + 0x3050u)) : 0u);
+                            }
                             // hud's device is a third device, distinct from
                             // both xam's and the title's, and only the
                             // title's buffers are ever submitted. Redirect
