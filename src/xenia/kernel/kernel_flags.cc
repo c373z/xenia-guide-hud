@@ -1183,6 +1183,24 @@ DEFINE_bool(guide_nop_draws, false,
             "register writes are.",
             "Kernel");
 
+DEFINE_bool(guide_isolate_regs, false,
+            "Snapshot the GPU register file before running the Guide's stream "
+            "and restore it afterwards. Phase 708: the Guide's 949 register "
+            "writes alone turn the presented frame entirely black - with every "
+            "draw and the resolve NOPed - because the stream runs at swap and "
+            "the title then presents against the Guide's state.",
+            "Kernel");
+
+DEFINE_bool(guide_nop_regs, false,
+            "Rewrite the Guide's type-0 register writes to type-3 NOPs of the "
+            "same length. Phase 709: restoring the register file after the "
+            "stream did not stop the frame going black, so the emulator must "
+            "act on the writes as they arrive rather than on their final "
+            "values. With this and guide_nop_draws the stream becomes pure "
+            "NOPs - if the frame is still black, submitting at all is what "
+            "breaks it.",
+            "Kernel");
+
 DEFINE_bool(guide_retarget_interrupt, false,
             "Re-register the graphics interrupt callback with the device the "
             "present path uses. Phase 645: xam registers it with mode 1's "

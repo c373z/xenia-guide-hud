@@ -8759,7 +8759,7 @@ void VdSwap_entry(
         // same nested-flag trap catalogued in 616, 692, 701 and 704, authored
         // here by me. Run the walk if either flag wants it.
         if ((::cvars::guide_patch_resolve_dest || ::cvars::guide_nop_waits ||
-             ::cvars::guide_nop_draws) &&
+             ::cvars::guide_nop_draws || ::cvars::guide_nop_regs) &&
             xbuf && words) {
           auto* rm = kernel_state()->memory();
           if (!resolve_buf && ::cvars::guide_patch_resolve_dest) {
@@ -8776,7 +8776,7 @@ void VdSwap_entry(
             }
           }
           if (resolve_buf || ::cvars::guide_nop_waits ||
-              ::cvars::guide_nop_draws) {
+              ::cvars::guide_nop_draws || ::cvars::guide_nop_regs) {
             uint32_t patched = 0, nopped = 0;
             for (uint32_t i = 0; i < words;) {
               uint32_t hd = sd(xbuf + i * 4);
@@ -8793,6 +8793,15 @@ void VdSwap_entry(
                         rm->TranslateVirtual(xbuf + idx * 4), resolve_buf);
                     ++patched;
                   }
+                }
+                if (::cvars::guide_nop_regs) {
+                  // A type-3 NOP with the same count skips exactly the same
+                  // words, so the stream stays correctly framed.
+                  uint32_t nr = 0xC0000000u | (((cnt - 1u) & 0x3FFFu) << 16) |
+                                (0x10u << 8);
+                  xe::store_and_swap<uint32_t>(
+                      rm->TranslateVirtual(xbuf + i * 4), nr);
+                  ++nopped;
                 }
                 i += cnt + 1u;
               } else if (ty == 3u) {
@@ -8863,8 +8872,13 @@ void VdSwap_entry(
             // the virtual executor genuinely runs the stream - including its
             // waits - so it must not become the default path silently.
             if (::cvars::guide_submit_from_base) {
-              gs3->command_processor()->ExecuteGuestBufferVirtualUnsafe(xbuf,
-                                                                       words);
+              if (::cvars::guide_isolate_regs) {
+                gs3->command_processor()->ExecuteGuestBufferVirtualIsolated(
+                    xbuf, words);
+              } else {
+                gs3->command_processor()->ExecuteGuestBufferVirtualUnsafe(
+                    xbuf, words);
+              }
             } else {
               gs3->command_processor()->ExecuteGuestBufferUnsafe(xbuf, words);
             }

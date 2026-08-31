@@ -609,6 +609,24 @@ class CommandProcessor {
   // host mapping. Masking that address yields physical 1009C000 - unrelated
   // memory that happens to be zeroed - so every attempt to run the Guide's
   // stream so far has parsed zeros and correctly reported nothing.
+  // Phase 709: the Guide's stream writes 949 registers into the title's
+  // context, and it runs at swap - so the title presents against whatever the
+  // Guide left behind. Phase 708 measured the frame going entirely black with
+  // every draw and the resolve removed, which puts the blame on the state
+  // alone. Snapshot the register file, run the stream, put it back.
+  void ExecuteGuestBufferVirtualIsolated(uint32_t ptr, uint32_t count) {
+    if (!count || !register_file_) {
+      ExecuteGuestBufferVirtualUnsafe(ptr, count);
+      return;
+    }
+    static std::vector<uint32_t> saved;
+    saved.assign(register_file_->values,
+                 register_file_->values + RegisterFile::kRegisterCount);
+    ExecuteGuestBufferVirtualUnsafe(ptr, count);
+    std::memcpy(register_file_->values, saved.data(),
+                saved.size() * sizeof(uint32_t));
+  }
+
   void ExecuteGuestBufferVirtualUnsafe(uint32_t ptr, uint32_t count) {
     if (!count) {
       return;
