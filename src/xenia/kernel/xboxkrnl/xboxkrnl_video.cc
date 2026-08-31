@@ -5160,6 +5160,18 @@ void VdSwap_entry(
                        "handler=[+1C]={:08X} ctx=[+20]={:08X}",
                        hops, o, trd(o), trd(o + 4u), trd(o + 8u),
                        trd(o + 0x1Cu), trd(o + 0x20u));
+                // Phase 666: 8195AA00 skips its paint loop because
+                // [ctx+0x1C] is zero on all 375 dispatches. Print the
+                // collection those objects would iterate, so "the elements
+                // are empty" is measured on the actual contexts rather than
+                // inferred from one branch.
+                uint32_t cx = trd(o + 0x20u);
+                if (cx) {
+                  XELOGI("GuideChainCtx: ctx={:08X} [+18]={:08X} [+1C]={} "
+                         "[+20]={:08X} [+24]={:08X}",
+                         cx, trd(cx + 0x18u), trd(cx + 0x1Cu),
+                         trd(cx + 0x20u), trd(cx + 0x24u));
+                }
               }
             }
             // Verify the gate empirically and call the paint directly.
