@@ -584,6 +584,25 @@ void CommandProcessor::UpdateWritePointer(uint32_t value) {
   XE_UNLIKELY_IF(cvars::log_ringbuffer_kickoff_initiator_bts) {
     LogKickoffInitator(value);
   }
+  // Phase 620: a write pointer is an index into the current ring, so a value
+  // past its end cannot belong to it. That happens when a ring is replaced
+  // mid-session and the previous owner keeps submitting: measured as 6625
+  // against a 1024-entry ring after the Guide's handover, which makes the
+  // worker execute the new ring six times over as garbage. Reject those
+  // rather than acting on them.
+  if (primary_buffer_size_) {
+    const uint32_t ring_entries = primary_buffer_size_ / sizeof(uint32_t);
+    if (value >= ring_entries) {
+      static uint32_t rejected = 0;
+      if (rejected < 4 || (rejected % 500) == 0) {
+        XELOGW("UpdateWritePointer: ignoring {} - ring {:08X} holds only {} "
+               "entries (stale submitter?)",
+               value, primary_buffer_ptr_, ring_entries);
+      }
+      ++rejected;
+      return;
+    }
+  }
   write_ptr_index_ = value;
   write_ptr_index_event_->SetBoostPriority();
 }
