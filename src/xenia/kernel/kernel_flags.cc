@@ -1154,6 +1154,15 @@ DEFINE_bool(guide_submit_from_base, false,
             "stopped being true once emission worked.",
             "Kernel");
 
+DEFINE_bool(guide_nop_waits, false,
+            "Rewrite WAIT_REG_MEM (0x3C) packets to NOP in the Guide's buffer "
+            "before submitting it. Phase 704: with the virtual executor the "
+            "stream is parsed for real and the call never returns - the buffer "
+            "carries 25 waits for fences that never arrive, because it is not "
+            "part of the title's ring flow. The count field is preserved so "
+            "the parser still skips the body.",
+            "Kernel");
+
 DEFINE_bool(guide_retarget_interrupt, false,
             "Re-register the graphics interrupt callback with the device the "
             "present path uses. Phase 645: xam registers it with mode 1's "

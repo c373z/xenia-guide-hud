@@ -8748,7 +8748,7 @@ void VdSwap_entry(
             }
           }
           if (resolve_buf) {
-            uint32_t patched = 0;
+            uint32_t patched = 0, nopped = 0;
             for (uint32_t i = 0; i < words;) {
               uint32_t hd = sd(xbuf + i * 4);
               uint32_t ty = hd >> 30;
@@ -8766,15 +8766,26 @@ void VdSwap_entry(
                 }
                 i += cnt + 1u;
               } else if (ty == 3u) {
+                // Phase 704: a wait for a fence that will never be signalled
+                // hangs the executor outright. Preserve the count so the body
+                // is still skipped; only the opcode changes.
+                uint32_t op3 = (hd >> 8) & 0x7Fu;
+                if (::cvars::guide_nop_waits && op3 == 0x3Cu) {
+                  uint32_t nop = (hd & ~uint32_t(0x7F << 8)) | (0x10u << 8);
+                  xe::store_and_swap<uint32_t>(
+                      rm->TranslateVirtual(xbuf + i * 4), nop);
+                  ++nopped;
+                }
                 i += cnt + 1u;
               } else {
                 ++i;
               }
             }
             static uint32_t rp = 0;
-            if (patched && ++rp <= 3) {
-              XELOGI("GuideResolveDest #{}: patched {} dest_base -> {:08X}", rp,
-                     patched, resolve_buf);
+            if ((patched || nopped) && ++rp <= 3) {
+              XELOGI("GuideResolveDest #{}: patched {} dest_base -> {:08X}, "
+                     "nopped {} waits",
+                     rp, patched, resolve_buf, nopped);
             }
           }
         }
@@ -8782,7 +8793,24 @@ void VdSwap_entry(
           auto* gs3 = kernel_state()->emulator()->graphics_system();
           if (gs3 && gs3->command_processor()) {
             uint32_t before = gs3->command_processor()->guide_draw_count_;
-            gs3->command_processor()->ExecuteGuestBufferUnsafe(xbuf, words);
+            // Phase 704: the Guide's buffer lives in the 4KB-page virtual
+            // heap (300A5000). ExecuteGuestBufferUnsafe resolves through
+            // TranslatePhysical - addr & 0x1FFFFFFF - which sends 300A5000 to
+            // physical 100A5000, unrelated zeroed memory. The command
+            // processor parsed zeros and correctly reported no draws. The
+            // virtual variant exists in command_processor.h for precisely
+            // this buffer, with the reason written above it; the call site
+            // was never switched to it.
+            // Gated with guide_submit_from_base: submitting the real
+            // buffer and resolving its address correctly are one change, and
+            // the virtual executor genuinely runs the stream - including its
+            // waits - so it must not become the default path silently.
+            if (::cvars::guide_submit_from_base) {
+              gs3->command_processor()->ExecuteGuestBufferVirtualUnsafe(xbuf,
+                                                                       words);
+            } else {
+              gs3->command_processor()->ExecuteGuestBufferUnsafe(xbuf, words);
+            }
             uint32_t after = gs3->command_processor()->guide_draw_count_;
             // Did anything actually land? First direct test of rasterisation.
             if (::cvars::guide_patch_resolve_dest && resolve_buf) {
