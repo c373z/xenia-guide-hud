@@ -1619,8 +1619,14 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
       // which is the path we actually take.
       std::vector<uint64_t> before_counts;
       uint32_t rh_n = 0, rh_start = 0;
+      // Phase 600: measure whichever function guide_coverage_fn names, not
+      // just the render host, so any callee reached from this one Execute can
+      // be measured as a delta across it.
+      const uint32_t probe_fn = ::cvars::guide_coverage_fn
+                                    ? uint32_t(::cvars::guide_coverage_fn)
+                                    : rhost;
       {
-        auto* lf = processor->LookupFunction(rhost);
+        auto* lf = processor->LookupFunction(probe_fn);
         auto* lgf = lf ? dynamic_cast<cpu::GuestFunction*>(lf) : nullptr;
         if (lgf && lgf->trace_data().is_valid()) {
           auto& td = lgf->trace_data();
@@ -1630,12 +1636,13 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
               td.instruction_execute_counts());
           before_counts.assign(c, c + rh_n);
         }
-        XELOGI("GuideRHostFn(before): fn={:016X} addr={:08X} n={}",
-               reinterpret_cast<uintptr_t>(lf), lf ? lf->address() : 0u, rh_n);
+        XELOGI("GuideRHostFn(before): probe={:08X} fn={:016X} addr={:08X} "
+               "n={}", probe_fn, reinterpret_cast<uintptr_t>(lf),
+               lf ? lf->address() : 0u, rh_n);
       }
       hr = processor->Execute(ts, rhost, a0, xe::countof(a0));
       {
-        auto* lf = processor->LookupFunction(rhost);
+        auto* lf = processor->LookupFunction(probe_fn);
         auto* lgf = lf ? dynamic_cast<cpu::GuestFunction*>(lf) : nullptr;
         uint64_t c0 = 0;
         if (lgf && lgf->trace_data().is_valid()) {
