@@ -8837,17 +8837,15 @@ void VdSwap_entry(
             {
               uint32_t tdv = sd(0x801E6FC4u);
               uint32_t cand = tdv ? sd(tdv + 0x2A1Cu) : 0u;
-              // 1E69E000 is a PHYSICAL address; reading 3.6MB of it through
-              // TranslateVirtual faulted the host 4 times. Verify the range is
-              // mapped, then sample a little of it.
+              // 1E69E000 is a PHYSICAL address. Reading it through
+              // TranslateVirtual faulted the host 4 times (phase 706), and
+              // guarding that read with LookupHeap only made it fail quietly -
+              // the guard was asking the wrong address space too.
               if (cand) {
-                auto* hpm = sm2->LookupHeap(cand);
-                if (hpm && hpm->QueryRangeAccess(cand, cand + 0xFFFu) !=
-                               xe::memory::PageAccess::kNoAccess) {
-                  rt_addr = cand;
-                  for (uint32_t o = 0; o < 0x1000u; o += 16u) {
-                    sum_before += sd(rt_addr + o);
-                  }
+                rt_addr = cand;
+                for (uint32_t o = 0; o < 0x1000u; o += 16u) {
+                  sum_before += xe::load_and_swap<uint32_t>(
+                      sm2->TranslatePhysical(rt_addr + o));
                 }
               }
             }
@@ -8865,7 +8863,8 @@ void VdSwap_entry(
             if (rt_addr) {
               uint32_t sum_after = 0;
               for (uint32_t o = 0; o < 0x1000u; o += 16u) {
-                sum_after += sd(rt_addr + o);
+                sum_after += xe::load_and_swap<uint32_t>(
+                    sm2->TranslatePhysical(rt_addr + o));
               }
               static uint32_t rtn = 0;
               if (++rtn <= 6) {
