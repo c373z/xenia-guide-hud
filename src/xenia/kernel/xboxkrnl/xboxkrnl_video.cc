@@ -8744,9 +8744,22 @@ void VdSwap_entry(
             // supposed to work - it composites OVER the running title rather
             // than owning a display of its own.
             uint32_t title_dev = rdw(0x801E6FC4u);
-            uint32_t target = (title_dev && rdw(title_dev + 0x3F74u))
-                                  ? title_dev
-                                  : guide_mode1_device_.load();
+            uint32_t m1_dev = guide_mode1_device_.load();
+            // Phase 616: this preference predates mode 1 ever running. Only
+            // the mode-1 setup writes [dev+0x2B14] (81A0FF3C), and the GPU
+            // kick at 819FCE50 stores through that pointer, so choosing the
+            // title's device hands the kick a null.
+            uint32_t target;
+            if (::cvars::guide_prefer_mode1_device && m1_dev) {
+              target = m1_dev;
+            } else {
+              target = (title_dev && rdw(title_dev + 0x3F74u)) ? title_dev
+                                                               : m1_dev;
+            }
+            XELOGI("GuideRebind: title_dev={:08X} [3F74]={:08X} m1_dev={:08X} "
+                   "-> target={:08X} ([2B14]={:08X})",
+                   title_dev, title_dev ? rdw(title_dev + 0x3F74u) : 0u,
+                   m1_dev, target, target ? rdw(target + 0x2B14u) : 0u);
             if (!rebound && target && target != real_dev) {
               rebound = true;
               auto* rth = XThread::GetCurrentThread();

@@ -1051,6 +1051,15 @@ DEFINE_bool(guide_resolve_paint_handles, false,
 // Phase 578: pass null as the dispatcher's DC argument so hud skips its release
 // path and constructs its own, instead of releasing the bootstrap's DC and then
 // calling through it.
+DEFINE_bool(guide_prefer_mode1_device, false,
+            "Prefer the device the mode-1 creator set up over the title's "
+            "when rebinding. Phase 616: the existing preference for the "
+            "title device was written when mode 1 never ran and no such "
+            "device existed. Only the mode-1 path sets [dev+0x2B14] (stored "
+            "at 81A0FF3C), and the GPU kick at 819FCE50 stores through it - "
+            "so on the title's device that kick dereferences null.",
+            "Kernel");
+
 DEFINE_bool(guide_skin_dispatch_real, false,
             "Install the real object 0x81D6CA00 into [81D6C9C8] rather than a "
             "fabricated stand-in. Phase 603: 819106F8 compares [81D6C9C8] "
