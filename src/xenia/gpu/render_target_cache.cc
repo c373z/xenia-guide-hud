@@ -815,6 +815,23 @@ bool RenderTargetCache::Update(bool is_rasterization_done,
               : true,
           vertex_shader));
 
+  // Phase 724: where does the Guide's geometry actually land? EstimateMaxY
+  // derives it from the shader's real position export, handling vtx_xy_fmt and
+  // the viewport as the hardware does - so it answers by measurement what
+  // reading vertex floats could not.
+  if (g_guide_in_draw_scope) {
+    static uint32_t gex = 0;
+    if (++gex <= 5) {
+      XELOGI(
+          "GuideExtent #{}: EstimateMaxY={} rt_height={} height_used={} "
+          "pitch_tiles={}",
+          gex,
+          draw_extent_estimator_.EstimateMaxY(true, vertex_shader),
+          GetRenderTargetHeight(pitch_tiles_at_32bpp, msaa_samples),
+          height_used, pitch_tiles_at_32bpp);
+    }
+  }
+
   // Sorted by EDRAM base and then by index in the pipeline - for simplicity,
   // treat render targets placed closer to the end of the EDRAM as truncating
   // the previous one (and in case multiple render targets are placed at the

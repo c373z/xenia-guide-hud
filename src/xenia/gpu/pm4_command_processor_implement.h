@@ -866,6 +866,11 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
     // not looking at the same command processor instance.
     static uint32_t swap_seen = 0;
     if ((swap_seen++ % 600u) == 0) {
+      // Phase 724: the Guide resolves to 1E69E000. Print what the swap
+      // actually presents from - if they differ, the pixels are landing in a
+      // buffer this present does not read.
+      XELOGI("GuideSwapFront: frontbuffer={:08X} {}x{}", frontbuffer_ptr,
+             frontbuffer_width, frontbuffer_height);
       XELOGI("GuideOverlay: swap #{} sees ptr={:08X} words={}", swap_seen,
              guide_overlay_ptr_, guide_overlay_words_);
     }
