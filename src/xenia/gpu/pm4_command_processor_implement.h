@@ -2087,6 +2087,31 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_IM_LOAD_IMMEDIATE(
     auto& e = imm[h];
     e.first += (guide_in_draw_scope_ || guide_replaying_) ? 1u : 0u;
     ++e.second;
+    // Phase 751: do the Guide's shaders come from the skin? huduiskin's 'skin'
+    // section sits at 90F90000, 75851 bytes (phase 749). If the ucode being
+    // loaded lives there, the skin is the source; if not, it is not.
+    if ((guide_in_draw_scope_ || guide_replaying_) && shader) {
+      static uint32_t sk = 0;
+      if (++sk <= 6) {
+        const uint32_t* uc =
+            reinterpret_cast<const uint32_t*>(reader_.read_ptr());
+        bool found = false;
+        uint32_t at = 0;
+        const uint8_t* skin = memory_->TranslateVirtual(0x90F90000u);
+        if (skin && size_dwords >= 4) {
+          for (uint32_t o = 0; o + 16 <= 75851u && !found; o += 4) {
+            if (std::memcmp(skin + o, uc, 16) == 0) {
+              found = true;
+              at = 0x90F90000u + o;
+            }
+          }
+        }
+        XELOGI("GuideShaderSrc #{}: hash={:016X} dw={} first={:08X} | in skin "
+               "section: {} {:08X}",
+               sk, shader->ucode_data_hash(), size_dwords,
+               size_dwords ? uc[0] : 0u, found ? "YES" : "no", at);
+      }
+    }
     // Phase 746: E915 never loads in guide scope but loads 325 times a run.
     // Name the stream it arrives in.
     if (uint32_t(h >> 48) == 0xE915u) {
