@@ -68,6 +68,11 @@ class GraphicsSystem {
                                           uint32_t block_size_log2);
 
   virtual void SetInterruptCallback(uint32_t callback, uint32_t user_data);
+  // Phase 645: the callback's user_data is the device its service routine
+  // inspects. Expose it so the Guide work can re-point it at the device that
+  // actually receives submissions.
+  uint32_t interrupt_callback() const { return interrupt_callback_; }
+  uint32_t interrupt_callback_data() const { return interrupt_callback_data_; }
   void DispatchInterruptCallback(uint32_t source, uint32_t cpu);
 
   virtual void ClearCaches();

@@ -6547,6 +6547,18 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                                 }
                               }
                             }
+                            if (cvars::guide_retarget_interrupt && dev) {
+                              auto* gsi = ks->emulator()->graphics_system();
+                              if (gsi) {
+                                uint32_t icb = gsi->interrupt_callback();
+                                uint32_t icd = gsi->interrupt_callback_data();
+                                if (icb && icd != dev) {
+                                  gsi->SetInterruptCallback(icb, dev);
+                                  XELOGI("GuideRetargetInt: cb={:08X} data "
+                                         "{:08X} -> {:08X}", icb, icd, dev);
+                                }
+                              }
+                            }
                             kernel::xboxkrnl::GuideBindDeviceRt(dev, ts);
                             if (cvars::guide_bind_boot_cmdbuf_kb) {
                               kernel::xboxkrnl::GuideBindDeviceCmdbuf(

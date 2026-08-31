@@ -1051,6 +1051,15 @@ DEFINE_bool(guide_resolve_paint_handles, false,
 // Phase 578: pass null as the dispatcher's DC argument so hud skips its release
 // path and constructs its own, instead of releasing the bootstrap's DC and then
 // calling through it.
+DEFINE_bool(guide_retarget_interrupt, false,
+            "Re-register the graphics interrupt callback with the device the "
+            "present path uses. Phase 645: xam registers it with mode 1's "
+            "device (407CB880), whose submitted/completed counters never "
+            "move because submissions go to 40870D00 - so the service "
+            "routine at 819FCB10 finds nothing to do and never writes the "
+            "fence the command processor waits on.",
+            "Kernel");
+
 DEFINE_bool(guide_dc_after_mode1, false,
             "Defer XuiRenderCreateDC until VdGlobalXamDevice is populated, "
             "so the DC, its wrapper and the render object are built on the "
