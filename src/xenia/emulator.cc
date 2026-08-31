@@ -6696,6 +6696,43 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                                      mem->TranslateVirtual(wsub + 0x0Cu))
                                : 0u;
                       if (wdev) {
+                        // Phase 648: the submit/service handshake never
+                        // primes (phase 646). Watch all four counters rather
+                        // than reasoning from which spans were skipped -
+                        // static tracing has twice pointed at the wrong
+                        // branch here.
+                        XELOGI("GuideCounters {}: dev={:08X} [462C]={} "
+                               "[4634]={} [46C8]={} [46CC]={} [4644]={}",
+                               frame, wdev,
+                               xe::load_and_swap<uint32_t>(
+                                   mem->TranslateVirtual(wdev + 0x462Cu)),
+                               xe::load_and_swap<uint32_t>(
+                                   mem->TranslateVirtual(wdev + 0x4634u)),
+                               xe::load_and_swap<uint32_t>(
+                                   mem->TranslateVirtual(wdev + 0x46C8u)),
+                               xe::load_and_swap<uint32_t>(
+                                   mem->TranslateVirtual(wdev + 0x46CCu)),
+                               xe::load_and_swap<uint32_t>(
+                                   mem->TranslateVirtual(wdev + 0x4644u)));
+                        // All zero on the present device means the submit
+                        // function measured running in phase 646 ran against
+                        // a different one. Log mode 1's alongside.
+                        uint32_t m1d = kernel::xboxkrnl::GuideMode1Device();
+                        if (m1d) {
+                          XELOGI("GuideCountersM1 {}: dev={:08X} [462C]={} "
+                                 "[4634]={} [46C8]={} [46CC]={} [4644]={}",
+                                 frame, m1d,
+                                 xe::load_and_swap<uint32_t>(
+                                     mem->TranslateVirtual(m1d + 0x462Cu)),
+                                 xe::load_and_swap<uint32_t>(
+                                     mem->TranslateVirtual(m1d + 0x4634u)),
+                                 xe::load_and_swap<uint32_t>(
+                                     mem->TranslateVirtual(m1d + 0x46C8u)),
+                                 xe::load_and_swap<uint32_t>(
+                                     mem->TranslateVirtual(m1d + 0x46CCu)),
+                                 xe::load_and_swap<uint32_t>(
+                                     mem->TranslateVirtual(m1d + 0x4644u)));
+                        }
                         XELOGI("GuideWin {}: dev={:08X} [30]={:08X} "
                                "[34]={:08X} [2B4C]={:08X} [2B54]={:08X}",
                                frame, wdev,
