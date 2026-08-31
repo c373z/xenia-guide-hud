@@ -3109,6 +3109,15 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
       shared_memory_->UseForWriting();
     }
     SubmitBarriers();
+    // Phase 728: the host draw call itself. Every layer above reports correct,
+    // so ask whether D3D12 is actually told to draw anything and how much.
+    if (guide_in_draw_scope_) {
+      static uint32_t gdi = 0;
+      if (++gdi <= 4) {
+        XELOGI("GuideHostDraw #{}: DrawInstanced vertices={}", gdi,
+               primitive_processing_result.host_draw_vertex_count);
+      }
+    }
     deferred_command_list_.D3DDrawInstanced(
         primitive_processing_result.host_draw_vertex_count, 1, 0, 0);
   } else {
@@ -3174,6 +3183,13 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
       shared_memory_->UseForReading();
     }
     SubmitBarriers();
+    if (guide_in_draw_scope_) {
+      static uint32_t gdx = 0;
+      if (++gdx <= 4) {
+        XELOGI("GuideHostDraw #{}: DrawIndexedInstanced indices={}", gdx,
+               primitive_processing_result.host_draw_vertex_count);
+      }
+    }
     deferred_command_list_.D3DDrawIndexedInstanced(
         primitive_processing_result.host_draw_vertex_count, 1, 0, 0, 0);
     if (scratch_index_buffer != nullptr) {

@@ -866,6 +866,22 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
     // not looking at the same command processor instance.
     static uint32_t swap_seen = 0;
     if ((swap_seen++ % 600u) == 0) {
+      // Phase 728: paint a marker directly into the buffer the swap names.
+      // This is the one thing never tested - whether that memory is what the
+      // display shows.
+      if (cvars::guide_paint_marker && frontbuffer_ptr) {
+        uint8_t* fb = memory_->TranslatePhysical(frontbuffer_ptr);
+        if (fb) {
+          for (uint32_t row = 0; row < 128; ++row) {
+            std::memset(fb + size_t(row) * 1280 * 4, 0xFF, 256 * 4);
+          }
+          static uint32_t mk = 0;
+          if (++mk <= 2) {
+            XELOGI("GuidePaintMarker: filled 256x128 at {:08X}",
+                   frontbuffer_ptr);
+          }
+        }
+      }
       // Phase 724: the Guide resolves to 1E69E000. Print what the swap
       // actually presents from - if they differ, the pixels are landing in a
       // buffer this present does not read.

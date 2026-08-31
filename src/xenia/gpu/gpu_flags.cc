@@ -187,3 +187,14 @@ DEFINE_bool(guide_replay_at_draw, false,
             "Replay the Guide's captured buffer at the frame's first title "
             "draw instead of during the resolve.",
             "GPU");
+
+// Phase 728: every layer of the draw path reports correct and no pixels change.
+// Before chasing the resolve further, establish whether guest memory at the
+// swap's frontbuffer_ptr reaches the display at all.
+DEFINE_bool(guide_paint_marker, false,
+            "Fill a block of guest memory at the swap's frontbuffer_ptr with a "
+            "solid colour just before presenting. If it appears, guest memory "
+            "is what gets displayed and the Guide's resolve should be visible; "
+            "if it does not, the presenter never reads that buffer and the "
+            "whole resolve-destination line of investigation is moot.",
+            "GPU");
