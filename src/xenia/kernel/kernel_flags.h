@@ -76,6 +76,7 @@ DECLARE_bool(guide_nop_regs);
 DECLARE_bool(guide_keep_surface_regs);
 DECLARE_uint64(guide_keep_reg_lo);
 DECLARE_uint64(guide_keep_reg_hi);
+DECLARE_int32(guide_capture_count);
 DECLARE_bool(guide_retarget_interrupt);
 DECLARE_bool(guide_dc_after_mode1);
 DECLARE_bool(guide_render_on_xam_device);

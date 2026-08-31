@@ -1224,6 +1224,14 @@ DEFINE_uint64(guide_keep_reg_hi, 0,
               "High bound of that range; 0 means equal to guide_keep_reg_lo.",
               "Kernel");
 
+DEFINE_int32(guide_capture_count, 1,
+             "Capture this many consecutive presented frames, 8ms apart, to "
+             "guide_capture_N.raw. Phase 718: the Guide resolves to 1E69E000 "
+             "every frame while the scanout alternates between the title's two "
+             "buffers, so a single capture cannot tell 'never visible' from "
+             "'visible every other frame'.",
+             "Kernel");
+
 DEFINE_bool(guide_retarget_interrupt, false,
             "Re-register the graphics interrupt callback with the device the "
             "present path uses. Phase 645: xam registers it with mode 1's "

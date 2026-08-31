@@ -4793,25 +4793,34 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
         XELOGW("GuideCapture: no presenter");
         return;
       }
-      xe::ui::RawImage image;
-      if (!presenter->CaptureGuestOutput(image)) {
-        XELOGW("GuideCapture: CaptureGuestOutput failed");
-        return;
+      // Phase 719: N consecutive frames, not one. A single capture cannot
+      // distinguish content that never appears from content that appears in
+      // the buffer the display is not currently scanning out.
+      const int shots = std::max(1, int(cvars::guide_capture_count));
+      for (int shot = 0; shot < shots; ++shot) {
+        xe::ui::RawImage image;
+        if (!presenter->CaptureGuestOutput(image)) {
+          XELOGW("GuideCapture: CaptureGuestOutput failed at shot {}", shot);
+          return;
+        }
+        auto path = xe::filesystem::GetExecutableFolder() /
+                    fmt::format("guide_capture_{}.raw", shot);
+        FILE* f = xe::filesystem::OpenFile(path, "wb");
+        if (!f) {
+          XELOGW("GuideCapture: cannot open {}", xe::path_to_utf8(path));
+          return;
+        }
+        uint32_t hdr[3] = {image.width, image.height,
+                           static_cast<uint32_t>(image.stride)};
+        fwrite(hdr, sizeof(hdr), 1, f);
+        fwrite(image.data.data(), 1, image.data.size(), f);
+        fclose(f);
+        XELOGI("GuideCapture: shot {} wrote {}x{} to {}", shot, image.width,
+               image.height, xe::path_to_utf8(path));
+        if (shot + 1 < shots) {
+          xe::threading::Sleep(std::chrono::milliseconds(8));
+        }
       }
-      auto path = xe::filesystem::GetExecutableFolder() / "guide_capture.raw";
-      FILE* f = xe::filesystem::OpenFile(path, "wb");
-      if (!f) {
-        XELOGW("GuideCapture: cannot open {}", xe::path_to_utf8(path));
-        return;
-      }
-      uint32_t hdr[3] = {image.width, image.height,
-                         static_cast<uint32_t>(image.stride)};
-      fwrite(hdr, sizeof(hdr), 1, f);
-      fwrite(image.data.data(), 1, image.data.size(), f);
-      fclose(f);
-      XELOGI("GuideCapture: wrote {}x{} stride={} bytes={} to {}", image.width,
-             image.height, image.stride, image.data.size(),
-             xe::path_to_utf8(path));
     }).detach();
     XELOGI("GuideCapture: armed for {}s", cap_delay);
   }
