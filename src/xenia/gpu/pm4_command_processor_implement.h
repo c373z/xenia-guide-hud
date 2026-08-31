@@ -2018,6 +2018,12 @@ uint32_t COMMAND_PROCESSOR::ExecutePrimaryBuffer(uint32_t read_index,
   // A guard distinguishes a spin in this loop from a block inside a single
   // packet - the two have different causes and different fixes.
   uint32_t guide_spin = 0;
+  // Phase 614: if the ring is replaced while we are executing out of it, the
+  // reader and primary_buffer_ptr_ no longer describe the same buffer and
+  // everything after that point is stale. Abandon the call so the worker
+  // re-enters against the new ring.
+  const uint32_t guide_entry_ring = primary_buffer_ptr_;
+  bool guide_ring_changed = false;
   do {
     if (++guide_spin == 100000u) {
       XELOGW("CPExec: primary loop still running after 100000 packets "
@@ -2030,6 +2036,13 @@ uint32_t COMMAND_PROCESSOR::ExecutePrimaryBuffer(uint32_t read_index,
       assert_always();
       break;
     }
+    if (primary_buffer_ptr_ != guide_entry_ring) {
+      XELOGW("CPExec: ring replaced mid-execution {:08X} -> {:08X}; "
+             "abandoning this buffer",
+             guide_entry_ring, primary_buffer_ptr_);
+      guide_ring_changed = true;
+      break;
+    }
   } while (reader_.read_count());
 
   COMMAND_PROCESSOR::OnPrimaryBufferEnd();
@@ -2037,7 +2050,10 @@ uint32_t COMMAND_PROCESSOR::ExecutePrimaryBuffer(uint32_t read_index,
   trace_writer_.WritePrimaryBufferEnd();
 
   reader_ = old_reader;
-  return write_index;
+  // On a mid-flight ring change, write_index indexes the buffer that is gone.
+  // read_ptr_index_ was reset to 0 by InitializeRingBuffer; hand that back so
+  // the worker starts at the beginning of the new ring.
+  return guide_ring_changed ? read_ptr_index_ : write_index;
 }
 
 void COMMAND_PROCESSOR::ExecutePacket(uint32_t ptr, uint32_t count) {

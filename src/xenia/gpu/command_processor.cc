@@ -522,6 +522,20 @@ void CommandProcessor::ShutdownContext() { ResetZPDState(); }
 
 void CommandProcessor::InitializeRingBuffer(uint32_t ptr, uint32_t size_log2) {
   read_ptr_index_ = 0;
+  // Phase 615: the write pointer indexes the ring, so it is as invalid as the
+  // read pointer once the ring is replaced. Leaving it alone meant the first
+  // execution against a new ring ran with an index inherited from the old one
+  // - measured as wptr=6571 against a 1024-entry ring, which wraps the buffer
+  // several times over. A fresh ring has no outstanding writes.
+  //
+  // Guarded so this only affects an actual replacement: titles call this once
+  // at boot, where the write pointer is already 0 and the guard is moot.
+  if (primary_buffer_ptr_ != 0 && primary_buffer_ptr_ != ptr) {
+    XELOGW("InitializeRingBuffer: ring replaced {:08X} -> {:08X}; resetting "
+           "write pointer from {}",
+           primary_buffer_ptr_, ptr, write_ptr_index_.load());
+    write_ptr_index_ = 0;
+  }
   primary_buffer_ptr_ = ptr;
   primary_buffer_size_ = uint32_t(1) << (size_log2 + 3);
 
