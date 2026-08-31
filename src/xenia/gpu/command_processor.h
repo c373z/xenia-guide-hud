@@ -118,6 +118,8 @@ extern bool g_guide_in_draw_scope;
 // cache can report what state the replayed draws actually get - the suspicion
 // is that they run against the title's state, not the Guide's.
 extern bool g_guide_replaying;
+extern uint32_t g_guide_current_ib;
+extern uint32_t g_guide_current_ib_words;
 
 class CommandProcessor {
  public:

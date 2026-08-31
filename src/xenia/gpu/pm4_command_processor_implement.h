@@ -1027,6 +1027,10 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_INDIRECT_BUFFER(
   const uint32_t guide_tally_draws0 = guide_draw_count_;
   bool saved_had = guide_ib_had_draw_;
   guide_ib_had_draw_ = false;
+  // Phase 746: remember which indirect buffer is executing, so a shader load
+  // can name the stream it arrived in.
+  g_guide_current_ib = GpuToCpu(list_ptr);
+  g_guide_current_ib_words = list_length;
   // Phase 741: checksum the title's indirect buffers so the range we submit
   // can be compared against them. If ours matches one, we have been
   // resubmitting the title's own commands.
@@ -2083,6 +2087,16 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_IM_LOAD_IMMEDIATE(
     auto& e = imm[h];
     e.first += (guide_in_draw_scope_ || guide_replaying_) ? 1u : 0u;
     ++e.second;
+    // Phase 746: E915 never loads in guide scope but loads 325 times a run.
+    // Name the stream it arrives in.
+    if (uint32_t(h >> 48) == 0xE915u) {
+      static uint32_t e915 = 0;
+      if (++e915 <= 4) {
+        XELOGI("E915Load #{}: ib={:08X} words={} | guide_scope={} replaying={}",
+               e915, g_guide_current_ib, g_guide_current_ib_words,
+               guide_in_draw_scope_ ? 1 : 0, guide_replaying_ ? 1 : 0);
+      }
+    }
     static uint32_t immn = 0;
     if (++immn % 4000u == 0u) {
       std::string list;

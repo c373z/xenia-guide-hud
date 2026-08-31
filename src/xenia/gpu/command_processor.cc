@@ -127,6 +127,8 @@ bool GetGPUSetting(GPUSetting setting) {
 
 bool g_guide_in_draw_scope = false;  // phase 528
 bool g_guide_replaying = false;      // phase 536
+uint32_t g_guide_current_ib = 0;     // phase 746
+uint32_t g_guide_current_ib_words = 0;
 
 ReadbackResolveMode GetReadbackResolveMode() {
   const std::string& mode = cvars::readback_resolve;
