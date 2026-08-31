@@ -6157,7 +6157,15 @@ void VdSwap_entry(
               static bool done = false;
               if (!done) {
                 done = true;
-                const char* names[] = {"XuiTabScene", "XuiScene", "XuiShader"};
+                // Phase 760: name the classes the scene is actually made of.
+                // Phase 759 counted 23 distinct handlers; creating one instance
+                // of each candidate class and reading its node handler maps
+                // handler -> name.
+                const char* names[] = {"XuiTabScene", "XuiScene", "XuiShader",
+                                       "XuiElement",  "XuiImage", "XuiText",
+                                       "XuiGroup",    "XuiButton", "XuiList",
+                                       "XuiFigure",   "XuiControl", "XuiCanvas",
+                                       "XuiNavButton", "XuiCheckbox"};
                 std::string out;
                 for (const char* nm : names) {
                   size_t len = std::strlen(nm);
@@ -6202,8 +6210,18 @@ void VdSwap_entry(
                   uint32_t hr2 = uint32_t(kernel_state()->processor()->Execute(
                       gth->thread_state(), GuideConst(0x8194F568u), ca2,
                       xe::countof(ca2)));
-                  mk += fmt::format("{}: hr={:08X} obj={:08X} | ", nm, hr2,
-                                    vrd(obuf2));
+                  // Report the node handler for each created instance, so
+                  // phase 759's handler tally can be read as class names.
+                  uint32_t oh = vrd(obuf2);
+                  uint32_t ofn = 0;
+                  if (oh) {
+                    uint32_t orec = GuideResolveHandle(oh);
+                    if (orec) {
+                      uint32_t onode = vrd(orec + 0x0Cu);
+                      if (onode) ofn = vrd(onode + 0x1Cu);
+                    }
+                  }
+                  mk += fmt::format("{}:hr={:08X} fn={:08X} | ", nm, hr2, ofn);
                 }
                 XELOGI("CreateByName: {}", mk);
                 // Phase 334: create a XuiShader and attach it to the draw-root
