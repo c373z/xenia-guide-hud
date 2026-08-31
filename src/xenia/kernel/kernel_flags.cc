@@ -1078,6 +1078,21 @@ DEFINE_bool(guide_patch_class_reg, false,
             "device (phases 644, 648).",
             "Kernel");
 
+DEFINE_bool(guide_force_cmdbuf_alloc, false,
+            "Patch the allocator guard at 81A02988 to an unconditional branch "
+            "so 81A02940 allocates regardless of [dev+0x2B3D] & 0x20. Phase "
+            "683 RAN this and it FAILS - do not retry expecting a different "
+            "result. The allocator gets further (51/102 vs 22) but still "
+            "returns NULL: [dev+0x3A54] is null, so it calls 81A02688, which "
+            "opens by asserting that this very bit is clear. With "
+            "ignore_trap_instructions the twui is a no-op, so the patch walks "
+            "past a precondition the guest declares must hold, and the run "
+            "gains a guest crash at 81A019B8. The bit is not a gate - it is a "
+            "cached statement that the device has no command-buffer pool, and "
+            "clearing it does not create one. Kept only so the negative "
+            "result is reproducible.",
+            "Kernel");
+
 DEFINE_bool(guide_retarget_interrupt, false,
             "Re-register the graphics interrupt callback with the device the "
             "present path uses. Phase 645: xam registers it with mode 1's "

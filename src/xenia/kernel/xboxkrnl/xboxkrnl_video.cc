@@ -3591,6 +3591,13 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   if (::cvars::guide_patch_class_reg && XamIsDashrootLayout()) {
     GuidePatchWord(0x8194F164u, 0x41820018u, 0x48000018u, "ClassRegPatch");
   }
+  // Phase 682: 81A02988 is `beq 81A02998`, taken only when [dev+0x2B3D] &
+  // 0x20 is clear. It is set on all 38 measured calls, so the allocator
+  // returns NULL and the draw emitter bails before its first packet write.
+  // Force the branch to test whether that refusal is the whole story.
+  if (::cvars::guide_force_cmdbuf_alloc && XamIsDashrootLayout()) {
+    GuidePatchWord(0x81A02988u, 0x41820010u, 0x48000010u, "CmdbufAllocPatch");
+  }
   if (::cvars::guide_patch_addr_passthru && XamIsDashrootLayout()) {
     GuidePatchWord(0x819E0218u, 0x7FEB5214u, 0x7C7F1B78u, "AddrPassthruPatch");
   }

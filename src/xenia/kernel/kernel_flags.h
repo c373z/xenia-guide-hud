@@ -61,6 +61,7 @@ DECLARE_bool(guide_resolve_paint_handles);
 DECLARE_bool(guide_draw_on_swap);
 DECLARE_bool(guide_transplant_ring);
 DECLARE_bool(guide_patch_class_reg);
+DECLARE_bool(guide_force_cmdbuf_alloc);
 DECLARE_bool(guide_retarget_interrupt);
 DECLARE_bool(guide_dc_after_mode1);
 DECLARE_bool(guide_render_on_xam_device);
