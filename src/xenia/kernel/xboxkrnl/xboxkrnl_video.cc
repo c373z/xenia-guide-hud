@@ -3749,10 +3749,50 @@ void VdSwap_entry(
         XELOGI("GuideDrawOnSwap #{}: fn={:08X} this={:08X}", sn,
                guide_draw_fn_, guide_draw_this_);
       }
+      // Phase 670: snapshot the coverage counters across ONE composite draw.
+      // Totals over a whole run are a union of paths and were over-read as
+      // exclusive three phases running (665-669); a delta says what happened
+      // in a single frame.
+      std::vector<uint64_t> pre;
+      uint32_t pn = 0, pstart = 0;
+      if (::cvars::guide_coverage_fn) {
+        auto* pf = kernel_state()->processor()->LookupFunction(
+            ::cvars::guide_coverage_fn);
+        auto* pgf = pf ? dynamic_cast<cpu::GuestFunction*>(pf) : nullptr;
+        if (pgf && pgf->trace_data().is_valid()) {
+          auto& td = pgf->trace_data();
+          pn = td.instruction_count();
+          pstart = td.start_address();
+          auto* c = reinterpret_cast<uint64_t*>(
+              td.instruction_execute_counts());
+          pre.assign(c, c + pn);
+        }
+      }
       uint64_t sargs[] = {guide_draw_this_};
       kernel_state()->processor()->Execute(sth->thread_state(),
                                            guide_draw_fn_, sargs,
                                            xe::countof(sargs));
+      if (pn && pre.size() == pn) {
+        auto* pf = kernel_state()->processor()->LookupFunction(
+            ::cvars::guide_coverage_fn);
+        auto* pgf = pf ? dynamic_cast<cpu::GuestFunction*>(pf) : nullptr;
+        if (pgf && pgf->trace_data().is_valid()) {
+          auto* c = reinterpret_cast<uint64_t*>(
+              pgf->trace_data().instruction_execute_counts());
+          std::string d;
+          uint32_t ran = 0;
+          for (uint32_t i = 0; i < pn; ++i) {
+            bool hit = c[i] > pre[i];
+            d += hit ? '1' : '.';
+            if (hit) ++ran;
+          }
+          static uint32_t dn = 0;
+          if (++dn <= 3) {
+            XELOGI("GuideDrawDelta #{} [{} of {}] start={:08X}: {}", dn, ran,
+                   pn, pstart, d);
+          }
+        }
+      }
     }
   }
   // Composite the Guide here. The title's D3D device is thread-affine and
