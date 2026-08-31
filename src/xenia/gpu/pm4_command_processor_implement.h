@@ -1983,6 +1983,21 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_IM_LOAD(uint32_t packet,
   auto shader = COMMAND_PROCESSOR::LoadShader(
       shader_type, addr, memory_->TranslatePhysical<uint32_t*>(addr),
       size_dwords);
+  // Phase 739: the active shaders are set here, by IM_LOAD - not by
+  // SQ_PROGRAM_CNTL. The Guide's stream carries 7 of these per buffer, so this
+  // is where its shaders either become active or do not.
+  {
+    // Phase 739: log the title's loads too - if both reference the same
+    // addresses, the Guide is not loading its own shaders at all.
+    bool g = guide_in_draw_scope_ || guide_replaying_;
+    static uint32_t imlg = 0, imlt = 0;
+    if ((g ? imlg : imlt)++ < 6) {
+      XELOGI("IMLoad[{}] #{}: type={} addr={:08X} size_dw={} -> hash={:016X}",
+             g ? "guide" : "title", g ? imlg : imlt,
+             shader_type == xenos::ShaderType::kVertex ? "VS" : "PS", addr,
+             size_dwords, shader ? shader->ucode_data_hash() : 0ull);
+    }
+  }
   switch (shader_type) {
     case xenos::ShaderType::kVertex:
       active_vertex_shader_ = shader;
