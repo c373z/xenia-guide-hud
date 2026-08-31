@@ -345,6 +345,19 @@ void VdSetGraphicsInterruptCallback_entry(function_t callback,
   // callback takes 2 params
   // r3 = bool 0/1 - 0 is normal interrupt, 1 is some acquire/lock mumble
   // r4 = user_data (r4 of VdSetGraphicsInterruptCallback)
+  // Phase 636: the CP blocks on a memory fence xam expects an interrupt
+  // handler to write, and Xenia dispatches PM4_INTERRUPT to whichever
+  // callback was registered last. Record every registration with its caller
+  // so a title-owned callback serving xam's interrupts is visible.
+  {
+    uint32_t lr = 0;
+    if (auto* th = XThread::GetCurrentThread()) {
+      lr = static_cast<uint32_t>(th->thread_state()->context()->lr);
+    }
+    XELOGI("VdSetGraphicsInterruptCallback: cb={:08X} data={:08X} from "
+           "lr={:08X}",
+           uint32_t(callback), user_data.guest_address(), lr);
+  }
   auto graphics_system = kernel_state()->emulator()->graphics_system();
   graphics_system->SetInterruptCallback(callback, user_data);
 }
