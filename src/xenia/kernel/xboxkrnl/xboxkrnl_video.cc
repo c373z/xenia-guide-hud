@@ -954,6 +954,36 @@ void GuideDumpNodes() {
   }
   XELOGI("GuideNodes: total={} with_base={} with_fn={} skipped={}", total,
          with_base, with_fn, skipped);
+  // Phase 759: which classes are actually in the tree? The handler at [+0x1C]
+  // varies by class, and the harness's CreateByName probe made a XuiShader
+  // instance with handle 00010504 - so resolving that names the XuiShader
+  // handler, and tallying handlers counts how many elements use it.
+  {
+    std::map<uint32_t, uint32_t> by_fn;
+    for (uint32_t idx = 0; idx < cap && idx < 0x10000u; ++idx) {
+      uint32_t bucket = r(0x81D6D0D8u + (idx >> 8) * 4u);
+      uint32_t entry = bucket + (idx & 0xFFu) * 8u;
+      if (!bucket || !readable(entry)) continue;
+      uint32_t rec = r(entry + 4u);
+      if (!rec || !readable(rec)) continue;
+      uint32_t node = r(rec + 0x0Cu);
+      if (!node || !readable(node)) continue;
+      ++by_fn[r(node + 0x1Cu)];
+    }
+    uint32_t shader_fn = 0;
+    uint32_t sh = GuideResolveHandle(0x00010504u);
+    if (sh && readable(sh)) {
+      uint32_t shnode = r(sh + 0x0Cu);
+      if (shnode && readable(shnode)) shader_fn = r(shnode + 0x1Cu);
+    }
+    std::string list;
+    for (auto& kv : by_fn) {
+      list += fmt::format("{:08X}x{}{} ", kv.first, kv.second,
+                          (shader_fn && kv.first == shader_fn) ? "<-SHADER" : "");
+    }
+    XELOGI("GuideNodeClasses: {} distinct handlers | XuiShader fn={:08X} | {}",
+           by_fn.size(), shader_fn, list);
+  }
 }
 
 
