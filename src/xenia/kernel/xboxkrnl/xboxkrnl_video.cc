@@ -8259,8 +8259,25 @@ void VdSwap_entry(
                 ++i;
               }
             }
+            // Phase 675: the sequential walk trusts each header's count, and
+            // phase 663 saw it produce "00x949" - a data word inside a shader
+            // blob read as a header with a 949-word count, which skips 950
+            // words. Anything in that span, including a draw, is invisible to
+            // it. Scan every word independently as a cross-check.
+            uint32_t bf22 = 0, bf36 = 0;
+            for (uint32_t i = 0; i < nw; ++i) {
+              uint32_t hd = cq(ws + i * 4u);
+              if ((hd >> 30) == 3) {
+                uint32_t op = (hd >> 8) & 0x7Fu;
+                if (op == 0x22u) ++bf22;
+                if (op == 0x36u) ++bf36;
+              }
+            }
             XELOGI("CompositeEmit #{}: {} words, {} type3, DRAW_INDX={} | {}",
                    drawbr, nw, t3, dr, firstp);
+            XELOGI("CompositeScan #{}: brute-force DRAW_INDX(22)={} "
+                   "DRAW_INDX_2(36)={} over {} words",
+                   drawbr, bf22, bf36, nw);
           }
         }
       }
