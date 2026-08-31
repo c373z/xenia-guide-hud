@@ -994,16 +994,38 @@ void GuideInstallAllocStub() {
   const uint32_t lo = buf & 0xFFFFu;
   const uint32_t hi = (buf >> 16) + ((buf & 0x8000u) ? 1u : 0u);
   // r3 = dev, r4 = size, r5 = align; return the block in r3.
-  const uint32_t code[] = {
-      0x3D600000u | hi,  // lis    r11, hi
-      0x814B0000u | lo,  // lwz    r10, lo(r11)
+  //
+  // Phase 696: the allowed return address lives at [buf+4], so which caller is
+  // served is a runtime choice. guide_alloc_lr = 0 serves everyone (phase
+  // 694's behaviour: DRAW_INDX=16 plus a guest crash); a specific value serves
+  // only that call site. LR is still the caller's return address here - this
+  // is the function entry, before any prologue.
+  const uint32_t allow = uint32_t(::cvars::guide_alloc_lr);
+  xe::store_and_swap<uint32_t>(mem->TranslateVirtual(buf + 4u), allow);
+  std::vector<uint32_t> code;
+  if (allow) {
+    code = {
+        0x7C0802A6u,             // mflr   r0
+        0x3D600000u | hi,        // lis    r11, hi
+        0x812B0000u | (lo + 4u), // lwz    r9, lo+4(r11)   allowed LR
+        0x7C004800u,             // cmpw   r0, r9
+        0x40820020u,             // bne    +0x20 -> return 0
+    };
+  } else {
+    code = {0x3D600000u | hi};   // lis    r11, hi
+  }
+  const std::vector<uint32_t> tail = {
+      0x814B0000u | lo,  // lwz    r10, lo(r11)     cursor
       0x394A00FFu,       // addi   r10, r10, 255
       0x554A002Eu,       // rlwinm r10, r10, 0, 0, 23   (round up to 256)
       0x7D2A2214u,       // add    r9, r10, r4
       0x912B0000u | lo,  // stw    r9, lo(r11)
       0x7D435378u,       // mr     r3, r10
       0x4E800020u,       // blr
+      0x38600000u,       // li     r3, 0
+      0x4E800020u,       // blr
   };
+  code.insert(code.end(), tail.begin(), tail.end());
   // xam's code pages are not writable; GuidePatchWord unprotects before each
   // store and restores after. Writing directly faulted the host at
   // fault_addr=181A02940 and took the run down with it.
@@ -1016,12 +1038,13 @@ void GuideInstallAllocStub() {
     XELOGW("GuideAllocStub: cannot unprotect 81A02940");
     return;
   }
-  for (uint32_t i = 0; i < uint32_t(xe::countof(code)); ++i) {
+  for (size_t i = 0; i < code.size(); ++i) {
     xe::store_and_swap<uint32_t>(hp + i * 4u, code[i]);
   }
   xe::memory::Protect(page, 0x1000, old_access, nullptr);
-  XELOGI("GuideAllocStub: buf={:08X} size={}KB cursor={:08X}; 81A02940 replaced",
-         buf, kSize / 1024, buf + 256u);
+  XELOGI("GuideAllocStub: buf={:08X} size={}KB cursor={:08X} allow_lr={:08X}; "
+         "81A02940 replaced ({} instrs)",
+         buf, kSize / 1024, buf + 256u, allow, code.size());
 }
 
 bool GuidePatchWord(uint32_t addr, uint32_t expect, uint32_t value,

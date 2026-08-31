@@ -1116,6 +1116,15 @@ DEFINE_bool(guide_stub_gpu_alloc, false,
             "the function is first translated.",
             "Kernel");
 
+DEFINE_uint64(guide_alloc_lr, 0,
+              "Serve guide_stub_gpu_alloc only to the caller whose return "
+              "address is this value; 0 serves every caller. Phase 696: "
+              "gating on 819DCD00 (819DCCA0's site) removed the crash but "
+              "dropped DRAW_INDX 16 -> 0, so the geometry needs allocations "
+              "from more than one of the 10 call sites. Runtime-settable so "
+              "each can be tested without a rebuild.",
+              "Kernel");
+
 DEFINE_bool(guide_retarget_interrupt, false,
             "Re-register the graphics interrupt callback with the device the "
             "present path uses. Phase 645: xam registers it with mode 1's "
