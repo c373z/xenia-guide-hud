@@ -2891,11 +2891,17 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
   // Register-level comparison (723, 730) cannot see a difference that lives in
   // the pipeline object itself, so compare the object.
   {
+    // Phase 735: one shared counter across both branches. If the guide and
+    // title lines carry the same indices they are the same draws and the
+    // predicate is mislabelling; different indices mean the Guide's draws are
+    // genuinely being issued with the title's shaders.
+    static uint32_t draw_index = 0;
+    ++draw_index;
     static uint32_t psg = 0, pst = 0;
     bool g = guide_in_draw_scope_ || xe::gpu::g_guide_replaying;
-    if ((g ? psg : pst)++ < 3) {
-      XELOGI("PSO[{}]: handle={} d3d12={} vs_hash={:016X} ps_hash={:016X}",
-             g ? "guide" : "title", pipeline_handle,
+    if ((g ? psg : pst)++ < 4) {
+      XELOGI("PSO[{}] #{}: handle={} d3d12={} vs_hash={:016X} ps_hash={:016X}",
+             g ? "guide" : "title", draw_index, pipeline_handle,
              static_cast<const void*>(
                  pipeline_cache_->GetD3D12PipelineByHandle(pipeline_handle)),
              vertex_shader ? vertex_shader->ucode_data_hash() : 0ull,
