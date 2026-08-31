@@ -6552,8 +6552,19 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                       }
                     }
                     uint64_t da[] = {obj};
+                    // Phase 634: the render now completes (46/46) yet the loop
+                    // stops advancing at ~107. Bracket the call so "the render
+                    // blocks" and "something after it blocks" are
+                    // distinguishable.
+                    const bool guide_brk = (frame >= 100 && frame <= 118);
+                    if (guide_brk) {
+                      XELOGI("GuideLoop {}: render in", frame);
+                    }
                     ks->processor()->Execute(ts, (g_hud_render ? g_hud_render : hb + 0xAB28u), da,
                                              xe::countof(da));
+                    if (guide_brk) {
+                      XELOGI("GuideLoop {}: render out", frame);
+                    }
                     // Phase 591: once emission actually works each frame
                     // costs real time, and the loop no longer reaches its
                     // end inside a run - a 170s run got to frame ~106. The
