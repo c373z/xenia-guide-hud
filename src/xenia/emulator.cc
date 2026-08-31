@@ -2395,8 +2395,26 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                   }
                 }
                 kernel::xboxkrnl::in_xam_createdevice_scope = true;
+                // Phase 643: the creator publishes VdGlobalXamDevice and then
+                // does not return, which is what forces the bootstrap to be
+                // queued ahead of it and therefore onto the wrong device
+                // (phase 642). Record which thread it holds, so a waiter can
+                // be placed on one it does not.
+                {
+                  auto* cth = kernel::XThread::GetCurrentThread();
+                  XELOGI("GuideCreator: entering {:08X} on thread '{}' "
+                         "(handle {:08X})",
+                         create_fn, cth ? cth->name() : "?",
+                         cth ? cth->handle() : 0u);
+                }
                 uint64_t cr = ks->processor()->Execute(ts, create_fn, ca,
                                                        xe::countof(ca));
+                {
+                  auto* cth = kernel::XThread::GetCurrentThread();
+                  XELOGI("GuideCreator: RETURNED {:08X} on thread '{}'",
+                         static_cast<uint32_t>(cr),
+                         cth ? cth->name() : "?");
+                }
                 kernel::xboxkrnl::in_xam_createdevice_scope = false;
                 if (cvars::guide_system_process_type && cur) {
                   auto* kt = cur->guest_object<kernel::X_KTHREAD>();
