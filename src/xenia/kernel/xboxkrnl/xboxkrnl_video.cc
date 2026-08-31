@@ -963,6 +963,9 @@ void GuideDumpNodes() {
 // supplies the missing service instead: a bump allocator over physical memory
 // the harness owns, so 819E01E0 has a real address to convert and 819DCCA0
 // can proceed past 819DCD18 with a legitimate buffer.
+static uint32_t guide_alloc_arena_ = 0;
+static uint32_t guide_alloc_end_ = 0;
+
 void GuideInstallAllocStub() {
   auto* mem = kernel_state()->memory();
   auto* heap = mem->LookupHeapByType(true, 64 * 1024);
@@ -1001,7 +1004,7 @@ void GuideInstallAllocStub() {
   // only that call site. LR is still the caller's return address here - this
   // is the function entry, before any prologue.
   // Phase 697: serve callers whose return address falls in [lo, hi]. The
-  // bounds live at [buf+4] and [buf+8] so both are runtime choices; lo == 0
+  // bounds live at [buf+4] and [buf+8]; [buf+12] is the arena end. lo == 0
   // serves every caller (phase 694's behaviour).
   const uint32_t allow_lo = uint32_t(::cvars::guide_alloc_lr);
   const uint32_t allow_hi = ::cvars::guide_alloc_lr_hi
@@ -1009,33 +1012,45 @@ void GuideInstallAllocStub() {
                                 : allow_lo;
   xe::store_and_swap<uint32_t>(mem->TranslateVirtual(buf + 4u), allow_lo);
   xe::store_and_swap<uint32_t>(mem->TranslateVirtual(buf + 8u), allow_hi);
+  xe::store_and_swap<uint32_t>(mem->TranslateVirtual(buf + 12u), buf + kSize);
+  guide_alloc_arena_ = buf;
+  guide_alloc_end_ = buf + kSize;
+  // Branch displacements are computed after assembly rather than written by
+  // hand - the prefix length varies with the gate, and one miscounted offset
+  // would be a jump into the middle of the allocator.
   std::vector<uint32_t> code;
+  std::vector<size_t> to_zero;
   if (allow_lo) {
-    code = {
-        0x7C0802A6u,              // mflr   r0
-        0x3D600000u | hi,         // lis    r11, hi
-        0x812B0000u | (lo + 4u),  // lwz    r9, lo+4(r11)    range low
-        0x7C004840u,              // cmplw  r0, r9
-        0x4180002Cu,              // blt    -> return 0
-        0x812B0000u | (lo + 8u),  // lwz    r9, lo+8(r11)    range high
-        0x7C004840u,              // cmplw  r0, r9
-        0x41810020u,              // bgt    -> return 0
-    };
+    code.push_back(0x7C0802A6u);               // mflr   r0
+    code.push_back(0x3D600000u | hi);          // lis    r11, hi
+    code.push_back(0x812B0000u | (lo + 4u));   // lwz    r9, lo+4(r11)
+    code.push_back(0x7C004840u);               // cmplw  r0, r9
+    to_zero.push_back(code.size());
+    code.push_back(0x41800000u);               // blt    -> return 0
+    code.push_back(0x812B0000u | (lo + 8u));   // lwz    r9, lo+8(r11)
+    code.push_back(0x7C004840u);               // cmplw  r0, r9
+    to_zero.push_back(code.size());
+    code.push_back(0x41810000u);               // bgt    -> return 0
   } else {
-    code = {0x3D600000u | hi};    // lis    r11, hi
+    code.push_back(0x3D600000u | hi);          // lis    r11, hi
   }
-  const std::vector<uint32_t> tail = {
-      0x814B0000u | lo,  // lwz    r10, lo(r11)     cursor
-      0x394A00FFu,       // addi   r10, r10, 255
-      0x554A002Eu,       // rlwinm r10, r10, 0, 0, 23   (round up to 256)
-      0x7D2A2214u,       // add    r9, r10, r4
-      0x912B0000u | lo,  // stw    r9, lo(r11)
-      0x7D435378u,       // mr     r3, r10
-      0x4E800020u,       // blr
-      0x38600000u,       // li     r3, 0
-      0x4E800020u,       // blr
-  };
-  code.insert(code.end(), tail.begin(), tail.end());
+  code.push_back(0x814B0000u | lo);            // lwz    r10, lo(r11)  cursor
+  code.push_back(0x394A00FFu);                 // addi   r10, r10, 255
+  code.push_back(0x554A002Eu);                 // rlwinm r10, r10, 0, 0, 23
+  code.push_back(0x7D2A2214u);                 // add    r9, r10, r4
+  code.push_back(0x810B0000u | (lo + 12u));    // lwz    r8, lo+12(r11) end
+  code.push_back(0x7C094040u);                 // cmplw  r9, r8
+  to_zero.push_back(code.size());
+  code.push_back(0x41810000u);                 // bgt    -> return 0 (overflow)
+  code.push_back(0x912B0000u | lo);            // stw    r9, lo(r11)
+  code.push_back(0x7D435378u);                 // mr     r3, r10
+  code.push_back(0x4E800020u);                 // blr
+  const size_t zero_idx = code.size();
+  code.push_back(0x38600000u);                 // li     r3, 0
+  code.push_back(0x4E800020u);                 // blr
+  for (size_t bi : to_zero) {
+    code[bi] |= uint32_t((zero_idx - bi) * 4u) & 0xFFFCu;
+  }
   // xam's code pages are not writable; GuidePatchWord unprotects before each
   // store and restores after. Writing directly faulted the host at
   // fault_addr=181A02940 and took the run down with it.
@@ -1594,6 +1609,16 @@ void GuideDumpDevices() {
       {"40870D00", 0x40870D00u},
       {"407CB880", 0x407CB880u},
   };
+  // Phase 698: how far did the bump allocator actually travel? Arena overflow
+  // is one of two candidates for the crash and this settles it by reading
+  // rather than reasoning.
+  if (guide_alloc_arena_) {
+    uint32_t cur = r(guide_alloc_arena_);
+    XELOGI("GuideArena: base={:08X} end={:08X} cursor={:08X} used={}KB of {}KB",
+           guide_alloc_arena_, guide_alloc_end_, cur,
+           (cur - guide_alloc_arena_) / 1024,
+           (guide_alloc_end_ - guide_alloc_arena_) / 1024);
+  }
   for (auto& d : devs) {
     if (!d.dev || !readable(d.dev)) {
       XELOGI("GuideDev {}: {:08X} unreadable", d.name, d.dev);
