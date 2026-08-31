@@ -996,7 +996,18 @@ uint32_t GuideBindDeviceCmdbuf(uint32_t dev, void* ts, uint32_t kb) {
     return xe::load_and_swap<uint32_t>(mem->TranslateVirtual(a));
   };
   if (rdv(dev + 0x2B4Cu)) {
-    return rdv(dev + 0x2B48u);  // already bound
+    // Phase 657: publish on this path too. Returning silently here meant
+    // guide_cmdbuf_base_ stayed zero whenever a buffer was already bound,
+    // which gates the second-context path shut for a reason that reads as
+    // "the binder never ran" - it ran and took the early exit.
+    uint32_t existing = rdv(dev + 0x2B48u);
+    if (existing && !guide_cmdbuf_base_) {
+      guide_cmdbuf_base_ = existing;
+      guide_cmdbuf_size_ = kb * 1024u;
+      XELOGI("GuideBindDeviceCmdbuf: already bound on {:08X}, publishing "
+             "base {:08X}", dev, existing);
+    }
+    return existing;
   }
   uint32_t csize = kb * 1024u;
   static uint32_t cbuf = 0;
@@ -4842,6 +4853,30 @@ void VdSwap_entry(
       // 81A01358 asserts the cursor is 0 on entry (a paired begin/end
       // protocol), which is why setting it up once never survived.
       uint32_t sc_dev = 0, sc_begin_cursor = 0;
+      // Phase 657: the second-context gate needs guide_cmdbuf_base_, and the
+      // only binder that publishes it runs from the paint loop's DC-install
+      // block - which this configuration disables (phase 655). Bind here, on
+      // the composite path, which does run.
+      if (::cvars::guide_second_context_kb > 0 && !guide_cmdbuf_base_ &&
+          ::cvars::guide_bind_boot_cmdbuf_kb > 0) {
+        auto* bm = kernel_state()->memory();
+        uint32_t bdc2 = guide_draw_this_
+                            ? xe::load_and_swap<uint32_t>(
+                                  bm->TranslateVirtual(guide_draw_this_ + 12))
+                            : 0u;
+        uint32_t bwrap = bdc2 ? xe::load_and_swap<uint32_t>(
+                                    bm->TranslateVirtual(bdc2 + 0x1CCu))
+                              : 0u;
+        uint32_t bdev = bwrap ? xe::load_and_swap<uint32_t>(
+                                    bm->TranslateVirtual(bwrap + 12u))
+                              : 0u;
+        if (bdev) {
+          if (auto* bth = XThread::GetCurrentThread()) {
+            GuideBindDeviceCmdbuf(bdev, bth->thread_state(),
+                                  uint32_t(::cvars::guide_bind_boot_cmdbuf_kb));
+          }
+        }
+      }
       if (::cvars::guide_second_context_kb > 0) {
         auto* sm = kernel_state()->memory();
         auto sr = [sm](uint32_t a) {
