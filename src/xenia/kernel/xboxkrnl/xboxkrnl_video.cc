@@ -8598,6 +8598,21 @@ void VdSwap_entry(
                     }
                     if (mc <= 7u) ++modes[mc];
                     ++shown;
+                    // Phase 700: at the resolve, report where it writes.
+                    // Visibility now depends on this destination, not on
+                    // anything upstream of it.
+                    if (mc == 6u) {
+                      auto g = [&regs](uint32_t r) {
+                        auto it = regs.find(r);
+                        return it == regs.end() ? 0xFFFFFFFFu : it->second;
+                      };
+                      XELOGI(
+                          "CompositeResolve #{}: control={:08X} dest_base={:08X} "
+                          "dest_pitch={:08X} dest_info={:08X} colour_src={:08X} "
+                          "surface={:08X}",
+                          drawbr, g(0x2318), g(0x2319), g(0x231A), g(0x231B),
+                          g(0x2001), g(0x2000));
+                    }
                   }
                   if ((op == 0x22u || op == 0x36u) && shown <= 3u) {
                     auto g = [&regs](uint32_t r) {
