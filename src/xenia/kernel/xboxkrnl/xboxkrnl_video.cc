@@ -4102,6 +4102,25 @@ void VdSwap_entry(
         }
       }
     }
+    // Phase 767: the id-2 propagation loop is skipped because the receiving
+    // element's child count at [+0x1C] is <= 0 (766). Read it directly on the
+    // object the composite dispatches to, rather than inferring it from a
+    // branch that was not taken.
+    {
+      static uint32_t cc = 0;
+      if (++cc <= 3 && guide_draw_this_) {
+        auto* cm = kernel_state()->memory();
+        auto cr = [cm](uint32_t a) {
+          return a ? xe::load_and_swap<uint32_t>(cm->TranslateVirtual(a)) : 0u;
+        };
+        XELOGI(
+            "GuideDrawThis #{}: obj={:08X} handle={:08X} children[1C]={} "
+            "coll[18]={:08X} [08]={:08X} [0C]={:08X}",
+            cc, guide_draw_this_, cr(guide_draw_this_),
+            cr(guide_draw_this_ + 0x1Cu), cr(guide_draw_this_ + 0x18u),
+            cr(guide_draw_this_ + 0x08u), cr(guide_draw_this_ + 0x0Cu));
+      }
+    }
     // Phase 680: read the dispatcher's slots instead of inferring them from an
     // unexecuted span. One shot, on the draw, after the delta is emitted.
     GuideDumpNodes();
