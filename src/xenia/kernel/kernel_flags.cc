@@ -1051,6 +1051,14 @@ DEFINE_bool(guide_resolve_paint_handles, false,
 // Phase 578: pass null as the dispatcher's DC argument so hud skips its release
 // path and constructs its own, instead of releasing the bootstrap's DC and then
 // calling through it.
+DEFINE_bool(guide_patch_window_reset, false,
+            "Nop the two stores at 81A02B08/81A02B14 that re-point "
+            "[dev+0x30]/[dev+0x34] at the device's internal 0x12C0-byte "
+            "command buffer. Phase 590: that reset is why a widened window "
+            "never survives into the reservation, and 0x12C0 (4800) cannot "
+            "hold the Guide's first request of 9236 bytes at any time.",
+            "Kernel");
+
 DEFINE_uint32(guide_bind_boot_cmdbuf_kb, 0,
               "Allocate and bind a command buffer of this many KB on the "
               "device hud renders against. Phase 589: with a render target "

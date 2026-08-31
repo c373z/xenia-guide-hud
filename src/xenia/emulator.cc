@@ -6285,6 +6285,19 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                   // fully constructed.
                   // Must be applied here, not from the xam bootstrap: that
                   // path runs after hud's render has already faulted.
+                  // 81A02AD8 resets the reservation window to the device's
+                  // own 0x12C0-byte buffer on every call and returns 0, so a
+                  // widened window cannot survive to the fit test. Nop the
+                  // two stores; the flag and [dev+0x38] stores are left
+                  // alone.
+                  if (cvars::guide_patch_window_reset) {
+                    kernel::xboxkrnl::GuidePatchWord(0x81A02B08u, 0x917F0030u,
+                                                     0x60000000u,
+                                                     "WindowResetPatch.cur");
+                    kernel::xboxkrnl::GuidePatchWord(0x81A02B14u, 0x915F0034u,
+                                                     0x60000000u,
+                                                     "WindowResetPatch.end");
+                  }
                   if (cvars::guide_patch_present_rt) {
                     kernel::xboxkrnl::GuidePatchWord(0x819DE934u, 0x409A00FCu,
                                                      0x480000FCu,
