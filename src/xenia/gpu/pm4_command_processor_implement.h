@@ -2090,9 +2090,14 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_IM_LOAD_IMMEDIATE(
     // Phase 751: do the Guide's shaders come from the skin? huduiskin's 'skin'
     // section sits at 90F90000, 75851 bytes (phase 749). If the ucode being
     // loaded lives there, the skin is the source; if not, it is not.
-    if ((guide_in_draw_scope_ || guide_replaying_) && shader) {
-      static uint32_t sk = 0;
-      if (++sk <= 6) {
+    // Phase 756: log both scopes. If the title's inline ucode for a hash is
+    // byte-identical to the Guide's, they are one shader from one source.
+    if (shader) {
+      bool gsc = guide_in_draw_scope_ || guide_replaying_;
+      static uint32_t skg = 0, skt = 0;
+      if (gsc ? (skg < 3) : (skt < 3)) {
+        gsc ? ++skg : ++skt;
+        uint32_t sk = gsc ? skg : skt;
         const uint32_t* uc =
             reinterpret_cast<const uint32_t*>(reader_.read_ptr());
         // Phase 754: phase 751 scanned only the 'skin' section. huduiskin also
@@ -2119,10 +2124,10 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_IM_LOAD_IMMEDIATE(
         for (uint32_t k = 0; k < 8u && k < size_dwords; ++k) {
           head += fmt::format("{:08X} ", uc[k]);
         }
-        XELOGI("GuideShaderSrc #{}: hash={:016X} dw={} | in huduiskin: {} "
+        XELOGI("ShaderSrc[{}] #{}: hash={:016X} dw={} | in huduiskin: {} "
                "{:08X} | ucode: {}",
-               sk, shader->ucode_data_hash(), size_dwords,
-               found ? "YES" : "no", at, head);
+               gsc ? "guide" : "title", sk, shader->ucode_data_hash(),
+               size_dwords, found ? "YES" : "no", at, head);
       }
     }
     // Phase 746: E915 never loads in guide scope but loads 325 times a run.
