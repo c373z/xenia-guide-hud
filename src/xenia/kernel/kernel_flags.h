@@ -58,6 +58,7 @@ DECLARE_bool(guide_patch_addr_passthru);
 DECLARE_int32(guide_nav_state);
 DECLARE_bool(guide_draw_root_object);
 DECLARE_bool(guide_resolve_paint_handles);
+DECLARE_bool(guide_draw_on_swap);
 DECLARE_bool(guide_transplant_ring);
 DECLARE_bool(guide_patch_class_reg);
 DECLARE_bool(guide_retarget_interrupt);

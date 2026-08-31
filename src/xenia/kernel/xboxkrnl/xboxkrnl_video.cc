@@ -3714,6 +3714,25 @@ void VdSwap_entry(
       EmitGuideCoverageOnce();
     }
   }
+  // Phase 654: run the Guide's composite draw here. Its intended home,
+  // VdCallGraphicsNotificationRoutines, is called once per run by this title
+  // and before the hook exists (phase 653), so the draw has never fired. The
+  // requirement the original comment states - the title's render thread,
+  // inside the title's frame - is satisfied here too.
+  if (::cvars::guide_draw_on_swap && guide_draw_fn_ && guide_draw_this_) {
+    if (auto* sth = XThread::GetCurrentThread()) {
+      static uint32_t swap_draws = 0;
+      uint32_t sn = ++swap_draws;
+      if (sn <= 3 || (sn % 300) == 0) {
+        XELOGI("GuideDrawOnSwap #{}: fn={:08X} this={:08X}", sn,
+               guide_draw_fn_, guide_draw_this_);
+      }
+      uint64_t sargs[] = {guide_draw_this_};
+      kernel_state()->processor()->Execute(sth->thread_state(),
+                                           guide_draw_fn_, sargs,
+                                           xe::countof(sargs));
+    }
+  }
   // Composite the Guide here. The title's D3D device is thread-affine and
   // this runs on the thread that owns it, inside the title's frame and just
   // before its swap - which is where the Guide is drawn on hardware. The

@@ -1051,6 +1051,15 @@ DEFINE_bool(guide_resolve_paint_handles, false,
 // Phase 578: pass null as the dispatcher's DC argument so hud skips its release
 // path and constructs its own, instead of releasing the bootstrap's DC and then
 // calling through it.
+DEFINE_bool(guide_draw_on_swap, false,
+            "Invoke the Guide's composite draw from VdSwap instead of "
+            "VdCallGraphicsNotificationRoutines. Phase 654: the latter is the "
+            "documented place for it, but PvZ calls it exactly once per run - "
+            "at startup, before the hook is installed - so the composite draw "
+            "has never fired (phase 653). VdSwap runs every frame on the same "
+            "thread at the same point in the frame.",
+            "Kernel");
+
 DEFINE_bool(guide_transplant_ring, false,
             "Copy the ring-association fields from mode 1's device onto the "
             "device the present path uses. Phase 650: the two devices are "
