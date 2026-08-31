@@ -4147,6 +4147,21 @@ void D3D12CommandProcessor::UpdateFixedFunctionState(
   viewport.Height = float(viewport_info.xy_extent[1]);
   viewport.MinDepth = viewport_info.z_min;
   viewport.MaxDepth = viewport_info.z_max;
+  // Phase 727: IssueDraw returning true means it did not bail, not that pixels
+  // were possible. Print the host viewport and scissor the backend actually
+  // programs - a zero-area either ends this immediately.
+  if (guide_in_draw_scope_) {
+    static uint32_t gvp = 0;
+    if (++gvp <= 4) {
+      XELOGI(
+          "GuideHostVP #{}: viewport x={} y={} w={} h={} z={}..{} | scissor "
+          "offset {},{} extent {}x{}",
+          gvp, viewport.TopLeftX, viewport.TopLeftY, viewport.Width,
+          viewport.Height, viewport.MinDepth, viewport.MaxDepth,
+          scissor.offset[0], scissor.offset[1], scissor.extent[0],
+          scissor.extent[1]);
+    }
+  }
   SetViewport(viewport);
 
   // Scissor.
