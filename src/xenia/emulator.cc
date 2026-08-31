@@ -6417,6 +6417,27 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                                 XELOGW("GuideTitleDev: title device is null");
                               }
                             }
+                            // Phase 630: 819FCE50 kicks the GPU through
+                            // [dev+0x2B14], which only mode-1 setup writes.
+                            // On the device the present path uses it is null,
+                            // and the resulting fault truncates the present.
+                            if (cvars::guide_fix_kick_ptr && dev) {
+                              uint32_t cur = xe::load_and_swap<uint32_t>(
+                                  mem->TranslateVirtual(dev + 0x2B14u));
+                              uint32_t m1 = kernel::xboxkrnl::GuideMode1Device();
+                              uint32_t src =
+                                  m1 ? xe::load_and_swap<uint32_t>(
+                                           mem->TranslateVirtual(m1 + 0x2B14u))
+                                     : 0u;
+                              XELOGI("GuideKickPtr: dev={:08X} [2B14]={:08X} "
+                                     "m1={:08X} m1[2B14]={:08X}",
+                                     dev, cur, m1, src);
+                              if (!cur && src) {
+                                xe::store_and_swap<uint32_t>(
+                                    mem->TranslateVirtual(dev + 0x2B14u), src);
+                                XELOGI("GuideKickPtr: installed {:08X}", src);
+                              }
+                            }
                             kernel::xboxkrnl::GuideBindDeviceRt(dev, ts);
                             if (cvars::guide_bind_boot_cmdbuf_kb) {
                               kernel::xboxkrnl::GuideBindDeviceCmdbuf(

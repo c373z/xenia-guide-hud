@@ -1051,6 +1051,15 @@ DEFINE_bool(guide_resolve_paint_handles, false,
 // Phase 578: pass null as the dispatcher's DC argument so hud skips its release
 // path and constructs its own, instead of releasing the bootstrap's DC and then
 // calling through it.
+DEFINE_bool(guide_fix_kick_ptr, false,
+            "Copy [dev+0x2B14] from the mode-1 device onto the device the "
+            "present path uses, when the latter is null. Phase 630: the GPU "
+            "kick at 819FCE50 stores through that pointer and faults when it "
+            "is null; runs that take that fault stop the present early "
+            "(819FEC64), runs that do not reach 819FECB0. Only the mode-1 "
+            "setup writes the field (81A0FF3C).",
+            "Kernel");
+
 DEFINE_bool(guide_prefer_mode1_device, false,
             "Prefer the device the mode-1 creator set up over the title's "
             "when rebinding. Phase 616: the existing preference for the "

@@ -1339,6 +1339,7 @@ static uint32_t guide_title_surface_ = 0;
 // published to any global and cannot be found by signature scan.
 static std::atomic<uint32_t> guide_mode1_device_{0};
 void GuideSetMode1Device(uint32_t dev) { guide_mode1_device_.store(dev); }
+uint32_t GuideMode1Device() { return guide_mode1_device_.load(); }
 
 // 819F4D28 arg5 (r7). See the header for why this is captured there rather
 // than at 81A0FE48: that function only runs on the mode-1 path, so a

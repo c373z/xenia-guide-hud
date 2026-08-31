@@ -17,6 +17,7 @@ namespace kernel {
 namespace xboxkrnl {
 
 void GuideSetMode1Device(uint32_t dev);
+uint32_t GuideMode1Device();
 
 // 819F4D28's fifth argument (r7), captured on entry. It is the pointer the
 // one real call site of 81A0FE48 passes as that function's second argument
