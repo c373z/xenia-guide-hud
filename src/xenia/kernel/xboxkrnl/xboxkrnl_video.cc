@@ -6212,16 +6212,25 @@ void VdSwap_entry(
                       xe::countof(ca2)));
                   // Report the node handler for each created instance, so
                   // phase 759's handler tally can be read as class names.
+                  // Phase 764: also read [node+4] on a FRESH instance. Phase
+                  // 678 measured it zero on all 1286 scene nodes; phase 680
+                  // dismissed it as an optional slot on a plausibility
+                  // argument. XuiButton derives from XuiControl, so if the
+                  // slot is inheritance a new XuiButton must have it set.
                   uint32_t oh = vrd(obuf2);
-                  uint32_t ofn = 0;
+                  uint32_t ofn = 0, obase = 0, onode = 0;
                   if (oh) {
                     uint32_t orec = GuideResolveHandle(oh);
                     if (orec) {
-                      uint32_t onode = vrd(orec + 0x0Cu);
-                      if (onode) ofn = vrd(onode + 0x1Cu);
+                      onode = vrd(orec + 0x0Cu);
+                      if (onode) {
+                        ofn = vrd(onode + 0x1Cu);
+                        obase = vrd(onode + 0x04u);
+                      }
                     }
                   }
-                  mk += fmt::format("{}:hr={:08X} fn={:08X} | ", nm, hr2, ofn);
+                  mk += fmt::format("{}:fn={:08X} base={:08X} | ", nm, ofn,
+                                    obase);
                 }
                 XELOGI("CreateByName: {}", mk);
                 // Phase 334: create a XuiShader and attach it to the draw-root
