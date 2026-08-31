@@ -4609,9 +4609,14 @@ void VdSwap_entry(
               if (ckpt_on) XELOGI("GuideCk: sv_reads");
               static uint32_t bind_logs = 0;
               if (bind_logs++ < 3)
-              XELOGI("Guide: reserve window widened -> cur[30]={:08X} "
-                     "end[34]={:08X} ({} bytes)",
-                     c2(cdev + 0x30u), c2(cdev + 0x34u), csize);
+              // Phase 685: read [+0x38] straight back. Phase 684 wrote it here
+              // and the census later saw xam's value, which is either "the
+              // store never happened" or "it was overwritten" - different
+              // bugs. Print dev too, so the census can be matched to it.
+              XELOGI("Guide: reserve window widened -> dev={:08X} cur[30]={:08X} "
+                     "end[34]={:08X} lim[38]={:08X} ({} bytes)",
+                     cdev, c2(cdev + 0x30u), c2(cdev + 0x34u),
+                     c2(cdev + 0x38u), csize);
               if (bind_logs < 4)
               XELOGI("Guide: cmdbuf init {:08X}(dev {:08X}, {:08X}, {}) "
                      "-> {:08X}; base={:08X} cursor={:08X} limit={:08X}",
@@ -5125,10 +5130,16 @@ void VdSwap_entry(
             sc_begin_cursor = guide_cmdbuf_base_;
             static uint32_t sc_b = 0;
             if (++sc_b <= 3) {
+              // Phase 685: print the device triple here too. This site runs
+              // between the widen (which provably writes lim[38] correctly)
+              // and the census (which sees xam's value), so it bisects the
+              // window the overwrite happens in.
               XELOGI("GuideCtx2 begin: dev={:08X} cursor={:08X} "
-                     "base={:08X} limit={:08X}",
+                     "base={:08X} limit={:08X} | [30]={:08X} [34]={:08X} "
+                     "[38]={:08X}",
                      sc_dev, sc_begin_cursor, sr(sc_dev + 0x2B48u),
-                     sr(sc_dev + 0x2B50u));
+                     sr(sc_dev + 0x2B50u), sr(sc_dev + 0x30u),
+                     sr(sc_dev + 0x34u), sr(sc_dev + 0x38u));
             }
           }
         }
