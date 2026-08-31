@@ -70,6 +70,7 @@ DECLARE_bool(guide_patch_resolve_dest);
 DECLARE_bool(guide_submit_from_base);
 DECLARE_bool(guide_nop_waits);
 DECLARE_bool(guide_ctx2_kick_ptr);
+DECLARE_bool(guide_nop_draws);
 DECLARE_bool(guide_retarget_interrupt);
 DECLARE_bool(guide_dc_after_mode1);
 DECLARE_bool(guide_render_on_xam_device);

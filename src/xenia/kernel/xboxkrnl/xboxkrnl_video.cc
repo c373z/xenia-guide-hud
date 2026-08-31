@@ -8758,7 +8758,8 @@ void VdSwap_entry(
         // depend on it - and dropping the former hung the run. That is the
         // same nested-flag trap catalogued in 616, 692, 701 and 704, authored
         // here by me. Run the walk if either flag wants it.
-        if ((::cvars::guide_patch_resolve_dest || ::cvars::guide_nop_waits) &&
+        if ((::cvars::guide_patch_resolve_dest || ::cvars::guide_nop_waits ||
+             ::cvars::guide_nop_draws) &&
             xbuf && words) {
           auto* rm = kernel_state()->memory();
           if (!resolve_buf && ::cvars::guide_patch_resolve_dest) {
@@ -8774,7 +8775,8 @@ void VdSwap_entry(
                      kResolveSize / 1024);
             }
           }
-          if (resolve_buf || ::cvars::guide_nop_waits) {
+          if (resolve_buf || ::cvars::guide_nop_waits ||
+              ::cvars::guide_nop_draws) {
             uint32_t patched = 0, nopped = 0;
             for (uint32_t i = 0; i < words;) {
               uint32_t hd = sd(xbuf + i * 4);
@@ -8798,6 +8800,13 @@ void VdSwap_entry(
                 // hangs the executor outright. Preserve the count so the body
                 // is still skipped; only the opcode changes.
                 uint32_t op3 = (hd >> 8) & 0x7Fu;
+                if (::cvars::guide_nop_draws &&
+                    (op3 == 0x22u || op3 == 0x36u)) {
+                  uint32_t nd = (hd & ~uint32_t(0x7F << 8)) | (0x10u << 8);
+                  xe::store_and_swap<uint32_t>(
+                      rm->TranslateVirtual(xbuf + i * 4), nd);
+                  ++nopped;
+                }
                 if (::cvars::guide_nop_waits && op3 == 0x3Cu) {
                   uint32_t nop = (hd & ~uint32_t(0x7F << 8)) | (0x10u << 8);
                   xe::store_and_swap<uint32_t>(

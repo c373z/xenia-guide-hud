@@ -2631,6 +2631,33 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
     return IssueCopy();
   }
 
+  // Phase 708: the Guide's stream never writes the viewport registers (699),
+  // so its geometry is transformed by whatever the title left there. Report
+  // what the colour draws actually inherit, before assuming it is wrong.
+  if (guide_in_draw_scope_) {
+    static uint32_t gdn = 0;
+    if (++gdn <= 3) {
+      auto f = [&regs](uint32_t r) {
+        float v;
+        uint32_t u = regs[r];
+        std::memcpy(&v, &u, sizeof(v));
+        return v;
+      };
+      XELOGI(
+          "GuideDrawState #{}: vte={:08X} vp x({},{}) y({},{}) z({},{}) "
+          "winscissor {:08X}..{:08X} screenscissor {:08X}..{:08X} "
+          "surface={:08X}",
+          gdn, regs[XE_GPU_REG_PA_CL_VTE_CNTL], f(XE_GPU_REG_PA_CL_VPORT_XSCALE),
+          f(XE_GPU_REG_PA_CL_VPORT_XOFFSET), f(XE_GPU_REG_PA_CL_VPORT_YSCALE),
+          f(XE_GPU_REG_PA_CL_VPORT_YOFFSET), f(XE_GPU_REG_PA_CL_VPORT_ZSCALE),
+          f(XE_GPU_REG_PA_CL_VPORT_ZOFFSET),
+          regs[XE_GPU_REG_PA_SC_WINDOW_SCISSOR_TL],
+          regs[XE_GPU_REG_PA_SC_WINDOW_SCISSOR_BR],
+          regs[XE_GPU_REG_PA_SC_SCREEN_SCISSOR_TL],
+          regs[XE_GPU_REG_PA_SC_SCREEN_SCISSOR_BR],
+          regs[XE_GPU_REG_RB_SURFACE_INFO]);
+    }
+  }
   if (regs.Get<reg::RB_SURFACE_INFO>().surface_pitch == 0) {
     // Doesn't actually draw.
     // TODO(Triang3l): Do something so memexport still works in this case maybe?

@@ -1173,6 +1173,16 @@ DEFINE_bool(guide_ctx2_kick_ptr, false,
             "16 to 0. Same fix, at a site that runs.",
             "Kernel");
 
+DEFINE_bool(guide_nop_draws, false,
+            "Rewrite DRAW_INDX and DRAW_INDX_2 to NOP in the Guide's buffer, "
+            "keeping every register write. Phase 708: the presented frame is "
+            "entirely black with the Guide's stream running; this separates "
+            "'the draws paint black' from 'the state writes alone blank the "
+            "frame'. If the frame returns to normal game output, the geometry "
+            "and its resolve are responsible; if it stays black, the 949 "
+            "register writes are.",
+            "Kernel");
+
 DEFINE_bool(guide_retarget_interrupt, false,
             "Re-register the graphics interrupt callback with the device the "
             "present path uses. Phase 645: xam registers it with mode 1's "
