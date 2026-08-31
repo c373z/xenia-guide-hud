@@ -22,7 +22,22 @@ void COMMAND_PROCESSOR::ExecuteIndirectBuffer(uint32_t ptr,
     // chiplets l3
     reader_.BeginPrefetchedRead<swcache::PrefetchTag::Level2>(
         COMMAND_PROCESSOR::GetCurrentRingReadCount());
+    // Phase 635: the worker blocks inside an indirect buffer dispatched from
+    // xam's ring. Log each packet header for buffers outside the title's
+    // regions, so the last line printed is the packet that did not return.
+    const bool guide_ib_watch =
+        cvars::guide_cp_probe && (ptr & 0xFF000000u) != 0x1F000000u;
+    uint32_t guide_ib_pkt = 0;
     do {
+      if (guide_ib_watch && guide_ib_pkt < 32) {
+        ++guide_ib_pkt;
+        uint32_t off = uint32_t(reader_.read_offset());
+        uint32_t hdr = xe::load_and_swap<uint32_t>(
+            memory_->TranslatePhysical(ptr + off));
+        XELOGI("CPIBPkt {:08X} #{}: off={:X} hdr={:08X} type={} op={:02X}",
+               ptr, guide_ib_pkt, off, hdr, hdr >> 30,
+               (hdr >> 30) == 3 ? ((hdr >> 8) & 0x7F) : 0);
+      }
       if (COMMAND_PROCESSOR::ExecutePacket()) {
         continue;
       } else {
