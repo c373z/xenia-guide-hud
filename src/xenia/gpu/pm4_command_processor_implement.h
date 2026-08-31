@@ -2113,10 +2113,16 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_IM_LOAD_IMMEDIATE(
           }
           if (found) break;
         }
-        XELOGI("GuideShaderSrc #{}: hash={:016X} dw={} first={:08X} | in skin "
-               "section: {} {:08X}",
+        // Phase 755: print eight dwords so the ucode can be searched for in
+        // xam's own image offline. One dword was not enough to look for.
+        std::string head;
+        for (uint32_t k = 0; k < 8u && k < size_dwords; ++k) {
+          head += fmt::format("{:08X} ", uc[k]);
+        }
+        XELOGI("GuideShaderSrc #{}: hash={:016X} dw={} | in huduiskin: {} "
+               "{:08X} | ucode: {}",
                sk, shader->ucode_data_hash(), size_dwords,
-               size_dwords ? uc[0] : 0u, found ? "YES" : "no", at);
+               found ? "YES" : "no", at, head);
       }
     }
     // Phase 746: E915 never loads in guide scope but loads 325 times a run.
