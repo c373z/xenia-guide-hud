@@ -930,6 +930,28 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_INDIRECT_BUFFER(
   // Phase 534: if this IB turns out to contain the Guide's draws, its address
   // and length are the replayable range. Save and restore the marker so nested
   // buffers attribute to the innermost one that actually drew.
+  // Phase 592: the Guide emits ~11.6KB of packets per frame into a buffer we
+  // bound, and gpu_draws never moves. Either that buffer is never handed to
+  // the CP or it is handed over and contains nothing that draws. Log each
+  // distinct 1MB region an IB comes from - compact enough to leave on, and
+  // it answers which of the two is true.
+  {
+    static uint32_t seen[24] = {};
+    static uint32_t seen_n = 0;
+    uint32_t region = GpuToCpu(list_ptr) & 0xFFF00000u;
+    bool known = false;
+    for (uint32_t i = 0; i < seen_n; ++i) {
+      if (seen[i] == region) {
+        known = true;
+        break;
+      }
+    }
+    if (!known && seen_n < 24) {
+      seen[seen_n++] = region;
+      XELOGI("GuideIBRegion #{}: {:08X} (first ptr {:08X}, len {})", seen_n,
+             region, GpuToCpu(list_ptr), list_length);
+    }
+  }
   bool saved_had = guide_ib_had_draw_;
   guide_ib_had_draw_ = false;
   COMMAND_PROCESSOR::ExecuteIndirectBuffer(GpuToCpu(list_ptr), list_length);

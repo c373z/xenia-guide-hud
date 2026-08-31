@@ -927,7 +927,10 @@ uint32_t GuideBindDeviceCmdbuf(uint32_t dev, void* ts, uint32_t kb) {
   uint32_t csize = kb * 1024u;
   static uint32_t cbuf = 0;
   if (!cbuf) {
-    cbuf = mem->SystemHeapAlloc(csize, 4096);
+    // Phase 592: this used the default (virtual) heap and got 0x3008F000,
+    // while every buffer xam uses itself sits at 0x40xxxxxx. A command
+    // buffer has to be memory the GPU can fetch from, so allocate physical.
+    cbuf = mem->SystemHeapAlloc(csize, 4096, kSystemHeapPhysical);
     if (cbuf) {
       std::memset(mem->TranslateVirtual(cbuf), 0, csize);
     }
