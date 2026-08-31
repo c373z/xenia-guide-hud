@@ -3730,8 +3730,19 @@ void VdSwap_entry(
   // and before the hook exists (phase 653), so the draw has never fired. The
   // requirement the original comment states - the title's render thread,
   // inside the title's frame - is satisfied here too.
-  if (::cvars::guide_draw_on_swap && guide_draw_fn_ && guide_draw_this_) {
+  // Phase 662: the Guide's present calls VdSwap itself (819FE73C is
+  // `bl VdSwap`), so invoking the draw from here re-enters this function and
+  // the render never returns. Guard it: one Guide draw at a time, and never
+  // from inside one.
+  static thread_local bool in_guide_swap_draw = false;
+  if (::cvars::guide_draw_on_swap && guide_draw_fn_ && guide_draw_this_ &&
+      !in_guide_swap_draw) {
     if (auto* sth = XThread::GetCurrentThread()) {
+      in_guide_swap_draw = true;
+      struct ClearOnExit {
+        bool* f;
+        ~ClearOnExit() { *f = false; }
+      } clear_on_exit{&in_guide_swap_draw};
       static uint32_t swap_draws = 0;
       uint32_t sn = ++swap_draws;
       if (sn <= 3 || (sn % 300) == 0) {
