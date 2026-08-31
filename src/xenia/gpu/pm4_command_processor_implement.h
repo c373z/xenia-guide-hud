@@ -2025,6 +2025,26 @@ uint32_t COMMAND_PROCESSOR::ExecutePrimaryBuffer(uint32_t read_index,
   const uint32_t guide_entry_ring = primary_buffer_ptr_;
   bool guide_ring_changed = false;
   do {
+    // Phase 621: name the packet the worker sticks on. Log the header and
+    // its offset for the first packets executed out of a ring we have not
+    // logged before, so the last line printed is the one that did not return.
+    if (cvars::guide_cp_probe) {
+      static uint32_t pk_ring = 0;
+      static uint32_t pk_n = 0;
+      if (pk_ring != primary_buffer_ptr_) {
+        pk_ring = primary_buffer_ptr_;
+        pk_n = 0;
+      }
+      if (pk_n < 48) {
+        ++pk_n;
+        uint32_t off = uint32_t(reader_.read_offset());
+        uint32_t hdr = xe::load_and_swap<uint32_t>(
+            memory_->TranslatePhysical(primary_buffer_ptr_ + off));
+        XELOGI("CPPkt {}: off={:X} idx={} hdr={:08X} type={} op={:02X}", pk_n,
+               off, off / 4, hdr, hdr >> 30,
+               (hdr >> 30) == 3 ? ((hdr >> 8) & 0x7F) : 0);
+      }
+    }
     if (cvars::guide_cp_probe && ++guide_spin == 100000u) {
       XELOGW("CPExec: primary loop still running after 100000 packets "
              "ring={:08X} read_count={} rptr_off={}",
