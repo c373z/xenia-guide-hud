@@ -8828,6 +8828,21 @@ void VdSwap_entry(
                     ++patched;
                   }
                 }
+                // Phase 736: does the Guide's stream write SQ_PROGRAM_CNTL
+                // (0x2180) at all? If not, its shader loads never become
+                // active.
+                {
+                  static uint32_t pc_seen = 0, pc_logged = 0;
+                  for (uint32_t k2 = 0; k2 < cnt; ++k2) {
+                    uint32_t r2 = one ? base : base + k2;
+                    if (r2 == 0x2180u) ++pc_seen;
+                  }
+                  if (pc_seen && pc_logged < 3) {
+                    ++pc_logged;
+                    XELOGI("GuideProgCntl: stream writes 0x2180 {} times so far",
+                           pc_seen);
+                  }
+                }
                 const uint32_t keep_lo =
                     ::cvars::guide_keep_surface_regs
                         ? 0x2000u

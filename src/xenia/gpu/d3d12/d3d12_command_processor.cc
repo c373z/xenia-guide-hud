@@ -2900,8 +2900,14 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
     static uint32_t psg = 0, pst = 0;
     bool g = guide_in_draw_scope_ || xe::gpu::g_guide_replaying;
     if ((g ? psg : pst)++ < 4) {
-      XELOGI("PSO[{}] #{}: handle={} d3d12={} vs_hash={:016X} ps_hash={:016X}",
-             g ? "guide" : "title", draw_index, pipeline_handle,
+      // Phase 736: SQ_PROGRAM_CNTL selects which loaded shaders are active.
+      // If the Guide never writes it, its 50 IM_LOAD_IMMEDIATE loads sit
+      // unused and the title's shaders stay bound - which is what phase 735
+      // measured.
+      XELOGI("PSO[{}] #{}: progcntl={:08X} handle={} d3d12={} "
+             "vs_hash={:016X} ps_hash={:016X}",
+             g ? "guide" : "title", draw_index,
+             regs[XE_GPU_REG_SQ_PROGRAM_CNTL], pipeline_handle,
              static_cast<const void*>(
                  pipeline_cache_->GetD3D12PipelineByHandle(pipeline_handle)),
              vertex_shader ? vertex_shader->ucode_data_hash() : 0ull,
