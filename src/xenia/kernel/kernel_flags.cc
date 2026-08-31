@@ -1051,6 +1051,14 @@ DEFINE_bool(guide_resolve_paint_handles, false,
 // Phase 578: pass null as the dispatcher's DC argument so hud skips its release
 // path and constructs its own, instead of releasing the bootstrap's DC and then
 // calling through it.
+DEFINE_bool(guide_skin_dispatch_real, false,
+            "Install the real object 0x81D6CA00 into [81D6C9C8] rather than a "
+            "fabricated stand-in. Phase 603: 819106F8 compares [81D6C9C8] "
+            "against 81D6CA00 and, when they differ, calls vtable[0] on that "
+            "object - which fails and is the 8000FFFF the render host "
+            "forwards. The comparison wants the real object, so give it one.",
+            "Kernel");
+
 DEFINE_bool(guide_render_on_title_device, false,
             "Point [[bootDC+0x1CC]+0x0C] at the title's D3D device so hud "
             "renders through it. Phase 593: hud renders against 40870D00, "

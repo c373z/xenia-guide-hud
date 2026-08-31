@@ -5202,7 +5202,16 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                 if (cvars::guide_patch_skin_dispatch) {
                   uint32_t blk = ks->memory()->SystemHeapAlloc(0x80, 16);
                   uint32_t nopfn = kernel::xboxkrnl::GuideNopFn();
-                  if (blk && nopfn) {
+                  if (cvars::guide_skin_dispatch_real) {
+                    // Phase 603: this is the EARLIEST installer, and the one
+                    // that decides what 819106F8 sees at render-host time.
+                    // Patching only the later sites left the fabricated block
+                    // in place for the call that matters.
+                    auto* m = ks->memory();
+                    xe::store_and_swap<uint32_t>(
+                        m->TranslateVirtual(0x81D6C9C8u), 0x81D6CA00u);
+                    XELOGI("LLE xam: [81D6C9C8] <- real object 81D6CA00");
+                  } else if (blk && nopfn) {
                     auto* m = ks->memory();
                     std::memset(m->TranslateVirtual(blk), 0, 0x80);
                     uint32_t vt = blk + 0x40u;

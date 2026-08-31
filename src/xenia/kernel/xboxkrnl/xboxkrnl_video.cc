@@ -770,6 +770,16 @@ static void GuideEnsureStandin(const char* tag) {
     XELOGI("Standin @{}: already {:08X}", tag, cur);
     return;
   }
+  // Phase 603: 819106F8 compares [81D6C9C8] against the static object
+  // 81D6CA00 and routes to a failing vtable[0] call when they differ. A
+  // fabricated block always differs, so the stand-in itself is what selects
+  // the failing path. Offer the real object instead.
+  if (::cvars::guide_skin_dispatch_real) {
+    xe::store_and_swap<uint32_t>(m->TranslateVirtual(0x81D6C9C8u),
+                                 0x81D6CA00u);
+    XELOGI("Standin @{}: installed real object 81D6CA00", tag);
+    return;
+  }
   uint32_t blk = m->SystemHeapAlloc(0x80, 16);
   uint32_t nopfn = GuideNopFn();
   if (!blk || !nopfn) {
@@ -1449,7 +1459,12 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
       auto* sm = kernel_state()->memory();
       uint32_t cur = xe::load_and_swap<uint32_t>(
           sm->TranslateVirtual(0x81D6C9C8u));
-      if (!cur) {
+      if (!cur && ::cvars::guide_skin_dispatch_real) {
+        // Phase 603: the comparison at 8191079C wants the real 81D6CA00.
+        xe::store_and_swap<uint32_t>(sm->TranslateVirtual(0x81D6C9C8u),
+                                     0x81D6CA00u);
+        XELOGI("GuideBootstrap: [81D6C9C8] <- real object 81D6CA00");
+      } else if (!cur) {
         uint32_t blk = sm->SystemHeapAlloc(0x80, 16);
         uint32_t nopfn = GuideNopFn();
         if (blk && nopfn) {
