@@ -6436,6 +6436,27 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                                 xe::store_and_swap<uint32_t>(
                                     mem->TranslateVirtual(dev + 0x2B14u), src);
                                 XELOGI("GuideKickPtr: installed {:08X}", src);
+                              } else if (!cur) {
+                                // Phase 631: mode 1's device is never
+                                // captured here, so there is nothing to copy.
+                                // 81A0FF3C stores the result of
+                                // 81A0A290(0x20, 5, 1) - a 32-byte block - and
+                                // the kick at 819FCE50 only writes [ptr+4].
+                                // A zeroed block of the right size turns the
+                                // fault into a harmless store. That does not
+                                // kick the GPU, but neither does faulting.
+                                uint32_t blk =
+                                    mem->SystemHeapAlloc(0x20, 16,
+                                                         kSystemHeapPhysical);
+                                if (blk) {
+                                  std::memset(mem->TranslateVirtual(blk), 0,
+                                              0x20);
+                                  xe::store_and_swap<uint32_t>(
+                                      mem->TranslateVirtual(dev + 0x2B14u),
+                                      blk);
+                                  XELOGI("GuideKickPtr: substituted a zeroed "
+                                         "0x20 block at {:08X}", blk);
+                                }
                               }
                             }
                             kernel::xboxkrnl::GuideBindDeviceRt(dev, ts);
