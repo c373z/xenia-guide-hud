@@ -3746,8 +3746,35 @@ void VdSwap_entry(
       static uint32_t swap_draws = 0;
       uint32_t sn = ++swap_draws;
       if (sn <= 3 || (sn % 300) == 0) {
-        XELOGI("GuideDrawOnSwap #{}: fn={:08X} this={:08X}", sn,
-               guide_draw_fn_, guide_draw_this_);
+        // Phase 672: the render sends ids 0 and 2 to [this+8] - the scene
+        // root - and id 2's propagation finds [root+0x1C] == 0. Log the root
+        // and its collection, so "the root has no children" is read off the
+        // object rather than inferred from a branch.
+        auto* rm = kernel_state()->memory();
+        // Guard by range, not just non-zero: a garbage pointer translated and
+        // dereferenced faults the host, which is what the first version of
+        // this probe did (4 host faults, and the draw stopped happening).
+        auto rr = [rm](uint32_t a) {
+          if (a < 0x40000000u || a >= 0x50000000u) {
+            return 0u;
+          }
+          return xe::load_and_swap<uint32_t>(rm->TranslateVirtual(a));
+        };
+        // [this+8] is a XUI *handle*, not a pointer - 0001012F, matching the
+        // handle in the chain trace. Resolve it through the object table
+        // before reading fields; the first version read the handle as an
+        // address and its range guard returned zeros, which looked exactly
+        // like "the root has no children".
+        uint32_t root_h = rr(guide_draw_this_ + 8u);
+        if (!root_h) {
+          root_h = xe::load_and_swap<uint32_t>(
+              rm->TranslateVirtual(guide_draw_this_ + 8u));
+        }
+        uint32_t root = GuideResolveHandle(root_h);
+        XELOGI("GuideDrawOnSwap #{}: fn={:08X} this={:08X} root_h={:08X} "
+               "root={:08X} root[+18]={:08X} root[+1C]={} vt={:08X}",
+               sn, guide_draw_fn_, guide_draw_this_, root_h, root,
+               rr(root + 0x18u), rr(root + 0x1Cu), rr(root));
       }
       // Phase 670: snapshot the coverage counters across ONE composite draw.
       // Totals over a whole run are a union of paths and were over-read as
