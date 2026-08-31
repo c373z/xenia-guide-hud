@@ -17,6 +17,7 @@ DECLARE_bool(trace_gpu_stream);
 DECLARE_path(dump_shaders);
 
 DECLARE_bool(vsync);
+DECLARE_bool(guide_cp_probe);
 DECLARE_bool(guide_resolve_after_draw);
 DECLARE_bool(guide_verify_resolve);
 DECLARE_bool(guide_force_opaque);

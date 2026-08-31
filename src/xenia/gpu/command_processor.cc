@@ -341,7 +341,7 @@ void CommandProcessor::WorkerThreadMain() {
     // handover is a positive result rather than an untested probe.
     {
       static uint32_t hb = 0;
-      if ((++hb % 400u) == 1u) {
+      if (cvars::guide_cp_probe && (++hb % 400u) == 1u) {
         XELOGI("CPBeat {}: ring={:08X} rptr={} wptr={} pending={}", hb,
                primary_buffer_ptr_, read_ptr_index_, write_ptr_index_.load(),
                pending_fns_.empty() ? 0 : 1);
@@ -354,11 +354,11 @@ void CommandProcessor::WorkerThreadMain() {
       pending_fns_.pop();
       static uint32_t fn_seq = 0;
       uint32_t seq = ++fn_seq;
-      if (seq < 12 || (seq % 200) == 0) {
+      if (cvars::guide_cp_probe && (seq < 12 || (seq % 200) == 0)) {
         XELOGI("CPFn in #{}", seq);
       }
       fn();
-      if (seq < 12 || (seq % 200) == 0) {
+      if (cvars::guide_cp_probe && (seq < 12 || (seq % 200) == 0)) {
         XELOGI("CPFn out #{}", seq);
       }
     }
@@ -375,10 +375,11 @@ void CommandProcessor::WorkerThreadMain() {
       // itself: it sits between the heartbeat and every probe that fires.
       static uint32_t pw = 0;
       uint32_t pw_seq = ++pw;
+      if (cvars::guide_cp_probe)
       XELOGI("CPWait enter #{} ring={:08X} rptr={} wptr={}", pw_seq,
              primary_buffer_ptr_, read_ptr_index_, write_ptr_index_.load());
       PrepareForWait();
-      XELOGI("CPWait prepared #{}", pw_seq);
+      if (cvars::guide_cp_probe) XELOGI("CPWait prepared #{}", pw_seq);
       uint32_t loop_count = 0;
       do {
         // If we spin around too much, revert to a "low-power" state.
@@ -397,7 +398,7 @@ void CommandProcessor::WorkerThreadMain() {
         // 2,000,000 was mis-calibrated: past 500 iterations this loop waits
         // 2ms each time, so that threshold needs ~4000s to trigger and the
         // probe silently never fired. 2000 iterations is a few seconds.
-        if ((loop_count % 2000u) == 0u) {
+        if (cvars::guide_cp_probe && (loop_count % 2000u) == 0u) {
           XELOGW("CPStall: ring={:08X} rptr={} wptr={} pending={}",
                  primary_buffer_ptr_, read_ptr_index_, write_ptr_index,
                  pending_fns_.empty() ? 0 : 1);
@@ -406,6 +407,7 @@ void CommandProcessor::WorkerThreadMain() {
                (write_ptr_index == 0xBAADF00D ||
                 read_ptr_index_ == write_ptr_index));
       ReturnFromWait();
+      if (cvars::guide_cp_probe)
       XELOGI("CPWait returned #{} rptr={} wptr={}", pw_seq, read_ptr_index_,
              write_ptr_index);
       if (!worker_running_ || !pending_fns_.empty()) {
@@ -421,7 +423,8 @@ void CommandProcessor::WorkerThreadMain() {
     {
       static uint32_t exec_logs = 0;
       static uint32_t last_ring = 0;
-      if (primary_buffer_ptr_ != last_ring || exec_logs < 6) {
+      if (cvars::guide_cp_probe &&
+          (primary_buffer_ptr_ != last_ring || exec_logs < 6)) {
         last_ring = primary_buffer_ptr_;
         ++exec_logs;
         XELOGI("CPExec: ring={:08X} size={:X} rptr={} wptr={}",
@@ -439,7 +442,8 @@ void CommandProcessor::WorkerThreadMain() {
       // ring change as well, like CPExec.
       static uint32_t ret_logs = 0;
       static uint32_t ret_last_ring = 0;
-      if (ret_logs < 8 || primary_buffer_ptr_ != ret_last_ring) {
+      if (cvars::guide_cp_probe &&
+          (ret_logs < 8 || primary_buffer_ptr_ != ret_last_ring)) {
         ++ret_logs;
         ret_last_ring = primary_buffer_ptr_;
         XELOGI("CPExecRet: ring={:08X} rptr={}", primary_buffer_ptr_,

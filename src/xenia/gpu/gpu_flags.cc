@@ -138,6 +138,15 @@ DEFINE_bool(
 // is written after the displayed pixels were copied out and is cleared unseen.
 // This issues a second resolve after the Guide has drawn, immediately before the
 // swap, reusing the copy registers the title's own resolve just used.
+DEFINE_bool(guide_cp_probe, false,
+            "Log command-processor internals: worker heartbeat, primary "
+            "buffer entry/exit, the stall wait, swaps and pending functions. "
+            "Phase 617: these were added unconditionally while diagnosing the "
+            "ring handover; the wait path alone emits three lines per entry, "
+            "which floods a normal run. The ring-change fixes they were "
+            "written to investigate are NOT gated by this - only the logging.",
+            "GPU");
+
 DEFINE_bool(guide_resolve_after_draw, false,
             "Issue a second EDRAM resolve after the Guide's draws and before "
             "the swap, so its geometry reaches the front buffer.",

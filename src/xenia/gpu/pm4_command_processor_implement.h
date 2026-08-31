@@ -919,7 +919,7 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
   {
     static uint32_t sw = 0;
     ++sw;
-    if (sw < 6 || (sw % 60) == 0) {
+    if (cvars::guide_cp_probe && (sw < 6 || (sw % 60) == 0)) {
       XELOGI("CPSwap in #{} fb={:08X}", sw, frontbuffer_ptr);
     }
   }
@@ -928,7 +928,7 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
   {
     static uint32_t swo = 0;
     ++swo;
-    if (swo < 6 || (swo % 60) == 0) {
+    if (cvars::guide_cp_probe && (swo < 6 || (swo % 60) == 0)) {
       XELOGI("CPSwap out #{}", swo);
     }
   }
@@ -1079,7 +1079,7 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_WAIT_REG_MEM(
   // Phase 613: this loop waits forever if the polled value never changes,
   // which is the shape of the post-handover hang. Report a wait that has
   // clearly stopped progressing, with what it is waiting on.
-      if (++guide_wait_spins == 400u) {
+      if (cvars::guide_cp_probe && ++guide_wait_spins == 400u) {
         XELOGW("CPWaitMem: still waiting after 400 polls - is_memory={} "
                "addr={:08X} ref={:08X} mask={:08X}",
                is_memory ? 1 : 0, poll_reg_addr, ref, mask);
@@ -2025,7 +2025,7 @@ uint32_t COMMAND_PROCESSOR::ExecutePrimaryBuffer(uint32_t read_index,
   const uint32_t guide_entry_ring = primary_buffer_ptr_;
   bool guide_ring_changed = false;
   do {
-    if (++guide_spin == 100000u) {
+    if (cvars::guide_cp_probe && ++guide_spin == 100000u) {
       XELOGW("CPExec: primary loop still running after 100000 packets "
              "ring={:08X} read_count={} rptr_off={}",
              primary_buffer_ptr_, reader_.read_count(), reader_.read_offset());
