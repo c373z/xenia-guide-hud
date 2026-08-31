@@ -371,6 +371,21 @@ void CommandProcessor::WorkerThreadMain() {
     }
     assert_true(read_ptr_index_ != write_ptr_index);
 
+    // Phase 611: the read pointer never advances after the Guide's ring
+    // handover while the write pointer sits at 61. Log entry to the primary
+    // buffer, rate-limited, so "worker blocked before here" and "worker
+    // running but the buffer does nothing" are distinguishable.
+    {
+      static uint32_t exec_logs = 0;
+      static uint32_t last_ring = 0;
+      if (primary_buffer_ptr_ != last_ring || exec_logs < 6) {
+        last_ring = primary_buffer_ptr_;
+        ++exec_logs;
+        XELOGI("CPExec: ring={:08X} size={:X} rptr={} wptr={}",
+               primary_buffer_ptr_, primary_buffer_size_, read_ptr_index_,
+               write_ptr_index);
+      }
+    }
     // Execute. Note that we handle wraparound transparently.
     read_ptr_index_ = ExecutePrimaryBuffer(read_ptr_index_, write_ptr_index);
 
