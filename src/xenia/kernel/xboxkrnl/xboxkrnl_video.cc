@@ -8563,6 +8563,65 @@ void VdSwap_entry(
             XELOGI("CompositeScan #{}: brute-force DRAW_INDX(22)={} "
                    "DRAW_INDX_2(36)={} over {} words",
                    drawbr, bf22, bf36, nw);
+            // Phase 699: emitting a draw and rasterising one are different
+            // claims. Shadow the register file while walking and report the
+            // frame state each draw actually sees - the question phases
+            // 593-650 could not ask because there were no draws to attach it
+            // to. Register indices from Xenia's own register_table.inc.
+            {
+              std::unordered_map<uint32_t, uint32_t> regs;
+              uint32_t shown = 0;
+              uint32_t modes[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+              for (uint32_t i = 0; i < nw;) {
+                uint32_t hd = cq(ws + i * 4u);
+                uint32_t ty = hd >> 30;
+                if (ty == 0u) {
+                  uint32_t cnt = ((hd >> 16) & 0x3FFFu) + 1u;
+                  uint32_t base = hd & 0x7FFFu;
+                  bool one = ((hd >> 15) & 1u) != 0u;
+                  for (uint32_t k = 0; k < cnt && i + 1u + k < nw; ++k) {
+                    regs[one ? base : base + k] = cq(ws + (i + 1u + k) * 4u);
+                  }
+                  i += cnt + 1u;
+                } else if (ty == 3u) {
+                  uint32_t op = (hd >> 8) & 0x7Fu;
+                  uint32_t cnt = ((hd >> 16) & 0x3FFFu) + 1u;
+                  if (op == 0x22u || op == 0x36u) {
+                    // Phase 699: tally every draw's edram mode, not just the
+                    // first few. kCopy (6) is the resolve that would move the
+                    // Guide's colour out of EDRAM; its absence is the whole
+                    // question.
+                    uint32_t mc = 0xFFFFFFFFu;
+                    {
+                      auto it = regs.find(0x2208u);
+                      if (it != regs.end()) mc = it->second & 7u;
+                    }
+                    if (mc <= 7u) ++modes[mc];
+                    ++shown;
+                  }
+                  if ((op == 0x22u || op == 0x36u) && shown <= 3u) {
+                    auto g = [&regs](uint32_t r) {
+                      auto it = regs.find(r);
+                      return it == regs.end() ? 0xFFFFFFFFu : it->second;
+                    };
+                    XELOGI(
+                        "CompositeDraw #{}.{} op={:02X} surface={:08X} "
+                        "color={:08X} modectl={:08X} scissorTL={:08X} "
+                        "vpXs={:08X} vpXo={:08X} vpYs={:08X}",
+                        drawbr, shown, op, g(0x2000), g(0x2001), g(0x2208),
+                        g(0x2081), g(0x210F), g(0x2110), g(0x2111));
+                  }
+                  i += cnt + 1u;
+                } else {
+                  ++i;
+                }
+              }
+              XELOGI(
+                  "CompositeModes #{}: draws={} | mode0={} mode1={} mode2={} "
+                  "mode3={} kColorDepth(4)={} mode5={} kCopy(6)={} mode7={}",
+                  drawbr, shown, modes[0], modes[1], modes[2], modes[3],
+                  modes[4], modes[5], modes[6], modes[7]);
+            }
           }
         }
       }
