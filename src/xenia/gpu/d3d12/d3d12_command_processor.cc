@@ -2702,6 +2702,23 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
     }
   }
 
+  // Phase 718: every geometric stage checks out and no pixels appear, so ask
+  // the backend what it thinks of the draw. IsRasterizationPotentiallyDone
+  // gates a "this draw has no effect" return, and a pixel shader that writes
+  // no colour target produces the same silence.
+  if (guide_in_draw_scope_) {
+    static uint32_t gps = 0;
+    if (++gps <= 4) {
+      XELOGI(
+          "GuidePixelShader #{}: rasterization_done={} polygonal={} "
+          "edram_mode={} ps={} writes_color={:X} kills={} depth={}",
+          gps, is_rasterization_done ? 1 : 0, primitive_polygonal ? 1 : 0,
+          uint32_t(edram_mode), pixel_shader ? "yes" : "NULL",
+          pixel_shader ? pixel_shader->writes_color_targets() : 0u,
+          pixel_shader && pixel_shader->kills_pixels() ? 1 : 0,
+          pixel_shader && pixel_shader->writes_depth() ? 1 : 0);
+    }
+  }
   const bool memexport_used_pixel =
       pixel_shader && (pixel_shader->memexport_eM_written() != 0);
   const bool memexport_used = memexport_used_vertex || memexport_used_pixel;
