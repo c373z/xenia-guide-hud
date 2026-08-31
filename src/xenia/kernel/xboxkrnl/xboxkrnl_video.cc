@@ -957,6 +957,63 @@ void GuideDumpNodes() {
 }
 
 
+// Phase 694: 81A02940 allocates GPU-visible DATA memory and refuses while
+// [dev+0x2B3D] & 0x20 is set (682). Phase 683 forced the guard and hit the
+// assert in 81A02688 - that disabled the check reporting the problem. This
+// supplies the missing service instead: a bump allocator over physical memory
+// the harness owns, so 819E01E0 has a real address to convert and 819DCCA0
+// can proceed past 819DCD18 with a legitimate buffer.
+void GuideInstallAllocStub() {
+  auto* mem = kernel_state()->memory();
+  auto* heap = mem->LookupHeapByType(true, 64 * 1024);
+  if (!heap) {
+    XELOGW("GuideAllocStub: no physical heap");
+    return;
+  }
+  const uint32_t kSize = 8u * 1024u * 1024u;
+  uint32_t buf = 0;
+  if (!heap->Alloc(kSize, 4096,
+                   kMemoryAllocationReserve | kMemoryAllocationCommit,
+                   kMemoryProtectRead | kMemoryProtectWrite, false, &buf) ||
+      !buf) {
+    XELOGW("GuideAllocStub: physical allocation failed");
+    return;
+  }
+  // [buf] holds the cursor; allocations start past it, 256-aligned.
+  xe::store_and_swap<uint32_t>(mem->TranslateVirtual(buf), buf + 256u);
+  const uint32_t lo = buf & 0xFFFFu;
+  const uint32_t hi = (buf >> 16) + ((buf & 0x8000u) ? 1u : 0u);
+  // r3 = dev, r4 = size, r5 = align; return the block in r3.
+  const uint32_t code[] = {
+      0x3D600000u | hi,  // lis    r11, hi
+      0x814B0000u | lo,  // lwz    r10, lo(r11)
+      0x394A00FFu,       // addi   r10, r10, 255
+      0x554A002Eu,       // rlwinm r10, r10, 0, 0, 23   (round up to 256)
+      0x7D2A2214u,       // add    r9, r10, r4
+      0x912B0000u | lo,  // stw    r9, lo(r11)
+      0x7D435378u,       // mr     r3, r10
+      0x4E800020u,       // blr
+  };
+  // xam's code pages are not writable; GuidePatchWord unprotects before each
+  // store and restores after. Writing directly faulted the host at
+  // fault_addr=181A02940 and took the run down with it.
+  uint8_t* hp = mem->TranslateVirtual(0x81A02940u);
+  void* page =
+      reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(hp) & ~0xFFFull);
+  xe::memory::PageAccess old_access = xe::memory::PageAccess::kNoAccess;
+  if (!xe::memory::Protect(page, 0x1000, xe::memory::PageAccess::kReadWrite,
+                           &old_access)) {
+    XELOGW("GuideAllocStub: cannot unprotect 81A02940");
+    return;
+  }
+  for (uint32_t i = 0; i < uint32_t(xe::countof(code)); ++i) {
+    xe::store_and_swap<uint32_t>(hp + i * 4u, code[i]);
+  }
+  xe::memory::Protect(page, 0x1000, old_access, nullptr);
+  XELOGI("GuideAllocStub: buf={:08X} size={}KB cursor={:08X}; 81A02940 replaced",
+         buf, kSize / 1024, buf + 256u);
+}
+
 bool GuidePatchWord(uint32_t addr, uint32_t expect, uint32_t value,
                     const char* name) {
   auto* pm = kernel_state()->memory();
@@ -3644,6 +3701,14 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   // 0x20 is clear. It is set on all 38 measured calls, so the allocator
   // returns NULL and the draw emitter bails before its first packet write.
   // Force the branch to test whether that refusal is the whole story.
+  // Installed here, not at the emulator.cc early site: that block is gated on
+  // guide_bootstrap_on_title_thread and does not run in this configuration -
+  // the same mistake phase 692 recorded for guide_render_on_title_device, made
+  // one phase later. Phase 683 proved a patch to 81A02940 applied HERE does
+  // take effect (the allocator went 22/102 -> 51/102).
+  if (::cvars::guide_stub_gpu_alloc && XamIsDashrootLayout()) {
+    GuideInstallAllocStub();
+  }
   if (::cvars::guide_force_cmdbuf_alloc && XamIsDashrootLayout()) {
     GuidePatchWord(0x81A02988u, 0x41820010u, 0x48000010u, "CmdbufAllocPatch");
   }

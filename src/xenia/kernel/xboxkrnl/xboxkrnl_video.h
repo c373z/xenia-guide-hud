@@ -54,6 +54,7 @@ bool XamIsDashrootLayout();
 uint32_t GuideConst(uint32_t addr);
 // Patch one guest instruction, unprotecting the host page first - the xam
 // text pages are read-only and a bare store faults before it can log.
+void GuideInstallAllocStub();
 bool GuidePatchWord(uint32_t addr, uint32_t expect, uint32_t value,
                     const char* name);
 uint32_t GuideNopFn();

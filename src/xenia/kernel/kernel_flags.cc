@@ -1105,6 +1105,17 @@ DEFINE_bool(guide_ctx2_title_device, false,
             "negative result is reproducible.",
             "Kernel");
 
+DEFINE_bool(guide_stub_gpu_alloc, false,
+            "Replace 81A02940, the GPU-visible data allocator, with a bump "
+            "allocator over harness-owned physical memory. Phase 693: the "
+            "Guide can write commands fine (81A015B8 runs 934 times) but "
+            "cannot allocate DATA memory, so its draws bail before emitting. "
+            "Unlike guide_force_cmdbuf_alloc, which forced the guard and hit "
+            "the assert in 81A02688, this satisfies the contract: it returns "
+            "a real address for 819E01E0 to convert. Installed early, before "
+            "the function is first translated.",
+            "Kernel");
+
 DEFINE_bool(guide_retarget_interrupt, false,
             "Re-register the graphics interrupt callback with the device the "
             "present path uses. Phase 645: xam registers it with mode 1's "
