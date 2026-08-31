@@ -1609,7 +1609,61 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
              "skipping the call");
       hr = 0x80004005u;
     } else {
+      // Phase 599: is the object Execute runs the same one the coverage
+      // readback inspects? Log identity and trace validity on both sides of
+      // the call; the readback resolves via LookupFunction the same way.
+      // Phase 599: the readback fires before this call, so every coverage
+      // reading of this function so far describes xam's own earlier
+      // invocation, not ours (entry_count goes 1 -> 2 across this Execute).
+      // Snapshot the counters either side of OUR call and report the delta,
+      // which is the path we actually take.
+      std::vector<uint64_t> before_counts;
+      uint32_t rh_n = 0, rh_start = 0;
+      {
+        auto* lf = processor->LookupFunction(rhost);
+        auto* lgf = lf ? dynamic_cast<cpu::GuestFunction*>(lf) : nullptr;
+        if (lgf && lgf->trace_data().is_valid()) {
+          auto& td = lgf->trace_data();
+          rh_n = td.instruction_count();
+          rh_start = td.start_address();
+          auto* c = reinterpret_cast<uint64_t*>(
+              td.instruction_execute_counts());
+          before_counts.assign(c, c + rh_n);
+        }
+        XELOGI("GuideRHostFn(before): fn={:016X} addr={:08X} n={}",
+               reinterpret_cast<uintptr_t>(lf), lf ? lf->address() : 0u, rh_n);
+      }
       hr = processor->Execute(ts, rhost, a0, xe::countof(a0));
+      {
+        auto* lf = processor->LookupFunction(rhost);
+        auto* lgf = lf ? dynamic_cast<cpu::GuestFunction*>(lf) : nullptr;
+        uint64_t c0 = 0;
+        if (lgf && lgf->trace_data().is_valid()) {
+          c0 = reinterpret_cast<uint64_t*>(
+              lgf->trace_data().instruction_execute_counts())[0];
+        }
+        XELOGI("GuideRHostFn(after): fn={:016X} addr={:08X} trace_valid={} "
+               "entry_count={}",
+               reinterpret_cast<uintptr_t>(lf), lf ? lf->address() : 0u,
+               (lgf && lgf->trace_data().is_valid()) ? "yes" : "no", c0);
+        if (lgf && lgf->trace_data().is_valid() && rh_n &&
+            before_counts.size() == rh_n) {
+          auto* c = reinterpret_cast<uint64_t*>(
+              lgf->trace_data().instruction_execute_counts());
+          std::string delta;
+          uint32_t ran = 0, last = 0;
+          for (uint32_t i = 0; i < rh_n; ++i) {
+            bool hit = c[i] > before_counts[i];
+            delta += hit ? '1' : '.';
+            if (hit) {
+              ++ran;
+              last = rh_start + i * 4;
+            }
+          }
+          XELOGI("GuideRHostDelta [{} of {}], last {:08X}: {}", ran, rh_n,
+                 last, delta);
+        }
+      }
       // Phase 598: coverage says this function falls through all 80
       // instructions and returns 0, yet the combined log downstream reports
       // 8000FFFF. Log the raw 64-bit value at the call site so there is no
