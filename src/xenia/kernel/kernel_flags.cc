@@ -1242,6 +1242,15 @@ DEFINE_bool(guide_arm_overlay, false,
             "session sees thousands.",
             "Kernel");
 
+DEFINE_bool(guide_truncate_at_ramp, false,
+            "Submit only up to the first packet that writes the 0x1000-0x1FFF "
+            "register block. Phases 720 and 724: that block is a 769-entry "
+            "gamma ramp being parsed as PM4, and it produces both an all-zero "
+            "palette load that blanks the display and a bogus XE_SWAP "
+            "presenting from address zero. Truncating removes both without "
+            "needing guide_keep_reg_lo to paper over them.",
+            "Kernel");
+
 DEFINE_bool(guide_retarget_interrupt, false,
             "Re-register the graphics interrupt callback with the device the "
             "present path uses. Phase 645: xam registers it with mode 1's "

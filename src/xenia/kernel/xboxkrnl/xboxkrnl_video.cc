@@ -8727,6 +8727,37 @@ void VdSwap_entry(
         }
         static uint32_t sc_n = 0;
         ++sc_n;
+        // Phase 725: find where the real command stream ends and the gamma
+        // ramp begins. The ramp shows up as type-0 packets addressing the
+        // 0x1000-0x1FFF block; the Guide's own state writes never do.
+        if (::cvars::guide_truncate_at_ramp && xbuf && words) {
+          uint32_t cut = 0;
+          for (uint32_t i = 0; i < words;) {
+            uint32_t hd = sd(xbuf + i * 4);
+            uint32_t ty = hd >> 30;
+            uint32_t cnt = ((hd >> 16) & 0x3FFFu) + 1u;
+            if (ty == 0u) {
+              uint32_t base = hd & 0x7FFFu;
+              if (base >= 0x1000u && base <= 0x1FFFu) {
+                cut = i;
+                break;
+              }
+              i += cnt + 1u;
+            } else if (ty == 3u) {
+              i += cnt + 1u;
+            } else {
+              ++i;
+            }
+          }
+          if (cut) {
+            static uint32_t tn = 0;
+            if (++tn <= 3) {
+              XELOGI("GuideTruncate #{}: {} words -> {} (ramp starts at +{})",
+                     tn, words, cut, cut);
+            }
+            words = cut;
+          }
+        }
         // Phase 705: 819FCE50 kicks the GPU through [dev+0x2B14] and faults
         // on null. Give it a buffer here, where sc_dev is live, rather than in
         // the emulator.cc block that never runs in this configuration.
