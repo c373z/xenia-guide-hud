@@ -2017,6 +2017,23 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_IM_LOAD(uint32_t packet,
     // events in the run - which may be xam's own initialisation, not the
     // game's. Sample the non-guide side LATE, during gameplay, so the label
     // means what it claims.
+    // Phase 744: census every shader address loaded in the run. If xam's own
+    // UI shaders are ever created, they appear here as addresses the title
+    // does not use.
+    {
+      static std::map<uint32_t, std::pair<uint64_t, uint32_t>> addrs;
+      auto& e = addrs[addr];
+      e.first = shader ? shader->ucode_data_hash() : 0ull;
+      ++e.second;
+      if (im_index % 4000u == 0u) {
+        std::string list;
+        for (auto& kv : addrs) {
+          list += fmt::format("{:08X}/{:04X}x{} ", kv.first,
+                              uint32_t(kv.second.first >> 48), kv.second.second);
+        }
+        XELOGI("IMLoadCensus: {} distinct addresses | {}", addrs.size(), list);
+      }
+    }
     static uint32_t imlg = 0, imlt = 0;
     bool want = g ? (imlg < 6) : (im_index > 6000u && imlt < 6);
     if (want && (g ? ++imlg : ++imlt)) {
