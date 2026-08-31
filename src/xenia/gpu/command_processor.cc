@@ -336,6 +336,17 @@ void CommandProcessor::WorkerThreadMain() {
   }
 
   while (worker_running_) {
+    // Phase 612: heartbeat at the top of the loop, before anything else can
+    // block. It ticks during normal operation, so its silence after the ring
+    // handover is a positive result rather than an untested probe.
+    {
+      static uint32_t hb = 0;
+      if ((++hb % 400u) == 1u) {
+        XELOGI("CPBeat {}: ring={:08X} rptr={} wptr={} pending={}", hb,
+               primary_buffer_ptr_, read_ptr_index_, write_ptr_index_.load(),
+               pending_fns_.empty() ? 0 : 1);
+      }
+    }
     while (!pending_fns_.empty()) {
       auto fn = std::move(pending_fns_.front());
       pending_fns_.pop();
@@ -361,6 +372,17 @@ void CommandProcessor::WorkerThreadMain() {
         }
         loop_count++;
         write_ptr_index = write_ptr_index_.load();
+        // Phase 612: the worker stops entering the execute step after the
+        // ring handover without spinning in the packet loop. If it is parked
+        // here, this says so - and says what it thinks the pointers are.
+        // 2,000,000 was mis-calibrated: past 500 iterations this loop waits
+        // 2ms each time, so that threshold needs ~4000s to trigger and the
+        // probe silently never fired. 2000 iterations is a few seconds.
+        if ((loop_count % 2000u) == 0u) {
+          XELOGW("CPStall: ring={:08X} rptr={} wptr={} pending={}",
+                 primary_buffer_ptr_, read_ptr_index_, write_ptr_index,
+                 pending_fns_.empty() ? 0 : 1);
+        }
       } while (worker_running_ && pending_fns_.empty() &&
                (write_ptr_index == 0xBAADF00D ||
                 read_ptr_index_ == write_ptr_index));
@@ -388,6 +410,21 @@ void CommandProcessor::WorkerThreadMain() {
     }
     // Execute. Note that we handle wraparound transparently.
     read_ptr_index_ = ExecutePrimaryBuffer(read_ptr_index_, write_ptr_index);
+    {
+      // Paired with CPExec above: if entry is logged and this is not, the
+      // worker did not come back out.
+      // Phase 612: a flat cap made every line land before the handover, so
+      // the log said nothing about the period being investigated. Fire on
+      // ring change as well, like CPExec.
+      static uint32_t ret_logs = 0;
+      static uint32_t ret_last_ring = 0;
+      if (ret_logs < 8 || primary_buffer_ptr_ != ret_last_ring) {
+        ++ret_logs;
+        ret_last_ring = primary_buffer_ptr_;
+        XELOGI("CPExecRet: ring={:08X} rptr={}", primary_buffer_ptr_,
+               read_ptr_index_);
+      }
+    }
 
     // TODO(benvanik): use reader->Read_update_freq_ and only issue after moving
     //     that many indices.

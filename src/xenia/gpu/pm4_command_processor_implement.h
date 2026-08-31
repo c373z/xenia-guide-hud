@@ -1975,7 +1975,16 @@ uint32_t COMMAND_PROCESSOR::ExecutePrimaryBuffer(uint32_t read_index,
   // chiplets l3
   reader_.BeginPrefetchedRead<swcache::PrefetchTag::Level2>(
       GetCurrentRingReadCount());
+  // Phase 612: after the Guide's ring handover the worker never returns here.
+  // A guard distinguishes a spin in this loop from a block inside a single
+  // packet - the two have different causes and different fixes.
+  uint32_t guide_spin = 0;
   do {
+    if (++guide_spin == 100000u) {
+      XELOGW("CPExec: primary loop still running after 100000 packets "
+             "ring={:08X} read_count={} rptr_off={}",
+             primary_buffer_ptr_, reader_.read_count(), reader_.read_offset());
+    }
     if (!COMMAND_PROCESSOR::ExecutePacket()) {
       // This probably should be fatal - but we're going to continue anyways.
       XELOGE("**** PRIMARY RINGBUFFER: Failed to execute packet.");
