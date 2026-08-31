@@ -4113,12 +4113,20 @@ void VdSwap_entry(
         auto cr = [cm](uint32_t a) {
           return a ? xe::load_and_swap<uint32_t>(cm->TranslateVirtual(a)) : 0u;
         };
+        // Phase 768: [+0x1C] is a child count on the DISPATCHER's element
+        // struct, not on this hud object (767). Resolve the XUI handle it
+        // carries at [+8] and read the count where the offset is known to
+        // mean that.
+        uint32_t xh = cr(guide_draw_this_ + 0x08u);
+        uint32_t xrec = xh ? GuideResolveHandle(xh) : 0u;
+        uint32_t xobj = xrec ? cr(xrec + 0x0Cu) : 0u;
         XELOGI(
-            "GuideDrawThis #{}: obj={:08X} handle={:08X} children[1C]={} "
-            "coll[18]={:08X} [08]={:08X} [0C]={:08X}",
+            "GuideDrawThis #{}: hudobj={:08X} vt={:08X} dc={:08X} | xui "
+            "handle={:08X} rec={:08X} obj={:08X} children[1C]={} "
+            "coll[18]={:08X}",
             cc, guide_draw_this_, cr(guide_draw_this_),
-            cr(guide_draw_this_ + 0x1Cu), cr(guide_draw_this_ + 0x18u),
-            cr(guide_draw_this_ + 0x08u), cr(guide_draw_this_ + 0x0Cu));
+            cr(guide_draw_this_ + 0x0Cu), xh, xrec, xobj,
+            xobj ? cr(xobj + 0x1Cu) : 0u, xobj ? cr(xobj + 0x18u) : 0u);
       }
     }
     // Phase 680: read the dispatcher's slots instead of inferring them from an
