@@ -1587,6 +1587,19 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   // and a device context created earlier kept [dc+0x1C8] = 40877DC0. By the
   // time it called through it the block had been reused for the wide string
   // "XuiScene", so CTR took 006E0065 - the "ne" - and the fetch faulted.
+  // Phase 627: name the render entry points. hud's render calls xam ordinals
+  // 0x34B (XuiRenderBegin) and 0x353 (XuiRenderPresent); the latter never
+  // returns (phase 626). Resolving them gives the addresses to measure.
+  {
+    auto xam_mod = kernel_state()->GetModule("xam.xex", true);
+    if (xam_mod) {
+      XELOGI("GuideXuiRender: Begin(34B)={:08X} End(34F)={:08X} "
+             "Present(353)={:08X}",
+             xam_mod->GetProcAddressByOrdinal(0x34B),
+             xam_mod->GetProcAddressByOrdinal(0x34F),
+             xam_mod->GetProcAddressByOrdinal(0x353));
+    }
+  }
   uint32_t live_ctx = rd(XamXuiCtxSlot());
   uint64_t hr = 0;
   if (::cvars::guide_reuse_xui_ctx && live_ctx) {
