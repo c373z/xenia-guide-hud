@@ -4870,6 +4870,15 @@ void VdSwap_entry(
         uint32_t bdev = bwrap ? xe::load_and_swap<uint32_t>(
                                     bm->TranslateVirtual(bwrap + 12u))
                               : 0u;
+        // Phase 658: log the inputs rather than inferring from the absence
+        // of a downstream line - that inference has been wrong three times.
+        static uint32_t bind_tries = 0;
+        if (++bind_tries <= 3) {
+          XELOGI("GuideCmdbufTry #{}: draw_this={:08X} dc={:08X} wrap={:08X} "
+                 "bdev={:08X} base={:08X}",
+                 bind_tries, guide_draw_this_, bdc2, bwrap, bdev,
+                 guide_cmdbuf_base_);
+        }
         if (bdev) {
           if (auto* bth = XThread::GetCurrentThread()) {
             GuideBindDeviceCmdbuf(bdev, bth->thread_state(),
