@@ -8814,6 +8814,42 @@ void VdSwap_entry(
                                   ->command_processor();
                   for (uint32_t k = 0; k < cnt && i + 1u + k < words; ++k) {
                     uint32_t reg = one ? base : base + k;
+                    // Phase 714: 0x1844 is D1GRPH_PRIMARY_SURFACE_ADDRESS -
+                    // what the display scans out. Report the address the Guide
+                    // points it at; that is where its picture is meant to be.
+                    if (reg == 0x1844u) {
+                      static uint32_t sa = 0;
+                      if (++sa <= 4) {
+                        XELOGI("GuideScanoutAddr #{}: D1GRPH_PRIMARY_SURFACE"
+                               "_ADDRESS <- {:08X} (emulator holds {:08X})",
+                               sa,
+                               xe::load_and_swap<uint32_t>(rm->TranslateVirtual(
+                                   xbuf + (i + 1u + k) * 4)),
+                               kcp ? kcp->GuideReadRegister(reg) : 0u);
+                      }
+                    }
+                    // Phase 714: name the registers instead of bisecting
+                    // for them. 262 writes in 0x1000-0x1FFF is a list, and a
+                    // list can be printed once rather than halved five times.
+                    if (reg >= keep_lo && reg <= keep_hi) {
+                      static std::set<uint32_t> seen_regs;
+                      static bool reported = false;
+                      if (seen_regs.insert(reg).second && !reported &&
+                          seen_regs.size() >= 1) {
+                        // report once the walk for this buffer is done below
+                      }
+                      if (!reported && seen_regs.size() >= 2) {
+                        std::string list;
+                        for (uint32_t r2 : seen_regs) {
+                          list += fmt::format("{:04X} ", r2);
+                        }
+                        static uint32_t rr = 0;
+                        if (++rr % 64 == 0) {
+                          XELOGI("GuideKeptRegs ({} distinct): {}",
+                                 seen_regs.size(), list);
+                        }
+                      }
+                    }
                     if (reg >= keep_lo && reg <= keep_hi && kcp) {
                       xe::store_and_swap<uint32_t>(
                           rm->TranslateVirtual(xbuf + (i + 1u + k) * 4),
