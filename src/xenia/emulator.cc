@@ -6434,6 +6434,24 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                     // test (cur+size <= end) on all four calls even with a
                     // 512KB window bound. Log the window either side of the
                     // frame where the DC lands and the crash follows.
+                    // Phase 594: is the title device's render target null
+                    // always, or only when hud's render happens to read it?
+                    // Sample it across the run, not just around the crash.
+                    if (frame % 20 == 0 && frame <= 200) {
+                      uint32_t td = xe::load_and_swap<uint32_t>(
+                          mem->TranslateVirtual(0x801E6FC4u));
+                      if (td) {
+                        XELOGI("GuideTitleRT {}: dev={:08X} [32A0]={:08X} "
+                               "[32B0]={:08X} [3F78]={:08X}",
+                               frame, td,
+                               xe::load_and_swap<uint32_t>(
+                                   mem->TranslateVirtual(td + 0x32A0u)),
+                               xe::load_and_swap<uint32_t>(
+                                   mem->TranslateVirtual(td + 0x32B0u)),
+                               xe::load_and_swap<uint32_t>(
+                                   mem->TranslateVirtual(td + 0x3F78u)));
+                      }
+                    }
                     if (frame < 3 || frame % 500 == 0 ||
                         (frame >= 100 && frame <= 108)) {
                       uint32_t wdc = kernel::xboxkrnl::GuideBootDc();
