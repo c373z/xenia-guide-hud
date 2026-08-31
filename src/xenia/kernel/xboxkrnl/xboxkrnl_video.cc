@@ -1000,19 +1000,29 @@ void GuideInstallAllocStub() {
   // 694's behaviour: DRAW_INDX=16 plus a guest crash); a specific value serves
   // only that call site. LR is still the caller's return address here - this
   // is the function entry, before any prologue.
-  const uint32_t allow = uint32_t(::cvars::guide_alloc_lr);
-  xe::store_and_swap<uint32_t>(mem->TranslateVirtual(buf + 4u), allow);
+  // Phase 697: serve callers whose return address falls in [lo, hi]. The
+  // bounds live at [buf+4] and [buf+8] so both are runtime choices; lo == 0
+  // serves every caller (phase 694's behaviour).
+  const uint32_t allow_lo = uint32_t(::cvars::guide_alloc_lr);
+  const uint32_t allow_hi = ::cvars::guide_alloc_lr_hi
+                                ? uint32_t(::cvars::guide_alloc_lr_hi)
+                                : allow_lo;
+  xe::store_and_swap<uint32_t>(mem->TranslateVirtual(buf + 4u), allow_lo);
+  xe::store_and_swap<uint32_t>(mem->TranslateVirtual(buf + 8u), allow_hi);
   std::vector<uint32_t> code;
-  if (allow) {
+  if (allow_lo) {
     code = {
-        0x7C0802A6u,             // mflr   r0
-        0x3D600000u | hi,        // lis    r11, hi
-        0x812B0000u | (lo + 4u), // lwz    r9, lo+4(r11)   allowed LR
-        0x7C004800u,             // cmpw   r0, r9
-        0x40820020u,             // bne    +0x20 -> return 0
+        0x7C0802A6u,              // mflr   r0
+        0x3D600000u | hi,         // lis    r11, hi
+        0x812B0000u | (lo + 4u),  // lwz    r9, lo+4(r11)    range low
+        0x7C004840u,              // cmplw  r0, r9
+        0x4180002Cu,              // blt    -> return 0
+        0x812B0000u | (lo + 8u),  // lwz    r9, lo+8(r11)    range high
+        0x7C004840u,              // cmplw  r0, r9
+        0x41810020u,              // bgt    -> return 0
     };
   } else {
-    code = {0x3D600000u | hi};   // lis    r11, hi
+    code = {0x3D600000u | hi};    // lis    r11, hi
   }
   const std::vector<uint32_t> tail = {
       0x814B0000u | lo,  // lwz    r10, lo(r11)     cursor
@@ -1044,7 +1054,7 @@ void GuideInstallAllocStub() {
   xe::memory::Protect(page, 0x1000, old_access, nullptr);
   XELOGI("GuideAllocStub: buf={:08X} size={}KB cursor={:08X} allow_lr={:08X}; "
          "81A02940 replaced ({} instrs)",
-         buf, kSize / 1024, buf + 256u, allow, code.size());
+         buf, kSize / 1024, buf + 256u, allow_lo, code.size());
 }
 
 bool GuidePatchWord(uint32_t addr, uint32_t expect, uint32_t value,

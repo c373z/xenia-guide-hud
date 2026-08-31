@@ -1125,6 +1125,13 @@ DEFINE_uint64(guide_alloc_lr, 0,
               "each can be tested without a rebuild.",
               "Kernel");
 
+DEFINE_uint64(guide_alloc_lr_hi, 0,
+              "Upper bound of the served return-address range; 0 means "
+              "equal to guide_alloc_lr (a single site). Phase 697: ranges let "
+              "the allocator's 10 call sites be bisected in about four runs "
+              "instead of nine.",
+              "Kernel");
+
 DEFINE_bool(guide_retarget_interrupt, false,
             "Re-register the graphics interrupt callback with the device the "
             "present path uses. Phase 645: xam registers it with mode 1's "
