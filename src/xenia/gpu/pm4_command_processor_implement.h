@@ -983,6 +983,12 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_INDIRECT_BUFFER(
       }
     }
   }
+  // Phase 623: the region probe reports only the FIRST buffer from each 1MB
+  // region, so "xam dispatched an IB" says nothing about the hundreds that
+  // follow. Tally every IB per region, and how many of them contained a draw,
+  // so "does the Guide ever submit geometry" is answerable outright.
+  const uint32_t guide_tally_region = GpuToCpu(list_ptr) & 0xFFF00000u;
+  const uint32_t guide_tally_draws0 = guide_draw_count_;
   bool saved_had = guide_ib_had_draw_;
   guide_ib_had_draw_ = false;
   COMMAND_PROCESSOR::ExecuteIndirectBuffer(GpuToCpu(list_ptr), list_length);
@@ -1010,6 +1016,42 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_INDIRECT_BUFFER(
     if (iblog++ < 8) {
       XELOGI("GuideIB: draws in IB {:08X} len={} -> copied to {:08X} armed={}",
              src, list_length, guide_replay_addr_, guide_replay_armed_);
+    }
+  }
+  {
+    static uint32_t t_region[24] = {};
+    static uint32_t t_ibs[24] = {};
+    static uint32_t t_draws[24] = {};
+    static uint32_t t_n = 0;
+    static uint32_t t_total = 0;
+    uint32_t slot = 0xFFFFFFFFu;
+    for (uint32_t i = 0; i < t_n; ++i) {
+      if (t_region[i] == guide_tally_region) {
+        slot = i;
+        break;
+      }
+    }
+    if (slot == 0xFFFFFFFFu && t_n < 24) {
+      slot = t_n++;
+      t_region[slot] = guide_tally_region;
+    }
+    if (slot != 0xFFFFFFFFu) {
+      ++t_ibs[slot];
+      // guide_ib_had_draw_ is gated on guide_in_draw_scope_, a Guide-specific
+      // flag that is not set in every configuration - using it reported "0
+      // draws" for the title, which plainly renders. Diff the actual draw
+      // counter across the buffer instead.
+      t_draws[slot] += guide_draw_count_ - guide_tally_draws0;
+    }
+    bool fresh_region = (slot != 0xFFFFFFFFu && t_ibs[slot] == 1);
+    if (cvars::guide_cp_probe &&
+        ((++t_total % 600u) == 0u || fresh_region)) {
+      std::string tally;
+      for (uint32_t i = 0; i < t_n; ++i) {
+        tally += fmt::format("{:08X}:{}ib/{}draw ", t_region[i], t_ibs[i],
+                             t_draws[i]);
+      }
+      XELOGI("GuideIBTally: {}", tally);
     }
   }
   guide_ib_had_draw_ = saved_had || guide_ib_had_draw_;
