@@ -1581,6 +1581,18 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
     // the analogue uniquely. Executing an unconfirmed address is what caused
     // this whole family of bugs, so skip rather than guess.
     uint32_t rhost = XamRenderHost();
+    // Phase 597: coverage says this function executes 80 of 80 instructions,
+    // which by the disassembly means it returns 0 - but it returns 8000FFFF.
+    // One of the two is wrong. Dump the running bytes of its tail and compare
+    // against the image being disassembled before trusting either.
+    if (rhost) {
+      std::string tw;
+      for (uint32_t w = 0; w < 10; ++w) {
+        tw += fmt::format("{:08X}:{:08X} ", rhost + 0x108u + w * 4,
+                          rd(rhost + 0x108u + w * 4));
+      }
+      XELOGI("GuideRHostBytes: {}", tw);
+    }
     if (!rhost) {
       XELOGW("GuideBootstrap: XUI render host not located on this build - "
              "skipping the call");
