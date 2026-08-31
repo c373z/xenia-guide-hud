@@ -1990,10 +1990,14 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_IM_LOAD(uint32_t packet,
     // Phase 739: log the title's loads too - if both reference the same
     // addresses, the Guide is not loading its own shaders at all.
     bool g = guide_in_draw_scope_ || guide_replaying_;
+    // Phase 740: shared index, the check that resolved the identical ambiguity
+    // in phase 734. Same indices means one set of events logged twice.
+    static uint32_t im_index = 0;
+    ++im_index;
     static uint32_t imlg = 0, imlt = 0;
     if ((g ? imlg : imlt)++ < 6) {
       XELOGI("IMLoad[{}] #{}: type={} addr={:08X} size_dw={} -> hash={:016X}",
-             g ? "guide" : "title", g ? imlg : imlt,
+             g ? "guide" : "title", im_index,
              shader_type == xenos::ShaderType::kVertex ? "VS" : "PS", addr,
              size_dwords, shader ? shader->ucode_data_hash() : 0ull);
     }
