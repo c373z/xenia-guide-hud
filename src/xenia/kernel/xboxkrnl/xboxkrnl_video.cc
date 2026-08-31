@@ -870,6 +870,14 @@ static uint32_t GuideMakeSurface(xe::cpu::Processor* proc,
 // as [[bootDC+0x1CC]+0x0C], and nothing has ever bound a surface on it.
 // `ts` is a xe::cpu::ThreadState* (kept as void* so this header does not have
 // to pull in the cpu headers, matching GuidePublishStallThread).
+static void EmitGuideCoverageOnce();  // defined below
+
+// Phase 589: the readbacks all sit at the end of something - the paint loop,
+// or 900 swaps in. A guest crash reaches neither, so coverage went silent in
+// exactly the runs where the path mattered most. Callable from the crash
+// handler.
+void GuideEmitCoverageNow() { EmitGuideCoverageOnce(); }
+
 uint32_t GuideBindDeviceRt(uint32_t dev, void* ts) {
   if (!dev || !ts) {
     return 0;
@@ -897,6 +905,55 @@ uint32_t GuideBindDeviceRt(uint32_t dev, void* ts) {
          dev, surf, rdv(dev + 0x32A0u), rdv(dev + 0x32B0u),
          rdv(dev + 0x3F78u));
   return surf;
+}
+
+// Phase 589: the same command-buffer setup the draw hook performs, but for an
+// arbitrary device. 81A015B8 emits a packet word with `stw r10, 0(r11)` where
+// r11 = [cursor]+4, so a zero cursor stores to address 4 - the 81A01638 fault.
+// The hook's version (guide_bind_cmdbuf_kb) computes its device by this exact
+// chain but keys off guide_draw_this_ and only runs from a draw that is not
+// firing here, so this device never got a buffer.
+uint32_t GuideBindDeviceCmdbuf(uint32_t dev, void* ts, uint32_t kb) {
+  if (!dev || !ts || !kb) {
+    return 0;
+  }
+  auto* mem = kernel_state()->memory();
+  auto rdv = [&](uint32_t a) {
+    return xe::load_and_swap<uint32_t>(mem->TranslateVirtual(a));
+  };
+  if (rdv(dev + 0x2B4Cu)) {
+    return rdv(dev + 0x2B48u);  // already bound
+  }
+  uint32_t csize = kb * 1024u;
+  static uint32_t cbuf = 0;
+  if (!cbuf) {
+    cbuf = mem->SystemHeapAlloc(csize, 4096);
+    if (cbuf) {
+      std::memset(mem->TranslateVirtual(cbuf), 0, csize);
+    }
+  }
+  if (!cbuf) {
+    XELOGW("GuideBindDeviceCmdbuf: allocation of {} bytes failed", csize);
+    return 0;
+  }
+  // Go through xam's own setter: it sets base +2B48, cursor +2B4C = buf-4
+  // (emission does +4 before each store), limit +2B50 and stride +2B58
+  // together, and asserts the cursor is currently 0.
+  uint64_t cargs[] = {dev, cbuf, csize / 4};
+  kernel_state()->processor()->Execute(
+      static_cast<xe::cpu::ThreadState*>(ts), GuideConst(0x81A01358u), cargs,
+      xe::countof(cargs));
+  // 81A042E0, the reservation that seeds the emitter's cursor, allocates from
+  // [dev+0x30]/[dev+0x34] - a different pair from the block above, and the
+  // fit test fails if they are not widened too.
+  xe::store_and_swap<uint32_t>(mem->TranslateVirtual(dev + 0x30u), cbuf);
+  xe::store_and_swap<uint32_t>(mem->TranslateVirtual(dev + 0x34u),
+                               cbuf + csize);
+  XELOGI("GuideBindDeviceCmdbuf: dev={:08X} buf={:08X} +2B48={:08X} "
+         "+2B4C={:08X} +2B50={:08X} [30]={:08X} [34]={:08X}",
+         dev, cbuf, rdv(dev + 0x2B48u), rdv(dev + 0x2B4Cu),
+         rdv(dev + 0x2B50u), rdv(dev + 0x30u), rdv(dev + 0x34u));
+  return cbuf;
 }
 
 uint32_t XamProviderSlot() {

@@ -73,7 +73,15 @@ uint32_t GuideBootDc();
 
 // Bind a freshly created surface as `dev`'s render target. `ts` is a
 // xe::cpu::ThreadState*. Returns the surface, or 0 if creation failed.
+// Emit the guide_coverage_fn readback immediately (used from the crash
+// handler, which no end-of-run readback survives).
+void GuideEmitCoverageNow();
+
 uint32_t GuideBindDeviceRt(uint32_t dev, void* ts);
+
+// Allocate and bind a command buffer on `dev` (kb kilobytes). `ts` is a
+// xe::cpu::ThreadState*. Returns the buffer, or 0.
+uint32_t GuideBindDeviceCmdbuf(uint32_t dev, void* ts, uint32_t kb);
 
 // xam's mode-1 device creator re-points the GPU ring from the title's ring to
 // its own, which is why the title stops swapping at the button press. Save the

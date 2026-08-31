@@ -1051,6 +1051,14 @@ DEFINE_bool(guide_resolve_paint_handles, false,
 // Phase 578: pass null as the dispatcher's DC argument so hud skips its release
 // path and constructs its own, instead of releasing the bootstrap's DC and then
 // calling through it.
+DEFINE_uint32(guide_bind_boot_cmdbuf_kb, 0,
+              "Allocate and bind a command buffer of this many KB on the "
+              "device hud renders against. Phase 589: with a render target "
+              "bound, the run reaches 81A01638, which stores a packet word "
+              "through a cursor that is zero because nothing ever gave that "
+              "device a buffer. 0 disables.",
+              "Kernel");
+
 DEFINE_bool(guide_bind_boot_rt, false,
             "Create a surface and bind it as the render target on the device "
             "hud's render is driven against, reached as "

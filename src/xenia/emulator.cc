@@ -3391,6 +3391,7 @@ bool Emulator::ExceptionCallback(Exception* ex) {
       // visible, and each was refuted by sampling state before the call - which
       // says nothing about state during it. Print the registers a faulting
       // `lwz rX, off(rY)` actually uses.
+      kernel::xboxkrnl::GuideEmitCoverageNow();
       XELOGE("GUEST CRASH: r11={:08X} r28={:08X} r29={:08X} r30={:08X} "
              "r31={:08X} ctr={:08X}",
              static_cast<uint32_t>(ectx->r[11]),
@@ -6318,6 +6319,11 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                             XELOGI("GuideBindBootRt: dc={:08X} sub={:08X} "
                                    "dev={:08X}", bdc, sub, dev);
                             kernel::xboxkrnl::GuideBindDeviceRt(dev, ts);
+                            if (cvars::guide_bind_boot_cmdbuf_kb) {
+                              kernel::xboxkrnl::GuideBindDeviceCmdbuf(
+                                  dev, ts,
+                                  uint32_t(cvars::guide_bind_boot_cmdbuf_kb));
+                            }
                           }
                           // Phase 588: the fault in 819DE94C is on device
                           // 40870D00, which is NOT the device the bootstrap
@@ -6380,6 +6386,35 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                     uint64_t da[] = {obj};
                     ks->processor()->Execute(ts, (g_hud_render ? g_hud_render : hb + 0xAB28u), da,
                                              xe::countof(da));
+                    // Phase 589: the reservation at 81A042E0 fails its fit
+                    // test (cur+size <= end) on all four calls even with a
+                    // 512KB window bound. Log the window either side of the
+                    // frame where the DC lands and the crash follows.
+                    if (frame < 3 || frame % 500 == 0 ||
+                        (frame >= 100 && frame <= 108)) {
+                      uint32_t wdc = kernel::xboxkrnl::GuideBootDc();
+                      uint32_t wsub =
+                          wdc ? xe::load_and_swap<uint32_t>(
+                                    mem->TranslateVirtual(wdc + 0x1CCu))
+                              : 0u;
+                      uint32_t wdev =
+                          wsub ? xe::load_and_swap<uint32_t>(
+                                     mem->TranslateVirtual(wsub + 0x0Cu))
+                               : 0u;
+                      if (wdev) {
+                        XELOGI("GuideWin {}: dev={:08X} [30]={:08X} "
+                               "[34]={:08X} [2B4C]={:08X} [2B54]={:08X}",
+                               frame, wdev,
+                               xe::load_and_swap<uint32_t>(
+                                   mem->TranslateVirtual(wdev + 0x30u)),
+                               xe::load_and_swap<uint32_t>(
+                                   mem->TranslateVirtual(wdev + 0x34u)),
+                               xe::load_and_swap<uint32_t>(
+                                   mem->TranslateVirtual(wdev + 0x2B4Cu)),
+                               xe::load_and_swap<uint32_t>(
+                                   mem->TranslateVirtual(wdev + 0x2B54u)));
+                      }
+                    }
                     if (frame < 3 || frame % 500 == 0) {
                       // Phase 587: [obj+12] is null on every frame of every
                       // run, so `flag` below was the 0xFFFFFFFF "no dc"
