@@ -58,6 +58,7 @@ DECLARE_bool(guide_patch_addr_passthru);
 DECLARE_int32(guide_nav_state);
 DECLARE_bool(guide_draw_root_object);
 DECLARE_bool(guide_resolve_paint_handles);
+DECLARE_bool(guide_dc_after_mode1);
 DECLARE_bool(guide_render_on_xam_device);
 DECLARE_bool(guide_fix_kick_ptr);
 DECLARE_bool(guide_prefer_mode1_device);

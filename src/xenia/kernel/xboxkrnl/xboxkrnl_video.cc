@@ -1863,6 +1863,22 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
              static_cast<uint32_t>(rr));
     }
   }
+  // Phase 644: build the DC on mode 1's device. The bootstrap is re-armed on
+  // each swap, so deferring here costs a frame per attempt and runs on
+  // F8000044, which the blocked creator does not hold.
+  if (::cvars::guide_dc_after_mode1 && !rd(0x801E6FC8u)) {
+    static uint32_t dc_waits = 0;
+    if (++dc_waits <= 600) {
+      guide_bs_pending_ = true;
+      if (dc_waits == 1 || (dc_waits % 120) == 0) {
+        XELOGI("GuideBootstrap: deferring DC creation, VdGlobalXamDevice "
+               "still null (attempt {})", dc_waits);
+      }
+      return;
+    }
+    XELOGW("GuideBootstrap: VdGlobalXamDevice never appeared after {} "
+           "attempts; creating the DC anyway", dc_waits);
+  }
   uint32_t dcp = memory->SystemHeapAlloc(16, 16);
   uint64_t dr = 0;
   if (::cvars::guide_bootstrap_create_dc) {

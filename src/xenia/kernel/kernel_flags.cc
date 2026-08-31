@@ -1051,6 +1051,15 @@ DEFINE_bool(guide_resolve_paint_handles, false,
 // Phase 578: pass null as the dispatcher's DC argument so hud skips its release
 // path and constructs its own, instead of releasing the bootstrap's DC and then
 // calling through it.
+DEFINE_bool(guide_dc_after_mode1, false,
+            "Defer XuiRenderCreateDC until VdGlobalXamDevice is populated, "
+            "so the DC, its wrapper and the render object are built on the "
+            "device mode 1 creates rather than the one that predates it. "
+            "Phase 644: repointing the global afterwards moves the pointer "
+            "but not the objects (phases 641, 643), and the creator does not "
+            "hold the bootstrap's thread (phase 643), so waiting is safe.",
+            "Kernel");
+
 DEFINE_bool(guide_render_on_xam_device, false,
             "Point [[bootDC+0x1CC]+0x0C] at the device that owns xam's ring "
             "(the one XamDeviceSlot reports). Phase 639: the mode-1 ring is "
