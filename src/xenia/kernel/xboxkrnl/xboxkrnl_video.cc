@@ -8749,6 +8749,42 @@ void VdSwap_entry(
               ++i;
             }
           }
+          // Phase 738: does the truncation cut the shader setup? Count the
+          // program-control writes and IM_LOAD_IMMEDIATE packets either side
+          // of the boundary before deciding.
+          {
+            uint32_t pc_before = 0, pc_after = 0, im_before = 0, im_after = 0;
+            for (uint32_t i = 0; i < words;) {
+              uint32_t hd = sd(xbuf + i * 4);
+              uint32_t ty = hd >> 30;
+              uint32_t cnt2 = ((hd >> 16) & 0x3FFFu) + 1u;
+              bool after = cut && i >= cut;
+              if (ty == 0u) {
+                uint32_t base2 = hd & 0x7FFFu;
+                bool one2 = ((hd >> 15) & 1u) != 0u;
+                for (uint32_t k2 = 0; k2 < cnt2; ++k2) {
+                  if ((one2 ? base2 : base2 + k2) == 0x2180u) {
+                    if (after) ++pc_after; else ++pc_before;
+                  }
+                }
+                i += cnt2 + 1u;
+              } else if (ty == 3u) {
+                uint32_t op2 = (hd >> 8) & 0x7Fu;
+                if (op2 == 0x2Bu || op2 == 0x27u) {
+                  if (after) ++im_after; else ++im_before;
+                }
+                i += cnt2 + 1u;
+              } else {
+                ++i;
+              }
+            }
+            static uint32_t sn = 0;
+            if (++sn <= 3) {
+              XELOGI("GuideShaderSetup #{}: cut={} | SQ_PROGRAM_CNTL before={} "
+                     "after={} | IM_LOAD before={} after={}",
+                     sn, cut, pc_before, pc_after, im_before, im_after);
+            }
+          }
           if (cut) {
             static uint32_t tn = 0;
             if (++tn <= 3) {
