@@ -9013,6 +9013,20 @@ void VdSwap_entry(
                 }
               }
             }
+            // Phase 741: checksum what we are about to submit, in the same
+            // form as the title's IBs, so the two can be compared directly.
+            {
+              static uint32_t subn = 0;
+              if (subn < 4) {
+                uint32_t sum = 0;
+                for (uint32_t i = 0; i < words; ++i) {
+                  sum = sum * 31u + sd(xbuf + i * 4);
+                }
+                ++subn;
+                XELOGI("GuideSubSum #{}: addr={:08X} words={} sum={:08X}", subn,
+                       xbuf, words, sum);
+              }
+            }
             // Phase 722: hand the stream to the swap handler rather than
             // running it here. The comment on guide_overlay_ptr_ says the
             // title thread is the wrong thread for this, and phase 721 found

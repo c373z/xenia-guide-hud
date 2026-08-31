@@ -1027,6 +1027,25 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_INDIRECT_BUFFER(
   const uint32_t guide_tally_draws0 = guide_draw_count_;
   bool saved_had = guide_ib_had_draw_;
   guide_ib_had_draw_ = false;
+  // Phase 741: checksum the title's indirect buffers so the range we submit
+  // can be compared against them. If ours matches one, we have been
+  // resubmitting the title's own commands.
+  {
+    static uint32_t ibn = 0;
+    if (ibn < 6 && list_length && list_length < 0x40000u) {
+      const uint32_t* ibp =
+          memory_->TranslatePhysical<const uint32_t*>(GpuToCpu(list_ptr));
+      if (ibp) {
+        uint32_t sum = 0;
+        for (uint32_t i = 0; i < list_length; ++i) {
+          sum = sum * 31u + ibp[i];
+        }
+        ++ibn;
+        XELOGI("TitleIBSum #{}: addr={:08X} words={} sum={:08X}", ibn,
+               GpuToCpu(list_ptr), list_length, sum);
+      }
+    }
+  }
   COMMAND_PROCESSOR::ExecuteIndirectBuffer(GpuToCpu(list_ptr), list_length);
   if (guide_ib_had_draw_ && !guide_replaying_) {
     uint32_t src = GpuToCpu(list_ptr);
