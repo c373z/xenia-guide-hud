@@ -6421,6 +6421,33 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                             // [dev+0x2B14], which only mode-1 setup writes.
                             // On the device the present path uses it is null,
                             // and the resulting fault truncates the present.
+                            // Phase 632: 819FCE50 reads [r31+0x2B14] with
+                            // r31 = the TITLE's device (phase 615), not the
+                            // one reached from the boot DC, so patch both.
+                            if (cvars::guide_fix_kick_ptr) {
+                              uint32_t tdev = xe::load_and_swap<uint32_t>(
+                                  mem->TranslateVirtual(0x801E6FC4u));
+                              if (tdev) {
+                                uint32_t tcur = xe::load_and_swap<uint32_t>(
+                                    mem->TranslateVirtual(tdev + 0x2B14u));
+                                if (!tcur) {
+                                  uint32_t tb = mem->SystemHeapAlloc(
+                                      0x20, 16, kSystemHeapPhysical);
+                                  if (tb) {
+                                    std::memset(mem->TranslateVirtual(tb), 0,
+                                                0x20);
+                                    xe::store_and_swap<uint32_t>(
+                                        mem->TranslateVirtual(tdev + 0x2B14u),
+                                        tb);
+                                    XELOGI("GuideKickPtr: title dev {:08X} "
+                                           "[2B14] <- {:08X}", tdev, tb);
+                                  }
+                                } else {
+                                  XELOGI("GuideKickPtr: title dev {:08X} "
+                                         "[2B14] already {:08X}", tdev, tcur);
+                                }
+                              }
+                            }
                             if (cvars::guide_fix_kick_ptr && dev) {
                               uint32_t cur = xe::load_and_swap<uint32_t>(
                                   mem->TranslateVirtual(dev + 0x2B14u));
