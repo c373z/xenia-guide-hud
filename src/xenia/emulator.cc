@@ -6476,7 +6476,17 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                     // submission that never comes), so the loop never gets
                     // there. The emitter is one-shot, so calling it on every
                     // frame from 100 costs nothing.
-                    if (cvars::guide_coverage_fn && frame >= 100) {
+                    // Phase 625: frame 100 is BEFORE the render DC is
+                    // installed (~frame 105), so the one-shot captured the
+                    // pre-DC path and reported the same 17/46 as phase 587 -
+                    // the fourth time a readback has answered a question about
+                    // a state it fired ahead of. Wait until the DC is actually
+                    // in the object.
+                    const bool guide_dc_ready =
+                        xe::load_and_swap<uint32_t>(
+                            mem->TranslateVirtual(obj + 12)) != 0;
+                    if (cvars::guide_coverage_fn && frame >= 100 &&
+                        guide_dc_ready) {
                       kernel::xboxkrnl::GuideEmitCoverageNow();
                     }
                     // Phase 589: the reservation at 81A042E0 fails its fit
