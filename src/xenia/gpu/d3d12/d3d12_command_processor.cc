@@ -2702,6 +2702,21 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
     }
   }
 
+  // Phase 723: the Guide's colour target is EDRAM tile 0x2AA (phase 699).
+  // Print what the TITLE's draws use, in the same run, so the two can be
+  // compared rather than assumed different.
+  {
+    static uint32_t tdn = 0;
+    if (!guide_in_draw_scope_ && tdn < 3) {
+      ++tdn;
+      XELOGI(
+          "TitleDrawState #{}: surface={:08X} color_info={:08X} "
+          "depth_info={:08X} modectl={:08X}",
+          tdn, regs[XE_GPU_REG_RB_SURFACE_INFO],
+          regs[XE_GPU_REG_RB_COLOR_INFO], regs[XE_GPU_REG_RB_DEPTH_INFO],
+          regs[XE_GPU_REG_RB_MODECONTROL]);
+    }
+  }
   // Phase 718: every geometric stage checks out and no pixels appear, so ask
   // the backend what it thinks of the draw. IsRasterizationPotentiallyDone
   // gates a "this draw has no effect" return, and a pixel shader that writes
@@ -2711,9 +2726,11 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
     if (++gps <= 4) {
       XELOGI(
           "GuidePixelShader #{}: rasterization_done={} polygonal={} "
-          "edram_mode={} ps={} writes_color={:X} kills={} depth={}",
+          "edram_mode={} surface={:08X} color_info={:08X} ps={} "
+          "writes_color={:X} kills={} depth={}",
           gps, is_rasterization_done ? 1 : 0, primitive_polygonal ? 1 : 0,
-          uint32_t(edram_mode), pixel_shader ? "yes" : "NULL",
+          uint32_t(edram_mode), regs[XE_GPU_REG_RB_SURFACE_INFO],
+          regs[XE_GPU_REG_RB_COLOR_INFO], pixel_shader ? "yes" : "NULL",
           pixel_shader ? pixel_shader->writes_color_targets() : 0u,
           pixel_shader && pixel_shader->kills_pixels() ? 1 : 0,
           pixel_shader && pixel_shader->writes_depth() ? 1 : 0);
