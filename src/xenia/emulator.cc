@@ -6401,12 +6401,21 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                                                   td + 0x3050u)) : 0u);
                             }
                             if (cvars::guide_render_on_xam_device && sub) {
-                              uint32_t xslot =
-                                  kernel::xboxkrnl::XamDeviceSlot();
+                              // Phase 641: prefer the device mode 1 actually
+                              // built - it owns the ring and the interrupt
+                              // handler. XamDeviceSlot reports the *global*,
+                              // which in these runs is 40870D00, the same
+                              // device the present already uses, so using it
+                              // made the redirect a no-op.
                               uint32_t xdev =
-                                  xslot ? xe::load_and_swap<uint32_t>(
-                                              mem->TranslateVirtual(xslot))
-                                        : 0u;
+                                  kernel::xboxkrnl::GuideMode1Device();
+                              if (!xdev) {
+                                uint32_t xslot =
+                                    kernel::xboxkrnl::XamDeviceSlot();
+                                xdev = xslot ? xe::load_and_swap<uint32_t>(
+                                                   mem->TranslateVirtual(xslot))
+                                             : 0u;
+                              }
                               if (xdev && xdev != dev) {
                                 xe::store_and_swap<uint32_t>(
                                     mem->TranslateVirtual(sub + 0x0Cu), xdev);
