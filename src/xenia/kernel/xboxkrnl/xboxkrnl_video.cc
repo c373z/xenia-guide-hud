@@ -902,9 +902,15 @@ uint32_t GuideResolveHandle(uint32_t handle) {
 // the slots directly. Phase 679 spent a scan on a struct that merely shared the
 // offsets; observation settles what pattern-matching could not.
 void GuideDumpNodes() {
-  static bool done = false;
-  if (done) return;
-  done = true;
+  // Phase 787: this used to be a one-shot on the first draw, and its per-node
+  // print is capped at 20 lines, so what it produced was a 20-of-58 SAMPLE of
+  // the tree at its earliest moment - which phase 786 then compared against
+  // phase 759's 1286-node figure as though the two were commensurable. Take
+  // three snapshots instead, and count every node by class rather than
+  // printing a prefix, so growth and composition are both visible.
+  static uint32_t passes = 0;
+  ++passes;
+  if (passes != 1 && passes != 5 && passes != 10) return;
   auto* m = kernel_state()->memory();
   // The first cut of this walked the table dereferencing whatever it found and
   // took 4 host faults, killing the composite draw - phase 672's mistake in a
@@ -921,6 +927,7 @@ void GuideDumpNodes() {
   uint32_t cap = r(0x81D6D0D8u + 0x420u);
   XELOGI("GuideNodes: capacity={} global_hook={:08X}", cap, r(0x81D6D028u));
   uint32_t total = 0, with_base = 0, with_fn = 0, shown = 0, skipped = 0;
+  std::map<uint32_t, uint32_t> by_class;
   uint32_t last_node = 0;
   for (uint32_t idx = 0; idx < cap && idx < 0x10000u; ++idx) {
     uint32_t bucket = r(0x81D6D0D8u + (idx >> 8) * 4u);
@@ -941,6 +948,7 @@ void GuideDumpNodes() {
     }
     ++total;
     uint32_t base = r(node + 4u), fn = r(node + 0x1Cu);
+    ++by_class[fn];
     if (base) ++with_base;
     if (fn) ++with_fn;
     if (node != last_node && shown < 20) {
@@ -952,8 +960,15 @@ void GuideDumpNodes() {
           idx, node, r(node), base, r(node + 8u), fn, r(node + 0x20u));
     }
   }
-  XELOGI("GuideNodes: total={} with_base={} with_fn={} skipped={}", total,
-         with_base, with_fn, skipped);
+  XELOGI("GuideNodes[pass {}]: total={} with_base={} with_fn={} skipped={}",
+         passes, total, with_base, with_fn, skipped);
+  // Full histogram over every counted node - the point of the walk. Handler
+  // address maps to a class via the registration table (phase 772).
+  std::string hist;
+  for (auto& kv : by_class) {
+    hist += fmt::format("{:08X}x{} ", kv.first, kv.second);
+  }
+  XELOGI("GuideNodeClasses[pass {}]: {}", passes, hist);
   // Phase 759: which classes are actually in the tree? The handler at [+0x1C]
   // varies by class, and the harness's CreateByName probe made a XuiShader
   // instance with handle 00010504 - so resolving that names the XuiShader
