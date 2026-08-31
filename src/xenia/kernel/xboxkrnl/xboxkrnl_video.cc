@@ -378,6 +378,31 @@ void VdInitializeRingBuffer_entry(lpvoid_t ptr, int_t size_log2) {
     }
     XELOGI("VdInitializeRingBuffer(ptr={:08X}, size_log2={}) from lr={:08X}",
            ptr.guest_address(), int32_t(size_log2), lr);
+    // Phase 639: the mode-1 device owns this ring, its fence and the
+    // submitted/completed counters the interrupt service reads - and the
+    // 81A0FE48 breakpoint that was supposed to capture it never fires. It is
+    // live in a register here. Dump the heap-pointer-shaped ones.
+    if (auto* th2 = XThread::GetCurrentThread()) {
+      auto* c = th2->thread_state()->context();
+      std::string regs;
+      for (int r = 3; r <= 31; ++r) {
+        uint32_t v = static_cast<uint32_t>(c->r[r]);
+        if ((v & 0xFF000000u) == 0x40000000u) {
+          regs += fmt::format("r{}={:08X} ", r, v);
+        }
+      }
+      XELOGI("VdInitRing regs: {}", regs);
+      // Phase 640: this is the one place the mode-1 device is provably live.
+      // The 81A0FE48 breakpoint that was meant to capture it never fires, so
+      // guide_mode1_device_ has been zero for every phase that wanted it
+      // (616, 630, 631). r31 holds the device across this call, and a ring
+      // initialised from xam (lr in 0x81xxxxxx) is by definition mode 1's.
+      uint32_t dev_r31 = static_cast<uint32_t>(c->r[31]);
+      if ((lr >> 24) == 0x81u && (dev_r31 & 0xFF000000u) == 0x40000000u) {
+        GuideSetMode1Device(dev_r31);
+        XELOGI("VdInitRing: captured mode-1 device {:08X}", dev_r31);
+      }
+    }
   }
   auto graphics_system = kernel_state()->emulator()->graphics_system();
   graphics_system->InitializeRingBuffer(ptr, size_log2);

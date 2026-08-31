@@ -1051,6 +1051,16 @@ DEFINE_bool(guide_resolve_paint_handles, false,
 // Phase 578: pass null as the dispatcher's DC argument so hud skips its release
 // path and constructs its own, instead of releasing the bootstrap's DC and then
 // calling through it.
+DEFINE_bool(guide_render_on_xam_device, false,
+            "Point [[bootDC+0x1CC]+0x0C] at the device that owns xam's ring "
+            "(the one XamDeviceSlot reports). Phase 639: the mode-1 ring is "
+            "created with r31 = 407CB880 and the interrupt handler is "
+            "registered with the same device, but the present path uses "
+            "40870D00 - so submission and servicing are on different "
+            "devices. Unlike guide_render_on_title_device this stays within "
+            "xam's device layout.",
+            "Kernel");
+
 DEFINE_bool(guide_fix_kick_ptr, false,
             "Copy [dev+0x2B14] from the mode-1 device onto the device the "
             "present path uses, when the latter is null. Phase 630: the GPU "

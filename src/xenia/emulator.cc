@@ -6400,6 +6400,21 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                                               mem->TranslateVirtual(
                                                   td + 0x3050u)) : 0u);
                             }
+                            if (cvars::guide_render_on_xam_device && sub) {
+                              uint32_t xslot =
+                                  kernel::xboxkrnl::XamDeviceSlot();
+                              uint32_t xdev =
+                                  xslot ? xe::load_and_swap<uint32_t>(
+                                              mem->TranslateVirtual(xslot))
+                                        : 0u;
+                              if (xdev && xdev != dev) {
+                                xe::store_and_swap<uint32_t>(
+                                    mem->TranslateVirtual(sub + 0x0Cu), xdev);
+                                XELOGI("GuideXamDev: [{:08X}+0C] {:08X} -> "
+                                       "{:08X}", sub, dev, xdev);
+                                dev = xdev;
+                              }
+                            }
                             // hud's device is a third device, distinct from
                             // both xam's and the title's, and only the
                             // title's buffers are ever submitted. Redirect
