@@ -2608,6 +2608,25 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
 
   xenos::EdramMode edram_mode = regs.Get<reg::RB_MODECONTROL>().edram_mode;
   if (edram_mode == xenos::EdramMode::kCopy) {
+    // Phase 706: report the destination the command processor actually reads,
+    // rather than the one the buffer was patched with. Only for the Guide's
+    // stream, and only a few times.
+    if (guide_in_draw_scope_) {
+      static uint32_t gcn = 0;
+      bool ok = IssueCopy();
+      if (++gcn <= 4) {
+        XELOGI(
+            "GuideIssueCopy #{}: ok={} control={:08X} dest_base={:08X} "
+            "dest_pitch={:08X} dest_info={:08X} color={:08X} surface={:08X}",
+            gcn, ok ? 1 : 0, regs[XE_GPU_REG_RB_COPY_CONTROL],
+            regs[XE_GPU_REG_RB_COPY_DEST_BASE],
+            regs[XE_GPU_REG_RB_COPY_DEST_PITCH],
+            regs[XE_GPU_REG_RB_COPY_DEST_INFO],
+            regs[XE_GPU_REG_RB_COLOR_INFO],
+            regs[XE_GPU_REG_RB_SURFACE_INFO]);
+      }
+      return ok;
+    }
     // Special copy handling.
     return IssueCopy();
   }

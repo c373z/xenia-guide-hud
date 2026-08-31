@@ -8753,9 +8753,15 @@ void VdSwap_entry(
         // worked for the allocator in 694 - and then look at what lands there.
         static uint32_t resolve_buf = 0;
         const uint32_t kResolveSize = 4u * 1024u * 1024u;
-        if (::cvars::guide_patch_resolve_dest && xbuf && words) {
+        // Phase 706: the wait-NOP pass lives in this walk, so gating the
+        // walk on guide_patch_resolve_dest alone made guide_nop_waits silently
+        // depend on it - and dropping the former hung the run. That is the
+        // same nested-flag trap catalogued in 616, 692, 701 and 704, authored
+        // here by me. Run the walk if either flag wants it.
+        if ((::cvars::guide_patch_resolve_dest || ::cvars::guide_nop_waits) &&
+            xbuf && words) {
           auto* rm = kernel_state()->memory();
-          if (!resolve_buf) {
+          if (!resolve_buf && ::cvars::guide_patch_resolve_dest) {
             auto* rheap = rm->LookupHeapByType(true, 64 * 1024);
             if (rheap &&
                 rheap->Alloc(kResolveSize, 4096,
@@ -8768,7 +8774,7 @@ void VdSwap_entry(
                      kResolveSize / 1024);
             }
           }
-          if (resolve_buf) {
+          if (resolve_buf || ::cvars::guide_nop_waits) {
             uint32_t patched = 0, nopped = 0;
             for (uint32_t i = 0; i < words;) {
               uint32_t hd = sd(xbuf + i * 4);
@@ -8777,7 +8783,8 @@ void VdSwap_entry(
               if (ty == 0u) {
                 uint32_t base = hd & 0x7FFFu;
                 bool one = ((hd >> 15) & 1u) != 0u;
-                if (!one && base <= 0x2319u && base + cnt > 0x2319u) {
+                if (resolve_buf && !one && base <= 0x2319u &&
+                    base + cnt > 0x2319u) {
                   uint32_t idx = i + 1u + (0x2319u - base);
                   if (idx < words) {
                     xe::store_and_swap<uint32_t>(
@@ -8822,6 +8829,28 @@ void VdSwap_entry(
             // virtual variant exists in command_processor.h for precisely
             // this buffer, with the reason written above it; the call site
             // was never switched to it.
+            // Phase 706: the resolve lands in [title_dev+0x2A1C] = 1E69E000,
+            // a 1280x720 surface belonging to the title. Checksum it either
+            // side of the submission - the title writes there too, so only a
+            // change caused by OUR stream means the Guide's pixels arrived.
+            uint32_t rt_addr = 0, sum_before = 0;
+            {
+              uint32_t tdv = sd(0x801E6FC4u);
+              uint32_t cand = tdv ? sd(tdv + 0x2A1Cu) : 0u;
+              // 1E69E000 is a PHYSICAL address; reading 3.6MB of it through
+              // TranslateVirtual faulted the host 4 times. Verify the range is
+              // mapped, then sample a little of it.
+              if (cand) {
+                auto* hpm = sm2->LookupHeap(cand);
+                if (hpm && hpm->QueryRangeAccess(cand, cand + 0xFFFu) !=
+                               xe::memory::PageAccess::kNoAccess) {
+                  rt_addr = cand;
+                  for (uint32_t o = 0; o < 0x1000u; o += 16u) {
+                    sum_before += sd(rt_addr + o);
+                  }
+                }
+              }
+            }
             // Gated with guide_submit_from_base: submitting the real
             // buffer and resolving its address correctly are one change, and
             // the virtual executor genuinely runs the stream - including its
@@ -8833,11 +8862,25 @@ void VdSwap_entry(
               gs3->command_processor()->ExecuteGuestBufferUnsafe(xbuf, words);
             }
             uint32_t after = gs3->command_processor()->guide_draw_count_;
+            if (rt_addr) {
+              uint32_t sum_after = 0;
+              for (uint32_t o = 0; o < 0x1000u; o += 16u) {
+                sum_after += sd(rt_addr + o);
+              }
+              static uint32_t rtn = 0;
+              if (++rtn <= 6) {
+                XELOGI("GuideRTDelta #{}: rt={:08X} sum {:08X} -> {:08X} {}",
+                       rtn, rt_addr, sum_before, sum_after,
+                       sum_before == sum_after ? "UNCHANGED" : "CHANGED");
+              }
+            }
             // Did anything actually land? First direct test of rasterisation.
             if (::cvars::guide_patch_resolve_dest && resolve_buf) {
               auto* pm2 = kernel_state()->memory();
               uint32_t nz = 0, first_nz = 0;
-              const uint32_t kCheck = 1u * 1024u * 1024u;
+              // Phase 706: check the whole surface - a tiled or
+              // offset destination can land outside the first MB.
+              const uint32_t kCheck = kResolveSize;
               for (uint32_t o = 0; o < kCheck; o += 4) {
                 uint32_t v = xe::load_and_swap<uint32_t>(
                     pm2->TranslateVirtual(resolve_buf + o));
