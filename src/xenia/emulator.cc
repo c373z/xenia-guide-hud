@@ -6399,6 +6399,20 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                     uint64_t da[] = {obj};
                     ks->processor()->Execute(ts, (g_hud_render ? g_hud_render : hb + 0xAB28u), da,
                                              xe::countof(da));
+                    // Phase 591: once emission actually works each frame
+                    // costs real time, and the loop no longer reaches its
+                    // end inside a run - a 170s run got to frame ~106. The
+                    // post-loop readback is therefore unreachable in exactly
+                    // the configuration that works. Emit from inside; the
+                    // underlying emitter is one-shot.
+                    // frame 200 was still too late: with emission working
+                    // the render hangs at ~frame 108 (waiting on a
+                    // submission that never comes), so the loop never gets
+                    // there. The emitter is one-shot, so calling it on every
+                    // frame from 100 costs nothing.
+                    if (cvars::guide_coverage_fn && frame >= 100) {
+                      kernel::xboxkrnl::GuideEmitCoverageNow();
+                    }
                     // Phase 589: the reservation at 81A042E0 fails its fit
                     // test (cur+size <= end) on all four calls even with a
                     // 512KB window bound. Log the window either side of the

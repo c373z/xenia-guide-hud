@@ -3364,10 +3364,24 @@ static void EmitGuideCoverageOnce() {
   if (::cvars::guide_coverage_fn) {
     static bool cov_done = false;
     if (!cov_done) {
-      cov_done = true;
       auto* f = kernel_state()->processor()->LookupFunction(
           ::cvars::guide_coverage_fn);
       auto* gf = f ? dynamic_cast<cpu::GuestFunction*>(f) : nullptr;
+      // Phase 591: only spend the one-shot on a readback that has data.
+      // Driven from the paint loop, the first call lands before the function
+      // under study has ever run, and burning the one-shot there reported
+      // "never translated" and then stayed silent for the rest of the run -
+      // which reads exactly like "the function is never called".
+      if (!gf || !gf->trace_data().is_valid()) {
+        static bool warned = false;
+        if (!warned) {
+          warned = true;
+          XELOGI("Coverage {:08X}: not yet translated/valid - will retry",
+                 uint32_t(::cvars::guide_coverage_fn));
+        }
+        return;
+      }
+      cov_done = true;
       if (gf && gf->trace_data().is_valid()) {
         auto& td = gf->trace_data();
         auto* counts =
