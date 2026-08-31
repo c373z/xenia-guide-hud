@@ -1051,6 +1051,15 @@ DEFINE_bool(guide_resolve_paint_handles, false,
 // Phase 578: pass null as the dispatcher's DC argument so hud skips its release
 // path and constructs its own, instead of releasing the bootstrap's DC and then
 // calling through it.
+DEFINE_bool(guide_patch_class_reg, false,
+            "Patch 8194F164 to an unconditional branch so class registration "
+            "treats an existing entry as success instead of returning "
+            "80300005. Phase 649: the render host fails only because its "
+            "classes are already registered (phase 606), and a fresh XUI "
+            "context is the only way to root the object graph on mode 1's "
+            "device (phases 644, 648).",
+            "Kernel");
+
 DEFINE_bool(guide_retarget_interrupt, false,
             "Re-register the graphics interrupt callback with the device the "
             "present path uses. Phase 645: xam registers it with mode 1's "

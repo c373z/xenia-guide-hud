@@ -2097,6 +2097,16 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                 // The mode-1 creator below never returns, so anything after it
                 // is dead code in that configuration - including the queue
                 // call that starts the Guide bootstrap.
+                // Phase 649: applied here rather than from the xam bootstrap
+                // block, which runs AFTER the render-host call it is meant to
+                // affect - the same ordering mistake as PresentRTPatch in
+                // phase 613, and visible the same way: the patch verified
+                // clean and changed nothing.
+                if (cvars::guide_patch_class_reg) {
+                  kernel::xboxkrnl::GuidePatchWord(0x8194F164u, 0x41820018u,
+                                                   0x48000018u,
+                                                   "ClassRegPatch(early)");
+                }
                 XELOGI("Guide button: queueing bootstrap BEFORE device creation");
                 kernel::xboxkrnl::QueueGuideBootstrap(
                     hud_base, obj, cvars::guide_use_title_device, skin_mod);

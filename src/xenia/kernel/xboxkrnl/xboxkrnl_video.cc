@@ -3504,6 +3504,12 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   // function returns its own argument: the fetch constant then carries the raw
   // input pointer, which is already logged. This deliberately breaks the
   // conversion - it is a diagnostic, not a fix.
+  // 8194F164 is `beq 8194F17C` guarding the duplicate-class check: zero from
+  // 81949B60 means "not found" and is the success path, non-zero builds
+  // 80300005. Forcing the branch makes a second registration succeed.
+  if (::cvars::guide_patch_class_reg && XamIsDashrootLayout()) {
+    GuidePatchWord(0x8194F164u, 0x41820018u, 0x48000018u, "ClassRegPatch");
+  }
   if (::cvars::guide_patch_addr_passthru && XamIsDashrootLayout()) {
     GuidePatchWord(0x819E0218u, 0x7FEB5214u, 0x7C7F1B78u, "AddrPassthruPatch");
   }
