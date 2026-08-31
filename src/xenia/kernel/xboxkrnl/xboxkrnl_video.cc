@@ -5105,6 +5105,20 @@ void VdSwap_entry(
         uint32_t sdc = sr(guide_draw_this_ + 12);
         uint32_t swrap = sdc ? sr(sdc + 0x1CCu) : 0;
         sc_dev = swrap ? sr(swrap + 12u) : 0;
+        // Phase 692: redirect to the title's device here, where the
+        // derivation actually happens.
+        if (::cvars::guide_ctx2_title_device && swrap) {
+          uint32_t tdev = sr(0x801E6FC4u);
+          if (tdev) {
+            xe::store_and_swap<uint32_t>(sm->TranslateVirtual(swrap + 12u),
+                                         tdev);
+            XELOGI("GuideCtx2TitleDev: [{:08X}+0C] {:08X} -> {:08X}", swrap,
+                   sc_dev, tdev);
+            sc_dev = tdev;
+          } else {
+            XELOGW("GuideCtx2TitleDev: title device is null");
+          }
+        }
         if (sc_dev) {
           if (!guide_cmdbuf_base_) {
             guide_cmdbuf_size_ =

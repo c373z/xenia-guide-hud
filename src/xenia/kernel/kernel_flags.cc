@@ -1093,6 +1093,18 @@ DEFINE_bool(guide_force_cmdbuf_alloc, false,
             "result is reproducible.",
             "Kernel");
 
+DEFINE_bool(guide_ctx2_title_device, false,
+            "Point the second context's wrapper at the title's D3D device "
+            "([wrap+0x0C]) at the site that actually runs - unlike "
+            "guide_render_on_title_device, whose block in emulator.cc never "
+            "executes here (GuideTitleDev logs zero lines). Phase 692 RAN "
+            "this: the redirect applies (dev=40AE4D00) and the run gains a "
+            "guest crash at 819DE94C. The title's device is live and owns its "
+            "own command buffer at BF7CA2BC; writing our cursor into "
+            "[dev+0x30] leaves it describing two buffers at once. Kept so the "
+            "negative result is reproducible.",
+            "Kernel");
+
 DEFINE_bool(guide_retarget_interrupt, false,
             "Re-register the graphics interrupt callback with the device the "
             "present path uses. Phase 645: xam registers it with mode 1's "
