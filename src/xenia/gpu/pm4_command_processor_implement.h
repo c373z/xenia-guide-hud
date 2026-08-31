@@ -1655,9 +1655,15 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
             uint32_t raw = xe::load_and_swap<uint32_t>(vp + k * 4);
             std::memcpy(&f[k], &raw, 4);
           }
-          XELOGI("GuideVerts[vf{}]: addr={:08X} dwords={} | pos {} {} {} | "
-                 "next {} {} {} {}",
-                 slot, addr, size_dw, f[0], f[1], f[2], f[3], f[4], f[5], f[6]);
+          // Phase 716: seven floats out of a 32-dword buffer is not enough
+          // to tell a NaN vertex from a misread stride. Print the whole
+          // buffer, capped, so the layout is visible rather than inferred.
+          std::string vdump;
+          for (uint32_t vi = 0; vi < size_dw && vi < 32u; ++vi) {
+            vdump += fmt::format("{} ", f[vi]);
+          }
+          XELOGI("GuideVerts[vf{}]: addr={:08X} dwords={} | {}", slot, addr,
+                 size_dw, vdump);
         }
       }
       // Phase 527: phase 522 concluded "the Guide draws after the frame's
