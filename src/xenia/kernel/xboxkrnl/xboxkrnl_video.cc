@@ -1099,6 +1099,12 @@ uint32_t GuideBindDeviceCmdbuf(uint32_t dev, void* ts, uint32_t kb) {
   xe::store_and_swap<uint32_t>(mem->TranslateVirtual(dev + 0x30u), cbuf);
   xe::store_and_swap<uint32_t>(mem->TranslateVirtual(dev + 0x34u),
                                cbuf + csize);
+  // Phase 684: [+0x38] is the writer's safety limit, and xam's own installer
+  // (81A018C8) derives it as end - 0xA0. Setting the pair without it left
+  // 40870D00 with a limit still pointing into the device's old buffer while
+  // begin/end pointed at ours - a triple that cannot be read consistently.
+  xe::store_and_swap<uint32_t>(mem->TranslateVirtual(dev + 0x38u),
+                               cbuf + csize - 0xA0u);
   // Phase 652: publish the buffer to guide_cmdbuf_base_. The second-context
   // path (guide_second_context_kb), which executes the Guide's emitted
   // packets directly via ExecuteGuestBufferUnsafe, is gated on that member -
@@ -1459,6 +1465,49 @@ static uint32_t guide_title_surface_ = 0;
 static std::atomic<uint32_t> guide_mode1_device_{0};
 void GuideSetMode1Device(uint32_t dev) { guide_mode1_device_.store(dev); }
 uint32_t GuideMode1Device() { return guide_mode1_device_.load(); }
+
+// Phase 684: phase 683 established that [dev+0x2B3D] & 0x20 is a cached "this
+// device has no command-buffer pool" state, not a gate - forcing past it hits
+// an assert in 81A02688 and crashes. The open question is which device the
+// Guide's draw emitter runs on and whether any device has a pool at all. Read
+// it rather than hook the guest: the fields are host-readable.
+void GuideDumpDevices() {
+  static bool done = false;
+  if (done) return;
+  done = true;
+  auto* m = kernel_state()->memory();
+  auto readable = [m](uint32_t a) {
+    auto* hp = m->LookupHeap(a);
+    return hp && hp->QueryRangeAccess(a, a + 0x4000u) !=
+                     xe::memory::PageAccess::kNoAccess;
+  };
+  auto r = [m](uint32_t a) {
+    return xe::load_and_swap<uint32_t>(m->TranslateVirtual(a));
+  };
+  auto rb = [m](uint32_t a) {
+    return *reinterpret_cast<uint8_t*>(m->TranslateVirtual(a));
+  };
+  struct { const char* name; uint32_t dev; } devs[] = {
+      {"title(801E6FC4)", r(0x801E6FC4u)},
+      {"xam(801E6FC8)", r(0x801E6FC8u)},
+      {"mode1", GuideMode1Device()},
+      {"40870D00", 0x40870D00u},
+      {"407CB880", 0x407CB880u},
+  };
+  for (auto& d : devs) {
+    if (!d.dev || !readable(d.dev)) {
+      XELOGI("GuideDev {}: {:08X} unreadable", d.name, d.dev);
+      continue;
+    }
+    uint8_t flags = rb(d.dev + 0x2B3Du);
+    XELOGI(
+        "GuideDev {}: {:08X} flags2B3D={:02X} noalloc={} pool3A54={:08X} "
+        "inline30={:08X} end34={:08X} lim38={:08X}",
+        d.name, d.dev, flags, (flags & 0x20) ? 1 : 0, r(d.dev + 0x3A54u),
+        r(d.dev + 0x30u), r(d.dev + 0x34u), r(d.dev + 0x38u));
+  }
+}
+
 
 // 819F4D28 arg5 (r7). See the header for why this is captured there rather
 // than at 81A0FE48: that function only runs on the mode-1 path, so a
@@ -3893,6 +3942,7 @@ void VdSwap_entry(
     // Phase 680: read the dispatcher's slots instead of inferring them from an
     // unexecuted span. One shot, on the draw, after the delta is emitted.
     GuideDumpNodes();
+    GuideDumpDevices();
   }
   // Composite the Guide here. The title's D3D device is thread-affine and
   // this runs on the thread that owns it, inside the title's frame and just
@@ -4554,6 +4604,8 @@ void VdSwap_entry(
                   cm->TranslateVirtual(cdev + 0x30u), cbuf);
               xe::store_and_swap<uint32_t>(
                   cm->TranslateVirtual(cdev + 0x34u), cbuf + csize);
+              xe::store_and_swap<uint32_t>(
+                  cm->TranslateVirtual(cdev + 0x38u), cbuf + csize - 0xA0u);
               if (ckpt_on) XELOGI("GuideCk: sv_reads");
               static uint32_t bind_logs = 0;
               if (bind_logs++ < 3)
@@ -4603,6 +4655,9 @@ void VdSwap_entry(
               xe::store_and_swap<uint32_t>(
                   wm->TranslateVirtual(wdev + 0x34u),
                   guide_cmdbuf_base_ + guide_cmdbuf_size_);
+              xe::store_and_swap<uint32_t>(
+                  wm->TranslateVirtual(wdev + 0x38u),
+                  guide_cmdbuf_base_ + guide_cmdbuf_size_ - 0xA0u);
               static std::atomic<uint32_t> wn{0};
               uint32_t wi = ++wn;
               if (wi <= 3) {
