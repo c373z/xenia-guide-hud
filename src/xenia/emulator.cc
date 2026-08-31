@@ -2214,13 +2214,23 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                     rgs->command_processor()->GuideRingState(&rp, &rs, &rw);
                     XELOGI("GuideRing: before creator ptr={:08X} "
                            "size={:08X} wb={:08X}", rp, rs, rw);
-                    std::thread([rgs, rp, rs, rw]() {
+                    std::thread([rgs, rp, rs, rw]() mutable {
                       xe::threading::set_name("GuideRingWatch");
                       for (int i = 0; i < 60; ++i) {
                         xe::threading::Sleep(std::chrono::seconds(1));
                         uint32_t p2 = 0, s2 = 0, w2 = 0;
                         rgs->command_processor()->GuideRingState(&p2, &s2,
                                                                 &w2);
+                        // Phase 610: keep sampling after the change - the
+                        // question is no longer whether the ring moves but
+                        // whether anything writes to the one it moved to.
+                        {
+                          uint32_t rd_i = 0, wr_i = 0;
+                          rgs->command_processor()->GuideRingPointers(&rd_i,
+                                                                      &wr_i);
+                          XELOGI("GuideRingPtrs {}s: ring={:08X} rptr={} "
+                                 "wptr={}", i + 1, p2, rd_i, wr_i);
+                        }
                         if (p2 != rp || s2 != rs || w2 != rw) {
                           XELOGI("GuideRing: CHANGED after {}s ptr {:08X}"
                                  "->{:08X} size {:08X}->{:08X} wb "
@@ -2235,8 +2245,16 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                             xe::threading::Sleep(
                                 std::chrono::seconds(3));
                             kernel::xboxkrnl::GuideRestoreTitleRing();
+                            return;
                           }
-                          return;
+                          // Phase 610: do NOT stop watching here. The
+                          // interesting period begins after the handover -
+                          // whether anything then writes to the new ring -
+                          // and returning on first change is why that was
+                          // never observed. Re-baseline and keep sampling.
+                          rp = p2;
+                          rs = s2;
+                          rw = w2;
                         }
                       }
                       XELOGI("GuideRing: unchanged for 60s");

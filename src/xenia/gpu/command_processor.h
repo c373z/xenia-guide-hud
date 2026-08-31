@@ -568,6 +568,14 @@ class CommandProcessor {
     read_ptr_index_ = r.rptr;
     read_ptr_update_freq_ = r.freq;
   }
+  // Phase 610: the ring handed over (phase 608) but nothing new reaches the
+  // GPU. Expose the ring pointers so "is anything being written to the new
+  // ring" is answerable directly rather than inferred from draw counts.
+  void GuideRingPointers(uint32_t* rptr, uint32_t* wptr) {
+    *rptr = read_ptr_index_;
+    *wptr = write_ptr_index_.load();
+  }
+
   void GuideRingState(uint32_t* ptr, uint32_t* size, uint32_t* wb) {
     *ptr = primary_buffer_ptr_;
     *size = primary_buffer_size_;
