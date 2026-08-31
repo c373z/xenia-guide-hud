@@ -6852,10 +6852,30 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                                uint32_t(cvars::guide_coverage_fn), ep);
                       }
                     } else {
+                      // Phase 775: `lookup` is NOT an execution signal.
+                      // Processor::LookupFunction calls DeclareFunction, which
+                      // CREATES the symbol when new, so lookup=ok holds for any
+                      // address in a loaded module whether or not it ever ran.
+                      // Reading it as "found, therefore called" - as covrun's
+                      // -NoTrace docstring invited - is unsound. Translation
+                      // happens in DefineFunction, so the status is the signal:
+                      // kDefined means the function was actually translated,
+                      // i.e. reached; kDeclared means only that we asked about
+                      // it. trace_valid is meaningful ONLY with
+                      // --trace_functions, which allocates the trace data.
+                      const char* st = "?";
+                      switch (cf ? cf->status() : cpu::Symbol::Status::kFailed) {
+                        case cpu::Symbol::Status::kNew:       st = "new"; break;
+                        case cpu::Symbol::Status::kDeclaring: st = "declaring"; break;
+                        case cpu::Symbol::Status::kDeclared:  st = "DECLARED-not-run"; break;
+                        case cpu::Symbol::Status::kDefining:  st = "defining"; break;
+                        case cpu::Symbol::Status::kDefined:   st = "DEFINED-translated"; break;
+                        case cpu::Symbol::Status::kFailed:    st = "failed"; break;
+                      }
                       XELOGI("Coverage {:08X}: no counts - lookup={}, "
-                             "guest_fn={}, trace_valid={}",
+                             "guest_fn={}, status={}, trace_valid={}",
                              uint32_t(cvars::guide_coverage_fn),
-                             cf ? "ok" : "null", cgf ? "ok" : "cast-failed",
+                             cf ? "ok" : "null", cgf ? "ok" : "cast-failed", st,
                              (cgf && cgf->trace_data().is_valid())
                                  ? "yes" : "no");
                     }
