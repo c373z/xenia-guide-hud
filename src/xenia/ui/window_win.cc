@@ -10,6 +10,7 @@
 #include "xenia/ui/window_win.h"
 
 #include "xenia/base/assert.h"
+#include "xenia/base/cvar.h"
 #include "xenia/base/filesystem.h"
 #include "xenia/base/logging.h"
 #include "xenia/ui/surface_win.h"
@@ -22,6 +23,16 @@
 #include <Dbt.h>
 #include <ShellScalingApi.h>
 #include <dwmapi.h>
+
+// Show the window without taking foreground. Xenia normally opens with
+// SW_SHOWNORMAL, which activates it and pulls focus away from whatever the
+// user is doing - unhelpful when the emulator is being launched repeatedly by
+// a test harness, where -WindowStyle Minimized is not enough because the flag
+// governs the launcher's request, not what the app then asks Windows for.
+DEFINE_bool(window_no_activate, false,
+            "Open the window minimized and without activating it, so launching "
+            "does not steal focus.",
+            "UI");
 
 namespace xe {
 namespace ui {
@@ -240,7 +251,8 @@ bool Win32Window::OpenImpl() {
   }
 
   // Finally show the window.
-  ShowWindow(hwnd_, SW_SHOWNORMAL);
+  ShowWindow(hwnd_,
+             cvars::window_no_activate ? SW_SHOWMINNOACTIVE : SW_SHOWNORMAL);
 
   // Report the initial actual state after opening, messages for which might
   // have missed if they were processed during CreateWindowExW when the HWND was
