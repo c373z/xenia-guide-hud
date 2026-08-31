@@ -45,18 +45,24 @@ class DrawExtentEstimator {
                 uint32_t value_mask) override;
 
     void Reset() {
+      position_x_.reset();  // phase 731
       position_y_.reset();
       position_w_.reset();
       point_size_.reset();
       vertex_kill_.reset();
     }
 
+    // Phase 731: X was never captured - Xenia only needs MaxY to size render
+    // targets - so geometry spanning y 0..720 with zero width reads exactly
+    // like full-screen coverage and produces no pixels.
+    const std::optional<float>& position_x() const { return position_x_; }
     const std::optional<float>& position_y() const { return position_y_; }
     const std::optional<float>& position_w() const { return position_w_; }
     const std::optional<float>& point_size() const { return point_size_; }
     const std::optional<uint32_t>& vertex_kill() const { return vertex_kill_; }
 
    private:
+    std::optional<float> position_x_;
     std::optional<float> position_y_;
     std::optional<float> position_w_;
     std::optional<float> point_size_;

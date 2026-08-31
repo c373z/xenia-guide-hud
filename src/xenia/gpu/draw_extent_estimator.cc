@@ -12,6 +12,7 @@
 #include <cfloat>
 
 #include "xenia/base/assert.h"
+#include "xenia/base/logging.h"
 #include "xenia/base/cvar.h"
 #include "xenia/base/memory.h"
 #include "xenia/base/profiling.h"
@@ -50,10 +51,18 @@ DEFINE_bool(
 namespace xe {
 namespace gpu {
 
+// Phase 731: same pattern render_target_cache.cc uses - a block-scope extern
+// binds to the global namespace and does not link.
+extern bool g_guide_in_draw_scope;
+extern bool g_guide_replaying;
+
 void DrawExtentEstimator::PositionYExportSink::Export(
     ucode::ExportRegister export_register, const float* value,
     uint32_t value_mask) {
   if (export_register == ucode::ExportRegister::kVSPosition) {
+    if (value_mask & 0b0001) {
+      position_x_ = value[0];
+    }
     if (value_mask & 0b0010) {
       position_y_ = value[1];
     }
@@ -209,6 +218,20 @@ uint32_t DrawExtentEstimator::EstimateVertexMaxY(const Shader& vertex_shader) {
       continue;
     }
     float vertex_y = position_y_export_sink.position_y().value();
+    {
+      static uint32_t vlog = 0;
+      if ((g_guide_in_draw_scope || g_guide_replaying) && vlog < 12) {
+        ++vlog;
+        XELOGI("GuideVertexOut #{}: x={} y={} w={}", vlog,
+               position_y_export_sink.position_x().has_value()
+                   ? position_y_export_sink.position_x().value()
+                   : -99999.0f,
+               vertex_y,
+               position_y_export_sink.position_w().has_value()
+                   ? position_y_export_sink.position_w().value()
+                   : -99999.0f);
+      }
+    }
     if (!pa_cl_vte_cntl.vtx_xy_fmt) {
       if (!position_y_export_sink.position_w().has_value()) {
         continue;
