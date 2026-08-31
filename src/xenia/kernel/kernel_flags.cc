@@ -1201,6 +1201,29 @@ DEFINE_bool(guide_nop_regs, false,
             "breaks it.",
             "Kernel");
 
+DEFINE_bool(guide_keep_surface_regs, false,
+            "Replace the Guide's writes to RB_SURFACE_INFO, RB_COLOR_INFO and "
+            "RB_DEPTH_INFO with the values the emulator already holds, so its "
+            "stream cannot retarget EDRAM. Phase 709 isolated the blank frame "
+            "to the register writes; phase 699 measured the Guide setting "
+            "pitch 1280 and colour base tile 0x2AA, a different EDRAM layout "
+            "from the title's. Rewriting the data words keeps the packet "
+            "framing, unlike NOPing whole packets which would take neighbours "
+            "with them.",
+            "Kernel");
+
+DEFINE_uint64(guide_keep_reg_lo, 0,
+              "Low bound of the register range whose writes are replaced with "
+              "the emulator's current values. Phase 710: preserving only "
+              "0x2000-0x2002 left the frame black, so the culprit is elsewhere "
+              "among the 949 writes; a range makes them bisectable the way "
+              "phase 697 bisected the allocator's call sites.",
+              "Kernel");
+
+DEFINE_uint64(guide_keep_reg_hi, 0,
+              "High bound of that range; 0 means equal to guide_keep_reg_lo.",
+              "Kernel");
+
 DEFINE_bool(guide_retarget_interrupt, false,
             "Re-register the graphics interrupt callback with the device the "
             "present path uses. Phase 645: xam registers it with mode 1's "

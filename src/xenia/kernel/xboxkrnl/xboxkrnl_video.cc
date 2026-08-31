@@ -8759,7 +8759,8 @@ void VdSwap_entry(
         // same nested-flag trap catalogued in 616, 692, 701 and 704, authored
         // here by me. Run the walk if either flag wants it.
         if ((::cvars::guide_patch_resolve_dest || ::cvars::guide_nop_waits ||
-             ::cvars::guide_nop_draws || ::cvars::guide_nop_regs) &&
+             ::cvars::guide_nop_draws || ::cvars::guide_nop_regs ||
+             ::cvars::guide_keep_surface_regs || ::cvars::guide_keep_reg_lo) &&
             xbuf && words) {
           auto* rm = kernel_state()->memory();
           if (!resolve_buf && ::cvars::guide_patch_resolve_dest) {
@@ -8776,8 +8777,10 @@ void VdSwap_entry(
             }
           }
           if (resolve_buf || ::cvars::guide_nop_waits ||
-              ::cvars::guide_nop_draws || ::cvars::guide_nop_regs) {
-            uint32_t patched = 0, nopped = 0;
+              ::cvars::guide_nop_draws || ::cvars::guide_nop_regs ||
+              ::cvars::guide_keep_surface_regs ||
+              ::cvars::guide_keep_reg_lo) {
+            uint32_t patched = 0, nopped = 0, kept = 0;
             for (uint32_t i = 0; i < words;) {
               uint32_t hd = sd(xbuf + i * 4);
               uint32_t ty = hd >> 30;
@@ -8792,6 +8795,31 @@ void VdSwap_entry(
                     xe::store_and_swap<uint32_t>(
                         rm->TranslateVirtual(xbuf + idx * 4), resolve_buf);
                     ++patched;
+                  }
+                }
+                const uint32_t keep_lo =
+                    ::cvars::guide_keep_surface_regs
+                        ? 0x2000u
+                        : uint32_t(::cvars::guide_keep_reg_lo);
+                const uint32_t keep_hi =
+                    ::cvars::guide_keep_surface_regs
+                        ? 0x2002u
+                        : (::cvars::guide_keep_reg_hi
+                               ? uint32_t(::cvars::guide_keep_reg_hi)
+                               : uint32_t(::cvars::guide_keep_reg_lo));
+                if (keep_lo) {
+                  auto* kcp = kernel_state()
+                                  ->emulator()
+                                  ->graphics_system()
+                                  ->command_processor();
+                  for (uint32_t k = 0; k < cnt && i + 1u + k < words; ++k) {
+                    uint32_t reg = one ? base : base + k;
+                    if (reg >= keep_lo && reg <= keep_hi && kcp) {
+                      xe::store_and_swap<uint32_t>(
+                          rm->TranslateVirtual(xbuf + (i + 1u + k) * 4),
+                          kcp->GuideReadRegister(reg));
+                      ++kept;
+                    }
                   }
                 }
                 if (::cvars::guide_nop_regs) {
@@ -8828,10 +8856,10 @@ void VdSwap_entry(
               }
             }
             static uint32_t rp = 0;
-            if ((patched || nopped) && ++rp <= 3) {
+            if ((patched || nopped || kept) && ++rp <= 3) {
               XELOGI("GuideResolveDest #{}: patched {} dest_base -> {:08X}, "
-                     "nopped {} waits",
-                     rp, patched, resolve_buf, nopped);
+                     "nopped {}, kept {} surface regs",
+                     rp, patched, resolve_buf, nopped, kept);
             }
           }
         }

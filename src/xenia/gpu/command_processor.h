@@ -614,6 +614,12 @@ class CommandProcessor {
   // Guide left behind. Phase 708 measured the frame going entirely black with
   // every draw and the resolve removed, which puts the blame on the state
   // alone. Snapshot the register file, run the stream, put it back.
+  // Phase 710: read a register the emulator currently holds, so the Guide's
+  // stream can be made to write the title's own value back instead of its own.
+  uint32_t GuideReadRegister(uint32_t reg) const {
+    return register_file_ ? (*register_file_)[reg] : 0u;
+  }
+
   void ExecuteGuestBufferVirtualIsolated(uint32_t ptr, uint32_t count) {
     if (!count || !register_file_) {
       ExecuteGuestBufferVirtualUnsafe(ptr, count);
