@@ -895,6 +895,68 @@ uint32_t GuideResolveHandle(uint32_t handle) {
   return (r(entry) == tag) ? r(entry + 4u) : 0;
 }
 
+// Phase 680: 8194A0A8 consults three slots per chain node - a global hook, a
+// handle in [+4] resolved through the same table, and [+0x1C]/[+0x20]. Coverage
+// says the first two never fire (phase 678), but that is inference from an
+// unexecuted span. The table at 81D6D0D8 is host-readable, so walk it and read
+// the slots directly. Phase 679 spent a scan on a struct that merely shared the
+// offsets; observation settles what pattern-matching could not.
+void GuideDumpNodes() {
+  static bool done = false;
+  if (done) return;
+  done = true;
+  auto* m = kernel_state()->memory();
+  // The first cut of this walked the table dereferencing whatever it found and
+  // took 4 host faults, killing the composite draw - phase 672's mistake in a
+  // new costume. Guard every read, and count what the guard rejects so a short
+  // table is visibly a short table and not a silent zero.
+  auto readable = [m](uint32_t a) {
+    auto* hp = m->LookupHeap(a);
+    return hp && hp->QueryRangeAccess(a, a + 0x24u) !=
+                     xe::memory::PageAccess::kNoAccess;
+  };
+  auto r = [m](uint32_t a) {
+    return xe::load_and_swap<uint32_t>(m->TranslateVirtual(a));
+  };
+  uint32_t cap = r(0x81D6D0D8u + 0x420u);
+  XELOGI("GuideNodes: capacity={} global_hook={:08X}", cap, r(0x81D6D028u));
+  uint32_t total = 0, with_base = 0, with_fn = 0, shown = 0, skipped = 0;
+  uint32_t last_node = 0;
+  for (uint32_t idx = 0; idx < cap && idx < 0x10000u; ++idx) {
+    uint32_t bucket = r(0x81D6D0D8u + (idx >> 8) * 4u);
+    uint32_t entry = bucket + (idx & 0xFFu) * 8u;
+    if (!bucket || !readable(entry)) {
+      ++skipped;
+      continue;
+    }
+    uint32_t rec = r(entry + 4u);
+    if (!rec || !readable(rec)) {
+      ++skipped;
+      continue;
+    }
+    uint32_t node = r(rec + 0x0Cu);
+    if (!node || !readable(node)) {
+      ++skipped;
+      continue;
+    }
+    ++total;
+    uint32_t base = r(node + 4u), fn = r(node + 0x1Cu);
+    if (base) ++with_base;
+    if (fn) ++with_fn;
+    if (node != last_node && shown < 20) {
+      last_node = node;
+      ++shown;
+      XELOGI(
+          "GuideNode[{}] node={:08X} self={:08X} base={:08X} next={:08X} "
+          "fn={:08X} ctx={:08X}",
+          idx, node, r(node), base, r(node + 8u), fn, r(node + 0x20u));
+    }
+  }
+  XELOGI("GuideNodes: total={} with_base={} with_fn={} skipped={}", total,
+         with_base, with_fn, skipped);
+}
+
+
 bool GuidePatchWord(uint32_t addr, uint32_t expect, uint32_t value,
                     const char* name) {
   auto* pm = kernel_state()->memory();
@@ -3821,6 +3883,9 @@ void VdSwap_entry(
         }
       }
     }
+    // Phase 680: read the dispatcher's slots instead of inferring them from an
+    // unexecuted span. One shot, on the draw, after the delta is emitted.
+    GuideDumpNodes();
   }
   // Composite the Guide here. The title's D3D device is thread-affine and
   // this runs on the thread that owns it, inside the title's frame and just
