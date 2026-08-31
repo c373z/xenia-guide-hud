@@ -2887,6 +2887,21 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
 
   // Bind the pipeline after configuring it and doing everything that may bind
   // other pipelines.
+  // Phase 734: the PSO binds shaders, blend, depth and RT formats as one unit.
+  // Register-level comparison (723, 730) cannot see a difference that lives in
+  // the pipeline object itself, so compare the object.
+  {
+    static uint32_t psg = 0, pst = 0;
+    bool g = guide_in_draw_scope_ || xe::gpu::g_guide_replaying;
+    if ((g ? psg : pst)++ < 3) {
+      XELOGI("PSO[{}]: handle={} d3d12={} vs_hash={:016X} ps_hash={:016X}",
+             g ? "guide" : "title", pipeline_handle,
+             static_cast<const void*>(
+                 pipeline_cache_->GetD3D12PipelineByHandle(pipeline_handle)),
+             vertex_shader ? vertex_shader->ucode_data_hash() : 0ull,
+             pixel_shader ? pixel_shader->ucode_data_hash() : 0ull);
+    }
+  }
   if (current_guest_pipeline_ != pipeline_handle) {
     deferred_command_list_.SetPipelineStateHandle(
         reinterpret_cast<void*>(pipeline_handle));
