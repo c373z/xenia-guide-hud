@@ -2074,6 +2074,26 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_IM_LOAD_IMMEDIATE(
   auto shader = COMMAND_PROCESSOR::LoadShader(
       shader_type, uint32_t(reader_.read_ptr()),
       reinterpret_cast<uint32_t*>(reader_.read_ptr()), size_dwords);
+  // Phase 745: the other half of the census. Phase 744 covered only the
+  // pointer-based loads, which is why the hashes the draw tally shows being
+  // bound were missing from it.
+  {
+    static std::map<uint64_t, std::pair<uint32_t, uint32_t>> imm;
+    uint64_t h = shader ? shader->ucode_data_hash() : 0ull;
+    auto& e = imm[h];
+    e.first += (guide_in_draw_scope_ || guide_replaying_) ? 1u : 0u;
+    ++e.second;
+    static uint32_t immn = 0;
+    if (++immn % 4000u == 0u) {
+      std::string list;
+      for (auto& kv : imm) {
+        list += fmt::format("{:04X}:{}g/{} ", uint32_t(kv.first >> 48),
+                            kv.second.first, kv.second.second);
+      }
+      XELOGI("IMImmCensus: {} distinct shaders (guide/total) | {}", imm.size(),
+             list);
+    }
+  }
   switch (shader_type) {
     case xenos::ShaderType::kVertex:
       active_vertex_shader_ = shader;
