@@ -8727,6 +8727,27 @@ void VdSwap_entry(
         }
         static uint32_t sc_n = 0;
         ++sc_n;
+        // Phase 705: 819FCE50 kicks the GPU through [dev+0x2B14] and faults
+        // on null. Give it a buffer here, where sc_dev is live, rather than in
+        // the emulator.cc block that never runs in this configuration.
+        if (::cvars::guide_ctx2_kick_ptr) {
+          auto* km = kernel_state()->memory();
+          uint32_t kdevs[2] = {sc_dev, sd(0x801E6FC4u)};
+          for (uint32_t kd : kdevs) {
+            if (!kd) continue;
+            uint32_t cur = sd(kd + 0x2B14u);
+            if (cur) continue;
+            uint32_t kb = km->SystemHeapAlloc(0x20, 16, kSystemHeapPhysical);
+            if (!kb) continue;
+            std::memset(km->TranslateVirtual(kb), 0, 0x20);
+            xe::store_and_swap<uint32_t>(km->TranslateVirtual(kd + 0x2B14u),
+                                         kb);
+            static uint32_t kn = 0;
+            if (++kn <= 4) {
+              XELOGI("GuideCtx2KickPtr: dev {:08X} [2B14] <- {:08X}", kd, kb);
+            }
+          }
+        }
         // Phase 703: the resolve destination is null (700), and the route
         // to its writer is closed (702). Supply one instead - the move that
         // worked for the allocator in 694 - and then look at what lands there.

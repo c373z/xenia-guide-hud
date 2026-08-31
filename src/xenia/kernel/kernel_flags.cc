@@ -1163,6 +1163,16 @@ DEFINE_bool(guide_nop_waits, false,
             "the parser still skips the body.",
             "Kernel");
 
+DEFINE_bool(guide_ctx2_kick_ptr, false,
+            "Give [dev+0x2B14] a real buffer at the second-context site, for "
+            "both the Guide's device and the title's. 819FCE50 kicks the GPU "
+            "through that field and faults on null - phases 630 and 632. The "
+            "existing guide_fix_kick_ptr does this in emulator.cc but is "
+            "nested under guide_bind_boot_rt under guide_set_render_dc, and "
+            "phase 701 measured that enabling that chain drops DRAW_INDX from "
+            "16 to 0. Same fix, at a site that runs.",
+            "Kernel");
+
 DEFINE_bool(guide_retarget_interrupt, false,
             "Re-register the graphics interrupt callback with the device the "
             "present path uses. Phase 645: xam registers it with mode 1's "
