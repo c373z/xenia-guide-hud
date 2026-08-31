@@ -970,7 +970,11 @@ void GuideInstallAllocStub() {
     XELOGW("GuideAllocStub: no physical heap");
     return;
   }
-  const uint32_t kSize = 8u * 1024u * 1024u;
+  // Phase 695: 1MB, not 8. The allocator is called 38 times a run and the
+  // arena is never reused, so 8MB was arbitrary - and it comes out of the same
+  // physical heap the title allocates from, which is a candidate for the new
+  // crash in the title's code.
+  const uint32_t kSize = 1u * 1024u * 1024u;
   uint32_t buf = 0;
   if (!heap->Alloc(kSize, 4096,
                    kMemoryAllocationReserve | kMemoryAllocationCommit,
@@ -979,6 +983,12 @@ void GuideInstallAllocStub() {
     XELOGW("GuideAllocStub: physical allocation failed");
     return;
   }
+  // Phase 695: zero the whole arena once. The stub never reuses memory, so a
+  // single memset makes every allocation zeroed - which is what a real pool
+  // hands out, and the cheapest explanation for phase 694's new guest crash in
+  // the title's range: xam's other 34 callers of this allocator were getting
+  // raw memory.
+  std::memset(mem->TranslateVirtual(buf), 0, kSize);
   // [buf] holds the cursor; allocations start past it, 256-aligned.
   xe::store_and_swap<uint32_t>(mem->TranslateVirtual(buf), buf + 256u);
   const uint32_t lo = buf & 0xFFFFu;
