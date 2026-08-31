@@ -2702,6 +2702,20 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
     }
   }
 
+  // Phase 730: RB_COLOR_MASK can discard every fragment while every other
+  // stage reports correct - a write mask of 0 looks exactly like what has been
+  // measured since 705. Print it for both the Guide's draws and the title's.
+  {
+    static uint32_t cmg = 0, cmt = 0;
+    bool g = guide_in_draw_scope_;
+    if ((g ? cmg : cmt)++ < 3) {
+      XELOGI("ColorMask[{}]: RB_COLOR_MASK={:08X} blendcontrol0={:08X} "
+             "colorcontrol={:08X}",
+             g ? "guide" : "title", regs[XE_GPU_REG_RB_COLOR_MASK],
+             regs[XE_GPU_REG_RB_BLENDCONTROL0],
+             regs[XE_GPU_REG_RB_COLORCONTROL]);
+    }
+  }
   // Phase 723: the Guide's colour target is EDRAM tile 0x2AA (phase 699).
   // Print what the TITLE's draws use, in the same run, so the two can be
   // compared rather than assumed different.

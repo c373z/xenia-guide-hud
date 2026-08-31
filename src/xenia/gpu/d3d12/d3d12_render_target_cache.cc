@@ -5719,6 +5719,26 @@ void D3D12RenderTargetCache::SetCommandListRenderTargets(
       auto& d3d12_rt = *static_cast<const D3D12RenderTarget*>(render_target);
       rtv_handles[rtv_count++] = d3d12_rt.descriptor_draw().GetHandle();
     }
+    // Phase 730: guest RB_COLOR_INFO matches the title's (723), but that is
+    // what the guest asked for. Print which host resource is actually bound,
+    // for the Guide's draws and the title's alike, so the two can be compared
+    // on the side that decides where pixels land.
+    {
+      static uint32_t rtn = 0, rtg = 0;
+      bool guide = xe::gpu::g_guide_in_draw_scope || xe::gpu::g_guide_replaying;
+      if ((guide ? rtg : rtn)++ < 3) {
+        const RenderTarget* c0 = depth_and_color_render_targets[1];
+        XELOGI("HostRT[{}]: rtv_count={} color0_key={:08X} resource={}",
+               guide ? "guide" : "title", rtv_count,
+               c0 ? c0->key().key : 0u,
+               c0 ? fmt::format(
+                        "{}",
+                        static_cast<const void*>(
+                            static_cast<const D3D12RenderTarget*>(c0)
+                                ->resource()))
+                  : "null");
+      }
+    }
     command_processor_.GetDeferredCommandList().D3DOMSetRenderTargets(
         rtv_count, rtv_handles, false,
         depth_and_color_render_targets[0] ? &dsv_handle : nullptr);
