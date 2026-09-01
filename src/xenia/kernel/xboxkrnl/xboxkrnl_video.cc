@@ -8235,6 +8235,70 @@ void VdSwap_entry(
                            "last mode={:08X} | ops: {}",
                            best, lo, start, g3, gdraw, gmode, last_mode, gh);
                     geom_start = best;
+                    // Phase 896: does the skipped head bind the vertex
+                    // buffers? Find a start in [before, best) whose walk lands
+                    // exactly on best - the same landing test - then count
+                    // type-0 packets covering the fetch constants at 0x4800+.
+                    uint32_t hbest = 0;
+                    for (uint32_t c = before; best && c < best; c += 4) {
+                      uint32_t a = c;
+                      bool ok = true;
+                      while (a < best) {
+                        auto* hh = pm2->LookupHeap(a);
+                        if (!hh || hh->QueryRangeAccess(a, a + 4u) ==
+                                       xe::memory::PageAccess::kNoAccess) {
+                          ok = false;
+                          break;
+                        }
+                        uint32_t w = xe::load_and_swap<uint32_t>(
+                            pm2->TranslateVirtual(a));
+                        uint32_t ty = w >> 30;
+                        uint32_t cn = ((w >> 16) & 0x3FFFu) + 1u;
+                        if (ty == 2u) {
+                          a += 4u;
+                        } else if (ty == 0u || ty == 3u) {
+                          a += (cn + 1u) * 4u;
+                        } else {
+                          ok = false;
+                          break;
+                        }
+                      }
+                      if (ok && a == best) {
+                        hbest = c;
+                        break;
+                      }
+                    }
+                    uint32_t hfetch = 0, h0 = 0, h3 = 0;
+                    std::string hf;
+                    for (uint32_t a = hbest; hbest && a < best;) {
+                      uint32_t w =
+                          xe::load_and_swap<uint32_t>(pm2->TranslateVirtual(a));
+                      uint32_t ty = w >> 30;
+                      uint32_t cn = ((w >> 16) & 0x3FFFu) + 1u;
+                      if (ty == 0u) {
+                        ++h0;
+                        uint32_t base = w & 0x7FFFu;
+                        if (base + cn > 0x4800u && base < 0x4900u) {
+                          ++hfetch;
+                          if (hfetch <= 4) {
+                            hf += fmt::format("{:08X}(base={:04X} n={}) ", a,
+                                              base, cn);
+                          }
+                        }
+                        a += (cn + 1u) * 4u;
+                      } else if (ty == 3u) {
+                        ++h3;
+                        a += (cn + 1u) * 4u;
+                      } else if (ty == 2u) {
+                        a += 4u;
+                      } else {
+                        break;
+                      }
+                    }
+                    XELOGI("HeadScan: start={:08X}..{:08X} | {} type-0, {} "
+                           "type-3, {} touching fetch constants | {}",
+                           hbest, best, h0, h3, hfetch,
+                           hf.empty() ? "NONE" : hf);
                   }
                   // The search is O(window * walk); do it once and reuse it.
                   if (::cvars::guide_publish_geometry && geom_start) {
