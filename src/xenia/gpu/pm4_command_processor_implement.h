@@ -908,6 +908,28 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
             }
           }
         }
+        // Phase 943: the swap packet carries 1E69E000 every frame while the
+        // texture cache reports its source alternating between 1E69E000 and
+        // 1E306000. They are not the same buffer. Sample the one the display
+        // actually loads from - texture fetch 0's base page - beside it.
+        uint32_t tf_base = 0, tf_nz = 0;
+        {
+          xenos::xe_gpu_texture_fetch_t tf =
+              register_file_->GetTextureFetch(0);
+          tf_base = tf.base_address << 12;
+          const uint8_t* tp =
+              tf_base ? memory_->TranslatePhysical(tf_base) : nullptr;
+          if (tp) {
+            for (uint32_t i = 0; i < 4096; ++i) {
+              uint32_t off = (i * 1451u) % (1280u * 720u);
+              uint32_t px = *reinterpret_cast<const uint32_t*>(tp + off * 4u);
+              if (px & 0x00FFFFFFu) ++tf_nz;
+            }
+          }
+        }
+        XELOGI("SwapSourceCmp: packet fb={:08X} nonzero={} | texfetch0 "
+               "{:08X} nonzero={}/4096",
+               frontbuffer_ptr, nz, tf_base, tf_nz);
         XELOGI("SwapTick: #{} at {}ms fb={:08X} nonzero={}/4096 sum={}",
                swap_seen,
                std::chrono::duration_cast<std::chrono::milliseconds>(now - t0)
