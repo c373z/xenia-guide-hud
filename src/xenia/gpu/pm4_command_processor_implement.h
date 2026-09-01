@@ -865,6 +865,40 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
     // and this side logs nothing, so one of them is not running or they are
     // not looking at the same command processor instance.
     static uint32_t swap_seen = 0;
+    {
+      // Phase 880: time each swap so a rate change is visible rather than
+      // inferred from how many 600-swap milestones a run reaches.
+      static std::chrono::steady_clock::time_point t0{};
+      static uint32_t nlog = 0;
+      auto now = std::chrono::steady_clock::now();
+      if (t0.time_since_epoch().count() == 0) t0 = now;
+      uint32_t every = std::max(1u, uint32_t(cvars::guide_swap_log_every));
+      if ((swap_seen % every) == 0 && nlog++ < 4000) {
+        // Phase 880: sample what is actually IN the buffer the swap names.
+        // Every signal so far has been indirect - PNG size, swap rate,
+        // frontbuffer address - and each has produced a wrong conclusion. If
+        // these pixels are non-zero while the capture is black, the pixels
+        // are fine and the presentation is not; if they are zero, whatever
+        // wrote them is the problem.
+        uint32_t nz = 0, sum = 0;
+        if (frontbuffer_ptr) {
+          uint8_t* fbp = memory_->TranslatePhysical(frontbuffer_ptr);
+          if (fbp) {
+            for (uint32_t i = 0; i < 4096; ++i) {
+              uint32_t off = (i * 1451) % (1280u * 720u);
+              uint32_t px = *reinterpret_cast<uint32_t*>(fbp + off * 4u);
+              if (px & 0x00FFFFFFu) ++nz;
+              sum += px & 0xFFu;
+            }
+          }
+        }
+        XELOGI("SwapTick: #{} at {}ms fb={:08X} nonzero={}/4096 sum={}",
+               swap_seen,
+               std::chrono::duration_cast<std::chrono::milliseconds>(now - t0)
+                   .count(),
+               frontbuffer_ptr, nz, sum);
+      }
+    }
     if ((swap_seen++ % 600u) == 0) {
       // Phase 728: paint a marker directly into the buffer the swap names.
       // This is the one thing never tested - whether that memory is what the
@@ -985,6 +1019,23 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_INDIRECT_BUFFER(
   // buffer (853) and nothing renders; log every buffer that IS chained, so
   // whether the Guide's is among them stops being a guess.
   {
+    // Phase 862: the first 24 chains were all in 1F4Fxxxx-1F52xxxx, but 24 of
+    // ~2200 is not a survey. Bucket every IB target by 1MB so the full range
+    // of what gets submitted is visible - if xam ever chains a buffer of its
+    // own, it shows up here.
+    {
+      static std::map<uint32_t, uint32_t> ib_buckets;
+      static uint32_t ib_total = 0;
+      ++ib_total;
+      ++ib_buckets[list_ptr >> 20];
+      if ((ib_total % 2000u) == 0u) {
+        std::string h;
+        for (auto& kv : ib_buckets) {
+          h += fmt::format("{:03X}xxxxx:{} ", kv.first, kv.second);
+        }
+        XELOGI("IBBuckets after {}: {}", ib_total, h);
+      }
+    }
     static uint32_t ib_log = 0;
     if (ib_log < 24) {
       ++ib_log;

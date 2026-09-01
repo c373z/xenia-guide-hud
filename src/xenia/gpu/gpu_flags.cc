@@ -191,6 +191,12 @@ DEFINE_bool(guide_replay_at_draw, false,
 // Phase 728: every layer of the draw path reports correct and no pixels change.
 // Before chasing the resolve further, establish whether guest memory at the
 // swap's frontbuffer_ptr reaches the display at all.
+DEFINE_uint32(guide_swap_log_every, 600,
+              "Log one line every N swaps, with a millisecond timestamp. "
+              "Phase 880: at the fixed 600 this is far too coarse to see the "
+              "swap rate change at the 10-12s transition where the display "
+              "goes black. Set to 1 to time every swap.",
+              "GPU");
 DEFINE_bool(guide_paint_marker, false,
             "Fill a block of guest memory at the swap's frontbuffer_ptr with a "
             "solid colour just before presenting. If it appears, guest memory "
