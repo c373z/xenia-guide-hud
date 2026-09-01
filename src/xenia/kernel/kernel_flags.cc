@@ -966,6 +966,15 @@ DEFINE_bool(guide_navigate_manual, false,
 DEFINE_bool(guide_navigate_scene, false,
              "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
              "Guide");
+DEFINE_bool(guide_overlay_walk, true,
+            "Run the PM4 walk and hex dumps inside the guide_overlay_at_swap "
+            "block. Phase 878: half of the bisect for a read-only body that "
+            "blanks the frame.",
+            "Guide");
+DEFINE_bool(guide_overlay_blocks, true,
+            "Run the EmitBlocks/tail half of the guide_overlay_at_swap block. "
+            "The other half of the phase 878 bisect.",
+            "Guide");
 DEFINE_bool(guide_overlay_dry, false,
             "Skip the entire body of the guide_overlay_at_swap block while "
             "leaving the flag itself on. Phase 877: the flag blanks the frame "

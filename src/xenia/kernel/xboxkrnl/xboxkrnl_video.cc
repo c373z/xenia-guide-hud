@@ -7970,6 +7970,7 @@ void VdSwap_entry(
               // Phase 507: set when the PM4 walk desyncs, so the range is not
               // handed to the command processor. See the guard below.
               uint32_t parse_bad = 0;
+              if (::cvars::guide_overlay_walk) {
               // Phase 514: every walk since phase 504 began on word 0, which
               // the sentinel proved is never written - it is stale memory that
               // decodes as a type-0 header claiming 721 registers, desyncing
@@ -8062,6 +8063,7 @@ void VdSwap_entry(
                 }
                 parse_bad = bad;
               }
+              }
               // The reserve range is NOT a command stream - phases 505/506 show
               // it is a 769-entry gamma ramp - and executing it anyway is not
               // merely useless. Xenia implements DC_LUT_*: command_processor.cc
@@ -8070,7 +8072,7 @@ void VdSwap_entry(
               // 256-entry ramp reaching the register path blacks the display on
               // its own, independently of the missing geometry. Refuse to
               // execute a range whose parse overran.
-              if (!emit_blocks.empty()) {
+              if (::cvars::guide_overlay_blocks && !emit_blocks.empty()) {
                 uint32_t d0 = gso2->command_processor()->guide_draw_count_;
                 uint32_t total = 0;
                 for (auto& b : emit_blocks) {
