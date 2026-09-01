@@ -966,6 +966,12 @@ DEFINE_bool(guide_navigate_manual, false,
 DEFINE_bool(guide_navigate_scene, false,
              "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
              "Guide");
+DEFINE_uint32(guide_tail_packets, 0,
+              "Execute only the first N PM4 packets of the paint's draw tail; "
+              "0 runs all of it. Phase 876: the tail blanks the display "
+              "wherever it is executed, so the packet that does it is found by "
+              "stepping N up until the frame goes black.",
+              "Guide");
 DEFINE_uint32(guide_paint_clear, 0xFF000000,
               "Clear colour the synthetic paint passes to RenderBegin. Phase "
               "874: the paint has always passed 0xFF000000 - opaque black - "

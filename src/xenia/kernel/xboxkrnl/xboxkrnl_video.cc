@@ -8105,20 +8105,42 @@ void VdSwap_entry(
                   }
                 }
                 uint32_t d1 = gso2->command_processor()->guide_draw_count_;
-                if (start && after > start) {
+                // Truncate the tail to the first N packets when asked. A
+                // type-3 or type-0 header carries (count-1) in bits 16..29, so
+                // a packet spans count+1 words.
+                uint32_t tail_end = after;
+                if (start && ::cvars::guide_tail_packets) {
+                  uint32_t a = start, n = 0;
+                  while (a + 4u <= after && n < ::cvars::guide_tail_packets) {
+                    uint32_t v2 =
+                        xe::load_and_swap<uint32_t>(pm2->TranslateVirtual(a));
+                    uint32_t cnt = ((v2 >> 16) & 0x3FFFu) + 1u;
+                    a += (cnt + 1u) * 4u;
+                    ++n;
+                  }
+                  tail_end = (a < after) ? a : after;
+                }
+                // Sentinel: execute and publish nothing at all, while leaving
+                // every other part of this block running. Separates "the
+                // packets blank the frame" from "being in this code path
+                // blanks the frame".
+                if (::cvars::guide_tail_packets == 0xFFFFFFFFu) {
+                  tail_end = start;
+                }
+                if (start && tail_end > start) {
                   if (::cvars::guide_execute_command_stream) {
                     // Inline, on the title thread, mid-frame. Phase 874: this
                     // runs the draws but the title's render state does not
                     // survive them.
                     gso2->command_processor()->ExecuteGuestBufferVirtualUnsafe(
-                        start, (after - start) / 4);
+                        start, (tail_end - start) / 4);
                   } else {
                     // Phase 875: hand the tail to the GPU thread instead. The
                     // swap handler executes guide_overlay_ptr_ just before the
                     // swap, which is after the title's own frame - the point
                     // the inline path was clobbering.
                     gso2->command_processor()->guide_overlay_words_ =
-                        (after - start) / 4;
+                        (tail_end - start) / 4;
                     gso2->command_processor()->guide_overlay_ptr_ = start;
                   }
                 }
@@ -8140,8 +8162,15 @@ void VdSwap_entry(
                          words, before);
                 }
               } else {
-              gso2->command_processor()->guide_overlay_words_ = words;
-              gso2->command_processor()->guide_overlay_ptr_ = before;
+              // Phase 876: this publishes the WHOLE extent - head, tail and
+              // the vertex data between them. Its refusal log is capped at two
+              // lines, so frames where the parse happened to succeed were
+              // publishing all 42539 words with nothing in the log to say so.
+              // The paint publishes its own tail; do not fight it.
+              if (!::cvars::guide_paint_frame) {
+                gso2->command_processor()->guide_overlay_words_ = words;
+                gso2->command_processor()->guide_overlay_ptr_ = before;
+              }
               if (::cvars::guide_execute_command_stream) {
                 uint32_t d0 = gso2->command_processor()->guide_draw_count_;
                 gso2->command_processor()->ExecuteGuestBufferVirtualUnsafe(
@@ -9972,7 +10001,15 @@ void VdSwap_entry(
           // Hand the run to the GPU thread to draw over the title's next
           // frame, instead of executing it here. This is the mechanism; the
           // in-line execution below is the probe.
-          if (::cvars::guide_overlay_at_swap && len >= 32) {
+          // Phase 876: this publishes a different, much older range than the
+          // paint does, and it fires on the same flag. With guide_paint_frame
+          // on, the GPU thread was executing THIS range - not the paint's
+          // tail - which is why the frame went black even in runs where the
+          // paint published nothing at all. Note also `words = start + len`,
+          // which is an address where a length belongs. Leave it for the
+          // pre-paint probes and keep it out of the paint's way.
+          if (::cvars::guide_overlay_at_swap && len >= 32 &&
+              !::cvars::guide_paint_frame) {
             auto* gso = kernel_state()->emulator()->graphics_system();
             if (gso && gso->command_processor()) {
               gso->command_processor()->guide_overlay_words_ = start + len;
