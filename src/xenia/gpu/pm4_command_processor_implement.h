@@ -1928,6 +1928,21 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
   if (guide_overlay_exec_) {
     ++guide_ov_seen_;
     if (!draw_succeeded) ++guide_ov_predrop_;
+    // Phase 891: RB_COLOR_INFO has only ever been sampled after the burst,
+    // where it holds whatever the resolve section left. Read it at the draws
+    // themselves - the first, and the first one after the mode flips to
+    // kCopy - so the geometry's own EDRAM base is on the record.
+    static uint32_t fate_log = 0;
+    RegisterFile& drf = *register_file_;
+    uint32_t mode_now = drf[0x2208] & 0x7u;
+    if (fate_log < 4 && (guide_ov_seen_ == 1 || mode_now == 6u)) {
+      if (guide_ov_seen_ == 1 || fate_log < 2) {
+        ++fate_log;
+        XELOGI("GuideDrawSurf: draw #{} mode={} SURFACE_INFO={:08X} "
+               "COLOR_INFO={:08X} DEPTH_INFO={:08X}",
+               guide_ov_seen_, mode_now, drf[0x2000], drf[0x2001], drf[0x2002]);
+      }
+    }
   }
   if (draw_succeeded) {
     auto viz_query = register_file_->Get<reg::PA_SC_VIZ_QUERY>();
