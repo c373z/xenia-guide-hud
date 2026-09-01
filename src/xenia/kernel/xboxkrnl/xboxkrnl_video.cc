@@ -7215,6 +7215,17 @@ void VdSwap_entry(
                          hp, idx, cap,
                          (idx < cap) ? "in-range" : "OVER-CAPACITY", bkt,
                          ent ? prd2(ent) : 0, tag, ent ? prd2(ent + 4u) : 0);
+                  // Phase 867: is bucket 14 uniquely missing, or is the array
+                  // sparse? capacity 1536 means 24 buckets of 64.
+                  if (ht_logs == 1) {
+                    std::string row;
+                    for (uint32_t b = 0; b < (cap >> 6); ++b) {
+                      row += fmt::format("{}{}", b ? " " : "",
+                                         prd2(htb + b * 4u) ? "X" : ".");
+                    }
+                    XELOGI("HandleBuckets: cap={} ({} buckets) {}", cap,
+                           cap >> 6, row);
+                  }
                 }
               }
               // The objects match, so phase 465's account of the contradiction
