@@ -3499,12 +3499,22 @@ bool D3D12CommandProcessor::IssueCopy() {
   }
   if (!guide_resolve_replay_) {
     RegisterFile& rf = *register_file_;
-    for (uint32_t i = 0; i < 4; ++i) guide_saved_copy_[i] = rf[0x2318 + i];
-    guide_saved_vf0_[0] = rf[0x4800];
-    guide_saved_vf0_[1] = rf[0x4801];
-    guide_saved_surface_[0] = rf[0x2000];
-    guide_saved_surface_[1] = rf[0x2001];
-    guide_resolve_saved_ = true;
+    // Phase 886: save only a resolve whose rectangle is actually valid. The
+    // Guide's own stream issues 125 resolves and every one is declined for
+    // "Unsupported resolve vertex buffer format" - and each of them ran
+    // through here first, overwriting the saved state with the bad fetch. The
+    // check is GetResolveInfo's: type must be kVertex and size 3*2 words.
+    uint32_t vf_type = rf[0x4800] & 0x3u;
+    uint32_t vf_size = (rf[0x4801] >> 2) & 0xFFFFFFu;
+    if (vf_type == uint32_t(xenos::FetchConstantType::kVertex) &&
+        vf_size == 3 * 2) {
+      for (uint32_t i = 0; i < 4; ++i) guide_saved_copy_[i] = rf[0x2318 + i];
+      guide_saved_vf0_[0] = rf[0x4800];
+      guide_saved_vf0_[1] = rf[0x4801];
+      guide_saved_surface_[0] = rf[0x2000];
+      guide_saved_surface_[1] = rf[0x2001];
+      guide_resolve_saved_ = true;
+    }
   }
 #if XE_GPU_FINE_GRAINED_DRAW_SCOPES
   SCOPE_profile_cpu_f("gpu");

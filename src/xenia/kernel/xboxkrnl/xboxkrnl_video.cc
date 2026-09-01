@@ -8110,6 +8110,55 @@ void VdSwap_entry(
                     break;
                   }
                 }
+                // Phase 886: the guest never writes GPU registers over MMIO -
+                // zero "Unknown GPU register" warnings in a whole run - so vf0
+                // can only be set by a type-0 packet in the stream. The tail
+                // starts at the first type-3 header, which would skip exactly
+                // that. Find every type-0 packet in the extent whose base
+                // register covers 0x4800, and say where they are relative to
+                // the tail start.
+                {
+                  static uint32_t vscan = 0;
+                  if (vscan++ < 2) {
+                    // Scanning for type-0 headers by mask finds 892 of them
+                    // with counts like 14980: (w & 0xC0000000) == 0 matches
+                    // almost any small integer or float, which this log has
+                    // recorded as a trap twice already. Walk the tail as
+                    // packets from a boundary known to parse instead - it is
+                    // the range that executed 125 draws without desyncing.
+                    std::string hits;
+                    uint32_t n0 = 0, t0 = 0, t3 = 0;
+                    for (uint32_t a = start; start && a + 4u <= after;) {
+                      uint32_t w =
+                          xe::load_and_swap<uint32_t>(pm2->TranslateVirtual(a));
+                      uint32_t ty = w >> 30;
+                      uint32_t cnt = ((w >> 16) & 0x3FFFu) + 1u;
+                      if (ty == 0u) {
+                        ++t0;
+                        uint32_t base = w & 0x7FFFu;
+                        if (base <= 0x4800u && 0x4800u < base + cnt) {
+                          ++n0;
+                          if (n0 <= 6) {
+                            hits += fmt::format("{:08X}(base={:04X} n={}) ", a,
+                                                base, cnt);
+                          }
+                        }
+                        a += (cnt + 1u) * 4u;
+                      } else if (ty == 3u) {
+                        ++t3;
+                        a += (cnt + 1u) * 4u;
+                      } else if (ty == 2u) {
+                        a += 4u;
+                      } else {
+                        break;
+                      }
+                    }
+                    XELOGI("VF0Setup: tail {:08X}..{:08X}: {} type-0, {} "
+                           "type-3, {} covering 0x4800 | {}",
+                           start, after, t0, t3, n0,
+                           hits.empty() ? "NONE" : hits);
+                  }
+                }
                 uint32_t d1 = gso2->command_processor()->guide_draw_count_;
                 // Truncate the tail to the first N packets when asked. A
                 // type-3 or type-0 header carries (count-1) in bits 16..29, so
