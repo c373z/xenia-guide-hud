@@ -9003,12 +9003,31 @@ void VdSwap_entry(
             // words. Anything in that span, including a draw, is invisible to
             // it. Scan every word independently as a cross-check.
             uint32_t bf22 = 0, bf36 = 0;
+            uint32_t bfdump = 0;
+            uint32_t bffirst = 0;
             for (uint32_t i = 0; i < nw; ++i) {
               uint32_t hd = cq(ws + i * 4u);
               if ((hd >> 30) == 3) {
                 uint32_t op = (hd >> 8) & 0x7Fu;
                 if (op == 0x22u) ++bf22;
                 if (op == 0x36u) ++bf36;
+                // Phase 853: this test is (hd>>30)==3 && op==0x22, which
+                // payload words can satisfy by chance - the same loose match
+                // that produced false packet counts in 806 and 812. Dump the
+                // first few hits with their headers and following words so a
+                // real DRAW_INDX (count field consistent, plausible payload)
+                // can be told from a coincidence.
+                if ((op == 0x22u || op == 0x36u) && !bffirst) bffirst = i;
+                if ((op == 0x22u || op == 0x36u) && bfdump < 6) {
+                  ++bfdump;
+                  uint32_t cnt = ((hd >> 16) & 0x3FFFu) + 1u;
+                  std::string pl;
+                  for (uint32_t k = 1; k <= cnt && k <= 4u && i + k < nw; ++k) {
+                    pl += fmt::format("{:08X} ", cq(ws + (i + k) * 4u));
+                  }
+                  XELOGI("BFHit #{}: at +{} hdr={:08X} op={:02X} count={} | {}",
+                         bfdump, i * 4u, hd, op, cnt, pl);
+                }
               }
             }
             XELOGI("CompositeEmit #{}: {} words, {} type3, DRAW_INDX={} | {}",
@@ -9016,6 +9035,38 @@ void VdSwap_entry(
             XELOGI("CompositeScan #{}: brute-force DRAW_INDX(22)={} "
                    "DRAW_INDX_2(36)={} over {} words",
                    drawbr, bf22, bf36, nw);
+            // Phase 856: the executor follows the word diff, whose runs stop
+            // 90 words before the first draw packet (855), so the DRAW_INDX
+            // this scan finds are never submitted. Execute the emitted range
+            // directly - this site has its base and extent, so it covers the
+            // draws by construction.
+            if (::cvars::guide_exec_emitted_range && nw >= 32) {
+              auto* gsx = kernel_state()->emulator()->graphics_system();
+              if (gsx && gsx->command_processor()) {
+                auto* rfx = gsx->register_file();
+                uint32_t chg = 0;
+                static std::vector<uint32_t> snap;
+                if (rfx) {
+                  snap.assign(rfx->values,
+                              rfx->values + xe::gpu::RegisterFile::kRegisterCount);
+                }
+                // Phase 856: executing from the base runs 3695 words and
+                // changes no register - the stream does not parse from there
+                // (817, 818). Start at the first draw packet, where the words
+                // are known to be well-formed.
+                uint32_t xs = bffirst ? ws + bffirst * 4u : ws;
+                uint32_t xn = bffirst ? nw - bffirst : nw;
+                gsx->command_processor()->ExecuteGuestBufferUnsafe(xs, xn);
+                if (rfx) {
+                  for (uint32_t i = 0;
+                       i < xe::gpu::RegisterFile::kRegisterCount; ++i) {
+                    if (rfx->values[i] != snap[i]) ++chg;
+                  }
+                }
+                XELOGI("GuideExecFull: ran {:08X} +{} words (first draw +{}); {} regs changed",
+                       xs, xn, bffirst * 4u, chg);
+              }
+            }
             // Phase 699: emitting a draw and rasterising one are different
             // claims. Shadow the register file while walking and report the
             // frame state each draw actually sees - the question phases

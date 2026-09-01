@@ -401,6 +401,12 @@ DEFINE_bool(guide_force_primcount, false,
             "the type forced to 4 the draw case runs and exits at once because "
             "the count is zero.",
             "GuideResearch");
+DEFINE_bool(guide_exec_emitted_range, false,
+            "Execute the composite's whole emitted range instead of the runs "
+            "the word diff finds. Phase 855: the diff-driven execution stops 90 "
+            "words before the first DRAW_INDX, so the draws are never "
+            "submitted.",
+            "GuideResearch");
 DEFINE_string(guide_status_fns, "",
               "Comma-separated hex guest addresses. On the coverage readback, "
               "report each one's symbol status (DEFINED-translated = it ran, "

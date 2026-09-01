@@ -95,6 +95,7 @@ DECLARE_bool(guide_nav_clear_slot);
 DECLARE_bool(guide_nav_dc_null);
 DECLARE_uint32(guide_coverage_fn);
 DECLARE_string(guide_status_fns);
+DECLARE_bool(guide_exec_emitted_range);
 DECLARE_bool(guide_force_primcount);
 DECLARE_bool(guide_force_prim4);
 DECLARE_uint32(guide_force_46d0);
