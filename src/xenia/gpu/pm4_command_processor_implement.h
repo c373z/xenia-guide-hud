@@ -2005,6 +2005,19 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
   if (guide_overlay_exec_) {
     ++guide_ov_seen_;
     if (!draw_succeeded) ++guide_ov_predrop_;
+    // Phase 916: each packet adds ~3000 scattered pixels where its geometry is
+    // a 323x1 quad. Read what the draw actually declares - primitive type and
+    // index count - since a mis-read primitive turns one strip into speckle.
+    {
+      static uint32_t pdl = 0;
+      if (pdl++ < 6) {
+        XELOGI("GuideDrawPrim: #{} prim_type={} num_indices={} indexed={} "
+               "src_sel={}",
+               guide_ov_seen_, uint32_t(vgt_draw_initiator.prim_type),
+               uint32_t(vgt_draw_initiator.num_indices), is_indexed ? 1 : 0,
+               uint32_t(vgt_draw_initiator.source_select));
+      }
+    }
     // Phase 891: RB_COLOR_INFO has only ever been sampled after the burst,
     // where it holds whatever the resolve section left. Read it at the draws
     // themselves - the first, and the first one after the mode flips to
