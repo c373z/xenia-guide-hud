@@ -3545,6 +3545,22 @@ bool D3D12CommandProcessor::IssueCopy() {
 }
 XE_NOINLINE
 bool D3D12CommandProcessor::IssueCopy_ReadbackResolvePath() {
+  // Phase 912: the success signal used since phase 886 hashes guest memory at
+  // the resolve destination. Phase 880 showed that memory reads zero while the
+  // game is plainly on screen, so the signal may be incapable of moving.
+  // Check it where pixels certainly change: the title's own resolves.
+  uint32_t tv_dest = (register_file_->values[0x2319] & ~0xFFFu);
+  auto tv_hash = [&]() -> uint32_t {
+    if (!tv_dest) return 0;
+    const uint8_t* pp = memory_->TranslatePhysical(tv_dest);
+    if (!pp) return 0;
+    uint32_t h = 2166136261u;
+    for (uint32_t i = 0; i < 0x384000u; i += 64) {
+      h = (h ^ pp[i]) * 16777619u;
+    }
+    return h;
+  };
+  uint32_t tv_before = guide_resolve_replay_ ? 0 : tv_hash();
   uint32_t written_address, written_length;
   reg::RB_COPY_DEST_INFO copy_dest_info;
   bool is_scaled;
@@ -3559,6 +3575,18 @@ bool D3D12CommandProcessor::IssueCopy_ReadbackResolvePath() {
       }
     }
     return false;
+  }
+  // The resolve succeeded; compare the destination against the hash taken
+  // before it.
+  if (!guide_resolve_replay_) {
+    static uint32_t tvn = 0, tvchanged = 0;
+    ++tvn;
+    if (tv_hash() != tv_before) ++tvchanged;
+    if (tvn == 400) {
+      XELOGI("TitleResolveDelta: {} of {} title resolves changed guest memory "
+             "at {:08X}",
+             tvchanged, tvn, tv_dest);
+    }
   }
   if (!written_length) {
     return true;
