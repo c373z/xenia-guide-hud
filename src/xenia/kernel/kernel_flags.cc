@@ -375,6 +375,20 @@ DEFINE_bool(guide_split_reserve_buf, false,
             "phases 806-811. Splitting them makes the command stream "
             "readable.",
             "GuideResearch");
+DEFINE_bool(guide_clear_dc_134, false,
+            "Zero [dc+0x134] immediately before the composite draw. Phase 821: "
+            "818F92E4 branches past the virtual call into the draw emitters "
+            "whenever that field is non-zero, and it reads 1 on every draw in "
+            "every configuration - which is why the entire draw subsystem is "
+            "unreached.",
+            "GuideResearch");
+DEFINE_uint32(guide_force_46d0, 0,
+              "Write this value into [dev+0x46D0] before the composite draw. "
+              "Phase 825: 819FE980 gates the call into the draw emitters on "
+              "that word being non-zero, and phase 830 found every writer that "
+              "would set bits in it is unreachable in this build. 8 sets the "
+              "bit the first gate tests.",
+              "GuideResearch");
 DEFINE_string(guide_status_fns, "",
               "Comma-separated hex guest addresses. On the coverage readback, "
               "report each one's symbol status (DEFINED-translated = it ran, "

@@ -647,6 +647,7 @@ void GuidePublishStallThread(void* h) { guide_stall_thread_ = h; }
 static uint32_t guide_first_visual_node_ = 0;
 static uint32_t guide_resv_dev_ = 0;
 static uint32_t g_draw_entry_reserve = 0;
+static uint32_t g_draw_entry_cmdbase = 0;
 
 // Resolve the guest thread xam recorded as its XUI render thread.
 //
@@ -3911,9 +3912,15 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
 // Phase 795: batch reachability. One address per run made each level of a
 // call-graph walk cost six runs; this reports a whole level from one.
 static void EmitGuideStatusBatch() {
-  static bool done = false;
-  if (done || ::cvars::guide_status_fns.empty()) return;
-  done = true;
+  // Phase 836: this used to fire once, at the first opportunity. A function
+  // that runs late in a frame therefore reported "no" (823), and booting the
+  // dashboard - which reaches only a handful of swaps - produced a full row of
+  // negatives that meant nothing. Sample repeatedly instead, so the reading is
+  // "not yet at sample N" rather than a bare no.
+  static uint32_t calls = 0;
+  if (::cvars::guide_status_fns.empty()) return;
+  ++calls;
+  if (calls != 1 && calls != 30 && calls != 200 && calls != 900) return;
   std::string out;
   const std::string& spec = ::cvars::guide_status_fns;
   size_t pos = 0;
@@ -3945,7 +3952,7 @@ static void EmitGuideStatusBatch() {
     }
     out += fmt::format("{:08X}={} ", addr, st);
   }
-  XELOGI("GuideStatusBatch: {}", out);
+  XELOGI("GuideStatusBatch[{}]: {}", calls, out);
 }
 
 static void EmitGuideCoverageOnce() {
@@ -4096,6 +4103,14 @@ void VdSwap_entry(
   // `bl VdSwap`), so invoking the draw from here re-enters this function and
   // the render never returns. Guard it: one Guide draw at a time, and never
   // from inside one.
+  // Phase 836: drive the reachability batch from the swap path unconditionally
+  // when guide_status_fns is set. Both existing call sites are inside
+  // Guide-specific hooks, so booting another title - the dashboard, say -
+  // produced no readout at all, which is exactly the comparison this
+  // investigation needs.
+  if (!::cvars::guide_status_fns.empty()) {
+    EmitGuideCoverageOnce();
+  }
   // Phase 788: sample the node table on every swap, not only on the draws.
   // Composite draws stop after about a dozen, so a census driven off them can
   // only ever see the first moment of the run - which is how 58 nodes got
@@ -8534,10 +8549,42 @@ void VdSwap_entry(
         // an option: with --guide_bind_cmdbuf_kb=0 the hook never fires at all
         // (draws: 0).
         g_draw_entry_reserve = q(qdv + 0x30u);
+        // Phase 817: capture the command base here; 81A01490 zeroes it during
+        // the draw, so it is gone by the time the stream can be walked.
+        g_draw_entry_cmdbase = q(qdv + 0x2B48u);
         XELOGI("CursorAtDraw #{}: dev={:08X} base[2B48]={:08X} cur[2B4C]={:08X} "
                "limit[2B50]={:08X} pend[2B54]={:08X} reserve[30]={:08X}",
                drawbr, qdv, q(qdv + 0x2B48u), q(qdv + 0x2B4Cu),
                q(qdv + 0x2B50u), q(qdv + 0x2B54u), g_draw_entry_reserve);
+        // Phase 814: three host-side writers set [dev+0x30], and the split
+        // applied at the binder was undone by a later one. Apply it HERE,
+        // after CursorAtDraw has sampled, so nothing downstream can restore
+        // the alias before the reservation runs. Validate the allocation:
+        // phase 813's second SystemHeapAlloc returned FD4B5000, outside the
+        // range every other buffer in this investigation occupies, and an
+        // address that is not mapped is worse than the alias.
+        if (::cvars::guide_split_reserve_buf) {
+          static uint32_t rsv3 = 0xFFFFFFFFu;
+          if (rsv3 == 0xFFFFFFFFu) {
+            auto* am = kernel_state()->memory();
+            uint32_t sz = 512u * 1024u;
+            uint32_t got = am->SystemHeapAlloc(sz, 4096, kSystemHeapPhysical);
+            auto* h = got ? am->LookupHeap(got) : nullptr;
+            bool ok = h && h->QueryRangeAccess(got, got + sz) !=
+                               xe::memory::PageAccess::kNoAccess;
+            XELOGI("GuideSplitAlloc: got={:08X} mapped={} (cmd base={:08X})",
+                   got, ok ? "yes" : "NO", q(qdv + 0x2B48u));
+            rsv3 = ok ? got : 0u;
+            if (rsv3) std::memset(am->TranslateVirtual(rsv3), 0, sz);
+          }
+          if (rsv3) {
+            auto* am = kernel_state()->memory();
+            xe::store_and_swap<uint32_t>(am->TranslateVirtual(qdv + 0x30u),
+                                         rsv3);
+            xe::store_and_swap<uint32_t>(am->TranslateVirtual(qdv + 0x34u),
+                                         rsv3 + 512u * 1024u);
+          }
+        }
         // Phase 809: scan the command buffer FORWARD from its base, here at
         // the draw, where the base is actually populated. The earlier scans
         // looked below the cursor, and with cur = base-4 that window lies
@@ -9930,6 +9977,42 @@ void VdSwap_entry(
           return xe::load_and_swap<uint32_t>(mem->TranslateVirtual(a));
         };
         uint32_t ddc = rdw(guide_draw_this_ + 12);
+        // Phase 822: 818F92E4 skips the virtual call into the draw emitters
+        // unless [dc+0x134] == 0, and every log this investigation produced
+        // shows [134]=00000001. Clear it here, immediately before the
+        // composite draw, and see whether draw packets appear.
+        // Phase 830: 819FE980 skips the draw call unless r29 != 0, and r29
+        // is [dev+0x46D0] (825). Every writer that would set bits in it is
+        // unreachable in this build (828, 830), so on the live path the field
+        // is only ever cleared. Force it and see whether the draw proceeds -
+        // the same intervention that worked for [dc+0x134].
+        if (::cvars::guide_force_46d0 && ddc) {
+          uint32_t wr = rdw(ddc + 0x1CCu);
+          uint32_t dv46 = wr ? rdw(wr + 0x0Cu) : 0u;
+          if (dv46) {
+            static uint32_t c46 = 0;
+            uint32_t prev = rdw(dv46 + 0x46D0u);
+            xe::store_and_swap<uint32_t>(
+                kernel_state()->memory()->TranslateVirtual(dv46 + 0x46D0u),
+                uint32_t(::cvars::guide_force_46d0));
+            if (++c46 <= 4) {
+              XELOGI("GuideForce46D0: dev={:08X} [46D0] {:08X} -> {:08X}", dv46,
+                     prev, uint32_t(::cvars::guide_force_46d0));
+            }
+          }
+        }
+        if (::cvars::guide_clear_dc_134 && ddc) {
+          uint32_t prev134 = rdw(ddc + 0x134u);
+          if (prev134 != 0u) {
+            xe::store_and_swap<uint32_t>(
+                kernel_state()->memory()->TranslateVirtual(ddc + 0x134u), 0u);
+            static uint32_t c134 = 0;
+            if (++c134 <= 4) {
+              XELOGI("GuideClear134: dc={:08X} [134] {:08X} -> 0", ddc,
+                     prev134);
+            }
+          }
+        }
         // Did the guest write anything into the buffer we handed it? PM4
         // type-3 packets start 0xC0......, so their presence is checkable
         // rather than a matter of opinion.
@@ -10021,6 +10104,129 @@ void VdSwap_entry(
                (dev && rdw(dev + 0x0Cu))
                    ? rdw(rdw(dev + 0x0Cu) + 0x32B0u)
                    : 0);
+        // Phase 815: CursorAtDraw samples the command cursor BEFORE the draw
+        // and always reads base-4. That cannot distinguish "never advances"
+        // from "advances during the draw and is reset by the submit". Sample
+        // it again here, immediately after the composite returns.
+        {
+          uint32_t pdev = dev ? rdw(dev + 0x0Cu) : 0u;
+          if (pdev) {
+            // Phase 829: [dev+0x46D0] is the word the draw gate reads
+            // (825). On the primary path nothing ever sets it (828). Read it
+            // on the Guide's device AND on the title's global device at the
+            // same moment - if the title's is non-zero the field is live and
+            // something specific to the Guide's device is not setting it.
+            {
+              uint32_t tdev = rdw(0x801E6FC4u);
+              XELOGI("Gate46D0 #{}: guide dev={:08X} [46D0]={:08X} [2B3C]={:08X}"
+                     " | title dev={:08X} [46D0]={:08X} [2B3C]={:08X}",
+                     gn, pdev, rdw(pdev + 0x46D0u), rdw(pdev + 0x2B3Cu), tdev,
+                     tdev ? rdw(tdev + 0x46D0u) : 0u,
+                     tdev ? rdw(tdev + 0x2B3Cu) : 0u);
+            }
+            XELOGI("CursorAfterDraw #{}: dev={:08X} base={:08X} cur={:08X} "
+                   "limit={:08X} pend={:08X} reserve={:08X}",
+                   gn, pdev, rdw(pdev + 0x2B48u), rdw(pdev + 0x2B4Cu),
+                   rdw(pdev + 0x2B50u), rdw(pdev + 0x2B54u),
+                   rdw(pdev + 0x30u));
+            // Phase 817: walk the committed stream decoding BOTH packet
+            // types. Every scan before this tested for type-3 only, so the
+            // type-0 register writes that make up most of a state-setup
+            // stream were invisible - which is why the buffer kept reading as
+            // empty (816).
+            uint32_t wbase = g_draw_entry_cmdbase;
+            uint32_t wend = rdw(pdev + 0x30u);
+            if (wbase && wend > wbase && wend - wbase < 0x40000u) {
+              auto* wm2 = kernel_state()->memory();
+              uint32_t a = wbase, t0 = 0, t3 = 0, t2 = 0, draws = 0, bad = 0;
+              uint32_t t0regs = 0;
+              std::map<uint32_t, uint32_t> t3ops;
+              while (a + 4 <= wend) {
+                auto* hp = wm2->LookupHeap(a);
+                if (!hp || hp->QueryRangeAccess(a, a + 4u) ==
+                               xe::memory::PageAccess::kNoAccess) {
+                  break;
+                }
+                uint32_t h =
+                    xe::load_and_swap<uint32_t>(wm2->TranslateVirtual(a));
+                uint32_t ty = h >> 30;
+                uint32_t cnt = ((h >> 16) & 0x3FFFu) + 1u;
+                if (ty == 0u) {
+                  ++t0;
+                  t0regs += cnt;
+                  a += 4u * (1u + cnt);
+                } else if (ty == 3u) {
+                  ++t3;
+                  uint32_t op = (h >> 8) & 0x7Fu;
+                  ++t3ops[op];
+                  if (op == 0x22u || op == 0x36u) ++draws;
+                  a += 4u * (1u + cnt);
+                } else if (ty == 2u) {
+                  ++t2;
+                  a += 4u;
+                } else {
+                  ++bad;
+                  a += 4u;
+                  if (bad > 64u) break;
+                }
+              }
+              std::string oh;
+              for (auto& kv : t3ops)
+                oh += fmt::format("{:02X}x{} ", kv.first, kv.second);
+              XELOGI("PM4Walk #{}: {:08X}..{:08X} ({} words) | type0={} "
+                     "({} regs) type2={} type3={} DRAWS={} bad={} | t3ops: {}",
+                     gn, wbase, wend, (wend - wbase) / 4u, t0, t0regs, t2, t3,
+                     draws, bad, oh);
+              // Phase 818: the walk from `base` decodes float payload as
+              // headers (817). Do not assume the stream starts at the base -
+              // try every offset and report the ones from which a walk lands
+              // EXACTLY on the committed end with no malformed packet. If none
+              // does, the region is data, not commands.
+              {
+                uint32_t hits = 0;
+                std::string found;
+                for (uint32_t st = wbase; st + 4 <= wend && hits < 6;
+                     st += 4) {
+                  uint32_t a2 = st, pk = 0, dr2 = 0;
+                  bool ok = true;
+                  while (a2 < wend) {
+                    auto* hp2 = wm2->LookupHeap(a2);
+                    if (!hp2 || hp2->QueryRangeAccess(a2, a2 + 4u) ==
+                                    xe::memory::PageAccess::kNoAccess) {
+                      ok = false;
+                      break;
+                    }
+                    uint32_t h2 = xe::load_and_swap<uint32_t>(
+                        wm2->TranslateVirtual(a2));
+                    uint32_t ty2 = h2 >> 30;
+                    uint32_t c2 = ((h2 >> 16) & 0x3FFFu) + 1u;
+                    if (ty2 == 2u) {
+                      a2 += 4u;
+                      ++pk;
+                      continue;
+                    }
+                    if (ty2 == 1u) { ok = false; break; }
+                    if (a2 + 4u * (1u + c2) > wend) { ok = false; break; }
+                    if (ty2 == 3u) {
+                      uint32_t o2 = (h2 >> 8) & 0x7Fu;
+                      if (o2 == 0x22u || o2 == 0x36u) ++dr2;
+                    }
+                    a2 += 4u * (1u + c2);
+                    ++pk;
+                  }
+                  if (ok && a2 == wend && pk >= 4u) {
+                    ++hits;
+                    found += fmt::format("{:08X}(+{},{}pk,{}draw) ", st,
+                                         (st - wbase) / 4u, pk, dr2);
+                  }
+                }
+                XELOGI("PM4Align #{}: {} clean start offsets | {}", gn, hits,
+                       found.empty() ? "(none - region is not a packet stream)"
+                                     : found);
+              }
+            }
+          }
+        }
         // The DRAW_INDX gate, read off the REAL device (wrapper+0x0C).
         // 819F6BC0 keeps the low 12 bits of [dev+0x10] (rldicl r10,r11,0,52)
         // and skips the draw when they are zero; [dev+0x28] gates the block
