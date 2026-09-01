@@ -2051,8 +2051,14 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
     // VTE_CNTL enables the viewport scale/offset transform and every viewport
     // register is zero, so each vertex maps to a single point. Supply the
     // transform for the surface the draws are being pointed at.
-    if (!cvars::guide_overlay_vte_passthru &&
-        cvars::guide_overlay_restore_surface && (drf[0x2206] & 0x3Fu) &&
+    // Phase 923: these were mutually exclusive and each is half of one fix.
+    // With VTE off, Xenia derives the viewport from PA_CL_VPORT_*, which are
+    // zero - giving a 1x1 viewport and a black frame. With VTE on, Xenia
+    // assumes the guest already transformed and passes vertices through as
+    // NDC, but they are pixel coordinates. The pair needed is the viewport
+    // values AND the transform disabled, so allow both.
+    if (cvars::guide_overlay_restore_surface &&
+        (cvars::guide_overlay_vte_passthru || (drf[0x2206] & 0x3Fu)) &&
         drf[0x210F] == 0u && drf[0x2111] == 0u) {
       auto setf = [&](uint32_t r, float f) {
         uint32_t v;

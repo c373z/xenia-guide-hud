@@ -3038,6 +3038,25 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
   scissor.extent[0] *= draw_resolution_scale_x;
   scissor.extent[1] *= draw_resolution_scale_y;
 #endif
+  // Phase 922: four mechanisms for the uniform damage have been refuted from
+  // the guest side. Read what the host actually gets - the viewport and
+  // scissor D3D12 receives are derived from the guest registers rather than
+  // equal to them, and have never been looked at.
+  {
+    static uint32_t hv_g = 0, hv_t = 0;
+    bool want = guide_overlay_exec_ ? (hv_g++ < 3) : (hv_t++ < 3);
+    if (want) {
+      XELOGI("HostRaster[{}]: vp off=({},{}) ext=({},{}) | ndc_scale=({},{},{})"
+             " ndc_offset=({},{},{}) | scissor off=({},{}) ext=({},{})",
+             guide_overlay_exec_ ? "guide" : "title", viewport_info.xy_offset[0],
+             viewport_info.xy_offset[1], viewport_info.xy_extent[0],
+             viewport_info.xy_extent[1], viewport_info.ndc_scale[0],
+             viewport_info.ndc_scale[1], viewport_info.ndc_scale[2],
+             viewport_info.ndc_offset[0], viewport_info.ndc_offset[1],
+             viewport_info.ndc_offset[2], scissor.offset[0], scissor.offset[1],
+             scissor.extent[0], scissor.extent[1]);
+    }
+  }
   // Update viewport, scissor, blend factor and stencil reference.
   UpdateFixedFunctionState(viewport_info, scissor, primitive_polygonal,
                            normalized_depth_control, normalized_color_mask,
