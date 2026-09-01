@@ -8114,6 +8114,17 @@ void VdSwap_entry(
                 if (start && ::cvars::guide_tail_packets) {
                   uint32_t a = start, n = 0;
                   while (a + 4u <= after && n < ::cvars::guide_tail_packets) {
+                    // Phase 881: guard this read the way the search loop above
+                    // guards its own. Xenia watches guest pages by protection,
+                    // so reading a watched page faults into the invalidation
+                    // handler - silently, and not counted as a host fault by
+                    // the harness. That would make a loop that "only reads"
+                    // invalidate whatever the watch protects.
+                    auto* wh = pm2->LookupHeap(a);
+                    if (!wh || wh->QueryRangeAccess(a, a + 4u) ==
+                                   xe::memory::PageAccess::kNoAccess) {
+                      break;
+                    }
                     uint32_t v2 =
                         xe::load_and_swap<uint32_t>(pm2->TranslateVirtual(a));
                     uint32_t cnt = ((v2 >> 16) & 0x3FFFu) + 1u;

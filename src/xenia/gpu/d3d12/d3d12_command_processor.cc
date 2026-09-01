@@ -2251,6 +2251,21 @@ void D3D12CommandProcessor::IssueSwap(uint32_t frontbuffer_ptr,
   xenos::TextureFormat frontbuffer_format;
   ID3D12Resource* swap_texture_resource = texture_cache_->RequestSwapTexture(
       swap_texture_srv_desc, frontbuffer_format);
+  // Phase 881: the displayed image comes from this texture, not from guest
+  // memory at the frontbuffer pointer (880). If the Guide's paint makes this
+  // request fail, or hands back a different texture, the swap presents
+  // something other than the title's frame - which is the one place this
+  // failure has not been looked for.
+  {
+    static uint32_t sw_n = 0, null_n = 0;
+    if (!swap_texture_resource) ++null_n;
+    if (sw_n < 6 || (sw_n % 40u) == 0) {
+      XELOGI("SwapTex: #{} resource={} nulls={} fmt={}", sw_n,
+             swap_texture_resource ? "ok" : "NULL", null_n,
+             uint32_t(frontbuffer_format));
+    }
+    ++sw_n;
+  }
   if (!swap_texture_resource) {
     return;
   }
