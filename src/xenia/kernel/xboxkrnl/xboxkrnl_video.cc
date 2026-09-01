@@ -1072,6 +1072,12 @@ void GuideInstallAllocStub() {
   xe::store_and_swap<uint32_t>(mem->TranslateVirtual(buf + 12u), buf + kSize);
   guide_alloc_arena_ = buf;
   guide_alloc_end_ = buf + kSize;
+  // Phase 908: 819E01E0 converts a pointer to a GPU address and returns zero
+  // for anything outside the physical window at 0xA0000000 (545). The emitter
+  // hands it this arena directly (907), so whether these addresses are inside
+  // that window decides whether the conversion can succeed at all.
+  XELOGI("GuideAllocStub: arena {:08X}..{:08X} | in 0xA0000000 window: {}", buf,
+         buf + kSize, (buf >= 0xA0000000u && buf < 0xC0000000u) ? "yes" : "NO");
   // Branch displacements are computed after assembly rather than written by
   // hand - the prefix length varies with the gate, and one miscounted offset
   // would be a jump into the middle of the allocator.
