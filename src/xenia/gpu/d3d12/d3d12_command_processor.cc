@@ -4184,6 +4184,18 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
 }
 
 bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
+  // Phase 930: the damage is harmless at one draw, cumulative from four and
+  // total at 541, regardless of what the draws write (929) - the shape of a
+  // per-draw resource running out and forcing the command list to be cut.
+  // Count submissions ended while the Guide's stream is executing.
+  if (guide_overlay_exec_) {
+    static uint32_t ge = 0;
+    if (ge++ < 8) {
+      XELOGI("SubmitDuringGuide: EndSubmission #{} is_swap={} while executing "
+             "the Guide's draws (draw {})",
+             ge, is_swap ? 1 : 0, guide_ov_seen_);
+    }
+  }
   const ui::d3d12::D3D12Provider& provider = GetD3D12Provider();
 
   // Make sure there is a command allocator to write commands to.
