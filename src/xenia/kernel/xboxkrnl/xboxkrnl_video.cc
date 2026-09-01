@@ -7231,6 +7231,40 @@ void VdSwap_entry(
                     XELOGI("HandleBuckets: cap={} ({} buckets) {}", cap,
                            cap >> 8, row);
                   }
+                  // Phase 869: 8193F1B8 walks a [x+8] chain comparing
+                  // [node+0x18] to the wanted type and returns the match, so
+                  // the cast failing means no node on this object carries it.
+                  // Dump the chain and say so directly.
+                  uint32_t obj0 = ent ? prd2(ent + 4u) : 0;
+                  // Name each type the way ClassName does: [td+4] points at a
+                  // UTF-16BE class name.
+                  auto tname = [&](uint32_t td) {
+                    uint32_t a = (td >= 0x10000000u && td < 0xA0000000u)
+                                     ? prd2(td + 4u) : 0;
+                    if (!(a >= 0x10000000u && a < 0xA0000000u)) return
+                        std::string("?");
+                    std::string o;
+                    for (uint32_t w = 0; w < 8; ++w) {
+                      uint32_t v = prd2(a + w * 4u);
+                      for (int h = 1; h >= 0; --h) {
+                        uint16_t u = uint16_t((v >> (h * 16)) & 0xFFFFu);
+                        if (!u) return o.empty() ? std::string("?") : o;
+                        o += (u >= 32 && u < 127) ? char(u) : '.';
+                      }
+                    }
+                    return o;
+                  };
+                  std::string chain;
+                  bool found = false;
+                  for (uint32_t nd = obj0, k = 0; nd && k < 10; ++k) {
+                    uint32_t ty = prd2(nd + 0x18u);
+                    if (ty == typid) found = true;
+                    chain += fmt::format("{}{}", k ? " -> " : "", tname(ty));
+                    nd = prd2(nd + 8u);
+                  }
+                  XELOGI("TypeChain: hp={:08X} want={:08X}({}) {} | {}", hp,
+                         typid, tname(typid), found ? "PRESENT" : "ABSENT",
+                         chain);
                 }
               }
               // The objects match, so phase 465's account of the contradiction
