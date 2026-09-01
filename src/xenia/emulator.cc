@@ -4824,7 +4824,8 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
         XELOGI("GuideCapture: shot {} wrote {}x{} to {}", shot, image.width,
                image.height, xe::path_to_utf8(path));
         if (shot + 1 < shots) {
-          xe::threading::Sleep(std::chrono::milliseconds(8));
+          xe::threading::Sleep(std::chrono::milliseconds(
+              std::max(1, int(cvars::guide_capture_interval_ms))));
         }
       }
     }).detach();

@@ -1308,6 +1308,12 @@ DEFINE_uint64(guide_keep_reg_hi, 0,
               "High bound of that range; 0 means equal to guide_keep_reg_lo.",
               "Kernel");
 
+DEFINE_int32(guide_capture_interval_ms, 8,
+             "Milliseconds between capture shots. Phase 879: at the default of "
+             "8ms a whole capture set covers under 50ms, so every result in "
+             "phases 872-878 describes one wall-clock instant that nothing "
+             "synchronises with. Widen it to sample a trajectory instead.",
+             "Guide");
 DEFINE_int32(guide_capture_count, 1,
              "Capture this many consecutive presented frames, 8ms apart, to "
              "guide_capture_N.raw. Phase 718: the Guide resolves to 1E69E000 "
