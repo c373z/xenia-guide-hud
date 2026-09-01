@@ -4362,6 +4362,19 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
     }
     deferred_command_list_.Execute(command_list_, command_list_1_,
                                    command_list_2_);
+    // Phase 950: the draws reach the GPU and change nothing (949), which is a
+    // failure at or below the API. LogD3D12DebugMessages already drains the
+    // debug layer's info queue into the log; nothing on the draw path calls
+    // it. Drain it right after the list carrying the Guide's burst executes.
+    // LogD3D12DebugMessages returns immediately when the debug layer is off,
+    // so this needs no flag of its own.
+    if (guide_seen_burst_) {
+      static uint32_t dq = 0;
+      if (dq++ < 4) {
+        XELOGI("D3D12DebugDrain: after executing the Guide's list");
+        GetD3D12Provider().LogD3D12DebugMessages();
+      }
+    }
     command_list_->Close();
     ID3D12CommandList* execute_command_lists[] = {command_list_};
     direct_queue->ExecuteCommandLists(1, execute_command_lists);

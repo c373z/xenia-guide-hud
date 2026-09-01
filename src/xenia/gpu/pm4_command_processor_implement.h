@@ -2244,8 +2244,18 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
               if (cvars::guide_overlay_test_quad && vaddr) {
                 uint8_t* wp = memory_->TranslatePhysical(vaddr);
                 if (wp) {
-                  static const float kQuad[8] = {-1.f, -1.f, 1.f, -1.f,
-                                                 1.f,  1.f,  -1.f, 1.f};
+                  // Phase 950: the phase-939 quad was written in NDC, but the
+                  // shader applies the model transform in c0/c1 first - a
+                  // translate of (285,163) for the first draw - which put it
+                  // far off screen. That control was invalid. Compensate with
+                  // this draw's own translate so the result lands at -1..1.
+                  float tx, ty;
+                  uint32_t rx = drf[0x4003], ry = drf[0x4007];
+                  std::memcpy(&tx, &rx, 4);
+                  std::memcpy(&ty, &ry, 4);
+                  const float kQuad[8] = {
+                      -1.f - tx, -1.f - ty, 1.f - tx, -1.f - ty,
+                      1.f - tx,  1.f - ty,  -1.f - tx, 1.f - ty};
                   for (uint32_t k = 0; k < 8; ++k) {
                     uint32_t raw;
                     std::memcpy(&raw, &kQuad[k], 4);
