@@ -1242,10 +1242,26 @@ bool D3D12RenderTargetCache::Update(
             n += uint32_t(tl[i].size());
           }
         }
+        // Phase 933: split the title's own transfers into before and after
+        // the Guide first touches one of its targets. Phase 921 measured only
+        // the Guide's own draws; the question is whether the title's
+        // behaviour changes afterwards.
         static uint32_t g_draws = 0, g_tr = 0, t_draws = 0, t_tr = 0;
+        static uint32_t t_draws_after = 0, t_tr_after = 0;
+        static bool guide_ran = false;
         if (command_processor_.guide_overlay_exec_) {
           ++g_draws;
           g_tr += n;
+          guide_ran = true;
+        } else if (guide_ran) {
+          ++t_draws_after;
+          t_tr_after += n;
+          static uint32_t rp2 = 0;
+          if ((t_draws_after % 2000) == 0 && rp2++ < 3) {
+            XELOGI("TitleTransfers: before the Guide {} over {} draws | after "
+                   "{} over {}",
+                   t_tr, t_draws, t_tr_after, t_draws_after);
+          }
         } else {
           ++t_draws;
           t_tr += n;

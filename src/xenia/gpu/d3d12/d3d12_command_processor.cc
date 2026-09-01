@@ -2257,6 +2257,21 @@ void D3D12CommandProcessor::IssueSwap(uint32_t frontbuffer_ptr,
   // something other than the title's frame - which is the one place this
   // failure has not been looked for.
   {
+    // Phase 933: the title keeps drawing normally after the burst and only
+    // the display is black, so the swap texture is the suspect. Log its
+    // identity, not just that it exists - a re-created texture would explain
+    // a blank present with healthy rendering behind it.
+    {
+      static void* last_swap = nullptr;
+      static uint32_t chg = 0;
+      void* sr = static_cast<void*>(swap_texture_resource);
+      if (sr != last_swap) {
+        last_swap = sr;
+        if (chg++ < 8) {
+          XELOGI("SwapTexInstance: now {} (change #{})", sr, chg);
+        }
+      }
+    }
     static uint32_t sw_n = 0, null_n = 0;
     if (!swap_texture_resource) ++null_n;
     if (sw_n < 6 || (sw_n % 40u) == 0) {
