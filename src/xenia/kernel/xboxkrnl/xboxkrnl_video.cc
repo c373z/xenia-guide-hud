@@ -8365,6 +8365,33 @@ void VdSwap_entry(
                     start = geom_start;
                   }
                 }
+                // Phase 935: N=2 damages nothing and N=3 damages 9299
+                // pixels, so packet #3 of the published range is the first
+                // that does anything. Name the first few packets.
+                {
+                  static uint32_t pk_log = 0;
+                  if (start && pk_log++ < 2) {
+                    std::string pl;
+                    uint32_t a = start;
+                    for (uint32_t k = 0; k < 6 && a + 4u <= after; ++k) {
+                      uint32_t w =
+                          xe::load_and_swap<uint32_t>(pm2->TranslateVirtual(a));
+                      uint32_t ty = w >> 30;
+                      uint32_t cn = ((w >> 16) & 0x3FFFu) + 1u;
+                      pl += fmt::format("#{}@{:08X} type{} ", k + 1, a, ty);
+                      if (ty == 3u) {
+                        pl += fmt::format("op{:02X} n{} | ", (w >> 8) & 0x7Fu,
+                                          cn);
+                      } else if (ty == 0u) {
+                        pl += fmt::format("reg{:04X} n{} | ", w & 0x7FFFu, cn);
+                      } else {
+                        pl += "| ";
+                      }
+                      a += (ty == 2u) ? 4u : (cn + 1u) * 4u;
+                    }
+                    XELOGI("GuidePacketHead: {}", pl);
+                  }
+                }
                 uint32_t d1 = gso2->command_processor()->guide_draw_count_;
                 // Truncate the tail to the first N packets when asked. A
                 // type-3 or type-0 header carries (count-1) in bits 16..29, so
