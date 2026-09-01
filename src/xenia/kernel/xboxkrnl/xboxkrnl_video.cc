@@ -7195,6 +7195,28 @@ void VdSwap_entry(
               XELOGI("VisualObj: hp={:08X} typeid={:08X} 81943378->{:08X} "
                      "obj={:08X} [obj+8]={:08X} | hp-direct obj={:08X}",
                      hp, typid, h2, obj, obj ? prd2(obj + 8u) : 0, obj_old);
+              // Phase 866: decode the handle table 819426F0 consults, so a
+              // null resolve says WHICH of its two checks failed. Base
+              // 0x81D6D0D8, capacity at +0x420, index = handle & 0xFFFF, and
+              // the top 16 bits are a generation tag that must equal the tag
+              // stored in the entry. Over-capacity and tag-mismatch both
+              // return null and are indistinguishable from the HRESULT alone.
+              {
+                static uint32_t ht_logs = 0;
+                if (ht_logs++ < 6) {
+                  const uint32_t htb = 0x81D6D0D8u;
+                  uint32_t cap = prd2(htb + 0x420u);
+                  uint32_t idx = hp & 0xFFFFu;
+                  uint32_t tag = hp >> 16;
+                  uint32_t bkt = (idx < cap) ? prd2(htb + ((idx >> 6) * 4u)) : 0;
+                  uint32_t ent = bkt ? (bkt + ((idx & 0xFFu) * 8u)) : 0;
+                  XELOGI("HandleTbl: hp={:08X} idx={} cap={} {} | bucket={:08X}"
+                         " stored_tag={:08X} want={:08X} obj={:08X}",
+                         hp, idx, cap,
+                         (idx < cap) ? "in-range" : "OVER-CAPACITY", bkt,
+                         ent ? prd2(ent) : 0, tag, ent ? prd2(ent + 4u) : 0);
+                }
+              }
               // The objects match, so phase 465's account of the contradiction
               // is wrong too. Decompose one level further: call 81931C90 with
               // exactly what the export passes it and see what IT writes,
