@@ -544,6 +544,11 @@ class CommandProcessor {
   // fails with "Unsupported resolve vertex buffer format" - 3479 times in
   // one run. Snapshot the state at the title's resolve and restore it for
   // the extra one.
+  // Phase 887: set while the swap-time overlay stream is executing. The
+  // Guide's draws now arrive through that path, which sets neither
+  // guide_in_draw_scope_ nor guide_replaying_ - so every override keyed on
+  // those silently did not apply to them.
+  bool guide_overlay_exec_ = false;
   bool guide_resolve_saved_ = false;
   bool guide_resolve_replay_ = false;
   uint32_t guide_saved_copy_[4] = {};    // RB_COPY_CONTROL..DEST_INFO

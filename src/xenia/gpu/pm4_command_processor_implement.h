@@ -640,7 +640,8 @@ bool COMMAND_PROCESSOR::ExecutePacketType3(uint32_t packet) XE_RESTRICT {
         // but geometry drawn with alpha 0 through a kSrcAlpha blend produces
         // exactly that, so the two explanations are indistinguishable until the
         // override covers the replayed draws.
-        if ((guide_in_draw_scope_ || guide_replaying_) &&
+        if ((guide_in_draw_scope_ || guide_replaying_ ||
+             guide_overlay_exec_) &&
             cvars::guide_force_opaque) {
           RegisterFile& brf = *register_file_;
           saved_blend = brf[0x2201];
@@ -932,7 +933,9 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
     XELOGI("GuideOverlay: executing {} words at {:08X} before swap", gwords,
            gptr);
     uint32_t draws_before = guide_draw_count_;
+    guide_overlay_exec_ = true;
     COMMAND_PROCESSOR::ExecuteGuestBufferVirtualUnsafe(gptr, gwords);
+    guide_overlay_exec_ = false;
     XELOGI("GuideOverlay: {} GPU draws dispatched",
            guide_draw_count_ - draws_before);
     // Phase 883: GuideExtraResolve is triggered from the draw path, at the
@@ -1613,6 +1616,17 @@ void COMMAND_PROCESSOR::GuideExtraResolve() {
              "(type={} size={})",
              keep_vf0[0], keep_vf0[1], guide_saved_vf0_[0], guide_saved_vf0_[1],
              guide_saved_vf0_[0] & 0x3u, (guide_saved_vf0_[1] >> 2) & 0x3FFFFFu);
+      // Phase 887: guide_saved_surface_ is captured and never restored, so
+      // this resolve reads whichever surface the Guide's draws left bound.
+      // If that is still the title's, the resolve is reading the wrong EDRAM
+      // and "copied nothing new" is explained without the geometry being
+      // empty.
+      XELOGI("GuideSurf: live SURFACE_INFO={:08X} COLOR_INFO={:08X} | title's "
+             "were {:08X} {:08X} | copy live {:08X} {:08X} restoring {:08X} "
+             "{:08X}",
+             rf[0x2000], rf[0x2001], guide_saved_surface_[0],
+             guide_saved_surface_[1], keep_copy[0], keep_copy[1],
+             guide_saved_copy_[0], guide_saved_copy_[1]);
     }
   }
 
