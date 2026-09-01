@@ -2884,12 +2884,22 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
   // whether a draw can write colour at all: is_rasterization_done, and the
   // normalized colour mask - a zero mask means no channel is written, which
   // would produce exactly the byte-identical EDRAM that has been measured.
-  if (guide_in_draw_scope_) {
-    static uint32_t gdlog = 0;
-    if (gdlog++ < 8) {
-      XELOGI("GuideDrawPipe: rasterization_done={} normalized_color_mask={:08X} "
+  // Phase 984: this was gated on guide_in_draw_scope_, which the swap-time
+  // overlay never sets, so it has been silent for the whole overlay era. A
+  // clear at the same injection point reaches the display and the draws do not
+  // (983), while the occlusion query says fragments are produced (976) - so a
+  // zero write mask is exactly the shape of what is left. Report it for both
+  // sides, since the comparison is the measurement.
+  {
+    static uint32_t gdlog_g = 0, gdlog_t = 0;
+    bool guide = guide_in_draw_scope_ || guide_overlay_exec_;
+    if ((guide ? gdlog_g : gdlog_t)++ < 4) {
+      XELOGI("GuideDrawPipe[{}]: rasterization_done={} color_mask={:08X} "
+             "RB_COLOR_MASK={:08X} ps_writes_color_targets={:X} "
              "depth_control={:08X}",
-             is_rasterization_done, normalized_color_mask,
+             guide ? "guide" : "title", is_rasterization_done,
+             normalized_color_mask, uint32_t(regs[0x2104]),
+             pixel_shader ? pixel_shader->writes_color_targets() : 0u,
              normalized_depth_control.value);
     }
   }
@@ -3666,6 +3676,9 @@ bool D3D12CommandProcessor::IssueCopy() {
     }
     guide_overlay_exec_ = true;
     uint32_t before_draws = guide_draw_count_;
+    if (cvars::guide_clear_rt_pre) {
+      GuideClearRenderTarget(true);
+    }
     ExecuteGuestBufferVirtualUnsafe(bptr, bwords);
     // Phase 978: the same two probes the swap-time placement has, so the two
     // can be compared on what the rasteriser did rather than only on what
@@ -4307,11 +4320,16 @@ void D3D12CommandProcessor::GuideInvalidateGuestRange(uint32_t addr,
 // the last fork this line has. Standalone rather than driven through the ZPD
 // pool, which needs report handles and segments a synthetic burst does not
 // have.
-void D3D12CommandProcessor::GuideClearRenderTarget() {
+void D3D12CommandProcessor::GuideClearRenderTarget(bool green) {
   if (!render_target_cache_) {
     return;
   }
-  static const float kMagenta[4] = {1.0f, 0.0f, 1.0f, 1.0f};
+  // Phase 988: the pre-burst clear and the marker were both magenta, so a
+  // blade drawn on top of the clear was indistinguishable from the clear.
+  // Clear to green and leave the fragments magenta.
+  static const float kGreen[4] = {0.0f, 1.0f, 0.0f, 1.0f};
+  static const float kMagentaC[4] = {1.0f, 0.0f, 1.0f, 1.0f};
+  const float* kMagenta = green ? kGreen : kMagentaC;
   static uint32_t clr_logs = 0;
   bool ok = static_cast<D3D12RenderTargetCache*>(render_target_cache_.get())
                 ->GuideClearColor0(kMagenta);

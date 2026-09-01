@@ -25,6 +25,7 @@ DECLARE_bool(guide_marker_color);
 DECLARE_bool(guide_marker_title);
 DECLARE_bool(guide_clear_rt);
 DECLARE_bool(guide_clear_rt_title);
+DECLARE_bool(guide_clear_rt_pre);
 DECLARE_bool(guide_overlay_repeat);
 DECLARE_bool(guide_occlusion_query);
 DECLARE_bool(guide_invalidate_vertex);

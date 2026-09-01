@@ -430,7 +430,7 @@ class D3D12CommandProcessor final : public CommandProcessor {
   void GuideInvalidateGuestRange(uint32_t addr, uint32_t len) override;
   void GuideOcclusionBegin() override;
   void GuideOcclusionEnd() override;
-  void GuideClearRenderTarget() override;
+  void GuideClearRenderTarget(bool green = false) override;
   ID3D12QueryHeap* guide_oq_heap_ = nullptr;
   ID3D12Resource* guide_oq_readback_ = nullptr;
   bool guide_oq_open_ = false;

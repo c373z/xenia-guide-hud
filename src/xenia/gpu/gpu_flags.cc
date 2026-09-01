@@ -235,6 +235,13 @@ DEFINE_bool(guide_overlay_repeat, false,
             "rendered perfectly for one frame would have been photographed 10 "
             "seconds later and recorded as 0 pixels.",
             "GuideResearch");
+DEFINE_bool(guide_clear_rt_pre, false,
+            "Clear the bound colour target to magenta BEFORE the burst rather "
+            "than after. Phase 987: a clear after the burst survives to the "
+            "display (982) and the draws do not (983), so the question is "
+            "whether the Guide's own stream - which ends in ~125 kCopy-mode "
+            "resolves - wipes the target between the two.",
+            "GuideResearch");
 DEFINE_bool(guide_clear_rt_title, false,
             "Clear the bound colour target to magenta on every TITLE draw. "
             "Phase 979: a clear that does not reach the screen from the "

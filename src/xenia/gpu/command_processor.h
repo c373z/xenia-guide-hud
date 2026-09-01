@@ -567,7 +567,7 @@ class CommandProcessor {
   // on what is submitted to it.
   virtual void GuideOcclusionBegin() {}
   virtual void GuideOcclusionEnd() {}
-  virtual void GuideClearRenderTarget() {}
+  virtual void GuideClearRenderTarget(bool green = false) {}
 
   bool guide_overlay_exec_ = false;
   uint32_t guide_ov_seen_ = 0, guide_ov_predrop_ = 0, guide_ov_vizdrop_ = 0;
