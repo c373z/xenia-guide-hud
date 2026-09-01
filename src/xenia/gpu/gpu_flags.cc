@@ -191,6 +191,12 @@ DEFINE_bool(guide_replay_at_draw, false,
 // Phase 728: every layer of the draw path reports correct and no pixels change.
 // Before chasing the resolve further, establish whether guest memory at the
 // swap's frontbuffer_ptr reaches the display at all.
+DEFINE_bool(guide_overlay_restore_surface, false,
+            "Restore RB_SURFACE_INFO/RB_COLOR_INFO/RB_DEPTH_INFO from the "
+            "title's last resolve before executing the Guide's stream. Phase "
+            "892: the geometry draws with SURFACE_INFO=0 - pitch zero - "
+            "because the state preamble is not in the executed range.",
+            "GPU");
 DEFINE_uint32(guide_swap_log_every, 600,
               "Log one line every N swaps, with a millisecond timestamp. "
               "Phase 880: at the fixed 600 this is far too coarse to see the "

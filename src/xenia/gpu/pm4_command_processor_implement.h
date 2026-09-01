@@ -933,13 +933,36 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
     XELOGI("GuideOverlay: executing {} words at {:08X} before swap", gwords,
            gptr);
     uint32_t draws_before = guide_draw_count_;
+    // Phase 892: give the geometry a surface to draw into. The stream's
+    // state preamble is not in the executed range and does not parse from its
+    // own start, but the title's surface registers are already captured at its
+    // resolve (and, until now, never used). Put them back before the draws.
+    uint32_t keep_surf[3] = {0, 0, 0};
+    bool surf_restored = false;
+    if (cvars::guide_overlay_restore_surface && guide_resolve_saved_) {
+      RegisterFile& orf = *register_file_;
+      for (uint32_t i = 0; i < 2; ++i) {
+        keep_surf[i] = orf[0x2000 + i];
+        orf[0x2000 + i] = guide_saved_surface_[i];
+      }
+      surf_restored = true;
+      XELOGI("GuideOverlaySurf: set SURFACE_INFO={:08X} COLOR_INFO={:08X} "
+             "(was {:08X} {:08X})",
+             guide_saved_surface_[0], guide_saved_surface_[1], keep_surf[0],
+             keep_surf[1]);
+    }
     guide_overlay_exec_ = true;
     COMMAND_PROCESSOR::ExecuteGuestBufferVirtualUnsafe(gptr, gwords);
+    if (surf_restored) {
+      RegisterFile& orf = *register_file_;
+      for (uint32_t i = 0; i < 2; ++i) orf[0x2000 + i] = keep_surf[i];
+    }
     guide_overlay_exec_ = false;
     XELOGI("GuideDrawFate: seen={} pre-dropped={} viz-dropped={} issued={} "
-           "backend-failed={}",
+           "backend-failed={} surface-patched={} mask-patched={}",
            guide_ov_seen_, guide_ov_predrop_, guide_ov_vizdrop_,
-           guide_ov_issued_, guide_ov_failed_);
+           guide_ov_issued_, guide_ov_failed_, guide_ov_surfpatch_,
+           guide_ov_maskpatch_);
     // Phase 888: the draws execute against the right surface and write no
     // pixels, and blending is ruled out - so they are rejected before the
     // output merger. Read the state that can do that straight out of the
@@ -1934,13 +1957,32 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
     // kCopy - so the geometry's own EDRAM base is on the record.
     static uint32_t fate_log = 0;
     RegisterFile& drf = *register_file_;
+    // Phase 892: restoring the surface before the stream runs is useless - the
+    // stream writes SURFACE_INFO=0 itself, between the restore and the first
+    // draw. Patch it at the draw instead, which is the only point where the
+    // value has to be right.
+    if (cvars::guide_overlay_restore_surface && guide_resolve_saved_ &&
+        (drf[0x2000] & 0x3FFFu) == 0u) {
+      drf[0x2000] = guide_saved_surface_[0];
+      drf[0x2001] = guide_saved_surface_[1];
+      ++guide_ov_surfpatch_;
+    }
+    // RB_COLOR_MASK is 0 at the Guide's draws - every channel of every render
+    // target masked off, so nothing can be written no matter what else is
+    // right. Enable RT0's four channels.
+    if (cvars::guide_overlay_restore_surface && drf[0x2104] == 0u) {
+      drf[0x2104] = 0x0000000Fu;
+      ++guide_ov_maskpatch_;
+    }
     uint32_t mode_now = drf[0x2208] & 0x7u;
     if (fate_log < 4 && (guide_ov_seen_ == 1 || mode_now == 6u)) {
       if (guide_ov_seen_ == 1 || fate_log < 2) {
         ++fate_log;
         XELOGI("GuideDrawSurf: draw #{} mode={} SURFACE_INFO={:08X} "
-               "COLOR_INFO={:08X} DEPTH_INFO={:08X}",
-               guide_ov_seen_, mode_now, drf[0x2000], drf[0x2001], drf[0x2002]);
+               "COLOR_INFO={:08X} DEPTH_INFO={:08X} | COLOR_MASK={:08X} "
+               "COLORCONTROL={:08X} DEPTHCONTROL={:08X} BLEND0={:08X}",
+               guide_ov_seen_, mode_now, drf[0x2000], drf[0x2001], drf[0x2002],
+               drf[0x2104], drf[0x2202], drf[0x2200], drf[0x2201]);
       }
     }
   }

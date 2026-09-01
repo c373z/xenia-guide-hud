@@ -551,6 +551,8 @@ class CommandProcessor {
   bool guide_overlay_exec_ = false;
   uint32_t guide_ov_seen_ = 0, guide_ov_predrop_ = 0, guide_ov_vizdrop_ = 0;
   uint32_t guide_ov_issued_ = 0, guide_ov_failed_ = 0;
+  uint32_t guide_ov_surfpatch_ = 0;
+  uint32_t guide_ov_maskpatch_ = 0;
   bool guide_resolve_saved_ = false;
   bool guide_resolve_replay_ = false;
   uint32_t guide_saved_copy_[4] = {};    // RB_COPY_CONTROL..DEST_INFO
