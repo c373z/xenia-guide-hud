@@ -191,6 +191,12 @@ DEFINE_bool(guide_replay_at_draw, false,
 // Phase 728: every layer of the draw path reports correct and no pixels change.
 // Before chasing the resolve further, establish whether guest memory at the
 // swap's frontbuffer_ptr reaches the display at all.
+DEFINE_bool(guide_overlay_restore_context, false,
+            "Restore the title's whole RB/PA register block (0x2000-0x25FF) "
+            "before executing the Guide's stream. Phase 894: patching "
+            "individual registers found three real defects and none was "
+            "sufficient, and the list has no end condition.",
+            "GPU");
 DEFINE_bool(guide_overlay_restore_surface, false,
             "Restore RB_SURFACE_INFO/RB_COLOR_INFO/RB_DEPTH_INFO from the "
             "title's last resolve before executing the Guide's stream. Phase "

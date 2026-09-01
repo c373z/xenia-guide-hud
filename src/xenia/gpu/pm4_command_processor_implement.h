@@ -951,8 +951,28 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
              guide_saved_surface_[0], guide_saved_surface_[1], keep_surf[0],
              keep_surf[1]);
     }
+    // Phase 894: restore the title's whole RB/PA block before the stream
+    // runs. Where the stream has an opinion its own type-0 packets overwrite
+    // this during execution; where it has none - which is most of the block,
+    // since it was recorded in a context that already had these set - the
+    // title's values stand in for the missing context.
+    std::vector<uint32_t> keep_ctx;
+    if (cvars::guide_overlay_restore_context && guide_title_regs_valid_) {
+      RegisterFile& crf = *register_file_;
+      keep_ctx.resize(kGuideCtxHi - kGuideCtxLo);
+      for (uint32_t r = kGuideCtxLo; r < kGuideCtxHi; ++r) {
+        keep_ctx[r - kGuideCtxLo] = crf[r];
+        crf[r] = guide_title_regs_[r - kGuideCtxLo];
+      }
+    }
     guide_overlay_exec_ = true;
     COMMAND_PROCESSOR::ExecuteGuestBufferVirtualUnsafe(gptr, gwords);
+    if (!keep_ctx.empty()) {
+      RegisterFile& crf = *register_file_;
+      for (uint32_t r = kGuideCtxLo; r < kGuideCtxHi; ++r) {
+        crf[r] = keep_ctx[r - kGuideCtxLo];
+      }
+    }
     if (surf_restored) {
       RegisterFile& orf = *register_file_;
       for (uint32_t i = 0; i < 2; ++i) orf[0x2000 + i] = keep_surf[i];
@@ -1976,6 +1996,10 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
                                       0x2081, 0x2082, 0x2206, 0x2205};
     for (uint32_t i = 0; i < 12; ++i) guide_title_state_[i] = trf[kIdx[i]];
     guide_title_state_valid_ = true;
+    for (uint32_t r = kGuideCtxLo; r < kGuideCtxHi; ++r) {
+      guide_title_regs_[r - kGuideCtxLo] = trf[r];
+    }
+    guide_title_regs_valid_ = true;
   }
   if (guide_overlay_exec_) {
     ++guide_ov_seen_;

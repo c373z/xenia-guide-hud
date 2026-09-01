@@ -554,6 +554,12 @@ class CommandProcessor {
   uint32_t guide_ov_surfpatch_ = 0;
   uint32_t guide_ov_maskpatch_ = 0;
   uint32_t guide_ov_vportpatch_ = 0;
+  // Phase 894: the whole RB/PA block from the title's last draw, not a
+  // hand-picked dozen. 0x2000..0x25FF covers the render backend and primitive
+  // assembler state.
+  static constexpr uint32_t kGuideCtxLo = 0x2000, kGuideCtxHi = 0x2600;
+  uint32_t guide_title_regs_[kGuideCtxHi - kGuideCtxLo] = {};
+  bool guide_title_regs_valid_ = false;
   uint32_t guide_title_state_[12] = {};
   bool guide_title_state_valid_ = false;
   bool guide_resolve_saved_ = false;
