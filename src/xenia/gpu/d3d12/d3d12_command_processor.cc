@@ -4267,6 +4267,11 @@ size_t D3D12CommandProcessor::GuideCommandListBytes() {
   return deferred_command_list_.recorded_bytes();
 }
 
+void D3D12CommandProcessor::GuideInvalidateFloatConstants() {
+  cbuffer_binding_float_vertex_.up_to_date = false;
+  cbuffer_binding_float_pixel_.up_to_date = false;
+}
+
 void D3D12CommandProcessor::GuideResetHostState() {
   // The same trackers BeginSubmission clears, so the title's next draw
   // re-binds everything rather than trusting a cache the Guide's draws moved.

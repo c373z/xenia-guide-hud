@@ -554,6 +554,10 @@ class CommandProcessor {
   // this to reset them.
   virtual void GuideResetHostState() {}
   virtual size_t GuideCommandListBytes() { return 0; }
+  // Phase 954: ALU constants are uploaded to a GPU buffer under dirty
+  // tracking, so writing register_file_->values directly does not reach the
+  // shader. Backends override this to invalidate the float constant buffers.
+  virtual void GuideInvalidateFloatConstants() {}
 
   bool guide_overlay_exec_ = false;
   uint32_t guide_ov_seen_ = 0, guide_ov_predrop_ = 0, guide_ov_vizdrop_ = 0;

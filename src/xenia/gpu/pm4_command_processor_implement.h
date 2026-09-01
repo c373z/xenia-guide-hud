@@ -2202,6 +2202,9 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
         };
         setf(0x4010, 2.0f / 1280.0f);   // c4.x =  2/w
         setf(0x4015, -2.0f / 720.0f);   // c5.y = -2/h
+        // The register file is not what the shader reads - invalidate the
+        // uploaded constant buffer so these values are sent to the GPU.
+        COMMAND_PROCESSOR::GuideInvalidateFloatConstants();
         ++guide_ov_projpatch_;
       }
     }

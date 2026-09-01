@@ -426,6 +426,7 @@ class D3D12CommandProcessor final : public CommandProcessor {
   // clearing and stopping capturing. Returns whether the submission was done
   // successfully, if it has failed, leaves it open.
   void GuideResetHostState() override;
+  void GuideInvalidateFloatConstants() override;
   size_t GuideCommandListBytes() override;
   bool EndSubmission(bool is_swap);
   // Checks if ending a submission right now would not cause potentially more
