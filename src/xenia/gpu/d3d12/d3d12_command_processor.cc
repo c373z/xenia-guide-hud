@@ -3509,7 +3509,18 @@ bool D3D12CommandProcessor::IssueCopy() {
 #if XE_GPU_FINE_GRAINED_DRAW_SCOPES
   SCOPE_profile_cpu_f("gpu");
 #endif  // XE_GPU_FINE_GRAINED_DRAW_SCOPES
-  if (!BeginSubmission(true)) {
+  // Phase 884: say which of the three ways this can fail actually fires when
+  // the Guide's extra resolve calls it. "IssueCopy FAILED" alone cannot
+  // distinguish no submission from a declined resolve.
+  bool ic_sub = BeginSubmission(true);
+  if (guide_resolve_replay_) {
+    static uint32_t icl = 0;
+    if (icl++ < 4) {
+      XELOGI("IssueCopyWhy: BeginSubmission={} readback_mode={}", ic_sub,
+             uint32_t(GetReadbackResolveMode()));
+    }
+  }
+  if (!ic_sub) {
     return false;
   }
   ReadbackResolveMode readback_mode = GetReadbackResolveMode();
@@ -3530,6 +3541,13 @@ bool D3D12CommandProcessor::IssueCopy_ReadbackResolvePath() {
   if (!render_target_cache_->Resolve(*memory_, *shared_memory_, *texture_cache_,
                                      written_address, written_length,
                                      &copy_dest_info, &is_scaled)) {
+    if (guide_resolve_replay_) {
+      static uint32_t rl = 0;
+      if (rl++ < 4) {
+        XELOGI("IssueCopyWhy: readback path - RenderTargetCache::Resolve "
+               "declined");
+      }
+    }
     return false;
   }
   if (!written_length) {

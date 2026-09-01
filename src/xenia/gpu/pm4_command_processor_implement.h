@@ -1602,6 +1602,19 @@ void COMMAND_PROCESSOR::GuideExtraResolve() {
   keep_vf0[1] = rf[0x4801];
   rf[0x4800] = guide_saved_vf0_[0];
   rf[0x4801] = guide_saved_vf0_[1];
+  // Phase 884: GetResolveInfo rejects this with "Unsupported resolve vertex
+  // buffer format", which is `fetch.type != kVertex || fetch.size != 6`.
+  // Print what was saved and what is being restored, because "the title's own
+  // resolve saved it" is an assumption about which IssueCopy ran last.
+  {
+    static uint32_t vlog = 0;
+    if (vlog++ < 4) {
+      XELOGI("GuideVF0: live {:08X} {:08X} | restoring {:08X} {:08X} "
+             "(type={} size={})",
+             keep_vf0[0], keep_vf0[1], guide_saved_vf0_[0], guide_saved_vf0_[1],
+             guide_saved_vf0_[0] & 0x3u, (guide_saved_vf0_[1] >> 2) & 0x3FFFFFu);
+    }
+  }
 
   uint32_t dest = guide_saved_copy_[1] & ~0xFFFu;
   auto sum_dest = [&]() -> uint32_t {
