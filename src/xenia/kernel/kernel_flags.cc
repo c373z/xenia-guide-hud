@@ -424,6 +424,12 @@ DEFINE_uint32(guide_coverage_fn, 0,
               "where 819F5D18 stops instead of building a draw packet - its "
               "draw construction sites are reachable but sit behind ~390 "
               "branch points, too many to read.",
+              "ONLY VALID FOR FUNCTION ENTRY ADDRESSES. Phase 902: "
+              "LookupFunction declares a new symbol at any address it does not "
+              "already know, so a mid-function address always reports "
+              "not-run - 81A015C0 reads `no` while 81A015B8, the function "
+              "containing it, reads RAN in the same batch. Probing call sites "
+              "or instruction addresses with this measures nothing. "
               "Kernel");
 
 DEFINE_int32(guide_front_buffer_shift, 0,
