@@ -425,6 +425,7 @@ class D3D12CommandProcessor final : public CommandProcessor {
   // If is_swap is true, a full frame is closed - with, if needed, cache
   // clearing and stopping capturing. Returns whether the submission was done
   // successfully, if it has failed, leaves it open.
+  void GuideResetHostState() override;
   bool EndSubmission(bool is_swap);
   // Checks if ending a submission right now would not cause potentially more
   // delay than it would reduce by making the GPU start working earlier - such

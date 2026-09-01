@@ -4183,6 +4183,24 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
   return true;
 }
 
+void D3D12CommandProcessor::GuideResetHostState() {
+  // The same trackers BeginSubmission clears, so the title's next draw
+  // re-binds everything rather than trusting a cache the Guide's draws moved.
+  ff_viewport_update_needed_ = true;
+  ff_scissor_update_needed_ = true;
+  ff_blend_factor_update_needed_ = true;
+  ff_stencil_ref_update_needed_ = true;
+  current_guest_pipeline_ = nullptr;
+  current_external_pipeline_ = nullptr;
+  current_graphics_root_signature_ = nullptr;
+  current_graphics_root_up_to_date_ = 0;
+  if (!bindless_resources_used_) {
+    view_bindful_heap_current_ = nullptr;
+    sampler_bindful_heap_current_ = nullptr;
+  }
+  primitive_topology_ = D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;
+}
+
 bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
   // Phase 930: the damage is harmless at one draw, cumulative from four and
   // total at 541, regardless of what the draws write (929) - the shape of a

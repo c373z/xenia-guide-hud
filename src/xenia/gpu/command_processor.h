@@ -548,6 +548,12 @@ class CommandProcessor {
   // Guide's draws now arrive through that path, which sets neither
   // guide_in_draw_scope_ nor guide_replaying_ - so every override keyed on
   // those silently did not apply to them.
+  // Phase 931: after the injected stream runs, the host binding trackers
+  // describe what the Guide's draws left bound, while the title's next frame
+  // assumes they still describe its own. Backends that cache bindings override
+  // this to reset them.
+  virtual void GuideResetHostState() {}
+
   bool guide_overlay_exec_ = false;
   uint32_t guide_ov_seen_ = 0, guide_ov_predrop_ = 0, guide_ov_vizdrop_ = 0;
   uint32_t guide_ov_issued_ = 0, guide_ov_failed_ = 0;

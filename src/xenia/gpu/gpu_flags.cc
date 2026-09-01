@@ -191,6 +191,12 @@ DEFINE_bool(guide_replay_at_draw, false,
 // Phase 728: every layer of the draw path reports correct and no pixels change.
 // Before chasing the resolve further, establish whether guest memory at the
 // swap's frontbuffer_ptr reaches the display at all.
+DEFINE_bool(guide_overlay_reset_state, false,
+            "Reset the host binding trackers after the Guide's stream runs, "
+            "as BeginSubmission does. Phase 931: nothing currently restores "
+            "them, so the title's next frame re-binds only what it believes "
+            "changed.",
+            "GPU");
 DEFINE_bool(guide_overlay_mask_off, false,
             "Force RB_COLOR_MASK to 0 for the Guide's draws, so they execute "
             "fully but write no colour. Phase 929: if the frame is still black "

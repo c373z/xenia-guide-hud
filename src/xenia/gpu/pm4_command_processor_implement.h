@@ -978,6 +978,12 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
       for (uint32_t i = 0; i < 2; ++i) orf[0x2000 + i] = keep_surf[i];
     }
     guide_overlay_exec_ = false;
+    // Phase 931: put the host binding trackers back the way BeginSubmission
+    // leaves them, so the title's next frame re-binds instead of trusting a
+    // cache the Guide's draws moved.
+    if (cvars::guide_overlay_reset_state) {
+      COMMAND_PROCESSOR::GuideResetHostState();
+    }
     if (guide_title_state_valid_) {
       XELOGI("TitleDrawState (last before overlay): mode={} SURFACE={:08X} "
              "COLOR={:08X} DEPTH={:08X} | MASK={:08X} COLORCTL={:08X} "

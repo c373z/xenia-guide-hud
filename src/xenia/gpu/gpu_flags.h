@@ -18,6 +18,7 @@ DECLARE_path(dump_shaders);
 
 DECLARE_bool(vsync);
 DECLARE_bool(guide_cp_probe);
+DECLARE_bool(guide_overlay_reset_state);
 DECLARE_bool(guide_overlay_mask_off);
 DECLARE_bool(guide_overlay_clip_disable);
 DECLARE_bool(guide_overlay_vport_identity);
