@@ -7110,6 +7110,28 @@ void VdSwap_entry(
           uint32_t paint_dev_ = paint_wr_ ? prd2(paint_wr_ + 0x0Cu) : 0;
           if (!paint_dev_) paint_dev_ = guide_resv_dev_;
           uint32_t before = paint_dev_ ? prd2(paint_dev_ + 0x30u) : 0;
+          // Phase 901: wipe the arena before the paint fills it. Whatever the
+          // paint writes this frame reappears; anything left from an earlier
+          // frame does not.
+          if (::cvars::guide_zero_arena && before) {
+            uint32_t lim = paint_dev_ ? prd2(paint_dev_ + 0x2B50u) : 0;
+            uint32_t end = (lim > before && lim - before < 0x100000u)
+                               ? lim
+                               : before + 0x40000u;
+            for (uint32_t a = before; a + 4u <= end; a += 4) {
+              auto* zh = pm2->LookupHeap(a);
+              if (!zh || zh->QueryRangeAccess(a, a + 4u) ==
+                             xe::memory::PageAccess::kNoAccess) {
+                continue;
+              }
+              xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(a), 0u);
+            }
+            static uint32_t zlog = 0;
+            if (zlog++ < 2) {
+              XELOGI("ZeroArena: cleared {:08X}..{:08X} ({} words)", before,
+                     end, (end - before) / 4);
+            }
+          }
           // Phase 513: the 6927 words are three 0x905-word reserve calls this
           // harness makes itself, one per element (ReserveCall returns exactly
           // the measured cursors). A reserve hands out memory without writing

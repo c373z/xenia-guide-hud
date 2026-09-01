@@ -966,6 +966,12 @@ DEFINE_bool(guide_navigate_manual, false,
 DEFINE_bool(guide_navigate_scene, false,
              "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
              "Guide");
+DEFINE_bool(guide_zero_arena, false,
+            "Zero the reservation arena before each paint. Phase 901: none of "
+            "the sixteen DRAW_INDX emitters in xam runs, yet the arena parses "
+            "with 416 of them - so either the paint writes them by some other "
+            "route, or they are stale bytes being replayed.",
+            "Guide");
 DEFINE_bool(guide_publish_geometry, false,
             "Publish from the geometry section rather than the resolve "
             "section. Phase 889: the tail holds 125 kCopy draws (resolves); "
