@@ -980,6 +980,19 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_INDIRECT_BUFFER(
   uint32_t list_length = reader_.ReadAndSwap<uint32_t>();
   assert_zero(list_length & ~0xFFFFF);
   list_length &= 0xFFFFF;
+  // Phase 857: a device command buffer reaches the GPU by being chained into
+  // the ring with this packet. The Guide emits twelve DRAW_INDX into its own
+  // buffer (853) and nothing renders; log every buffer that IS chained, so
+  // whether the Guide's is among them stops being a guess.
+  {
+    static uint32_t ib_log = 0;
+    if (ib_log < 24) {
+      ++ib_log;
+      XELOGI("IBChain #{}: ptr={:08X} len={} words | primary={:08X} size={}",
+             ib_log, list_ptr, list_length, primary_buffer_ptr_,
+             primary_buffer_size_);
+    }
+  }
   // Phase 534: if this IB turns out to contain the Guide's draws, its address
   // and length are the replayable range. Save and restore the marker so nested
   // buffers attribute to the innermost one that actually drew.

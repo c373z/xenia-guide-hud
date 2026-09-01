@@ -10219,6 +10219,66 @@ void VdSwap_entry(
                        gn, p59, rdw(pdev + 0x59C4u), rdw(pdev + 0x59C8u),
                        rdw(pdev + 0x3FE0u), blk.empty() ? "(unreadable)" : blk);
               }
+              // Phase 860: submission happens by IB packets in the ring
+              // (859), not by device fields. Scan the ring for any word
+              // pointing into the Guide's buffer, and for IB headers, so
+              // "nothing references it" stops being an inference from the
+              // command processor's side only.
+              {
+                // Phase 861: 1FAE2000 was VdInitializeRingBuffer's argument
+                // and is NOT the buffer the command processor executes - it
+                // reports primary=1F905000 size=1MB. Ask it rather than
+                // assuming, which is what made 860's scan find no IB packets
+                // in a ring that demonstrably carries 24 of them.
+                auto* rm = kernel_state()->memory();
+                uint32_t ring = 0x1FAE2000u, rwords = 0x20000u / 4u;
+                if (auto* gsr = kernel_state()->emulator()->graphics_system()) {
+                  if (auto* cpr = gsr->command_processor()) {
+                    auto ri = cpr->GuideRingSave();
+                    if (ri.ptr && ri.size) {
+                      ring = ri.ptr;
+                      rwords = ri.size / 4u;
+                    }
+                  }
+                }
+                uint32_t ibs = 0, refs = 0, scanned = 0;
+                std::string sample;
+                // VdInitializeRingBuffer's pointer is a PHYSICAL address -
+                // reading it with TranslateVirtual returned zero readable
+                // words. This is the same distinction that has cost this
+                // investigation before.
+                auto* rbase = rm->TranslatePhysical(ring);
+                for (uint32_t i = 0; i < rwords; ++i) {
+                  if (!rbase) break;
+                  uint32_t v = xe::load_and_swap<uint32_t>(rbase + i * 4u);
+                  ++scanned;
+                  if ((v >> 30) == 3 && ((v >> 8) & 0x7Fu) == 0x3Fu) ++ibs;
+                  if ((v & 0xFFF00000u) == 0x30000000u ||
+                      (v & 0xFFF00000u) == 0x40800000u) {
+                    ++refs;
+                    if (sample.size() < 60) {
+                      sample += fmt::format("{:08X}@+{} ", v, i * 4u);
+                    }
+                  }
+                }
+                XELOGI("RingScan #{}: {} words | IB headers={} | words pointing "
+                       "at guide ranges={} {}",
+                       gn, scanned, ibs, refs, sample);
+              }
+              // Phase 859: the title chains 24 command buffers a run and the
+              // Guide none (857). Read the command-buffer fields on both
+              // devices at the same instant - the title's are what a working
+              // device looks like.
+              {
+                uint32_t td = rdw(0x801E6FC4u);
+                XELOGI("DevCmp #{}: guide {:08X} base={:08X} cur={:08X} "
+                       "lim={:08X} stride={:08X} || title {:08X} base={:08X} "
+                       "cur={:08X} lim={:08X} stride={:08X}",
+                       gn, pdev, rdw(pdev + 0x2B48u), rdw(pdev + 0x2B4Cu),
+                       rdw(pdev + 0x2B50u), rdw(pdev + 0x2B58u), td,
+                       td ? rdw(td + 0x2B48u) : 0u, td ? rdw(td + 0x2B4Cu) : 0u,
+                       td ? rdw(td + 0x2B50u) : 0u, td ? rdw(td + 0x2B58u) : 0u);
+              }
               XELOGI("Gate46D0 #{}: guide dev={:08X} [46D0]={:08X} [2B3C]={:08X}"
                      " | title dev={:08X} [46D0]={:08X} [2B3C]={:08X}",
                      gn, pdev, rdw(pdev + 0x46D0u), rdw(pdev + 0x2B3Cu), tdev,
