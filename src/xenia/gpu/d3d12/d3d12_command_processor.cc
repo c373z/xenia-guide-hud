@@ -3046,6 +3046,19 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
     static uint32_t hv_g = 0, hv_t = 0;
     bool want = guide_overlay_exec_ ? (hv_g++ < 3) : (hv_t++ < 3);
     if (want) {
+      // Phase 923: the viewport patch reports applying and the host still gets
+      // ext=(1,1). Read the registers here, where Xenia actually consumes
+      // them, next to what it derives from them.
+      auto rdf = [&](uint32_t r) {
+        float f;
+        uint32_t v = register_file_->values[r];
+        std::memcpy(&f, &v, 4);
+        return f;
+      };
+      XELOGI("HostRegs[{}]: VTE={:08X} xscale={} xoff={} yscale={} yoff={}",
+             guide_overlay_exec_ ? "guide" : "title",
+             register_file_->values[0x2206], rdf(0x210F), rdf(0x2110),
+             rdf(0x2111), rdf(0x2112));
       XELOGI("HostRaster[{}]: vp off=({},{}) ext=({},{}) | ndc_scale=({},{},{})"
              " ndc_offset=({},{},{}) | scissor off=({},{}) ext=({},{})",
              guide_overlay_exec_ ? "guide" : "title", viewport_info.xy_offset[0],
