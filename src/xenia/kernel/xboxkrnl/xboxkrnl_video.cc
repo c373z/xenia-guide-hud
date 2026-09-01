@@ -7173,6 +7173,12 @@ void VdSwap_entry(
             uint32_t en2 = bk2 + (idx2 & 0xFFu) * 8u;
             return prd2(en2) == (h >> 16) && prd2(en2 + 4u) != 0;
           };
+          // Phase 872: each EmitFrame call writes one self-contained PM4
+          // block and advances the cursor past it. The whole extent is a
+          // sequence of those blocks, not one stream, which is why parsing it
+          // end to end desyncs. Record the boundaries so the blocks can be
+          // executed individually.
+          std::vector<std::pair<uint32_t, uint32_t>> emit_blocks;
           std::vector<uint32_t> todo;
           if (resolves(hp)) todo.push_back(hp);
           uint32_t visited = 0, skipped = 0;
@@ -7747,6 +7753,13 @@ void VdSwap_entry(
                              "cur {:08X} -> {:08X} (delta {})",
                              pdev, ar, c_before, prd2(pdev + 0x30u),
                              prd2(pdev + 0x30u) - c_before);
+                      {
+                        uint32_t c_after = prd2(pdev + 0x30u);
+                        if (c_after > c_before &&
+                            (c_after - c_before) < 0x100000u) {
+                          emit_blocks.emplace_back(c_before, c_after);
+                        }
+                      }
                       // Words are landing in our buffer for the first time.
                       // Walk them as PM4: type-3 headers carry the opcode in
                       // bits 8..14 and a count in 16..29. DRAW_INDX is 0x22.
@@ -8055,6 +8068,53 @@ void VdSwap_entry(
               // 256-entry ramp reaching the register path blacks the display on
               // its own, independently of the missing geometry. Refuse to
               // execute a range whose parse overran.
+              if (::cvars::guide_execute_command_stream &&
+                  !emit_blocks.empty()) {
+                uint32_t d0 = gso2->command_processor()->guide_draw_count_;
+                uint32_t total = 0;
+                for (auto& b : emit_blocks) {
+                  uint32_t nw = (b.second - b.first) / 4;
+                  gso2->command_processor()->ExecuteGuestBufferVirtualUnsafe(
+                      b.first, nw);
+                  total += nw;
+                }
+                // Phase 872: the EmitFrame blocks are the head of the arena
+                // and carry state, not draws. GuideOwnBuf finds the draws in
+                // the last 8192 words before the cursor. Execute that tail
+                // too, starting at the first type-3 header so the parse does
+                // not begin mid-packet.
+                uint32_t tail_lo = (after > 8192u * 4u) ? after - 8192u * 4u : before;
+                uint32_t start = 0;
+                for (uint32_t a = tail_lo; a + 4u <= after; a += 4) {
+                  auto* th = pm2->LookupHeap(a);
+                  if (!th || th->QueryRangeAccess(a, a + 4u) ==
+                                 xe::memory::PageAccess::kNoAccess) {
+                    continue;
+                  }
+                  uint32_t v =
+                      xe::load_and_swap<uint32_t>(pm2->TranslateVirtual(a));
+                  uint32_t op = (v >> 8) & 0x7Fu;
+                  if ((v & 0xC0000000u) == 0xC0000000u &&
+                      (op == 0x00u || op == 0x22u || op == 0x27u ||
+                       op == 0x2Bu || op == 0x3Cu)) {
+                    start = a;
+                    break;
+                  }
+                }
+                uint32_t d1 = gso2->command_processor()->guide_draw_count_;
+                if (start && after > start) {
+                  gso2->command_processor()->ExecuteGuestBufferVirtualUnsafe(
+                      start, (after - start) / 4);
+                }
+                static uint32_t blk_logs = 0;
+                if (blk_logs++ < 3) {
+                  XELOGI("EmitBlocks: executed {} blocks, {} words total; "
+                         "GPU draws +{} | tail {:08X}->{:08X} draws +{}",
+                         emit_blocks.size(), total,
+                         d1 - d0, start, after,
+                         gso2->command_processor()->guide_draw_count_ - d1);
+                }
+              }
               if (parse_bad) {
                 static uint32_t skip_logs = 0;
                 if (skip_logs++ < 2) {
