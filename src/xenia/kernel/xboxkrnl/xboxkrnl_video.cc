@@ -8269,6 +8269,7 @@ void VdSwap_entry(
                       }
                     }
                     uint32_t hfetch = 0, h0 = 0, h3 = 0;
+                    std::map<uint32_t, uint32_t> hhist;
                     std::string hf;
                     for (uint32_t a = hbest; hbest && a < best;) {
                       uint32_t w =
@@ -8288,6 +8289,12 @@ void VdSwap_entry(
                         a += (cn + 1u) * 4u;
                       } else if (ty == 3u) {
                         ++h3;
+                        // Phase 897: fetch constants are set by SET_CONSTANT
+                        // (type-3 opcode 0x2D with type=1), not by type-0
+                        // writes to 0x4800 - so the earlier "0 touching fetch
+                        // constants" scans were looking for the wrong packet
+                        // entirely. Count opcodes instead.
+                        hhist[(w >> 8) & 0x7Fu]++;
                         a += (cn + 1u) * 4u;
                       } else if (ty == 2u) {
                         a += 4u;
@@ -8295,10 +8302,13 @@ void VdSwap_entry(
                         break;
                       }
                     }
+                    std::string hh2;
+                    for (auto& kv : hhist) {
+                      hh2 += fmt::format("{:02X}x{} ", kv.first, kv.second);
+                    }
                     XELOGI("HeadScan: start={:08X}..{:08X} | {} type-0, {} "
-                           "type-3, {} touching fetch constants | {}",
-                           hbest, best, h0, h3, hfetch,
-                           hf.empty() ? "NONE" : hf);
+                           "type-3 | ops: {}",
+                           hbest, best, h0, h3, hh2.empty() ? "none" : hh2);
                   }
                   // The search is O(window * walk); do it once and reuse it.
                   if (::cvars::guide_publish_geometry && geom_start) {
