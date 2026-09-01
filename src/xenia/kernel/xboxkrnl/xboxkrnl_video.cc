@@ -4428,6 +4428,20 @@ void VdSwap_entry(
               XELOGI("GuideDC: wrapper {:08X} [00]={:08X} [0C]={:08X} "
                      "(device) [10]={:08X}",
                      wrap, ord(wrap), ord(wrap + 0x0Cu), ord(wrap + 0x10u));
+              // Phase 800: the device the Guide draws through dispatches
+              // [[dev+0xF4]+8] (798). Without the skin that lands on 818FA030
+              // and the whole graphics subsystem runs; with it, it lands
+              // elsewhere and 21 functions go unreached. Print the device's
+              // own vtable, its secondary vtable at +0xF4, and what slot +8 of
+              // that actually holds, so "different class" stops being an
+              // inference.
+              uint32_t dv = ord(wrap + 0x0Cu);
+              if (dv) {
+                uint32_t sec = ord(dv + 0xF4u);
+                XELOGI("GuideDevVT: dev={:08X} vt={:08X} [+F4]={:08X} "
+                       "[[+F4]+8]={:08X} (818FA030 = the live path)",
+                       dv, ord(dv), sec, sec ? ord(sec + 8u) : 0u);
+              }
             }
           }
           if (guide_bs_obj_ && guide_bs_obj_ != guide_draw_this_) {
