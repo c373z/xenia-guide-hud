@@ -1247,6 +1247,21 @@ ID3D12Resource* D3D12TextureCache::RequestSwapTexture(
       key.dimension != xenos::DataDimension::k2DOrStacked) {
     return nullptr;
   }
+  // Phase 941: the presented image is loaded from guest memory at texture
+  // fetch 0's base page - not necessarily the frontbuffer_ptr the swap packet
+  // carries, which is what phase 880 sampled and found to be zeros. Log the
+  // address that actually feeds the display.
+  {
+    static uint32_t sb = 0;
+    static uint32_t last_base = 0;
+    if (key.base_page != last_base && sb++ < 6) {
+      last_base = key.base_page;
+      XELOGI("SwapSource: texture fetch 0 base_page={:08X} (address {:08X}) "
+             "{}x{} fmt={}",
+             key.base_page, key.base_page << 12, key.GetWidth(),
+             key.GetHeight(), uint32_t(key.format));
+    }
+  }
   D3D12Texture* texture = static_cast<D3D12Texture*>(FindOrCreateTexture(key));
   if (texture == nullptr || !LoadTextureData(*texture)) {
     return nullptr;
