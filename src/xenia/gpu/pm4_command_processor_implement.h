@@ -2065,10 +2065,17 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
         std::memcpy(&v, &f, 4);
         drf[r] = v;
       };
-      setf(0x210F, 640.0f);   // x scale
-      setf(0x2110, 640.0f);   // x offset
-      setf(0x2111, -360.0f);  // y scale
-      setf(0x2112, 360.0f);   // y offset
+      if (cvars::guide_overlay_vport_identity) {
+        setf(0x210F, 1.0f);   // x scale
+        setf(0x2110, 0.0f);   // x offset
+        setf(0x2111, 1.0f);   // y scale
+        setf(0x2112, 0.0f);   // y offset
+      } else {
+        setf(0x210F, 640.0f);   // x scale
+        setf(0x2110, 640.0f);   // x offset
+        setf(0x2111, -360.0f);  // y scale
+        setf(0x2112, 360.0f);   // y offset
+      }
       setf(0x2113, 1.0f);     // z scale
       setf(0x2114, 0.0f);     // z offset
       ++guide_ov_vportpatch_;
@@ -2158,6 +2165,38 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
           std::string c;
           for (uint32_t i = 0; i < 8; ++i) c += fmt::format("{} ", cf(i));
           XELOGI("GuideALUConst: c0..c1 = {}", c);
+          // Phase 924: a pixel-to-NDC conversion would carry 2/1280 =
+          // 0.0015625 and -2/720 = -0.0027778. Scan the constant file for
+          // anything of that magnitude rather than assuming where it sits.
+          std::string hits;
+          uint32_t nh = 0;
+          for (uint32_t i = 0; i < 256; ++i) {
+            float f = cf(i);
+            float af = f < 0 ? -f : f;
+            if (af > 0.0005f && af < 0.006f) {
+              ++nh;
+              if (nh <= 10) {
+                hits += fmt::format("c{}.{}={} ", i / 4, i % 4, f);
+              }
+            }
+          }
+          XELOGI("GuideALUScan: {} constants in 0.0005..0.006 | {}", nh,
+                 hits.empty() ? "NONE" : hits);
+          // A shader could hold the screen size and divide instead of holding
+          // its reciprocal, which the small-magnitude scan would miss.
+          std::string big;
+          uint32_t nb = 0;
+          for (uint32_t i = 0; i < 256; ++i) {
+            float f = cf(i);
+            float af = f < 0 ? -f : f;
+            if ((af > 300.0f && af < 400.0f) || (af > 600.0f && af < 700.0f) ||
+                (af > 700.0f && af < 740.0f) || (af > 1200.0f && af < 1300.0f)) {
+              ++nb;
+              if (nb <= 10) big += fmt::format("c{}.{}={} ", i / 4, i % 4, f);
+            }
+          }
+          XELOGI("GuideALUDims: {} constants near 320/360/640/720/1280 | {}",
+                 nb, big.empty() ? "NONE" : big);
         }
         XELOGI("GuideVSBindings: shader={} bindings={} | {}",
                  vs ? "present" : "NONE",
