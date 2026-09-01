@@ -936,6 +936,29 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
     guide_overlay_exec_ = true;
     COMMAND_PROCESSOR::ExecuteGuestBufferVirtualUnsafe(gptr, gwords);
     guide_overlay_exec_ = false;
+    // Phase 888: the draws execute against the right surface and write no
+    // pixels, and blending is ruled out - so they are rejected before the
+    // output merger. Read the state that can do that straight out of the
+    // register file at the end of the burst.
+    {
+      static uint32_t rst = 0;
+      if (rst++ < 3) {
+        RegisterFile& srf = *register_file_;
+        auto asf = [&](uint32_t r) {
+          float f;
+          uint32_t v = srf[r];
+          std::memcpy(&f, &v, 4);
+          return f;
+        };
+        uint32_t tl = srf[0x2081], br = srf[0x2082];
+        XELOGI("GuideRaster: scissor TL=({},{}) BR=({},{}) | vport xscale={} "
+               "yscale={} | VTE_CNTL={:08X} SU_SC_MODE={:08X} "
+               "MODECONTROL={:08X}",
+               tl & 0x7FFFu, (tl >> 16) & 0x7FFFu, br & 0x7FFFu,
+               (br >> 16) & 0x7FFFu, asf(0x210F), asf(0x2111), srf[0x2206],
+               srf[0x2205], srf[0x2208]);
+      }
+    }
     XELOGI("GuideOverlay: {} GPU draws dispatched",
            guide_draw_count_ - draws_before);
     // Phase 883: GuideExtraResolve is triggered from the draw path, at the
