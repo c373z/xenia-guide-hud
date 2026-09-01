@@ -1029,7 +1029,12 @@ void GuideInstallAllocStub() {
   // arena is never reused, so 8MB was arbitrary - and it comes out of the same
   // physical heap the title allocates from, which is a candidate for the new
   // crash in the title's code.
-  const uint32_t kSize = 1u * 1024u * 1024u;
+  // Phase 844: this was 8MB when the stub first produced DRAW_INDX=16 (694);
+  // it is 1MB now, and today's run with the stub emits 2789 words of float
+  // payload against that run's 6917 words of command data. A bump allocator
+  // that runs out returns nothing, and geometry is what stops being produced,
+  // so restore the size the working measurement used.
+  const uint32_t kSize = 8u * 1024u * 1024u;
   uint32_t buf = 0;
   if (!heap->Alloc(kSize, 4096,
                    kMemoryAllocationReserve | kMemoryAllocationCommit,
@@ -3822,6 +3827,25 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   // exclusive (phase 516).
   if (::cvars::guide_patch_skin_dispatch && XamIsDashrootLayout()) {
     GuidePatchWord(0x81901E88u, 0x409A0010u, 0x60000000u, "SkinDispatchPatch");
+  }
+  // Phase 840: 81A14110 defaults the primitive type when the descriptor field
+  // is zero, and neither arm can produce 4 - the only case that emits
+  // DRAW_INDX_2 (834). The taken arm ends `addi r11,r11,5` at 81A14228.
+  // Replacing it with `li r11,4` forces the draw case without needing the
+  // descriptor's address, which three attempts at static dataflow have failed
+  // to establish (835, 839). This answers whether the rest of the path can
+  // produce a draw packet at all.
+  if (::cvars::guide_force_prim4) {
+    GuidePatchWord(0x81A14228u, 0x396B0005u, 0x39600004u, "PrimType4Patch");
+  }
+  // Phase 842: with the type forced to 4 the draw case is entered and exits
+  // immediately because the primitive count r31 is zero (841). r31 is
+  // computed once, at 81A13A4C, as arg2 * arg3. Replace that multiply with a
+  // constant to test whether the count is the only thing missing - tracing it
+  // statically is what has gone wrong three times (835, 839, 840).
+  //   7FFBD1D6  mullw r31, r27, r26   ->   3BE00006  li r31, 6
+  if (::cvars::guide_force_primcount) {
+    GuidePatchWord(0x81A13A4Cu, 0x7FFBD1D6u, 0x3BE00006u, "PrimCountPatch");
   }
   // Phase 546: 819E01E0 converts a CPU pointer to a GPU address and returns 0
   // for the Guide's vertex buffer (phase 545). Its input has been inferred from
@@ -10118,6 +10142,32 @@ void VdSwap_entry(
             // something specific to the Guide's device is not setting it.
             {
               uint32_t tdev = rdw(0x801E6FC4u);
+              // Phase 839: the primitive-type descriptor is r9 at
+              // 81A14898's call, derived from [dev+0x59BC] (835). The type is
+              // defaulted to 5 because that field is zero (834). Dump the
+              // region so the structure - and whether anything ever writes a
+              // type into it - can be seen rather than inferred.
+              {
+                uint32_t p59 = rdw(pdev + 0x59BCu);
+                std::string blk;
+                if (p59) {
+                  auto* dm2 = kernel_state()->memory();
+                  for (uint32_t k = 0; k < 8u; ++k) {
+                    uint32_t a2 = p59 + k * 4u;
+                    auto* hp = dm2->LookupHeap(a2);
+                    if (!hp || hp->QueryRangeAccess(a2, a2 + 4u) ==
+                                   xe::memory::PageAccess::kNoAccess) {
+                      break;
+                    }
+                    blk += fmt::format("{:08X} ", xe::load_and_swap<uint32_t>(
+                                                      dm2->TranslateVirtual(a2)));
+                  }
+                }
+                XELOGI("Desc #{}: [59BC]={:08X} [59C4]={:08X} [59C8]={:08X} "
+                       "[3FE0]={:08X} | at 59BC: {}",
+                       gn, p59, rdw(pdev + 0x59C4u), rdw(pdev + 0x59C8u),
+                       rdw(pdev + 0x3FE0u), blk.empty() ? "(unreadable)" : blk);
+              }
               XELOGI("Gate46D0 #{}: guide dev={:08X} [46D0]={:08X} [2B3C]={:08X}"
                      " | title dev={:08X} [46D0]={:08X} [2B3C]={:08X}",
                      gn, pdev, rdw(pdev + 0x46D0u), rdw(pdev + 0x2B3Cu), tdev,

@@ -389,6 +389,18 @@ DEFINE_uint32(guide_force_46d0, 0,
               "would set bits in it is unreachable in this build. 8 sets the "
               "bit the first gate tests.",
               "GuideResearch");
+DEFINE_bool(guide_force_prim4, false,
+            "Patch 81A14228 from `addi r11,r11,5` to `li r11,4`, forcing the "
+            "primitive type the XUI draw path defaults to. Phase 834: case 4 "
+            "is the only one that emits DRAW_INDX_2 and 81A14110 can never "
+            "default to it.",
+            "GuideResearch");
+DEFINE_bool(guide_force_primcount, false,
+            "Patch 81A13A4C from `mullw r31,r27,r26` to `li r31,6`, giving the "
+            "XUI draw dispatcher a non-zero primitive count. Phase 841: with "
+            "the type forced to 4 the draw case runs and exits at once because "
+            "the count is zero.",
+            "GuideResearch");
 DEFINE_string(guide_status_fns, "",
               "Comma-separated hex guest addresses. On the coverage readback, "
               "report each one's symbol status (DEFINED-translated = it ran, "
