@@ -1253,7 +1253,13 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
               // Dump hud's XUI import thunks. The import-table dump marks
               // these "!!" (no HLE implementation), which says nothing about
               // where the LLE override actually pointed them.
-              for (uint32_t th : {0x913FE7E4u, 0x913FE7F4u, 0x913FE874u}) {
+              // Phase 793: 913FE104 and 913FE4C4 are the two render calls in hud's
+              // render body (913EAB80 and 913EABA4). The static image holds
+              // unrelocated import records there, and resolving their
+              // ordinals against xam's export table gave an address that is
+              // never called - so read what the loader actually wrote.
+              for (uint32_t th : {0x913FE7E4u, 0x913FE7F4u, 0x913FE874u,
+                                  0x913FE104u, 0x913FE4C4u, 0x913FE864u}) {
                 XELOGI("Guide button: thunk {:08X}: {:08X} {:08X} {:08X} "
                        "{:08X}",
                        th, rd(th), rd(th + 4), rd(th + 8), rd(th + 12));

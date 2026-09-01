@@ -365,6 +365,14 @@ DEFINE_bool(guide_patch_null_render, false,
             "time, before anything JITs the function.",
             "Kernel");
 
+DEFINE_string(guide_status_fns, "",
+              "Comma-separated hex guest addresses. On the coverage readback, "
+              "report each one's symbol status (DEFINED-translated = it ran, "
+              "DECLARED-not-run = it did not). Phase 795: probing reachability "
+              "one address per 60s run made a single level of a call-graph "
+              "walk cost six runs; this answers the same question for a whole "
+              "level at once.",
+              "GuideResearch");
 DEFINE_uint32(guide_coverage_fn, 0,
               "Guest address of a function whose per-instruction execution "
               "counts to report after the Guide's draw. Requires "

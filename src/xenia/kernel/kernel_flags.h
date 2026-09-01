@@ -94,6 +94,7 @@ DECLARE_bool(guide_set_render_dc);
 DECLARE_bool(guide_nav_clear_slot);
 DECLARE_bool(guide_nav_dc_null);
 DECLARE_uint32(guide_coverage_fn);
+DECLARE_string(guide_status_fns);
 DECLARE_int32(guide_front_buffer_shift);
 DECLARE_int32(guide_front_buffer_format);
 DECLARE_bool(guide_fake_front_buffer);

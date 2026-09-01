@@ -910,7 +910,13 @@ void GuideDumpNodes() {
   // printing a prefix, so growth and composition are both visible.
   static uint32_t passes = 0;
   ++passes;
-  if (passes != 1 && passes != 5 && passes != 10) return;
+  // Phase 788: passes 1/5/10 are the first ten composite draws, which all
+  // happen within a few thousand log lines of each other - far too narrow to
+  // tell a settled tree from one still loading. Keep sampling for the whole
+  // run so a late-arriving scene is visible.
+  if (passes != 1 && passes != 5 && passes != 10 && (passes % 100) != 0) {
+    return;
+  }
   auto* m = kernel_state()->memory();
   // The first cut of this walked the table dereferencing whatever it found and
   // took 4 host faults, killing the composite draw - phase 672's mistake in a
@@ -3883,7 +3889,48 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
 // so the instrument this investigation depends on went silent exactly in
 // the configurations that needed measuring. Extracted here so it can also
 // be driven from the swap path.
+// Phase 795: batch reachability. One address per run made each level of a
+// call-graph walk cost six runs; this reports a whole level from one.
+static void EmitGuideStatusBatch() {
+  static bool done = false;
+  if (done || ::cvars::guide_status_fns.empty()) return;
+  done = true;
+  std::string out;
+  const std::string& spec = ::cvars::guide_status_fns;
+  size_t pos = 0;
+  while (pos < spec.size()) {
+    size_t comma = spec.find(',', pos);
+    std::string tok = spec.substr(pos, comma == std::string::npos
+                                           ? std::string::npos
+                                           : comma - pos);
+    pos = (comma == std::string::npos) ? spec.size() : comma + 1;
+    while (!tok.empty() && (tok.front() == ' ')) tok.erase(tok.begin());
+    while (!tok.empty() && (tok.back() == ' ')) tok.pop_back();
+    if (tok.empty()) continue;
+    uint32_t addr = 0;
+    try {
+      addr = uint32_t(std::stoul(tok, nullptr, 16));
+    } catch (...) {
+      out += tok + "=BAD ";
+      continue;
+    }
+    auto* f = kernel_state()->processor()->LookupFunction(addr);
+    const char* st = "null";
+    if (f) {
+      switch (f->status()) {
+        case cpu::Symbol::Status::kDefined: st = "RAN"; break;
+        case cpu::Symbol::Status::kDeclared: st = "no"; break;
+        case cpu::Symbol::Status::kFailed: st = "failed"; break;
+        default: st = "?"; break;
+      }
+    }
+    out += fmt::format("{:08X}={} ", addr, st);
+  }
+  XELOGI("GuideStatusBatch: {}", out);
+}
+
 static void EmitGuideCoverageOnce() {
+  EmitGuideStatusBatch();
   if (::cvars::guide_coverage_fn) {
     static bool cov_done = false;
     if (!cov_done) {
@@ -4030,6 +4077,14 @@ void VdSwap_entry(
   // `bl VdSwap`), so invoking the draw from here re-enters this function and
   // the render never returns. Guard it: one Guide draw at a time, and never
   // from inside one.
+  // Phase 788: sample the node table on every swap, not only on the draws.
+  // Composite draws stop after about a dozen, so a census driven off them can
+  // only ever see the first moment of the run - which is how 58 nodes got
+  // reported as a regression against phase 680's 1286 when the difference may
+  // just be how far the asynchronous scene load has got.
+  if (::cvars::guide_draw_on_swap) {
+    GuideDumpNodes();
+  }
   static thread_local bool in_guide_swap_draw = false;
   if (::cvars::guide_draw_on_swap && guide_draw_fn_ && guide_draw_this_ &&
       !in_guide_swap_draw) {
