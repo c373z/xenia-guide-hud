@@ -2087,9 +2087,26 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
               uint32_t fc = vb.fetch_constant;
               uint32_t s0 = drf[0x4800 + fc * 2];
               uint32_t s1 = drf[0x4801 + fc * 2];
-              need += fmt::format("slot{}(type={} addr={:08X} words={}) ", fc,
-                                  s0 & 0x3u, s0 & 0xFFFFFFFCu,
-                                  (s1 >> 2) & 0xFFFFFFu);
+              uint32_t vaddr = s0 & 0xFFFFFFFCu;
+              uint32_t vwords = (s1 >> 2) & 0xFFFFFFu;
+              need += fmt::format("slot{}(type={} addr={:08X} words={} stride={}) ",
+                                  fc, s0 & 0x3u, vaddr, vwords,
+                                  vb.stride_words);
+              // Phase 910: the binding is valid, so read what it points at.
+              // These are post-conversion physical addresses.
+              const uint8_t* vdat =
+                  vaddr ? memory_->TranslatePhysical(vaddr) : nullptr;
+              if (vdat && vwords) {
+                std::string fl;
+                for (uint32_t k = 0; k < 12 && k < vwords; ++k) {
+                  uint32_t raw = xe::load_and_swap<uint32_t>(vdat + k * 4);
+                  float f;
+                  std::memcpy(&f, &raw, 4);
+                  fl += fmt::format("{} ", f);
+                }
+                XELOGI("GuideVertexData: slot{} @{:08X} [{} words]: {}", fc,
+                       vaddr, vwords, fl);
+              }
             }
           }
           XELOGI("GuideVSBindings: shader={} bindings={} | {}",
