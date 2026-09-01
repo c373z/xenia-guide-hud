@@ -210,6 +210,40 @@ DEFINE_bool(guide_overlay_test_quad, false,
             "fragment has been read and is correct, so the question is whether "
             "ANY draw injected at this point can put a pixel on screen.",
             "GPU");
+// Phase 969: every reading so far covers what a draw declares; none covers
+// how large the resulting primitive is. The first draw's quad is 323x1 pixels
+// after the model transform (964) - one pixel tall - and a sub-pixel primitive
+// rasterises to nothing however correct its state is.
+DEFINE_bool(guide_marker_title, false,
+            "Apply the same marker patch to the TITLE's draws instead of the "
+            "Guide's. Phase 974: a negative from guide_marker_color is only "
+            "worth as much as evidence that the patch can paint at all, and "
+            "nothing has ever shown that it reaches the GPU.",
+            "GuideResearch");
+DEFINE_bool(guide_marker_color, false,
+            "Force the Guide's fragments to opaque magenta - pixel constants "
+            "c0*c1 = (1,0,1,1), src One / dst Zero, alpha test off. Phase 972: "
+            "every diff instrument here is either masked over the region the "
+            "blade lands in or fighting a 9% animation noise floor; an exact "
+            "colour needs no reference frame.",
+            "GuideResearch");
+DEFINE_bool(guide_invalidate_vertex, false,
+            "Mark each Guide vertex buffer range CPU-modified before its draw, "
+            "so SharedMemory re-uploads it. Phase 975: every vertex reading in "
+            "this log is a CPU-side read through TranslatePhysical, and none "
+            "shows what the GPU actually fetched.",
+            "GuideResearch");
+DEFINE_bool(guide_quad_census, false,
+            "Measure the post-model-transform extent of every quad in the "
+            "Guide's burst and report how many are thinner than a pixel.",
+            "GuideResearch");
+DEFINE_bool(guide_overlay_quad_px, false,
+            "Overwrite the Guide's vertex data with a large quad expressed in "
+            "the Guide's own pixel space, solving the model transform in "
+            "c0/c1 so the result lands on screen. Phase 969: replaces "
+            "guide_overlay_test_quad, whose NDC quad ignored that transform "
+            "and was never a valid control (939, 950).",
+            "GuideResearch");
 DEFINE_bool(guide_overlay_skip_lut, false,
             "Skip DC_LUT gamma ramp register writes while executing the "
             "Guide's stream. Phase 936: those writes, not the draws, are what "

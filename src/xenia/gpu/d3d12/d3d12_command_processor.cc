@@ -4285,6 +4285,13 @@ void D3D12CommandProcessor::GuideInvalidateFloatConstants() {
   cbuffer_binding_float_pixel_.up_to_date = false;
 }
 
+void D3D12CommandProcessor::GuideInvalidateGuestRange(uint32_t addr,
+                                                      uint32_t len) {
+  if (shared_memory_ && len) {
+    shared_memory_->MemoryInvalidationCallback(addr, len, true);
+  }
+}
+
 void D3D12CommandProcessor::GuideResetHostState() {
   // The same trackers BeginSubmission clears, so the title's next draw
   // re-binds everything rather than trusting a cache the Guide's draws moved.

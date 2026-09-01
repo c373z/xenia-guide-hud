@@ -1072,8 +1072,17 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
            guide_ov_seen_, guide_ov_predrop_, guide_ov_vizdrop_,
            guide_ov_issued_, guide_ov_failed_, guide_ov_surfpatch_,
            guide_ov_maskpatch_, guide_ov_vportpatch_);
-    XELOGI("GuideVTE: passthru patches={} clip patches={}",
-           guide_ov_vtepatch_, guide_ov_clippatch_);
+    XELOGI("GuideVTE: passthru patches={} clip patches={} marker patches={}",
+           guide_ov_vtepatch_, guide_ov_clippatch_, guide_ov_markerpatch_);
+    if (cvars::guide_quad_census) {
+      XELOGI("GuideQuadCensus: measured={} thin(<1px tall)={} "
+             "narrow(<1px wide)={} degenerate={} non-finite={} skipped={} | "
+             "max {}x{} | union x[{}..{}] y[{}..{}]",
+             guide_ov_qn_, guide_ov_qthin_, guide_ov_qnarrow_,
+             guide_ov_qdegen_, guide_ov_qnonfin_, guide_ov_qskip_,
+             guide_ov_qmaxw_, guide_ov_qmaxh_, guide_ov_qbb_[0],
+             guide_ov_qbb_[2], guide_ov_qbb_[1], guide_ov_qbb_[3]);
+    }
     // Phase 888: the draws execute against the right surface and write no
     // pixels, and blending is ruled out - so they are rejected before the
     // output merger. Read the state that can do that straight out of the
@@ -2108,6 +2117,23 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
     }
     guide_title_regs_valid_ = true;
   }
+  // Phase 974: the same marker, on the title's own draws. If the screen does
+  // not turn magenta this patch never reaches the GPU, and every negative
+  // taken with guide_marker_color measures the instrument rather than the
+  // Guide.
+  if (cvars::guide_marker_title && !guide_overlay_exec_) {
+    RegisterFile& mrf = *register_file_;
+    auto mf = [&](uint32_t r, float f) {
+      uint32_t v;
+      std::memcpy(&v, &f, 4);
+      mrf[r] = v;
+    };
+    mf(0x4400, 1.0f); mf(0x4401, 0.0f); mf(0x4402, 1.0f); mf(0x4403, 1.0f);
+    mf(0x4404, 1.0f); mf(0x4405, 1.0f); mf(0x4406, 1.0f); mf(0x4407, 1.0f);
+    mrf[0x2201] = 0x00010001u;
+    mrf[0x2202] = (mrf[0x2202] & ~0x1Fu) | 0x7u;
+    COMMAND_PROCESSOR::GuideInvalidateFloatConstants();
+  }
   if (guide_overlay_exec_) {
     ++guide_ov_seen_;
     if (!draw_succeeded) ++guide_ov_predrop_;
@@ -2221,6 +2247,104 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
         ++guide_ov_projpatch_;
       }
     }
+    // Phase 969: every earlier reading covers what the draw declares - state,
+    // shader, constants, bindings - and none covers how large the resulting
+    // primitive is. Draw #1's quad is 323x1 pixels after the model transform
+    // (964): one pixel tall. A sub-pixel primitive rasterises to nothing
+    // however correct everything feeding it is, and the extent has only ever
+    // been computed for that one draw. Measure all of them.
+    if (cvars::guide_quad_census) {
+      Shader* qvs = active_vertex_shader();
+      uint32_t qfc = 0xFFFFFFFFu;
+      if (qvs && !qvs->vertex_bindings().empty()) {
+        qfc = qvs->vertex_bindings()[0].fetch_constant;
+      }
+      const uint8_t* qvd = nullptr;
+      uint32_t qaddr = 0, qwords = 0;
+      if (qfc != 0xFFFFFFFFu) {
+        uint32_t s0 = drf[0x4800 + qfc * 2];
+        uint32_t s1 = drf[0x4801 + qfc * 2];
+        qaddr = s0 & 0xFFFFFFFCu;
+        qwords = (s1 >> 2) & 0xFFFFFFu;
+        if (qaddr) qvd = memory_->TranslatePhysical(qaddr);
+      }
+      auto qcf = [&](uint32_t i) {
+        float f;
+        uint32_t v = drf[0x4000 + i];
+        std::memcpy(&f, &v, 4);
+        return f;
+      };
+      if (cvars::guide_invalidate_vertex && qaddr && qwords) {
+        COMMAND_PROCESSOR::GuideInvalidateGuestRange(qaddr, qwords * 4u);
+      }
+      uint32_t qnv = uint32_t(vgt_draw_initiator.num_indices);
+      if (qvd && qnv >= 3 && qnv * 2 <= qwords) {
+        // 964: r1.z carries the X axis and r1.x the Y axis, so
+        //   X = vx*c0.x + vy*c0.y + c0.w
+        //   Y = vx*c1.x + vy*c1.y + c1.w
+        float c0x = qcf(0), c0y = qcf(1), c0w = qcf(3);
+        float c1x = qcf(4), c1y = qcf(5), c1w = qcf(7);
+        float lox = 1e30f, hix = -1e30f, loy = 1e30f, hiy = -1e30f;
+        bool fin = true;
+        for (uint32_t k = 0; k < qnv && k * 2 + 1 < qwords; ++k) {
+          uint32_t ax = xe::load_and_swap<uint32_t>(qvd + (k * 2) * 4);
+          uint32_t ay = xe::load_and_swap<uint32_t>(qvd + (k * 2 + 1) * 4);
+          float vx, vy;
+          std::memcpy(&vx, &ax, 4);
+          std::memcpy(&vy, &ay, 4);
+          float X = vx * c0x + vy * c0y + c0w;
+          float Y = vx * c1x + vy * c1y + c1w;
+          if (!std::isfinite(X) || !std::isfinite(Y)) fin = false;
+          lox = std::min(lox, X);
+          hix = std::max(hix, X);
+          loy = std::min(loy, Y);
+          hiy = std::max(hiy, Y);
+        }
+        if (fin) {
+          float qw = hix - lox, qh = hiy - loy;
+          ++guide_ov_qn_;
+          if (qh < 1.0f) ++guide_ov_qthin_;
+          if (qw < 1.0f) ++guide_ov_qnarrow_;
+          if (qw < 0.01f && qh < 0.01f) ++guide_ov_qdegen_;
+          guide_ov_qmaxw_ = std::max(guide_ov_qmaxw_, qw);
+          guide_ov_qmaxh_ = std::max(guide_ov_qmaxh_, qh);
+          guide_ov_qbb_[0] = std::min(guide_ov_qbb_[0], lox);
+          guide_ov_qbb_[1] = std::min(guide_ov_qbb_[1], loy);
+          guide_ov_qbb_[2] = std::max(guide_ov_qbb_[2], hix);
+          guide_ov_qbb_[3] = std::max(guide_ov_qbb_[3], hiy);
+          if (guide_ov_qn_ <= 10) {
+            XELOGI("GuideQuad: #{} nv={} @{:08X} x[{}..{}] y[{}..{}] = {}x{}",
+                   guide_ov_qn_, qnv, qaddr, lox, hix, loy, hiy, qw, qh);
+          }
+        } else {
+          ++guide_ov_qnonfin_;
+        }
+      } else {
+        ++guide_ov_qskip_;
+      }
+    }
+    // Phase 972: every diff-based instrument in this log is blind where it
+    // matters. The blade lands at window x 365..959, y 139..540 (971), and
+    // capdiff's animation mask covers 320,195,960,567 - so the masked reading
+    // that reports "0 differing pixels" excludes most of the region the Guide
+    // draws in, and unmasked the menu animation floods it at ~9%. An absolute
+    // test needs no reference frame: paint the fragments a colour the title
+    // cannot produce, and count exact matches in a single capture.
+    if (cvars::guide_marker_color) {
+      auto mf = [&](uint32_t r, float f) {
+        uint32_t v;
+        std::memcpy(&v, &f, 4);
+        drf[r] = v;
+      };
+      // The whole pixel shader is "mul oC0, c0, c1" (955), and the pixel half
+      // of the constant file starts at 0x4400, not 0x4000 (970).
+      mf(0x4400, 1.0f); mf(0x4401, 0.0f); mf(0x4402, 1.0f); mf(0x4403, 1.0f);
+      mf(0x4404, 1.0f); mf(0x4405, 1.0f); mf(0x4406, 1.0f); mf(0x4407, 1.0f);
+      drf[0x2201] = 0x00010001u;                    // src One, dst Zero, ADD
+      drf[0x2202] = (drf[0x2202] & ~0x1Fu) | 0x7u;  // alpha test/to-mask off
+      COMMAND_PROCESSOR::GuideInvalidateFloatConstants();
+      ++guide_ov_markerpatch_;
+    }
     uint32_t mode_now = drf[0x2208] & 0x7u;
     // Phase 918: the vertex data was read once, for draw #1, and generalised
     // to all 416 (917). Sample across the burst instead - if the quads grow to
@@ -2234,10 +2358,10 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
         XELOGI("GuideDrawSurf: draw #{} mode={} SURFACE_INFO={:08X} "
                "COLOR_INFO={:08X} DEPTH_INFO={:08X} | COLOR_MASK={:08X} "
                "COLORCONTROL={:08X} DEPTHCONTROL={:08X} BLEND0={:08X} | "
-               "scissor {:08X} {:08X} VTE={:08X} SU_SC={:08X}",
+               "scissor {:08X} {:08X} VTE={:08X} SU_SC={:08X} WINOFF={:08X}",
                guide_ov_seen_, mode_now, drf[0x2000], drf[0x2001], drf[0x2002],
                drf[0x2104], drf[0x2202], drf[0x2200], drf[0x2201], drf[0x2081],
-               drf[0x2082], drf[0x2206], drf[0x2205]);
+               drf[0x2082], drf[0x2206], drf[0x2205], drf[0x2080]);
         // VTE=0x43F enables the viewport scale/offset transform, which the
         // title (0x300) does not use. With those registers zero every vertex
         // collapses to a point, which looks exactly like geometry that covers
@@ -2248,6 +2372,28 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
           std::memcpy(&f, &v, 4);
           return f;
         };
+        // Phase 971: PA_CL_CLIP_CNTL reads 0008000F for the Guide's draws and
+        // 00090000 for the title's. The low four bits are ucp_ena_0..3, so
+        // the Guide enables four USER CLIP PLANES and does not set
+        // clip_disable, while the title enables none and disables clipping
+        // outright. Xenia implements these (pipeline_cache.cc:633) by emitting
+        // SV_ClipDistance from PA_CL_UCP_n - registers the Guide's stream
+        // never writes. Read what they actually hold.
+        {
+          uint32_t cc = drf[0x2204];
+          std::string up;
+          for (uint32_t pl = 0; pl < 6; ++pl) {
+            if (!((cc >> pl) & 1u)) continue;
+            up += fmt::format("ucp{}=(", pl);
+            for (uint32_t c = 0; c < 4; ++c) {
+              up += fmt::format("{}{}", c ? "," : "", vf(0x2388 + pl * 4 + c));
+            }
+            up += ") ";
+          }
+          XELOGI("GuideUCP: CLIP_CNTL={:08X} ucp_ena={:X} clip_disable={} | {}",
+                 cc, cc & 0x3Fu, (cc >> 16) & 1u,
+                 up.empty() ? "<none enabled>" : up);
+        }
         XELOGI("GuideViewport: xscale={} xoffset={} yscale={} yoffset={} "
                "zscale={} zoffset={}",
                vf(0x210F), vf(0x2110), vf(0x2111), vf(0x2112), vf(0x2113),
@@ -2294,6 +2440,49 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
                     uint32_t raw;
                     std::memcpy(&raw, &kQuad[k], 4);
                     xe::store_and_swap<uint32_t>(wp + k * 4, raw);
+                  }
+                  ++guide_ov_quadpatch_;
+                }
+              }
+              // Phase 969: the phase-950 compensation subtracted the model
+              // translate from an NDC quad, mixing two coordinate spaces -
+              // the shader's whole chain up to c4..c7 is in the Guide's pixel
+              // space. Express the quad there and invert the model transform
+              // properly, so the vertices land on a chosen pixel rectangle
+              // whatever c0/c1 hold.
+              if (cvars::guide_overlay_quad_px && vaddr) {
+                uint8_t* wp = memory_->TranslatePhysical(vaddr);
+                auto pcf = [&](uint32_t i) {
+                  float f;
+                  uint32_t v = drf[0x4000 + i];
+                  std::memcpy(&f, &v, 4);
+                  return f;
+                };
+                float c0x = pcf(0), c0y = pcf(1), c0w = pcf(3);
+                float c1x = pcf(4), c1y = pcf(5), c1w = pcf(7);
+                float det = c0x * c1y - c0y * c1x;
+                if (wp && std::isfinite(det) && (det > 1e-6f || det < -1e-6f)) {
+                  // Same winding as the Guide's own fan (964):
+                  // (maxX,maxY) (minX,maxY) (minX,minY) (maxX,minY).
+                  const float kX[4] = {700.f, 120.f, 120.f, 700.f};
+                  const float kY[4] = {380.f, 380.f, 100.f, 100.f};
+                  for (uint32_t k = 0; k < 4; ++k) {
+                    float tX = kX[k] - c0w, tY = kY[k] - c1w;
+                    float vx = (tX * c1y - tY * c0y) / det;
+                    float vy = (c0x * tY - c1x * tX) / det;
+                    uint32_t rw;
+                    std::memcpy(&rw, &vx, 4);
+                    xe::store_and_swap<uint32_t>(wp + (k * 2) * 4, rw);
+                    std::memcpy(&rw, &vy, 4);
+                    xe::store_and_swap<uint32_t>(wp + (k * 2 + 1) * 4, rw);
+                  }
+                  // Written from host code, which does not trip the write
+                  // watch, so SharedMemory would keep serving the old copy.
+                  COMMAND_PROCESSOR::GuideInvalidateGuestRange(vaddr, 8 * 4u);
+                  if (guide_ov_quadpatch_ < 3) {
+                    XELOGI("GuidePxQuad: patched @{:08X} det={} c0=({},{},{}) "
+                           "c1=({},{},{})",
+                           vaddr, det, c0x, c0y, c0w, c1x, c1y, c1w);
                   }
                   ++guide_ov_quadpatch_;
                 }
@@ -2354,6 +2543,22 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
             pm += fmt::format("{}{} ", (i % 4 == 0) ? "| " : "", cf(i));
           }
           XELOGI("GuideProjConst: c4..c7 = {}", pm);
+          // Phase 970: every constant dump in this log has been base 0x4000,
+          // which is the VERTEX half of the file. Xenos has 512 float4s and
+          // the pixel shader reads the second 256 - XE_GPU_REG_SHADER_
+          // CONSTANT_256_X at 0x4400 - so the two constants the Guide's whole
+          // pixel shader consists of ("mul oC0, c0, c1") have never been read.
+          // If either is zero the fragments are produced and blended away by
+          // SrcAlpha/InvSrcAlpha, which every instrument here would record as
+          // an unchanged frame.
+          std::string ps;
+          for (uint32_t i = 0; i < 16; ++i) {
+            float f;
+            uint32_t v = drf[0x4400 + i];
+            std::memcpy(&f, &v, 4);
+            ps += fmt::format("{}{} ", (i % 4 == 0) ? "| " : "", f);
+          }
+          XELOGI("GuidePSConst: pc0..pc3 = {}", ps);
           // Phase 924: a pixel-to-NDC conversion would carry 2/1280 =
           // 0.0015625 and -2/720 = -0.0027778. Scan the constant file for
           // anything of that magnitude rather than assuming where it sits.

@@ -558,6 +558,11 @@ class CommandProcessor {
   // tracking, so writing register_file_->values directly does not reach the
   // shader. Backends override this to invalidate the float constant buffers.
   virtual void GuideInvalidateFloatConstants() {}
+  // Phase 975: every vertex-data reading in this investigation is a CPU-side
+  // read of guest memory through TranslatePhysical. What the GPU fetches comes
+  // from SharedMemory, which is only refreshed when the range is marked
+  // CPU-modified. Backends override this to force that.
+  virtual void GuideInvalidateGuestRange(uint32_t addr, uint32_t len) {}
 
   bool guide_overlay_exec_ = false;
   uint32_t guide_ov_seen_ = 0, guide_ov_predrop_ = 0, guide_ov_vizdrop_ = 0;
@@ -570,6 +575,12 @@ class CommandProcessor {
   uint32_t guide_ov_lutskip_ = 0;
   uint32_t guide_ov_quadpatch_ = 0;
   uint32_t guide_ov_projpatch_ = 0;
+  uint32_t guide_ov_markerpatch_ = 0;
+  // Phase 969: post-model-transform extent census over the whole burst.
+  uint32_t guide_ov_qn_ = 0, guide_ov_qthin_ = 0, guide_ov_qnarrow_ = 0;
+  uint32_t guide_ov_qdegen_ = 0, guide_ov_qnonfin_ = 0, guide_ov_qskip_ = 0;
+  float guide_ov_qmaxw_ = 0.0f, guide_ov_qmaxh_ = 0.0f;
+  float guide_ov_qbb_[4] = {1e30f, 1e30f, -1e30f, -1e30f};
   bool guide_seen_burst_ = false;
   size_t guide_burst_list_bytes_ = 0;
   // Phase 894: the whole RB/PA block from the title's last draw, not a
