@@ -935,6 +935,15 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
     COMMAND_PROCESSOR::ExecuteGuestBufferVirtualUnsafe(gptr, gwords);
     XELOGI("GuideOverlay: {} GPU draws dispatched",
            guide_draw_count_ - draws_before);
+    // Phase 883: GuideExtraResolve is triggered from the draw path, at the
+    // first non-Guide draw after a Guide burst. That trigger cannot fire for
+    // these draws: they run here, in the swap handler, after every title draw
+    // in the frame, so the next non-Guide draw belongs to the NEXT frame and
+    // the title has overwritten EDRAM by then. Resolve them here instead,
+    // while the pixels are still in EDRAM.
+    if (guide_draw_count_ != draws_before) {
+      COMMAND_PROCESSOR::GuideExtraResolve();
+    }
   }
 
   // Phase 523: the Guide draws between this frame's resolve and its swap
