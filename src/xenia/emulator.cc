@@ -2446,6 +2446,30 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                 // matching TODO to run graphics notifications as
                 // X_PROCTYPE_SYSTEM when it is non-zero. We have one now.
                 uint32_t xam_dev = rd(kernel::xboxkrnl::XamDeviceSlot());
+                // Phase 960: the device is created in mode 2, which skips its
+                // bring-up (959), so its width/height fields stay zero (958)
+                // and the projection matrix is later built as 2/0 (952).
+                // Filling them during the paint is too late - the matrix is
+                // already cached. Fill them here, immediately after creation,
+                // before anything reads them.
+                if (cvars::guide_fix_device_dims && xam_dev) {
+                  auto* dm = ks->memory();
+                  static const struct { uint32_t off, val; } kDims[] = {
+                      {0x2908u, 0x44200000u}, {0x290Cu, 0x44200000u},
+                      {0x2914u, 0x43B40000u}, {0x3220u, 0x44A00000u},
+                      {0x3224u, 0x44340000u}, {0x35BCu, 1280u},
+                      {0x35C0u, 720u},        {0x558Cu, 1280u},
+                      {0x5590u, 720u},
+                  };
+                  for (auto& d : kDims) {
+                    auto* dh = dm->LookupHeap(xam_dev + d.off);
+                    if (!dh) continue;
+                    xe::store_and_swap<uint32_t>(
+                        dm->TranslateVirtual(xam_dev + d.off), d.val);
+                  }
+                  XELOGI("GuideFixDimsEarly: filled 9 dimension fields on the "
+                         "new device {:08X}", xam_dev);
+                }
                 if (xam_dev) {
                   xe::store_and_swap<uint32_t>(
                       ks->memory()->TranslateVirtual(0x801E6FC8u), xam_dev);
