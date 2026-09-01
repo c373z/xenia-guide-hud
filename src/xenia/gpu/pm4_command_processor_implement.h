@@ -996,6 +996,7 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
            guide_ov_seen_, guide_ov_predrop_, guide_ov_vizdrop_,
            guide_ov_issued_, guide_ov_failed_, guide_ov_surfpatch_,
            guide_ov_maskpatch_, guide_ov_vportpatch_);
+    XELOGI("GuideVTE: passthru patches={}", guide_ov_vtepatch_);
     // Phase 888: the draws execute against the right surface and write no
     // pixels, and blending is ruled out - so they are rejected before the
     // output merger. Read the state that can do that straight out of the
@@ -2027,10 +2028,18 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
       drf[0x2104] = 0x0000000Fu;
       ++guide_ov_maskpatch_;
     }
+    // Phase 911: the vertices are pixel-sized, so the alternative to supplying
+    // a viewport is switching the transform off, which is what the title does
+    // for its own pre-transformed geometry.
+    if (cvars::guide_overlay_vte_passthru && (drf[0x2206] & 0x3Fu)) {
+      drf[0x2206] = 0x00000300u;
+      ++guide_ov_vtepatch_;
+    }
     // VTE_CNTL enables the viewport scale/offset transform and every viewport
     // register is zero, so each vertex maps to a single point. Supply the
     // transform for the surface the draws are being pointed at.
-    if (cvars::guide_overlay_restore_surface && (drf[0x2206] & 0x3Fu) &&
+    if (!cvars::guide_overlay_vte_passthru &&
+        cvars::guide_overlay_restore_surface && (drf[0x2206] & 0x3Fu) &&
         drf[0x210F] == 0u && drf[0x2111] == 0u) {
       auto setf = [&](uint32_t r, float f) {
         uint32_t v;

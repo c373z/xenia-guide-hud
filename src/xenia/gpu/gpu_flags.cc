@@ -191,6 +191,13 @@ DEFINE_bool(guide_replay_at_draw, false,
 // Phase 728: every layer of the draw path reports correct and no pixels change.
 // Before chasing the resolve further, establish whether guest memory at the
 // swap's frontbuffer_ptr reaches the display at all.
+DEFINE_bool(guide_overlay_vte_passthru, false,
+            "Force VTE_CNTL to the title's 0x300 for the Guide's draws, "
+            "disabling the viewport scale/offset transform. Phase 911: the "
+            "Guide's vertices are pixel-sized (a 323x1 quad), so the transform "
+            "being enabled scales them off screen rather than being merely "
+            "unconfigured.",
+            "GPU");
 DEFINE_bool(guide_overlay_restore_context, false,
             "Restore the title's whole RB/PA register block (0x2000-0x25FF) "
             "before executing the Guide's stream. Phase 894: patching "

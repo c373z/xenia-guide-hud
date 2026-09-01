@@ -18,6 +18,7 @@ DECLARE_path(dump_shaders);
 
 DECLARE_bool(vsync);
 DECLARE_bool(guide_cp_probe);
+DECLARE_bool(guide_overlay_vte_passthru);
 DECLARE_bool(guide_overlay_restore_context);
 DECLARE_bool(guide_overlay_restore_surface);
 DECLARE_uint32(guide_swap_log_every);
