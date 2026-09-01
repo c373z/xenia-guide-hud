@@ -1007,6 +1007,14 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
       }
     }
     size_t dcl_before = COMMAND_PROCESSOR::GuideCommandListBytes();
+    // Phase 948: reset the host binding trackers BEFORE the burst, not after.
+    // Phase 931 reset them afterwards to protect the title and it changed
+    // nothing; resetting here forces the Guide's first draw to re-bind render
+    // targets rather than assume the title's bindings are still current in the
+    // command list.
+    if (cvars::guide_overlay_reset_state) {
+      COMMAND_PROCESSOR::GuideResetHostState();
+    }
     guide_overlay_exec_ = true;
     COMMAND_PROCESSOR::ExecuteGuestBufferVirtualUnsafe(gptr, gwords);
     {
