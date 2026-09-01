@@ -2312,6 +2312,14 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
             c += fmt::format("{}{} ", (i % 4 == 0) ? "| " : "", cf(i));
           }
           XELOGI("GuideALUConst: c0..c3 = {}", c);
+          // Phase 951: the shader computes oPos with dp3 against c4..c7 -
+          // a projection matrix that has never been read. c0..c3 are only the
+          // model transform feeding it.
+          std::string pm;
+          for (uint32_t i = 16; i < 32; ++i) {
+            pm += fmt::format("{}{} ", (i % 4 == 0) ? "| " : "", cf(i));
+          }
+          XELOGI("GuideProjConst: c4..c7 = {}", pm);
           // Phase 924: a pixel-to-NDC conversion would carry 2/1280 =
           // 0.0015625 and -2/720 = -0.0027778. Scan the constant file for
           // anything of that magnitude rather than assuming where it sits.

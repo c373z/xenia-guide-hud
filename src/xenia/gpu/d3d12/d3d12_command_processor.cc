@@ -3107,6 +3107,13 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
       // and writes no colour, which is exactly the signature measured - and
       // Xenia accepts it, since depth-only draws are legal. Nothing has asked
       // whether these draws have a fragment stage.
+      // Phase 951: name the shader so the dumped file can be identified. The
+      // transform has been inferred from constants for fifty phases; the
+      // shader's own code settles what it does with its input.
+      XELOGI("HostShaderHash[{}]: vs={:016X} ps={:016X}",
+             guide_overlay_exec_ ? "guide" : "title",
+             vertex_shader ? vertex_shader->ucode_data_hash() : 0,
+             pixel_shader ? pixel_shader->ucode_data_hash() : 0);
       XELOGI("HostShaders[{}]: vertex={} pixel={} | rasterization_done={}",
              guide_overlay_exec_ ? "guide" : "title",
              vertex_shader ? "present" : "NONE",
