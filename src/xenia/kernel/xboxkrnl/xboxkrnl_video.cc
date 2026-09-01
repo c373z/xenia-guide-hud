@@ -8159,6 +8159,81 @@ void VdSwap_entry(
                            hits.empty() ? "NONE" : hits);
                   }
                 }
+                // Phase 889: the tail is the resolve section (888); the
+                // geometry is below it. A candidate start is correct if a
+                // packet walk from it lands exactly on the tail start - a
+                // wrong alignment desyncs and overshoots. Search downward for
+                // the lowest such candidate, then report what it contains.
+                {
+                  static uint32_t gs_log = 0;
+                  static uint32_t geom_start = 0;
+                  if (start && gs_log++ < 2) {
+                    uint32_t best = 0;
+                    uint32_t lo = (start > 0x20000u) ? start - 0x20000u : before;
+                    for (uint32_t c = lo; c < start; c += 4) {
+                      uint32_t a = c;
+                      bool ok = true;
+                      while (a < start) {
+                        auto* ch = pm2->LookupHeap(a);
+                        if (!ch || ch->QueryRangeAccess(a, a + 4u) ==
+                                       xe::memory::PageAccess::kNoAccess) {
+                          ok = false;
+                          break;
+                        }
+                        uint32_t w = xe::load_and_swap<uint32_t>(
+                            pm2->TranslateVirtual(a));
+                        uint32_t ty = w >> 30;
+                        uint32_t cn = ((w >> 16) & 0x3FFFu) + 1u;
+                        if (ty == 2u) {
+                          a += 4u;
+                        } else if (ty == 0u || ty == 3u) {
+                          a += (cn + 1u) * 4u;
+                        } else {
+                          ok = false;
+                          break;
+                        }
+                      }
+                      if (ok && a == start) {
+                        best = c;
+                        break;
+                      }
+                    }
+                    // What does that region contain?
+                    uint32_t g3 = 0, gdraw = 0, gmode = 0, last_mode = 0xFFFFu;
+                    for (uint32_t a = best; best && a < start;) {
+                      uint32_t w =
+                          xe::load_and_swap<uint32_t>(pm2->TranslateVirtual(a));
+                      uint32_t ty = w >> 30;
+                      uint32_t cn = ((w >> 16) & 0x3FFFu) + 1u;
+                      if (ty == 3u) {
+                        ++g3;
+                        if (((w >> 8) & 0x7Fu) == 0x22u) ++gdraw;
+                        a += (cn + 1u) * 4u;
+                      } else if (ty == 0u) {
+                        uint32_t base = w & 0x7FFFu;
+                        if (base <= 0x2208u && 0x2208u < base + cn) {
+                          ++gmode;
+                          last_mode = xe::load_and_swap<uint32_t>(
+                              pm2->TranslateVirtual(a + (0x2208u - base + 1u) * 4u));
+                        }
+                        a += (cn + 1u) * 4u;
+                      } else if (ty == 2u) {
+                        a += 4u;
+                      } else {
+                        break;
+                      }
+                    }
+                    XELOGI("GeomScan: start={:08X} (searched {:08X}..{:08X}) | "
+                           "{} type3, {} DRAW_INDX, {} MODECONTROL writes, "
+                           "last mode={:08X}",
+                           best, lo, start, g3, gdraw, gmode, last_mode);
+                    geom_start = best;
+                  }
+                  // The search is O(window * walk); do it once and reuse it.
+                  if (::cvars::guide_publish_geometry && geom_start) {
+                    start = geom_start;
+                  }
+                }
                 uint32_t d1 = gso2->command_processor()->guide_draw_count_;
                 // Truncate the tail to the first N packets when asked. A
                 // type-3 or type-0 header carries (count-1) in bits 16..29, so

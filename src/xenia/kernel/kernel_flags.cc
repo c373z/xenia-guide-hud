@@ -966,6 +966,12 @@ DEFINE_bool(guide_navigate_manual, false,
 DEFINE_bool(guide_navigate_scene, false,
              "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
              "Guide");
+DEFINE_bool(guide_publish_geometry, false,
+            "Publish from the geometry section rather than the resolve "
+            "section. Phase 889: the tail holds 125 kCopy draws (resolves); "
+            "below it sit 416 DRAW_INDX in kColorDepth, which is the actual "
+            "geometry.",
+            "Guide");
 DEFINE_bool(guide_tail_from_start, false,
             "Begin the published tail at the start of the paint's whole "
             "extent rather than 8192 words before the cursor. Phase 885: the "
