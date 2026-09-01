@@ -1986,7 +1986,36 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
   // registers one at a time has found two defects and neither was enough;
   // the differences against a draw that demonstrably renders are the whole
   // remaining list, in one reading.
+  // Phase 926: ndc_scale = guest_viewport_scale * 2/extent, so it converts
+  // PIXELS to NDC. The title's 0.000244 implies its vertices span 0..8192,
+  // not 0..1280. Read the title's own vertex data and settle what space it
+  // works in - the Guide's coordinates only make sense relative to it.
   if (!guide_overlay_exec_) {
+    static uint32_t tvd = 0;
+    if (tvd < 2) {
+      Shader* tvs = active_vertex_shader();
+      if (tvs && !tvs->vertex_bindings().empty()) {
+        RegisterFile& trf2 = *register_file_;
+        for (auto& vb : tvs->vertex_bindings()) {
+          uint32_t fc = vb.fetch_constant;
+          uint32_t s0 = trf2[0x4800 + fc * 2];
+          uint32_t addr = s0 & 0xFFFFFFFCu;
+          const uint8_t* vp = addr ? memory_->TranslatePhysical(addr) : nullptr;
+          if (!vp) continue;
+          std::string fl;
+          for (uint32_t k = 0; k < 8; ++k) {
+            uint32_t raw = xe::load_and_swap<uint32_t>(vp + k * 4);
+            float f;
+            std::memcpy(&f, &raw, 4);
+            fl += fmt::format("{} ", f);
+          }
+          XELOGI("TitleVertexData: slot{} @{:08X} stride={} : {}", fc, addr,
+                 vb.stride_words, fl);
+          ++tvd;
+          break;
+        }
+      }
+    }
     // Sampling the FIRST title draws reads all zeros - they happen before the
     // title has set any state. Keep the most recent one instead, which is the
     // state of a draw that demonstrably rendered, and report it next to the
@@ -2181,7 +2210,11 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
           // anything of that magnitude rather than assuming where it sits.
           std::string hits;
           uint32_t nh = 0;
-          for (uint32_t i = 0; i < 256; ++i) {
+          // Phase 926: this scanned 256 floats, which is c0..c63. Xenos has
+          // 256 float constants - 1024 floats - so three quarters of the file
+          // were never looked at, including wherever a projection matrix would
+          // sit.
+          for (uint32_t i = 0; i < 1024; ++i) {
             float f = cf(i);
             float af = f < 0 ? -f : f;
             if (af > 0.0005f && af < 0.006f) {
@@ -2197,7 +2230,7 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
           // its reciprocal, which the small-magnitude scan would miss.
           std::string big;
           uint32_t nb = 0;
-          for (uint32_t i = 0; i < 256; ++i) {
+          for (uint32_t i = 0; i < 1024; ++i) {
             float f = cf(i);
             float af = f < 0 ? -f : f;
             if ((af > 300.0f && af < 400.0f) || (af > 600.0f && af < 700.0f) ||
