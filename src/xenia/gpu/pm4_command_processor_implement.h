@@ -936,6 +936,10 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
     guide_overlay_exec_ = true;
     COMMAND_PROCESSOR::ExecuteGuestBufferVirtualUnsafe(gptr, gwords);
     guide_overlay_exec_ = false;
+    XELOGI("GuideDrawFate: seen={} pre-dropped={} viz-dropped={} issued={} "
+           "backend-failed={}",
+           guide_ov_seen_, guide_ov_predrop_, guide_ov_vizdrop_,
+           guide_ov_issued_, guide_ov_failed_);
     // Phase 888: the draws execute against the right surface and write no
     // pixels, and blending is ruled out - so they are rejected before the
     // output merger. Read the state that can do that straight out of the
@@ -1917,8 +1921,20 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
   // we don't support yet.
   reader_.AdvanceRead(count_remaining * sizeof(uint32_t));
 
+  // Phase 890: guide_draw_count_ increments when the PACKET is seen, several
+  // steps before anything reaches the backend, so "541 draws dispatched" is
+  // not evidence that 541 draws were issued. Count what actually happens to
+  // the Guide's draws: dropped before the call, called and refused, or issued.
+  if (guide_overlay_exec_) {
+    ++guide_ov_seen_;
+    if (!draw_succeeded) ++guide_ov_predrop_;
+  }
   if (draw_succeeded) {
     auto viz_query = register_file_->Get<reg::PA_SC_VIZ_QUERY>();
+    if (guide_overlay_exec_ &&
+        (viz_query.viz_query_ena && viz_query.kill_pix_post_hi_z)) {
+      ++guide_ov_vizdrop_;
+    }
     if (!(viz_query.viz_query_ena && viz_query.kill_pix_post_hi_z)) {
       // TODO(Triang3l): Don't drop the draw call completely if the vertex
       // shader has memexport.
@@ -1929,6 +1945,9 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
           is_indexed ? &index_buffer_info : nullptr,
           xenos::IsMajorModeExplicit(vgt_draw_initiator.major_mode,
                                      vgt_draw_initiator.prim_type));
+      if (guide_overlay_exec_) {
+        if (draw_succeeded) ++guide_ov_issued_; else ++guide_ov_failed_;
+      }
       if (!draw_succeeded) {
         XELOGE("{}({}, {}, {}): Failed in backend", opcode_name,
                vgt_draw_initiator.num_indices,
