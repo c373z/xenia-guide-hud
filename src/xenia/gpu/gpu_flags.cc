@@ -191,6 +191,12 @@ DEFINE_bool(guide_replay_at_draw, false,
 // Phase 728: every layer of the draw path reports correct and no pixels change.
 // Before chasing the resolve further, establish whether guest memory at the
 // swap's frontbuffer_ptr reaches the display at all.
+DEFINE_bool(guide_fix_projection, false,
+            "Replace the Guide's projection constants c4/c5 when they are "
+            "non-finite. Phase 953: the Guide builds them as 2/w and -2/h "
+            "from a screen size of zero, giving infinity, so every vertex "
+            "leaves the shader non-finite and covers nothing.",
+            "GPU");
 DEFINE_bool(guide_overlay_before_resolve, false,
             "Execute the published Guide stream immediately before the title's "
             "own resolve, rather than at the swap. Phase 946: the title's "

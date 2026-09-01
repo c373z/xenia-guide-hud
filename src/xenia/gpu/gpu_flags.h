@@ -18,6 +18,7 @@ DECLARE_path(dump_shaders);
 
 DECLARE_bool(vsync);
 DECLARE_bool(guide_cp_probe);
+DECLARE_bool(guide_fix_projection);
 DECLARE_bool(guide_overlay_before_resolve);
 DECLARE_bool(guide_overlay_test_quad);
 DECLARE_bool(guide_overlay_skip_lut);

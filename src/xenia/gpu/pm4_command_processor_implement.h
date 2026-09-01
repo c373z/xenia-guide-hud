@@ -2187,6 +2187,24 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
       setf(0x2114, 0.0f);     // z offset
       ++guide_ov_vportpatch_;
     }
+    // Phase 953: c4.x and c5.y are 2/w and -2/h computed with w = h = 0, so
+    // they are infinite and every transformed vertex is non-finite. Supply the
+    // values a 1280x720 target implies.
+    if (cvars::guide_fix_projection) {
+      float c4x;
+      uint32_t r4 = drf[0x4010];
+      std::memcpy(&c4x, &r4, 4);
+      if (!std::isfinite(c4x)) {
+        auto setf = [&](uint32_t r, float f) {
+          uint32_t v;
+          std::memcpy(&v, &f, 4);
+          drf[r] = v;
+        };
+        setf(0x4010, 2.0f / 1280.0f);   // c4.x =  2/w
+        setf(0x4015, -2.0f / 720.0f);   // c5.y = -2/h
+        ++guide_ov_projpatch_;
+      }
+    }
     uint32_t mode_now = drf[0x2208] & 0x7u;
     // Phase 918: the vertex data was read once, for draw #1, and generalised
     // to all 416 (917). Sample across the burst instead - if the quads grow to
