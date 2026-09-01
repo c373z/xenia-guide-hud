@@ -7077,7 +7077,7 @@ void VdSwap_entry(
               xe::store_and_swap<uint32_t>(
                   vm2->TranslateVirtual(ri3 + 0xB4u), f_mid | 0x20000u);
               uint32_t f_forced = prd2(ri3 + 0xB4u);
-              pcall(f_b, {dc2, 0xFF000000});
+              pcall(f_b, {dc2, ::cvars::guide_paint_clear});
               pcall(f_l, {rt2});
               uint32_t f_after_layout = prd2(ri3 + 0xB4u);
               static uint32_t dl = 0;
@@ -7092,7 +7092,7 @@ void VdSwap_entry(
             }
           }
           if (!::cvars::guide_dirty_via_api) {
-            pcall(f_b, {dc2, 0xFF000000});
+            pcall(f_b, {dc2, ::cvars::guide_paint_clear});
             pcall(f_l, {rt2});
           }
           // Sample the cursor AFTER RenderBegin. Phase 209's reading spanned
@@ -7909,7 +7909,9 @@ void VdSwap_entry(
           pcall(f_e, {dc2});
           uint32_t afterEnd = guide_resv_dev_
                                   ? prd2(guide_resv_dev_ + 0x30u) : 0;
-          uint32_t pres = pcall(f_p, {dc2, 0, 0, 0});
+          uint32_t pres = ::cvars::guide_paint_present
+                              ? pcall(f_p, {dc2, 0, 0, 0})
+                              : 0u;
           uint32_t afterPresent = guide_resv_dev_
                                       ? prd2(guide_resv_dev_ + 0x30u) : 0;
           {

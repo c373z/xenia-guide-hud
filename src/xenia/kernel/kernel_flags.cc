@@ -966,6 +966,18 @@ DEFINE_bool(guide_navigate_manual, false,
 DEFINE_bool(guide_navigate_scene, false,
              "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
              "Guide");
+DEFINE_uint32(guide_paint_clear, 0xFF000000,
+              "Clear colour the synthetic paint passes to RenderBegin. Phase "
+              "874: the paint has always passed 0xFF000000 - opaque black - "
+              "and the title's frame is black whenever the paint runs. An "
+              "overlay wants a transparent clear, or none at all.",
+              "Guide");
+DEFINE_bool(guide_paint_present, true,
+            "Call Present at the end of the synthetic paint. Phase 874: the "
+            "paint presents the Guide's device in the middle of the title's "
+            "own frame, which is a second way to lose it. Off leaves the "
+            "painted surface for the compositor instead.",
+            "Guide");
 DEFINE_bool(guide_paint_frame, false,
              "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
              "Guide");
