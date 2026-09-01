@@ -7167,6 +7167,26 @@ void VdSwap_entry(
               XELOGI("DevDims: title={:08X} guide={:08X} | {} fields hold "
                      "1280/720 | {}",
                      tdev, gdev, n, hits.empty() ? "none" : hits);
+              // Phase 961: the DC wrapper reports a back-buffer width of 852
+              // (0x354), not 1280 - so the Guide may hold its own dimensions
+              // at different offsets rather than none at all. Scan its device
+              // for 852/480 and their halves, as integers and floats.
+              std::string gh2;
+              uint32_t gn = 0;
+              for (uint32_t off = 0; off < 0x8000u && gdev; off += 4) {
+                uint32_t gv = prd2(gdev + off);
+                if (gv == 852u || gv == 480u || gv == 426u || gv == 240u ||
+                    gv == 0x44550000u || gv == 0x43F00000u ||
+                    gv == 0x43D50000u || gv == 0x43700000u) {
+                  ++gn;
+                  if (gn <= 12) {
+                    gh2 += fmt::format("+{:X}={} ", off, gv);
+                  }
+                }
+              }
+              XELOGI("GuideOwnDims: device {:08X} | {} fields hold 852/480 "
+                     "shapes | {}",
+                     gdev, gn, gh2.empty() ? "none" : gh2);
             }
           }
           uint32_t before = paint_dev_ ? prd2(paint_dev_ + 0x30u) : 0;
