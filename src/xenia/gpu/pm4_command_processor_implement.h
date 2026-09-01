@@ -353,6 +353,21 @@ bool COMMAND_PROCESSOR::ExecutePacketType0(uint32_t packet) XE_RESTRICT {
 
     uint32_t base_index = (packet & 0x7FFF);
     uint32_t write_one_reg = (packet >> 15) & 0x1;
+    // Phase 936: the injected stream writes DC_LUT gamma ramp entries
+    // (0x1921-0x1927, 0x1930-0x1936). Xenia applies those to the display, so
+    // replaying them blacks the screen - the whole fault chased from phase 913
+    // to 935. Skip them while executing the Guide's stream; the ramp belongs
+    // to the title.
+    if (guide_overlay_exec_ && cvars::guide_overlay_skip_lut) {
+      uint32_t lo = base_index;
+      uint32_t hi = base_index + (write_one_reg ? 1 : count);
+      if ((hi > 0x1920u && lo < 0x1928u) || (hi > 0x1930u && lo < 0x1937u)) {
+        ++guide_ov_lutskip_;
+        reader_.AdvanceRead(count * sizeof(uint32_t));
+        trace_writer_.WritePacketEnd();
+        return true;
+      }
+    }
     // Phase 543: the Guide writes no SET_CONSTANT packets of any type, and its
     // stream is largely type-0 (phase 514) - direct register writes. Fetch
     // constants live at 0x4800+, so this is where they would be set. Report any

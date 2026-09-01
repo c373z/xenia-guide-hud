@@ -191,6 +191,12 @@ DEFINE_bool(guide_replay_at_draw, false,
 // Phase 728: every layer of the draw path reports correct and no pixels change.
 // Before chasing the resolve further, establish whether guest memory at the
 // swap's frontbuffer_ptr reaches the display at all.
+DEFINE_bool(guide_overlay_skip_lut, false,
+            "Skip DC_LUT gamma ramp register writes while executing the "
+            "Guide's stream. Phase 936: those writes, not the draws, are what "
+            "blacks the display - Xenia applies the ramp, and the replayed "
+            "entries overwrite the title's.",
+            "GPU");
 DEFINE_bool(guide_overlay_reset_state, false,
             "Reset the host binding trackers after the Guide's stream runs, "
             "as BeginSubmission does. Phase 931: nothing currently restores "
