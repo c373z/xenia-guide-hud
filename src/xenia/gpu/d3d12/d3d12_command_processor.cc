@@ -4348,6 +4348,18 @@ bool D3D12CommandProcessor::EndSubmission(bool is_swap) {
         command_allocator_writable_first_->command_allocator;
     command_allocator->Reset();
     command_list_->Reset(command_allocator, nullptr);
+    // Phase 949: the Guide's 71KB is recorded into this list (932). Report
+    // its size at the moment it is executed - if it is smaller than it was
+    // after the burst, the draws were discarded before reaching the GPU.
+    {
+      static uint32_t el = 0;
+      size_t bytes = deferred_command_list_.recorded_bytes();
+      if (guide_seen_burst_ && el++ < 6) {
+        XELOGI("ExecList: executing {} bytes (list was {} right after the "
+               "Guide's burst)",
+               bytes, guide_burst_list_bytes_);
+      }
+    }
     deferred_command_list_.Execute(command_list_, command_list_1_,
                                    command_list_2_);
     command_list_->Close();

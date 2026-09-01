@@ -1019,6 +1019,8 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
     COMMAND_PROCESSOR::ExecuteGuestBufferVirtualUnsafe(gptr, gwords);
     {
       size_t dcl_after = COMMAND_PROCESSOR::GuideCommandListBytes();
+      guide_seen_burst_ = true;
+      guide_burst_list_bytes_ = dcl_after;
       static uint32_t dl = 0;
       if (dl++ < 3) {
         XELOGI("GuideCmdList: {} bytes before the burst, {} after (+{})",

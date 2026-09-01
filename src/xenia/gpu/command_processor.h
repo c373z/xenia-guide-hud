@@ -565,6 +565,8 @@ class CommandProcessor {
   uint32_t guide_ov_clippatch_ = 0;
   uint32_t guide_ov_lutskip_ = 0;
   uint32_t guide_ov_quadpatch_ = 0;
+  bool guide_seen_burst_ = false;
+  size_t guide_burst_list_bytes_ = 0;
   // Phase 894: the whole RB/PA block from the title's last draw, not a
   // hand-picked dozen. 0x2000..0x25FF covers the render backend and primitive
   // assembler state.
