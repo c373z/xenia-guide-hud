@@ -1229,6 +1229,35 @@ bool D3D12RenderTargetCache::Update(
     case Path::kHostRenderTargets: {
       RenderTarget* const* depth_and_color_render_targets =
           last_update_accumulated_render_targets();
+      // Phase 921: the Guide's draws damage the frame uniformly and in
+      // proportion to their count, with no relation to their geometry (919),
+      // while non-drawing packets are harmless (920). An EDRAM ownership
+      // transfer per draw would look exactly like that, so count them for the
+      // Guide's draws and the title's separately.
+      {
+        const std::vector<Transfer>* tl = last_update_transfers();
+        uint32_t n = 0;
+        if (tl) {
+          for (uint32_t i = 0; i < 1 + xenos::kMaxColorRenderTargets; ++i) {
+            n += uint32_t(tl[i].size());
+          }
+        }
+        static uint32_t g_draws = 0, g_tr = 0, t_draws = 0, t_tr = 0;
+        if (command_processor_.guide_overlay_exec_) {
+          ++g_draws;
+          g_tr += n;
+        } else {
+          ++t_draws;
+          t_tr += n;
+        }
+        static uint32_t rep = 0;
+        if (command_processor_.guide_overlay_exec_ && (g_draws % 200) == 0 &&
+            rep++ < 4) {
+          XELOGI("EdramTransfers: guide {} transfers over {} draws | title {} "
+                 "over {}",
+                 g_tr, g_draws, t_tr, t_draws);
+        }
+      }
       PerformTransfersAndResolveClears(1 + xenos::kMaxColorRenderTargets,
                                        depth_and_color_render_targets,
                                        last_update_transfers());
