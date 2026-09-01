@@ -7,6 +7,7 @@
  ******************************************************************************
  */
 
+#include <map>
 #include "xenia/gpu/command_processor.h"
 
 #include "third_party/fmt/include/fmt/format.h"
@@ -813,6 +814,18 @@ void CommandProcessor::HandleSpecialRegisterWrite(uint32_t index,
 void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
   // chrispy: rearrange check order, place set after checks
 
+  // Phase 863: the 360 Guide is an overlay, and if it is composited by the
+  // display controller rather than the 3D pipe then xam never appearing in the
+  // ring (862) is correct rather than a fault. Log writes to the scanout
+  // surface registers so which pipe the Guide uses stops being a guess.
+  if (index == 0x1844u || index == 0x1848u || index == 0x1930u ||
+      index == 0x1921u || index == 0x1922u) {
+    static std::map<uint32_t, uint32_t> dc_seen;
+    uint32_t& n = dc_seen[index];
+    if (++n <= 3u || (n % 500u) == 0u) {
+      XELOGI("DCReg: [{:04X}] = {:08X}  (write #{})", index, value, n);
+    }
+  }
   if (XE_LIKELY(index < RegisterFile::kRegisterCount)) {
     register_file_->values[index] = value;
 
