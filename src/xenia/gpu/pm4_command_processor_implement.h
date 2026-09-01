@@ -662,6 +662,16 @@ bool COMMAND_PROCESSOR::ExecutePacketType3(uint32_t packet) XE_RESTRICT {
           saved_blend = brf[0x2201];
           brf[0x2201] = 0x00000001u;  // src=kOne, dst=kZero, add
           forced = true;
+          // Phase 965: several conclusions rest on this override applying to
+          // the Guide's draws. Count it rather than assuming.
+          if (guide_overlay_exec_) {
+            static uint32_t fo = 0;
+            if (++fo <= 2 || (fo % 200) == 0) {
+              XELOGI("GuideForceOpaque: applied to {} of the Guide's draws "
+                     "(blend was {:08X})",
+                     fo, saved_blend);
+            }
+          }
         }
         result = (opcode == PM4_DRAW_INDX)
                      ? COMMAND_PROCESSOR::ExecutePacketType3_DRAW_INDX(packet,
