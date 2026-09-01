@@ -7208,7 +7208,12 @@ void VdSwap_entry(
                   uint32_t cap = prd2(htb + 0x420u);
                   uint32_t idx = hp & 0xFFFFu;
                   uint32_t tag = hp >> 16;
-                  uint32_t bkt = (idx < cap) ? prd2(htb + ((idx >> 6) * 4u)) : 0;
+                  // rlwinm r9,r10,26,6,29 maps result bits 25..2 to source
+                  // bits 31..8, so this is (index >> 8) * 4 - 256 entries per
+                  // bucket, not 64. Reading it as >>6 finds a populated bucket
+                  // by luck for small indices and a null one for large, which
+                  // looks exactly like a half-allocated table.
+                  uint32_t bkt = (idx < cap) ? prd2(htb + ((idx >> 8) * 4u)) : 0;
                   uint32_t ent = bkt ? (bkt + ((idx & 0xFFu) * 8u)) : 0;
                   XELOGI("HandleTbl: hp={:08X} idx={} cap={} {} | bucket={:08X}"
                          " stored_tag={:08X} want={:08X} obj={:08X}",
@@ -7219,12 +7224,12 @@ void VdSwap_entry(
                   // sparse? capacity 1536 means 24 buckets of 64.
                   if (ht_logs == 1) {
                     std::string row;
-                    for (uint32_t b = 0; b < (cap >> 6); ++b) {
+                    for (uint32_t b = 0; b < (cap >> 8); ++b) {
                       row += fmt::format("{}{}", b ? " " : "",
                                          prd2(htb + b * 4u) ? "X" : ".");
                     }
                     XELOGI("HandleBuckets: cap={} ({} buckets) {}", cap,
-                           cap >> 6, row);
+                           cap >> 8, row);
                   }
                 }
               }
