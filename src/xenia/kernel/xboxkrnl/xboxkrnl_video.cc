@@ -7031,6 +7031,12 @@ void VdSwap_entry(
         uint32_t rt2 = prd2(guide_draw_this_ + 8u);
         uint32_t f_b = po(0x34B), f_l = po(0x82A), f_e = po(0x34F),
                  f_p = po(0x353), f_lc = po(0x32F), f_v = po(0x395);
+        // 0x32F is XuiElementGetLastChild, so the walk below used to follow a
+        // single last-child spine. Phase 869: the root scene's last child is an
+        // AsyncTaskManager, which is not a XuiControl, so the spine died on its
+        // second step. Enumerate properly instead - 0x32B is
+        // XuiElementGetFirstChild and 0x330 is XuiElementGetNext.
+        uint32_t f_fc = po(0x32B), f_ns = po(0x330);
         uint32_t f_bounds_api = po(0x336);
         if (dc2 && rt2 && pmsg && f_b && f_e && f_p && f_lc && f_v) {
           auto* prc = kernel_state()->processor();
@@ -7153,7 +7159,28 @@ void VdSwap_entry(
           // log the index this walk actually produces.
           XELOGI("VisualIndex: hp={:08X} low16={:04X} bound=0400 {}", hp, hp & 0xFFFFu,
                  ((hp & 0xFFFFu) < 0x400u) ? "in range" : "OUT OF RANGE");
-          for (int d = 0; d < 6 && hp; ++d) {
+          // Only walk into values that resolve the way 819426F0 resolves
+          // them: index under capacity, an allocated bucket page, and a
+          // matching generation tag. A failed enumeration leaves whatever was
+          // in the out slot, and pushing that unchecked faults the host on a
+          // wild address.
+          auto resolves = [&](uint32_t h) {
+            const uint32_t htb2 = 0x81D6D0D8u;
+            uint32_t idx2 = h & 0xFFFFu;
+            if (!h || idx2 >= prd2(htb2 + 0x420u)) return false;
+            uint32_t bk2 = prd2(htb2 + (idx2 >> 8) * 4u);
+            if (!bk2) return false;
+            uint32_t en2 = bk2 + (idx2 & 0xFFu) * 8u;
+            return prd2(en2) == (h >> 16) && prd2(en2 + 4u) != 0;
+          };
+          std::vector<uint32_t> todo;
+          if (resolves(hp)) todo.push_back(hp);
+          uint32_t visited = 0, skipped = 0;
+          while (!todo.empty() && visited < 512) {
+            hp = todo.back();
+            todo.pop_back();
+            ++visited;
+            int d = 0;
             std::memset(pm2->TranslateVirtual(pout), 0, 16);
             // The return value was discarded; only `out` was checked. An
             // HRESULT says why 0x395 declines, which a null out cannot.
@@ -7338,7 +7365,16 @@ void VdSwap_entry(
                 uint32_t oent = obkt ? obkt + (oidx & 0xFFu) * 8u : 0;
                 uint32_t oobj = (oent && prd2(oent) == otag) ? prd2(oent + 4u) : 0;
                 std::string cls;
-                for (uint32_t d = oobj ? prd2(oobj) : 0, k = 0; d && k < 6; ++k) {
+                // Phase 870: this walked the chain without checking that each
+                // link is a pointer. A node whose [+8] holds a handle-shaped
+                // value (000103C2) made the next iteration read guest address
+                // 000103C6, which is unmapped - a host fault on the title
+                // thread, mid-paint, every run.
+                auto ptr_ok = [](uint32_t a) {
+                  return a >= 0x10000000u && a < 0xA0000000u;
+                };
+                for (uint32_t d = (oobj && ptr_ok(oobj)) ? prd2(oobj) : 0, k = 0;
+                     ptr_ok(d) && k < 6; ++k) {
                   cls += fmt::format("{:08X}'{}' -> ", d, nm(prd2(d + 4u)));
                   d = prd2(d + 8u);
                 }
@@ -7493,6 +7529,7 @@ void VdSwap_entry(
                 }
               }
             }
+            if (!vh2) ++skipped;
             if (vh2) {
               uint32_t oi2 = pcall(0x81931040u, {hp});
               if (oi2) {
@@ -7822,10 +7859,25 @@ void VdSwap_entry(
                 ++painted;
               }
             }
+            // Push every child, not just the last one. Reversed, so the
+            // first child is popped first and the walk reads depth-first in
+            // document order.
+            std::vector<uint32_t> kids;
             std::memset(pm2->TranslateVirtual(pout), 0, 16);
-            pcall(f_lc, {hp, pout});
-            hp = prd2(pout);
+            pcall(f_fc, {hp, pout});
+            for (uint32_t c = prd2(pout); c && kids.size() < 256;) {
+              if (!resolves(c)) break;
+              kids.push_back(c);
+              std::memset(pm2->TranslateVirtual(pout), 0, 16);
+              pcall(f_ns, {c, pout});
+              uint32_t nx = prd2(pout);
+              if (nx == c) break;
+              c = nx;
+            }
+            for (size_t i = kids.size(); i-- > 0;) todo.push_back(kids[i]);
           }
+          XELOGI("PaintWalk: visited {} nodes, painted {}, skipped {}", visited,
+                 painted, skipped);
           uint32_t after = paint_dev_ ? prd2(paint_dev_ + 0x30u) : 0;
           uint32_t after_cb = paint_dev_ ? prd2(paint_dev_ + 0x2B4Cu) : 0;
           XELOGI("PaintCursors: dev={:08X} resv {:08X}->{:08X} ({} words) | "
