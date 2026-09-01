@@ -8128,8 +8128,10 @@ void VdSwap_entry(
                 for (auto& b : emit_blocks) {
                   uint32_t nw = (b.second - b.first) / 4;
                   if (::cvars::guide_execute_command_stream) {
+                    gso2->command_processor()->guide_overlay_exec_ = true;
                     gso2->command_processor()->ExecuteGuestBufferVirtualUnsafe(
                         b.first, nw);
+                    gso2->command_processor()->guide_overlay_exec_ = false;
                   }
                   total += nw;
                 }
@@ -8428,11 +8430,15 @@ void VdSwap_entry(
                 }
                 if (start && tail_end > start) {
                   if (::cvars::guide_execute_command_stream) {
-                    // Inline, on the title thread, mid-frame. Phase 874: this
-                    // runs the draws but the title's render state does not
-                    // survive them.
+                    // Inline, on the title thread, mid-frame. Phase 945: set
+                    // the same flag the swap-time path sets, so the DC_LUT
+                    // filter (936) applies here too - without it this path
+                    // still replays gamma writes and blacks the frame, which
+                    // is not a property of the injection point.
+                    gso2->command_processor()->guide_overlay_exec_ = true;
                     gso2->command_processor()->ExecuteGuestBufferVirtualUnsafe(
                         start, (tail_end - start) / 4);
+                    gso2->command_processor()->guide_overlay_exec_ = false;
                   } else {
                     // Phase 875: hand the tail to the GPU thread instead. The
                     // swap handler executes guide_overlay_ptr_ just before the
