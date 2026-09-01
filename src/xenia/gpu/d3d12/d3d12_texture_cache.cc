@@ -1263,6 +1263,25 @@ ID3D12Resource* D3D12TextureCache::RequestSwapTexture(
     }
   }
   D3D12Texture* texture = static_cast<D3D12Texture*>(FindOrCreateTexture(key));
+  // Phase 942: LoadTextureData returns early unless the texture is outdated,
+  // which memory watches set when guest memory is written. Whether the
+  // presented texture is rebuilt each swap or served from cache decides
+  // whether writing guest memory can affect the display at all.
+  if (texture) {
+    static uint32_t reloads = 0, cached = 0, n = 0;
+    bool outdated =
+        texture->base_outdated_lockless() || texture->mips_outdated_lockless();
+    if (outdated) {
+      ++reloads;
+    } else {
+      ++cached;
+    }
+    if ((++n % 200) == 0) {
+      XELOGI("SwapTexLoad: {} reloads, {} served from cache, of {} swaps "
+             "| source {:08X}",
+             reloads, cached, n, key.base_page << 12);
+    }
+  }
   if (texture == nullptr || !LoadTextureData(*texture)) {
     return nullptr;
   }
