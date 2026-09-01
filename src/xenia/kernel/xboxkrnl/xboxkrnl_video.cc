@@ -7951,8 +7951,8 @@ void VdSwap_entry(
                          : "skipped");
             }
           }
-          if (::cvars::guide_overlay_at_swap && after > before &&
-              (after - before) < 0x40000u) {
+          if (::cvars::guide_overlay_at_swap && !::cvars::guide_overlay_dry &&
+              after > before && (after - before) < 0x40000u) {
             auto* gso2 = kernel_state()->emulator()->graphics_system();
             if (gso2 && gso2->command_processor()) {
               // Publishing to the swap handler does not work: only ONE

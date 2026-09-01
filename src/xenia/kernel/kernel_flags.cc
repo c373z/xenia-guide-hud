@@ -966,6 +966,13 @@ DEFINE_bool(guide_navigate_manual, false,
 DEFINE_bool(guide_navigate_scene, false,
              "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
              "Guide");
+DEFINE_bool(guide_overlay_dry, false,
+            "Skip the entire body of the guide_overlay_at_swap block while "
+            "leaving the flag itself on. Phase 877: the flag blanks the frame "
+            "even with every publisher gated and nothing executed, which the "
+            "block's contents cannot explain. This separates the block from "
+            "the flag.",
+            "Guide");
 DEFINE_uint32(guide_tail_packets, 0,
               "Execute only the first N PM4 packets of the paint's draw tail; "
               "0 runs all of it. Phase 876: the tail blanks the display "
