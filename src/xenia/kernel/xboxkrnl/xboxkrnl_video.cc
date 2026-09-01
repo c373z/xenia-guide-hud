@@ -8088,7 +8088,10 @@ void VdSwap_entry(
                 // the last 8192 words before the cursor. Execute that tail
                 // too, starting at the first type-3 header so the parse does
                 // not begin mid-packet.
-                uint32_t tail_lo = (after > 8192u * 4u) ? after - 8192u * 4u : before;
+                uint32_t tail_lo =
+                    ::cvars::guide_tail_from_start
+                        ? before
+                        : ((after > 8192u * 4u) ? after - 8192u * 4u : before);
                 uint32_t start = 0;
                 for (uint32_t a = tail_lo;
                      ::cvars::guide_overlay_search && a + 4u <= after; a += 4) {

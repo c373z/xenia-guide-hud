@@ -966,6 +966,13 @@ DEFINE_bool(guide_navigate_manual, false,
 DEFINE_bool(guide_navigate_scene, false,
              "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
              "Guide");
+DEFINE_bool(guide_tail_from_start, false,
+            "Begin the published tail at the start of the paint's whole "
+            "extent rather than 8192 words before the cursor. Phase 885: the "
+            "Guide's own resolves fail because vf0 holds no vertex fetch, and "
+            "vf0 is written by the CPU - so the setup may sit earlier in the "
+            "stream than the tail window begins.",
+            "Guide");
 DEFINE_bool(guide_overlay_search, true,
             "Run the search for the tail's first type-3 header. Phase 882: "
             "with this off, start stays 0, which also skips the truncation "
