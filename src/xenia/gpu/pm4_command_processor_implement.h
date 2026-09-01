@@ -2067,7 +2067,10 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
     // RB_COLOR_MASK is 0 at the Guide's draws - every channel of every render
     // target masked off, so nothing can be written no matter what else is
     // right. Enable RT0's four channels.
-    if (cvars::guide_overlay_restore_surface && drf[0x2104] == 0u) {
+    if (cvars::guide_overlay_mask_off) {
+      // Execute the draws with every colour channel masked off.
+      drf[0x2104] = 0u;
+    } else if (cvars::guide_overlay_restore_surface && drf[0x2104] == 0u) {
       drf[0x2104] = 0x0000000Fu;
       ++guide_ov_maskpatch_;
     }

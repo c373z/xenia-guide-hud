@@ -191,6 +191,12 @@ DEFINE_bool(guide_replay_at_draw, false,
 // Phase 728: every layer of the draw path reports correct and no pixels change.
 // Before chasing the resolve further, establish whether guest memory at the
 // swap's frontbuffer_ptr reaches the display at all.
+DEFINE_bool(guide_overlay_mask_off, false,
+            "Force RB_COLOR_MASK to 0 for the Guide's draws, so they execute "
+            "fully but write no colour. Phase 929: if the frame is still black "
+            "with every colour write masked off, the damage is not caused by "
+            "the draws writing pixels.",
+            "GPU");
 DEFINE_bool(guide_overlay_clip_disable, false,
             "Set PA_CL_CLIP_CNTL.clip_disable for the Guide's draws, as the "
             "title has it. Phase 927: that bit selects the huge-viewport path "
