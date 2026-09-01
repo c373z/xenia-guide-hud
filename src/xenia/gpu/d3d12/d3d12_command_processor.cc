@@ -3055,6 +3055,13 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
         std::memcpy(&f, &v, 4);
         return f;
       };
+      // Phase 927: GetHostViewportInfo branches on
+      // pa_cl_clip_cntl.clip_disable - that branch, not VTE, is what gives the
+      // title an 8192 extent and the Guide a 1. Read the register.
+      XELOGI("HostClip[{}]: PA_CL_CLIP_CNTL={:08X} clip_disable={}",
+             guide_overlay_exec_ ? "guide" : "title",
+             register_file_->values[0x2204],
+             (register_file_->values[0x2204] >> 16) & 1u);
       XELOGI("HostRegs[{}]: VTE={:08X} xscale={} xoff={} yscale={} yoff={}",
              guide_overlay_exec_ ? "guide" : "title",
              register_file_->values[0x2206], rdf(0x210F), rdf(0x2110),

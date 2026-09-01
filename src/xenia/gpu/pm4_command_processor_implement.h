@@ -996,7 +996,8 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
            guide_ov_seen_, guide_ov_predrop_, guide_ov_vizdrop_,
            guide_ov_issued_, guide_ov_failed_, guide_ov_surfpatch_,
            guide_ov_maskpatch_, guide_ov_vportpatch_);
-    XELOGI("GuideVTE: passthru patches={}", guide_ov_vtepatch_);
+    XELOGI("GuideVTE: passthru patches={} clip patches={}",
+           guide_ov_vtepatch_, guide_ov_clippatch_);
     // Phase 888: the draws execute against the right surface and write no
     // pixels, and blending is ruled out - so they are rejected before the
     // output merger. Read the state that can do that straight out of the
@@ -2073,6 +2074,14 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
     // Phase 911: the vertices are pixel-sized, so the alternative to supplying
     // a viewport is switching the transform off, which is what the title does
     // for its own pre-transformed geometry.
+    // Phase 927: PA_CL_CLIP_CNTL.clip_disable is the register that differs
+    // between the title (1) and the Guide (0), and it selects which viewport
+    // path Xenia takes.
+    if (cvars::guide_overlay_clip_disable &&
+        !((drf[0x2204] >> 16) & 1u)) {
+      drf[0x2204] |= (1u << 16);
+      ++guide_ov_clippatch_;
+    }
     if (cvars::guide_overlay_vte_passthru && (drf[0x2206] & 0x3Fu)) {
       drf[0x2206] = 0x00000300u;
       ++guide_ov_vtepatch_;
@@ -2203,8 +2212,10 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
             return f;
           };
           std::string c;
-          for (uint32_t i = 0; i < 8; ++i) c += fmt::format("{} ", cf(i));
-          XELOGI("GuideALUConst: c0..c1 = {}", c);
+          for (uint32_t i = 0; i < 16; ++i) {
+            c += fmt::format("{}{} ", (i % 4 == 0) ? "| " : "", cf(i));
+          }
+          XELOGI("GuideALUConst: c0..c3 = {}", c);
           // Phase 924: a pixel-to-NDC conversion would carry 2/1280 =
           // 0.0015625 and -2/720 = -0.0027778. Scan the constant file for
           // anything of that magnitude rather than assuming where it sits.

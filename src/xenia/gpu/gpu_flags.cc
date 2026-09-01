@@ -191,6 +191,13 @@ DEFINE_bool(guide_replay_at_draw, false,
 // Phase 728: every layer of the draw path reports correct and no pixels change.
 // Before chasing the resolve further, establish whether guest memory at the
 // swap's frontbuffer_ptr reaches the display at all.
+DEFINE_bool(guide_overlay_clip_disable, false,
+            "Set PA_CL_CLIP_CNTL.clip_disable for the Guide's draws, as the "
+            "title has it. Phase 927: that bit selects the huge-viewport path "
+            "in GetHostViewportInfo, where ndc_scale becomes 2/extent with a "
+            "unit scale - a window-to-NDC conversion, which is what the "
+            "Guide's pixel-space shader output needs.",
+            "GPU");
 DEFINE_bool(guide_overlay_vport_identity, false,
             "Patch the Guide's viewport to identity (scale 1, offset 0) "
             "instead of 640/-360. Phase 924: VTE=0x43F sets both the scale "
