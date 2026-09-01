@@ -2068,8 +2068,14 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
       ++guide_ov_vportpatch_;
     }
     uint32_t mode_now = drf[0x2208] & 0x7u;
-    if (fate_log < 4 && (guide_ov_seen_ == 1 || mode_now == 6u)) {
-      if (guide_ov_seen_ == 1 || fate_log < 2) {
+    // Phase 918: the vertex data was read once, for draw #1, and generalised
+    // to all 416 (917). Sample across the burst instead - if the quads grow to
+    // screen size the speckle is the Guide's own interface, not corruption.
+    bool spread = (guide_ov_seen_ == 1 || guide_ov_seen_ == 5 ||
+                   guide_ov_seen_ == 20 || guide_ov_seen_ == 60 ||
+                   guide_ov_seen_ == 150 || guide_ov_seen_ == 300);
+    if (spread) {
+      if (true) {
         ++fate_log;
         XELOGI("GuideDrawSurf: draw #{} mode={} SURFACE_INFO={:08X} "
                "COLOR_INFO={:08X} DEPTH_INFO={:08X} | COLOR_MASK={:08X} "
@@ -2131,7 +2137,23 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
               }
             }
           }
-          XELOGI("GuideVSBindings: shader={} bindings={} | {}",
+          // Phase 918: every quad is small and starts at the origin, so their
+        // position has to come from somewhere else - a transform in the ALU
+        // constants. Phase 897 found no SET_CONSTANT of any type in the arena,
+        // so read the first float constants and see whether they look like a
+        // matrix or like whatever the title left behind.
+        {
+          auto cf = [&](uint32_t i) {
+            float f;
+            uint32_t v = drf[0x4000 + i];
+            std::memcpy(&f, &v, 4);
+            return f;
+          };
+          std::string c;
+          for (uint32_t i = 0; i < 8; ++i) c += fmt::format("{} ", cf(i));
+          XELOGI("GuideALUConst: c0..c1 = {}", c);
+        }
+        XELOGI("GuideVSBindings: shader={} bindings={} | {}",
                  vs ? "present" : "NONE",
                  vs ? vs->vertex_bindings().size() : 0,
                  need.empty() ? "<none>" : need);
