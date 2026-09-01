@@ -7850,6 +7850,28 @@ void VdSwap_entry(
                 uint32_t b1 = pdev ? prd2(pdev + 0x2B4Cu) : 0;
                 pcall(0x81968890u, {oi2, pmsg});
                 uint32_t e2 = pdev ? prd2(pdev + 0x30u) : 0;
+                // Phase 905: attribute DRAW_INDX packets to the element that
+                // wrote them. Three scans for the instruction that builds them
+                // have found the wrong thing (904), so look at the bytes each
+                // element's paint adds instead. This range is small and was
+                // just written, so a header test over it is not the loose
+                // whole-arena scan that has misled before.
+                if (e2 > e1 && (e2 - e1) < 0x40000u) {
+                  uint32_t nd = 0;
+                  for (uint32_t a = e1; a + 4u <= e2; a += 4) {
+                    uint32_t v =
+                        xe::load_and_swap<uint32_t>(pm2->TranslateVirtual(a));
+                    if ((v >> 30) == 3u && ((v >> 8) & 0x7Fu) == 0x22u) ++nd;
+                  }
+                  if (nd) {
+                    static uint32_t edl = 0;
+                    if (edl++ < 8) {
+                      XELOGI("ElemDraws: element {} wrote {} DRAW_INDX in "
+                             "{:08X}..{:08X} ({} words)",
+                             painted, nd, e1, e2, (e2 - e1) / 4);
+                    }
+                  }
+                }
                 uint32_t b2 = pdev ? prd2(pdev + 0x2B4Cu) : 0;
                 static uint32_t el_logs = 0;
                 if (el_logs++ < 8) {
