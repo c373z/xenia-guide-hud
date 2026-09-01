@@ -958,11 +958,24 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
       for (uint32_t i = 0; i < 2; ++i) orf[0x2000 + i] = keep_surf[i];
     }
     guide_overlay_exec_ = false;
+    if (guide_title_state_valid_) {
+      XELOGI("TitleDrawState (last before overlay): mode={} SURFACE={:08X} "
+             "COLOR={:08X} DEPTH={:08X} | MASK={:08X} COLORCTL={:08X} "
+             "DEPTHCTL={:08X} BLEND0={:08X} | scissor {:08X} {:08X} VTE={:08X} "
+             "SU_SC={:08X}",
+             guide_title_state_[0] & 0x7u, guide_title_state_[1],
+             guide_title_state_[2], guide_title_state_[3],
+             guide_title_state_[4], guide_title_state_[5],
+             guide_title_state_[6], guide_title_state_[7],
+             guide_title_state_[8], guide_title_state_[9],
+             guide_title_state_[10], guide_title_state_[11]);
+    }
     XELOGI("GuideDrawFate: seen={} pre-dropped={} viz-dropped={} issued={} "
-           "backend-failed={} surface-patched={} mask-patched={}",
+           "backend-failed={} surface-patched={} mask-patched={} "
+           "viewport-patched={}",
            guide_ov_seen_, guide_ov_predrop_, guide_ov_vizdrop_,
            guide_ov_issued_, guide_ov_failed_, guide_ov_surfpatch_,
-           guide_ov_maskpatch_);
+           guide_ov_maskpatch_, guide_ov_vportpatch_);
     // Phase 888: the draws execute against the right surface and write no
     // pixels, and blending is ruled out - so they are rejected before the
     // output merger. Read the state that can do that straight out of the
@@ -1948,6 +1961,22 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
   // steps before anything reaches the backend, so "541 draws dispatched" is
   // not evidence that 541 draws were issued. Count what actually happens to
   // the Guide's draws: dropped before the call, called and refused, or issued.
+  // Phase 893: log the same state at a TITLE draw. Fixing the Guide's
+  // registers one at a time has found two defects and neither was enough;
+  // the differences against a draw that demonstrably renders are the whole
+  // remaining list, in one reading.
+  if (!guide_overlay_exec_) {
+    // Sampling the FIRST title draws reads all zeros - they happen before the
+    // title has set any state. Keep the most recent one instead, which is the
+    // state of a draw that demonstrably rendered, and report it next to the
+    // Guide's.
+    RegisterFile& trf = *register_file_;
+    static const uint32_t kIdx[12] = {0x2208, 0x2000, 0x2001, 0x2002,
+                                      0x2104, 0x2202, 0x2200, 0x2201,
+                                      0x2081, 0x2082, 0x2206, 0x2205};
+    for (uint32_t i = 0; i < 12; ++i) guide_title_state_[i] = trf[kIdx[i]];
+    guide_title_state_valid_ = true;
+  }
   if (guide_overlay_exec_) {
     ++guide_ov_seen_;
     if (!draw_succeeded) ++guide_ov_predrop_;
@@ -1974,15 +2003,49 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
       drf[0x2104] = 0x0000000Fu;
       ++guide_ov_maskpatch_;
     }
+    // VTE_CNTL enables the viewport scale/offset transform and every viewport
+    // register is zero, so each vertex maps to a single point. Supply the
+    // transform for the surface the draws are being pointed at.
+    if (cvars::guide_overlay_restore_surface && (drf[0x2206] & 0x3Fu) &&
+        drf[0x210F] == 0u && drf[0x2111] == 0u) {
+      auto setf = [&](uint32_t r, float f) {
+        uint32_t v;
+        std::memcpy(&v, &f, 4);
+        drf[r] = v;
+      };
+      setf(0x210F, 640.0f);   // x scale
+      setf(0x2110, 640.0f);   // x offset
+      setf(0x2111, -360.0f);  // y scale
+      setf(0x2112, 360.0f);   // y offset
+      setf(0x2113, 1.0f);     // z scale
+      setf(0x2114, 0.0f);     // z offset
+      ++guide_ov_vportpatch_;
+    }
     uint32_t mode_now = drf[0x2208] & 0x7u;
     if (fate_log < 4 && (guide_ov_seen_ == 1 || mode_now == 6u)) {
       if (guide_ov_seen_ == 1 || fate_log < 2) {
         ++fate_log;
         XELOGI("GuideDrawSurf: draw #{} mode={} SURFACE_INFO={:08X} "
                "COLOR_INFO={:08X} DEPTH_INFO={:08X} | COLOR_MASK={:08X} "
-               "COLORCONTROL={:08X} DEPTHCONTROL={:08X} BLEND0={:08X}",
+               "COLORCONTROL={:08X} DEPTHCONTROL={:08X} BLEND0={:08X} | "
+               "scissor {:08X} {:08X} VTE={:08X} SU_SC={:08X}",
                guide_ov_seen_, mode_now, drf[0x2000], drf[0x2001], drf[0x2002],
-               drf[0x2104], drf[0x2202], drf[0x2200], drf[0x2201]);
+               drf[0x2104], drf[0x2202], drf[0x2200], drf[0x2201], drf[0x2081],
+               drf[0x2082], drf[0x2206], drf[0x2205]);
+        // VTE=0x43F enables the viewport scale/offset transform, which the
+        // title (0x300) does not use. With those registers zero every vertex
+        // collapses to a point, which looks exactly like geometry that covers
+        // nothing.
+        auto vf = [&](uint32_t r) {
+          float f;
+          uint32_t v = drf[r];
+          std::memcpy(&f, &v, 4);
+          return f;
+        };
+        XELOGI("GuideViewport: xscale={} xoffset={} yscale={} yoffset={} "
+               "zscale={} zoffset={}",
+               vf(0x210F), vf(0x2110), vf(0x2111), vf(0x2112), vf(0x2113),
+               vf(0x2114));
       }
     }
   }

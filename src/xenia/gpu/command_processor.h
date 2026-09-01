@@ -553,6 +553,9 @@ class CommandProcessor {
   uint32_t guide_ov_issued_ = 0, guide_ov_failed_ = 0;
   uint32_t guide_ov_surfpatch_ = 0;
   uint32_t guide_ov_maskpatch_ = 0;
+  uint32_t guide_ov_vportpatch_ = 0;
+  uint32_t guide_title_state_[12] = {};
+  bool guide_title_state_valid_ = false;
   bool guide_resolve_saved_ = false;
   bool guide_resolve_replay_ = false;
   uint32_t guide_saved_copy_[4] = {};    // RB_COPY_CONTROL..DEST_INFO
