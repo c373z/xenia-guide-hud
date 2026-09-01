@@ -2200,8 +2200,11 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
           std::memcpy(&v, &f, 4);
           drf[r] = v;
         };
-        setf(0x4010, 2.0f / 1280.0f);   // c4.x =  2/w
-        setf(0x4015, -2.0f / 720.0f);   // c5.y = -2/h
+        // Phase 962: the Guide's device reports 852x480 (961), not the
+        // title's 1280x720. Every patch so far has supplied the title's
+        // numbers to geometry authored against the Guide's own target.
+        setf(0x4010, 2.0f / 852.0f);   // c4.x =  2/w
+        setf(0x4015, -2.0f / 480.0f);  // c5.y = -2/h
         // The register file is not what the shader reads - invalidate the
         // uploaded constant buffer so these values are sent to the GPU.
         COMMAND_PROCESSOR::GuideInvalidateFloatConstants();
