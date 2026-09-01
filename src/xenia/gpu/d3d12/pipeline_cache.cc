@@ -846,6 +846,39 @@ bool PipelineCache::ConfigurePipeline(
   }
   PipelineDescription& description = runtime_description.description;
 
+  // Phase 989: the pipeline state object is the last artefact on this path
+  // that has never been read. At the before-resolve injection point a
+  // ClearRenderTargetView on the bound RTV reaches the display (982) and 541
+  // draws into the same target at the same instant do not (983), while the
+  // occlusion query says ~382000 fragments are produced (976, 985) and the
+  // colour mask matches the title's (984). The difference has to be in here.
+  {
+    static uint32_t pdl_g = 0, pdl_t = 0;
+    bool guide = command_processor_.guide_overlay_exec_;
+    if ((guide ? pdl_g : pdl_t)++ < 3) {
+      const PipelineRenderTarget& rt0 = description.render_targets[0];
+      XELOGI(
+          "GuidePSO[{}]: topo_type={} gs={} cull={} front_ccw={} depth_clip={} "
+          "host_msaa={} depth_func={} depth_write={} stencil={} | rt0 used={} "
+          "fmt={} write_mask={:X} src={} dst={} op={} srcA={} dstA={} opA={} | "
+          "bound_bits={:02X} strip_cut={}",
+          guide ? "guide" : "title",
+          uint32_t(description.primitive_topology_type_or_tessellation_mode),
+          uint32_t(description.geometry_shader), uint32_t(description.cull_mode),
+          uint32_t(description.front_counter_clockwise),
+          uint32_t(description.depth_clip),
+          uint32_t(description.host_msaa_samples),
+          uint32_t(description.depth_func), uint32_t(description.depth_write),
+          uint32_t(description.stencil_enable), uint32_t(rt0.used),
+          uint32_t(rt0.format), uint32_t(rt0.write_mask),
+          uint32_t(rt0.src_blend), uint32_t(rt0.dest_blend),
+          uint32_t(rt0.blend_op), uint32_t(rt0.src_blend_alpha),
+          uint32_t(rt0.dest_blend_alpha), uint32_t(rt0.blend_op_alpha),
+          bound_depth_and_color_render_target_bits,
+          uint32_t(description.strip_cut_index));
+    }
+  }
+
   if (current_pipeline_ != nullptr &&
       current_pipeline_->description.description == description) {
     *pipeline_handle_out = current_pipeline_;
