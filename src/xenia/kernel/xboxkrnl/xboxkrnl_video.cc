@@ -8090,7 +8090,8 @@ void VdSwap_entry(
                 // not begin mid-packet.
                 uint32_t tail_lo = (after > 8192u * 4u) ? after - 8192u * 4u : before;
                 uint32_t start = 0;
-                for (uint32_t a = tail_lo; a + 4u <= after; a += 4) {
+                for (uint32_t a = tail_lo;
+                     ::cvars::guide_overlay_search && a + 4u <= after; a += 4) {
                   auto* th = pm2->LookupHeap(a);
                   if (!th || th->QueryRangeAccess(a, a + 4u) ==
                                  xe::memory::PageAccess::kNoAccess) {

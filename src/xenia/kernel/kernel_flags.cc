@@ -966,6 +966,12 @@ DEFINE_bool(guide_navigate_manual, false,
 DEFINE_bool(guide_navigate_scene, false,
              "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
              "Guide");
+DEFINE_bool(guide_overlay_search, true,
+            "Run the search for the tail's first type-3 header. Phase 882: "
+            "with this off, start stays 0, which also skips the truncation "
+            "loop and the publish - leaving the EmitBlocks half as arithmetic "
+            "and one log line.",
+            "Guide");
 DEFINE_bool(guide_overlay_walk, true,
             "Run the PM4 walk and hex dumps inside the guide_overlay_at_swap "
             "block. Phase 878: half of the bisect for a read-only body that "
