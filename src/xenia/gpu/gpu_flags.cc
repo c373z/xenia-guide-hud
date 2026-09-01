@@ -191,6 +191,12 @@ DEFINE_bool(guide_replay_at_draw, false,
 // Phase 728: every layer of the draw path reports correct and no pixels change.
 // Before chasing the resolve further, establish whether guest memory at the
 // swap's frontbuffer_ptr reaches the display at all.
+DEFINE_bool(guide_overlay_test_quad, false,
+            "Overwrite the Guide's vertex data with a full-screen quad in NDC "
+            "before its draws. Phase 939: everything that could stop a "
+            "fragment has been read and is correct, so the question is whether "
+            "ANY draw injected at this point can put a pixel on screen.",
+            "GPU");
 DEFINE_bool(guide_overlay_skip_lut, false,
             "Skip DC_LUT gamma ramp register writes while executing the "
             "Guide's stream. Phase 936: those writes, not the draws, are what "

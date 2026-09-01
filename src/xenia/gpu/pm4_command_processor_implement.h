@@ -2201,6 +2201,23 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
               uint32_t s1 = drf[0x4801 + fc * 2];
               uint32_t vaddr = s0 & 0xFFFFFFFCu;
               uint32_t vwords = (s1 >> 2) & 0xFFFFFFu;
+              // Phase 939: replace the geometry with a full-screen NDC quad,
+              // as a triangle fan of four vertices matching the declared
+              // k_32_32_FLOAT stride-2 format. If this does not appear, the
+              // injection path cannot draw at all.
+              if (cvars::guide_overlay_test_quad && vaddr) {
+                uint8_t* wp = memory_->TranslatePhysical(vaddr);
+                if (wp) {
+                  static const float kQuad[8] = {-1.f, -1.f, 1.f, -1.f,
+                                                 1.f,  1.f,  -1.f, 1.f};
+                  for (uint32_t k = 0; k < 8; ++k) {
+                    uint32_t raw;
+                    std::memcpy(&raw, &kQuad[k], 4);
+                    xe::store_and_swap<uint32_t>(wp + k * 4, raw);
+                  }
+                  ++guide_ov_quadpatch_;
+                }
+              }
               need += fmt::format("slot{}(type={} addr={:08X} words={} stride={}) ",
                                   fc, s0 & 0x3u, vaddr, vwords,
                                   vb.stride_words);
