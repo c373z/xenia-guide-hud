@@ -2693,6 +2693,18 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
     }
   }
   if (regs.Get<reg::RB_SURFACE_INFO>().surface_pitch == 0) {
+    // Phase 947: this returns true without drawing, which is exactly the
+    // measured signature - IssueDraw reports success for all 541 draws and no
+    // pixel appears. Count how many of the Guide's draws land here.
+    if (guide_overlay_exec_) {
+      static uint32_t skipped = 0;
+      ++skipped;
+      if (skipped <= 3 || (skipped % 200) == 0) {
+        XELOGI("GuideDrawSkipped: {} of the Guide's draws returned early on "
+               "surface_pitch==0 (SURFACE_INFO={:08X})",
+               skipped, regs[0x2000]);
+      }
+    }
     // Doesn't actually draw.
     // TODO(Triang3l): Do something so memexport still works in this case maybe?
     // Unlikely that zero would even really be legal though.
@@ -2731,6 +2743,14 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
     // Disabling pixel shader for this case is also required by the pipeline
     // cache.
     if (!memexport_used_vertex) {
+      if (guide_overlay_exec_) {
+        static uint32_t ne = 0;
+        if (++ne <= 3) {
+          XELOGI("GuideNoEffect: {} of the Guide's draws hit the "
+                 "'no effect' path",
+                 ne);
+        }
+      }
       // This draw has no effect.
       return true;
     }
@@ -2798,6 +2818,16 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
     return false;
   }
   if (!primitive_processing_result.host_draw_vertex_count) {
+    // Phase 947: another silent success - the primitive processor produced no
+    // vertices, so the draw returns true without drawing.
+    if (guide_overlay_exec_) {
+      static uint32_t nv = 0;
+      if (++nv <= 3 || (nv % 200) == 0) {
+        XELOGI("GuideNoVertices: {} of the Guide's draws produced zero host "
+               "vertices",
+               nv);
+      }
+    }
     // Nothing to draw.
     return true;
   }
