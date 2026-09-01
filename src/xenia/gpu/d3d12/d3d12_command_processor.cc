@@ -3073,6 +3073,15 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
       // Phase 927: GetHostViewportInfo branches on
       // pa_cl_clip_cntl.clip_disable - that branch, not VTE, is what gives the
       // title an 8192 extent and the Guide a 1. Read the register.
+      // Phase 938: a draw with a vertex shader and no pixel shader rasterises
+      // and writes no colour, which is exactly the signature measured - and
+      // Xenia accepts it, since depth-only draws are legal. Nothing has asked
+      // whether these draws have a fragment stage.
+      XELOGI("HostShaders[{}]: vertex={} pixel={} | rasterization_done={}",
+             guide_overlay_exec_ ? "guide" : "title",
+             vertex_shader ? "present" : "NONE",
+             pixel_shader ? "present" : "NONE",
+             is_rasterization_done ? 1 : 0);
       XELOGI("HostClip[{}]: PA_CL_CLIP_CNTL={:08X} clip_disable={}",
              guide_overlay_exec_ ? "guide" : "title",
              register_file_->values[0x2204],
