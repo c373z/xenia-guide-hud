@@ -8200,6 +8200,7 @@ void VdSwap_entry(
                     }
                     // What does that region contain?
                     uint32_t g3 = 0, gdraw = 0, gmode = 0, last_mode = 0xFFFFu;
+                    std::map<uint32_t, uint32_t> ghist;
                     for (uint32_t a = best; best && a < start;) {
                       uint32_t w =
                           xe::load_and_swap<uint32_t>(pm2->TranslateVirtual(a));
@@ -8207,7 +8208,9 @@ void VdSwap_entry(
                       uint32_t cn = ((w >> 16) & 0x3FFFu) + 1u;
                       if (ty == 3u) {
                         ++g3;
-                        if (((w >> 8) & 0x7Fu) == 0x22u) ++gdraw;
+                        uint32_t gop = (w >> 8) & 0x7Fu;
+                        if (gop == 0x22u) ++gdraw;
+                        ghist[gop]++;
                         a += (cn + 1u) * 4u;
                       } else if (ty == 0u) {
                         uint32_t base = w & 0x7FFFu;
@@ -8223,10 +8226,14 @@ void VdSwap_entry(
                         break;
                       }
                     }
+                    std::string gh;
+                    for (auto& kv : ghist) {
+                      gh += fmt::format("{:02X}x{} ", kv.first, kv.second);
+                    }
                     XELOGI("GeomScan: start={:08X} (searched {:08X}..{:08X}) | "
                            "{} type3, {} DRAW_INDX, {} MODECONTROL writes, "
-                           "last mode={:08X}",
-                           best, lo, start, g3, gdraw, gmode, last_mode);
+                           "last mode={:08X} | ops: {}",
+                           best, lo, start, g3, gdraw, gmode, last_mode, gh);
                     geom_start = best;
                   }
                   // The search is O(window * walk); do it once and reuse it.
