@@ -5782,6 +5782,9 @@ void D3D12RenderTargetCache::SetCommandListRenderTargets(
       }
       auto& d3d12_rt = *static_cast<const D3D12RenderTarget*>(render_target);
       rtv_handles[rtv_count++] = d3d12_rt.descriptor_draw().GetHandle();
+      if (i == 0) {
+        guide_bound_color0_ = render_target;
+      }
     }
     // Phase 730: guest RB_COLOR_INFO matches the title's (723), but that is
     // what the guest asked for. Print which host resource is actually bound,
@@ -5808,6 +5811,23 @@ void D3D12RenderTargetCache::SetCommandListRenderTargets(
         depth_and_color_render_targets[0] ? &dsv_handle : nullptr);
     are_current_command_list_render_targets_valid_ = true;
   }
+}
+
+bool D3D12RenderTargetCache::GuideClearColor0(const float color[4]) {
+  if (GetPath() != Path::kHostRenderTargets) {
+    return false;
+  }
+  const RenderTarget* render_target = guide_bound_color0_;
+  if (!render_target) {
+    return false;
+  }
+  const auto& d3d12_rt = *static_cast<const D3D12RenderTarget*>(render_target);
+  command_processor_.GetDeferredCommandList().D3DClearRenderTargetView(
+      d3d12_rt.descriptor_draw().GetHandle(), color, 0, nullptr);
+  XELOGI("GuideClearRT: cleared colour target {} (key {:08X})",
+         static_cast<const void*>(d3d12_rt.resource()),
+         render_target->key().key);
+  return true;
 }
 
 ID3D12PipelineState* D3D12RenderTargetCache::GetOrCreateDumpPipeline(

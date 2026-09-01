@@ -227,6 +227,32 @@ DEFINE_bool(guide_marker_color, false,
             "blade lands in or fighting a 9% animation noise floor; an exact "
             "colour needs no reference frame.",
             "GuideResearch");
+DEFINE_bool(guide_overlay_repeat, false,
+            "Keep the published Guide stream armed after executing it, so it "
+            "runs on every swap instead of once. Phase 980: the burst fires "
+            "exactly ONCE in a session of ~390 frames, while every capture in "
+            "this log is taken on a fixed wall-clock timer - so a blade that "
+            "rendered perfectly for one frame would have been photographed 10 "
+            "seconds later and recorded as 0 pixels.",
+            "GuideResearch");
+DEFINE_bool(guide_clear_rt_title, false,
+            "Clear the bound colour target to magenta on every TITLE draw. "
+            "Phase 979: a clear that does not reach the screen from the "
+            "Guide's burst proves nothing until a clear is shown to reach the "
+            "screen at all.",
+            "GuideResearch");
+DEFINE_bool(guide_clear_rt, false,
+            "Clear the render target the Guide's draws are bound to, to "
+            "magenta, immediately after the burst. Phase 977: the occlusion "
+            "query says fragments ARE produced, so the question is whether "
+            "this render target is the one that reaches the display at all.",
+            "GuideResearch");
+DEFINE_bool(guide_occlusion_query, false,
+            "Wrap the Guide's burst in a D3D12 occlusion query and report how "
+            "many samples passed. Phase 976: every other instrument in this "
+            "investigation reports what Xenia submits; this one reports what "
+            "the rasteriser produced.",
+            "GuideResearch");
 DEFINE_bool(guide_invalidate_vertex, false,
             "Mark each Guide vertex buffer range CPU-modified before its draw, "
             "so SharedMemory re-uploads it. Phase 975: every vertex reading in "

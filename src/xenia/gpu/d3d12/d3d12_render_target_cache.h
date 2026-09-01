@@ -42,6 +42,11 @@ class D3D12CommandProcessor;
 
 class D3D12RenderTargetCache final : public RenderTargetCache {
  public:
+  // Phase 977: clear whatever colour target the last Update bound, so the
+  // question "do the Guide's fragments land in a target that is displayed"
+  // can be asked without depending on any per-fragment state.
+  bool GuideClearColor0(const float color[4]);
+
   D3D12RenderTargetCache(const RegisterFile& register_file,
                          const Memory& memory, TraceWriter& trace_writer,
                          uint32_t draw_resolution_scale_x,
@@ -774,6 +779,10 @@ class D3D12RenderTargetCache final : public RenderTargetCache {
   const RenderTarget* const*
       current_command_list_render_targets_[1 + xenos::kMaxColorRenderTargets];
   bool are_current_command_list_render_targets_valid_ = false;
+  // Phase 977: current_command_list_render_targets_ is declared as an array of
+  // pointer-to-pointer and only ever memcpy'd into, so it cannot be read back
+  // as a target. Keep the colour target of the last binding directly.
+  const RenderTarget* guide_bound_color0_ = nullptr;
 
   // Temporary storage for descriptors used in PerformTransfersAndResolveClears
   // and DumpRenderTargets.

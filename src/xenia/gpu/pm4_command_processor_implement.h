@@ -980,7 +980,9 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
       !cvars::guide_overlay_before_resolve) {
     uint32_t gptr = guide_overlay_ptr_;
     uint32_t gwords = guide_overlay_words_;
-    guide_overlay_ptr_ = 0;
+    if (!cvars::guide_overlay_repeat) {
+      guide_overlay_ptr_ = 0;
+    }
     XELOGI("GuideOverlay: executing {} words at {:08X} before swap", gwords,
            gptr);
     uint32_t draws_before = guide_draw_count_;
@@ -1026,7 +1028,12 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
       COMMAND_PROCESSOR::GuideResetHostState();
     }
     guide_overlay_exec_ = true;
+    COMMAND_PROCESSOR::GuideOcclusionBegin();
     COMMAND_PROCESSOR::ExecuteGuestBufferVirtualUnsafe(gptr, gwords);
+    if (cvars::guide_clear_rt) {
+      COMMAND_PROCESSOR::GuideClearRenderTarget();
+    }
+    COMMAND_PROCESSOR::GuideOcclusionEnd();
     {
       size_t dcl_after = COMMAND_PROCESSOR::GuideCommandListBytes();
       guide_seen_burst_ = true;
@@ -2121,6 +2128,9 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
   // not turn magenta this patch never reaches the GPU, and every negative
   // taken with guide_marker_color measures the instrument rather than the
   // Guide.
+  if (cvars::guide_clear_rt_title && !guide_overlay_exec_) {
+    COMMAND_PROCESSOR::GuideClearRenderTarget();
+  }
   if (cvars::guide_marker_title && !guide_overlay_exec_) {
     RegisterFile& mrf = *register_file_;
     auto mf = [&](uint32_t r, float f) {

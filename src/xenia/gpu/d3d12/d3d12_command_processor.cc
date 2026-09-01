@@ -3661,10 +3661,18 @@ bool D3D12CommandProcessor::IssueCopy() {
       !guide_overlay_exec_ && guide_overlay_ptr_ && guide_overlay_words_) {
     uint32_t bptr = guide_overlay_ptr_;
     uint32_t bwords = guide_overlay_words_;
-    guide_overlay_ptr_ = 0;
+    if (!cvars::guide_overlay_repeat) {
+      guide_overlay_ptr_ = 0;
+    }
     guide_overlay_exec_ = true;
     uint32_t before_draws = guide_draw_count_;
     ExecuteGuestBufferVirtualUnsafe(bptr, bwords);
+    // Phase 978: the same two probes the swap-time placement has, so the two
+    // can be compared on what the rasteriser did rather than only on what
+    // reached the screen.
+    if (cvars::guide_clear_rt) {
+      GuideClearRenderTarget();
+    }
     guide_overlay_exec_ = false;
     static uint32_t brl = 0;
     if (brl++ < 4) {
@@ -4289,6 +4297,108 @@ void D3D12CommandProcessor::GuideInvalidateGuestRange(uint32_t addr,
                                                       uint32_t len) {
   if (shared_memory_ && len) {
     shared_memory_->MemoryInvalidationCallback(addr, len, true);
+  }
+}
+
+// Phase 976: every instrument this investigation has used reports on what
+// Xenia submits, and they all now agree it is correct. An occlusion query
+// reports what the rasteriser produced, which separates "no fragment is ever
+// generated" from "fragments are generated and the output merger drops them" -
+// the last fork this line has. Standalone rather than driven through the ZPD
+// pool, which needs report handles and segments a synthetic burst does not
+// have.
+void D3D12CommandProcessor::GuideClearRenderTarget() {
+  if (!render_target_cache_) {
+    return;
+  }
+  static const float kMagenta[4] = {1.0f, 0.0f, 1.0f, 1.0f};
+  static uint32_t clr_logs = 0;
+  bool ok = static_cast<D3D12RenderTargetCache*>(render_target_cache_.get())
+                ->GuideClearColor0(kMagenta);
+  if (!ok && clr_logs++ < 3) {
+    XELOGW("GuideClearRT: no colour target bound by the last update");
+  }
+}
+
+void D3D12CommandProcessor::GuideOcclusionBegin() {
+  if (!cvars::guide_occlusion_query || guide_oq_open_) {
+    return;
+  }
+  if (!BeginSubmission(true)) {
+    XELOGW("GuideOcclusion: no submission, not querying");
+    return;
+  }
+  if (!guide_oq_heap_) {
+    const ui::d3d12::D3D12Provider& provider = GetD3D12Provider();
+    ID3D12Device* device = provider.GetDevice();
+    D3D12_QUERY_HEAP_DESC heap_desc = {};
+    heap_desc.Type = D3D12_QUERY_HEAP_TYPE_OCCLUSION;
+    heap_desc.Count = 1;
+    if (FAILED(device->CreateQueryHeap(&heap_desc,
+                                       IID_PPV_ARGS(&guide_oq_heap_)))) {
+      XELOGE("GuideOcclusion: failed to create the query heap");
+      guide_oq_heap_ = nullptr;
+      return;
+    }
+    D3D12_RESOURCE_DESC buffer_desc;
+    ui::d3d12::util::FillBufferResourceDesc(buffer_desc, sizeof(uint64_t),
+                                            D3D12_RESOURCE_FLAG_NONE);
+    if (FAILED(device->CreateCommittedResource(
+            &ui::d3d12::util::kHeapPropertiesReadback,
+            provider.GetHeapFlagCreateNotZeroed(), &buffer_desc,
+            D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+            IID_PPV_ARGS(&guide_oq_readback_)))) {
+      XELOGE("GuideOcclusion: failed to create the readback buffer");
+      guide_oq_readback_ = nullptr;
+      guide_oq_heap_->Release();
+      guide_oq_heap_ = nullptr;
+      return;
+    }
+  }
+  guide_oq_submission_at_begin_ = GetCurrentSubmission();
+  deferred_command_list_.D3DBeginQuery(guide_oq_heap_,
+                                       D3D12_QUERY_TYPE_OCCLUSION, 0);
+  guide_oq_open_ = true;
+}
+
+void D3D12CommandProcessor::GuideOcclusionEnd() {
+  if (!guide_oq_open_) {
+    return;
+  }
+  guide_oq_open_ = false;
+  uint64_t submission_now = GetCurrentSubmission();
+  // A query must begin and end in the same command list. If the burst forced a
+  // submission the reading is void, and saying so is the point of this line.
+  if (submission_now != guide_oq_submission_at_begin_) {
+    XELOGW(
+        "GuideOcclusion: the burst crossed a submission boundary ({} -> {}), "
+        "so the query spans command lists and its result is not valid",
+        guide_oq_submission_at_begin_, submission_now);
+    return;
+  }
+  deferred_command_list_.D3DEndQuery(guide_oq_heap_, D3D12_QUERY_TYPE_OCCLUSION,
+                                     0);
+  deferred_command_list_.D3DResolveQueryData(guide_oq_heap_,
+                                             D3D12_QUERY_TYPE_OCCLUSION, 0, 1,
+                                             guide_oq_readback_, 0);
+  EndSubmission(false);
+  if (!AwaitAllQueueOperationsCompletion()) {
+    XELOGW("GuideOcclusion: could not wait for the queue");
+    return;
+  }
+  D3D12_RANGE read_range = {0, sizeof(uint64_t)};
+  void* mapping = nullptr;
+  if (FAILED(guide_oq_readback_->Map(0, &read_range, &mapping)) || !mapping) {
+    XELOGW("GuideOcclusion: could not map the readback buffer");
+    return;
+  }
+  uint64_t samples = 0;
+  std::memcpy(&samples, mapping, sizeof(samples));
+  D3D12_RANGE write_range = {0, 0};
+  guide_oq_readback_->Unmap(0, &write_range);
+  static uint32_t oq_logs = 0;
+  if (oq_logs++ < 6) {
+    XELOGI("GuideOcclusion: {} samples passed over the burst", samples);
   }
 }
 
