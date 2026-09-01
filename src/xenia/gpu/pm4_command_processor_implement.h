@@ -2070,6 +2070,32 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
                "zscale={} zoffset={}",
                vf(0x210F), vf(0x2110), vf(0x2111), vf(0x2112), vf(0x2113),
                vf(0x2114));
+        // Phase 895: the state is now the title's own and nothing appears, so
+        // look at the geometry. Vertex buffers come from the fetch constants
+        // at 0x4800 + 2*slot: dword_0 is type:2 | address:30 with the address
+        // in dwords, dword_1 is endian:2 | size:24. Dump the slots that hold
+        // a vertex fetch and the first floats each one points at.
+        for (uint32_t slot = 0; slot < 6; ++slot) {
+          uint32_t d0 = drf[0x4800 + slot * 2];
+          uint32_t d1 = drf[0x4801 + slot * 2];
+          if ((d0 & 0x3u) != uint32_t(xenos::FetchConstantType::kVertex)) {
+            continue;
+          }
+          uint32_t addr = d0 & 0xFFFFFFFCu;
+          uint32_t words = (d1 >> 2) & 0xFFFFFFu;
+          std::string vals;
+          const uint8_t* vp = memory_->TranslatePhysical(addr);
+          if (vp && words) {
+            for (uint32_t k = 0; k < 8 && k < words; ++k) {
+              uint32_t raw = xe::load_and_swap<uint32_t>(vp + k * 4);
+              float f;
+              std::memcpy(&f, &raw, 4);
+              vals += fmt::format("{} ", f);
+            }
+          }
+          XELOGI("GuideVertexBuf: slot {} addr={:08X} words={} | {}", slot,
+                 addr, words, vals.empty() ? "<unreadable>" : vals);
+        }
       }
     }
   }
