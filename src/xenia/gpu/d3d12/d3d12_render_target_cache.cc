@@ -1250,6 +1250,25 @@ bool D3D12RenderTargetCache::Update(
           ++t_draws;
           t_tr += n;
         }
+        // Phase 932: zero transfers is also what a freshly acquired target
+        // looks like - nothing to copy into it. The key is identical for both
+        // sources (917), but the same key can map to a different instance.
+        // Log the pointer.
+        {
+          static void* last_title = nullptr;
+          static void* last_guide = nullptr;
+          void* rt0 = depth_and_color_render_targets
+                          ? static_cast<void*>(depth_and_color_render_targets[1])
+                          : nullptr;
+          void*& slot = command_processor_.guide_overlay_exec_ ? last_guide
+                                                               : last_title;
+          if (rt0 != slot) {
+            slot = rt0;
+            XELOGI("RTInstance[{}]: colour target now {}",
+                   command_processor_.guide_overlay_exec_ ? "guide" : "title",
+                   rt0);
+          }
+        }
         static uint32_t rep = 0;
         if (command_processor_.guide_overlay_exec_ && (g_draws % 200) == 0 &&
             rep++ < 4) {

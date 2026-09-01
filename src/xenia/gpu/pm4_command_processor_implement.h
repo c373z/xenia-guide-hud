@@ -965,8 +965,17 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
         crf[r] = guide_title_regs_[r - kGuideCtxLo];
       }
     }
+    size_t dcl_before = COMMAND_PROCESSOR::GuideCommandListBytes();
     guide_overlay_exec_ = true;
     COMMAND_PROCESSOR::ExecuteGuestBufferVirtualUnsafe(gptr, gwords);
+    {
+      size_t dcl_after = COMMAND_PROCESSOR::GuideCommandListBytes();
+      static uint32_t dl = 0;
+      if (dl++ < 3) {
+        XELOGI("GuideCmdList: {} bytes before the burst, {} after (+{})",
+               dcl_before, dcl_after, dcl_after - dcl_before);
+      }
+    }
     if (!keep_ctx.empty()) {
       RegisterFile& crf = *register_file_;
       for (uint32_t r = kGuideCtxLo; r < kGuideCtxHi; ++r) {

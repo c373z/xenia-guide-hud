@@ -38,6 +38,11 @@ class DeferredCommandList {
   DeferredCommandList(const D3D12CommandProcessor& command_processor,
                       size_t initial_size_bytes = MAX_SIZEOF_COMMANDLIST);
 
+  // Phase 932: seven mechanisms around the draws have been refuted; the list
+  // they are recorded into has never been looked at. Expose how much has been
+  // recorded so the Guide's contribution can be measured against the title's.
+  size_t recorded_bytes() const { return command_stream_.size(); }
+
   void Reset();
   void Execute(ID3D12GraphicsCommandList* command_list,
                ID3D12GraphicsCommandList1* command_list_1,

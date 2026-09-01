@@ -553,6 +553,7 @@ class CommandProcessor {
   // assumes they still describe its own. Backends that cache bindings override
   // this to reset them.
   virtual void GuideResetHostState() {}
+  virtual size_t GuideCommandListBytes() { return 0; }
 
   bool guide_overlay_exec_ = false;
   uint32_t guide_ov_seen_ = 0, guide_ov_predrop_ = 0, guide_ov_vizdrop_ = 0;

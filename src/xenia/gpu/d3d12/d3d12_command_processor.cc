@@ -4183,6 +4183,10 @@ bool D3D12CommandProcessor::BeginSubmission(bool is_guest_command) {
   return true;
 }
 
+size_t D3D12CommandProcessor::GuideCommandListBytes() {
+  return deferred_command_list_.recorded_bytes();
+}
+
 void D3D12CommandProcessor::GuideResetHostState() {
   // The same trackers BeginSubmission clears, so the title's next draw
   // re-binds everything rather than trusting a cache the Guide's draws moved.
