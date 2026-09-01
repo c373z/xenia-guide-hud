@@ -138,6 +138,7 @@ DECLARE_bool(guide_force_flag17);
 DECLARE_bool(guide_force_visible);
 DECLARE_bool(guide_navigate_manual);
 DECLARE_bool(guide_navigate_scene);
+DECLARE_bool(guide_fix_device_dims);
 DECLARE_bool(guide_zero_arena);
 DECLARE_bool(guide_publish_geometry);
 DECLARE_bool(guide_tail_from_start);

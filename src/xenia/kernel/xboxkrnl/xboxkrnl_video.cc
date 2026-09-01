@@ -7115,6 +7115,60 @@ void VdSwap_entry(
           uint32_t paint_wr_ = paint_dc_ ? prd2(paint_dc_ + 0x1CCu) : 0;
           uint32_t paint_dev_ = paint_wr_ ? prd2(paint_wr_ + 0x0Cu) : 0;
           if (!paint_dev_) paint_dev_ = guide_resv_dev_;
+          // Phase 958: fill them in. These are the fields the title's device
+          // carries and the Guide's leaves at zero.
+          if (::cvars::guide_fix_device_dims && paint_dev_) {
+            static uint32_t fixlog = 0;
+            struct { uint32_t off, val; } kDims[] = {
+                {0x2908u, 0x44200000u},  // 640.0f
+                {0x290Cu, 0x44200000u},  // 640.0f
+                {0x2914u, 0x43B40000u},  // 360.0f
+                {0x3220u, 0x44A00000u},  // 1280.0f
+                {0x3224u, 0x44340000u},  // 720.0f
+                {0x35BCu, 1280u},        {0x35C0u, 720u},
+                {0x558Cu, 1280u},        {0x5590u, 720u},
+            };
+            for (auto& d : kDims) {
+              auto* dh = pm2->LookupHeap(paint_dev_ + d.off);
+              if (!dh) continue;
+              xe::store_and_swap<uint32_t>(
+                  pm2->TranslateVirtual(paint_dev_ + d.off), d.val);
+            }
+            if (fixlog++ < 2) {
+              XELOGI("GuideFixDims: wrote 9 dimension fields on device {:08X}",
+                     paint_dev_);
+            }
+          }
+          // Phase 957: three consumers of a width and height all read zero
+          // (891, 893, 952) while the video mode reports 1280x720. Find where
+          // the title's device records its dimensions and read the Guide's at
+          // the same offsets.
+          {
+            static uint32_t dimlog = 0;
+            if (dimlog++ < 1) {
+              uint32_t tdev = prd2(0x801E6FC4u);
+              uint32_t gdev = paint_dev_;
+              std::string hits;
+              uint32_t n = 0;
+              // Dimensions may be stored as floats or half-extents, and the
+              // device is larger than 0x3000.
+              for (uint32_t off = 0; off < 0x8000u && tdev && gdev; off += 4) {
+                uint32_t tv = prd2(tdev + off);
+                if (tv == 1280u || tv == 720u || tv == 640u || tv == 360u ||
+                    tv == 0x44A00000u || tv == 0x44340000u ||
+                    tv == 0x44200000u || tv == 0x43B40000u) {
+                  ++n;
+                  if (n <= 12) {
+                    hits += fmt::format("+{:X}: title={} guide={} | ", off, tv,
+                                        prd2(gdev + off));
+                  }
+                }
+              }
+              XELOGI("DevDims: title={:08X} guide={:08X} | {} fields hold "
+                     "1280/720 | {}",
+                     tdev, gdev, n, hits.empty() ? "none" : hits);
+            }
+          }
           uint32_t before = paint_dev_ ? prd2(paint_dev_ + 0x30u) : 0;
           // Phase 901: wipe the arena before the paint fills it. Whatever the
           // paint writes this frame reappears; anything left from an earlier

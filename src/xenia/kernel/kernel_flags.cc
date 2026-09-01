@@ -971,6 +971,13 @@ DEFINE_bool(guide_navigate_manual, false,
 DEFINE_bool(guide_navigate_scene, false,
              "Guide research flag. Definition recovered 2026-08-29 after a refactor script destroyed kernel_flags; default verified against the run-log config dump.",
              "Guide");
+DEFINE_bool(guide_fix_device_dims, false,
+            "Fill the Guide device's uninitialised width/height fields from "
+            "the title's. Phase 958: nine fields on the title's device hold "
+            "1280/720 or their halves and every one reads zero on the "
+            "Guide's, which is the single upstream zero behind the null "
+            "surface pitch, the zero viewport and the infinite projection.",
+            "Guide");
 DEFINE_bool(guide_zero_arena, false,
             "Zero the reservation arena before each paint. Phase 901: none of "
             "the sixteen DRAW_INDX emitters in xam runs, yet the arena parses "
