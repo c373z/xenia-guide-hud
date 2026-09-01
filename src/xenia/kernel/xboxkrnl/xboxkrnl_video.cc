@@ -6962,6 +6962,14 @@ void VdSwap_entry(
       // (RenderBegin, LayoutTree, ..., RenderEnd, Present) and calls the paint
       // directly on each element that owns a visual, standing in for the
       // descent that is missing.
+      {
+        static uint32_t pg_logs = 0;
+        if (pg_logs++ < 3) {
+          XELOGI("PaintGate: guide_paint_frame={} guide_draw_this_={:08X}",
+                 ::cvars::guide_paint_frame ? "true" : "false",
+                 guide_draw_this_);
+        }
+      }
       if (::cvars::guide_paint_frame && guide_draw_this_) {
         auto* pm2 = kernel_state()->memory();
         // Clear the 0x20 latch immediately before the paint, not only in the
