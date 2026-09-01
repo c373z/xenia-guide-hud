@@ -2844,6 +2844,25 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
     }
     return false;
   }
+  // Phase 917: every input to the rasteriser is correct and the output is
+  // speckle (916), so read which render target the cache actually binds for
+  // these draws and compare it against the title's. base_tiles and
+  // pitch_tiles_at_32bpp are what turn coherent geometry into scattered
+  // writes if they disagree.
+  {
+    static uint32_t rtl_g = 0, rtl_t = 0;
+    bool want = guide_overlay_exec_ ? (rtl_g++ < 3) : (rtl_t++ < 3);
+    if (want) {
+      uint32_t fmts[5] = {};
+      uint32_t bound = render_target_cache_->GetLastUpdateBoundRenderTargets(fmts);
+      const RegisterFile& krf = *register_file_;
+      XELOGI("RTKey[{}]: bound_mask={:02X} fmt0={} | SURFACE={:08X} "
+             "COLOR0={:08X} DEPTH={:08X}",
+             guide_overlay_exec_ ? "guide" : "title", bound, fmts[1],
+             krf[0x2000], krf[0x2001], krf[0x2002]);
+    }
+  }
+
 
 
   // Create the pipeline (for this, need the actually used render target formats
