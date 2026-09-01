@@ -2133,6 +2133,17 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
               need += fmt::format("slot{}(type={} addr={:08X} words={} stride={}) ",
                                   fc, s0 & 0x3u, vaddr, vwords,
                                   vb.stride_words);
+              // Phase 925: everything since phase 910 assumes these are
+              // float32 because they decode as clean floats. The fetch
+              // instruction declares the real format - read it.
+              for (auto& at : vb.attributes) {
+                const auto& op = at.fetch_instr.attributes;
+                XELOGI("GuideVFmt: slot{} data_format={} offset={} stride={} "
+                       "exp_adjust={} signed={} norm={}",
+                       fc, uint32_t(op.data_format), op.offset, op.stride,
+                       op.exp_adjust, op.is_signed ? 1 : 0,
+                       uint32_t(op.signed_rf_mode) );
+              }
               // Phase 910: the binding is valid, so read what it points at.
               // These are post-conversion physical addresses.
               const uint8_t* vdat =
