@@ -3604,6 +3604,25 @@ bool D3D12CommandProcessor::IssueCopy() {
   // Phase 884: say which of the three ways this can fail actually fires when
   // the Guide's extra resolve calls it. "IssueCopy FAILED" alone cannot
   // distinguish no submission from a declined resolve.
+  // Phase 946: run the Guide's stream here, immediately before the title's
+  // resolve, so its pixels are in EDRAM when the step that copies EDRAM to the
+  // displayed image runs. Every other placement leaves them after that copy.
+  if (cvars::guide_overlay_before_resolve && !guide_resolve_replay_ &&
+      !guide_overlay_exec_ && guide_overlay_ptr_ && guide_overlay_words_) {
+    uint32_t bptr = guide_overlay_ptr_;
+    uint32_t bwords = guide_overlay_words_;
+    guide_overlay_ptr_ = 0;
+    guide_overlay_exec_ = true;
+    uint32_t before_draws = guide_draw_count_;
+    ExecuteGuestBufferVirtualUnsafe(bptr, bwords);
+    guide_overlay_exec_ = false;
+    static uint32_t brl = 0;
+    if (brl++ < 4) {
+      XELOGI("GuideBeforeResolve: ran {} words at {:08X}, {} draws, just "
+             "before the title's resolve",
+             bwords, bptr, guide_draw_count_ - before_draws);
+    }
+  }
   bool ic_sub = BeginSubmission(true);
   if (guide_resolve_replay_) {
     static uint32_t icl = 0;

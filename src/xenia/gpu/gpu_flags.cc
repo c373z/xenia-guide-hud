@@ -191,6 +191,13 @@ DEFINE_bool(guide_replay_at_draw, false,
 // Phase 728: every layer of the draw path reports correct and no pixels change.
 // Before chasing the resolve further, establish whether guest memory at the
 // swap's frontbuffer_ptr reaches the display at all.
+DEFINE_bool(guide_overlay_before_resolve, false,
+            "Execute the published Guide stream immediately before the title's "
+            "own resolve, rather than at the swap. Phase 946: the title's "
+            "resolve is the step that moves EDRAM to the displayed image, so "
+            "drawing just before it is the one placement where the pixels "
+            "cannot be stranded.",
+            "GPU");
 DEFINE_bool(guide_overlay_test_quad, false,
             "Overwrite the Guide's vertex data with a full-screen quad in NDC "
             "before its draws. Phase 939: everything that could stop a "

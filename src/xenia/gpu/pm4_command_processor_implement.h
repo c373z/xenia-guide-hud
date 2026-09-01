@@ -963,7 +963,11 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
              guide_overlay_ptr_, guide_overlay_words_);
     }
   }
-  if (guide_overlay_ptr_ && guide_overlay_words_) {
+  // Phase 946: when the stream is to be run just before the title's resolve,
+  // leave it published here - this handler would otherwise consume and clear
+  // it, which is why the injection never fired.
+  if (guide_overlay_ptr_ && guide_overlay_words_ &&
+      !cvars::guide_overlay_before_resolve) {
     uint32_t gptr = guide_overlay_ptr_;
     uint32_t gwords = guide_overlay_words_;
     guide_overlay_ptr_ = 0;
