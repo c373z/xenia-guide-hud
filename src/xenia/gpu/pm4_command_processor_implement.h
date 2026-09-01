@@ -2075,6 +2075,28 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
         // at 0x4800 + 2*slot: dword_0 is type:2 | address:30 with the address
         // in dwords, dword_1 is endian:2 | size:24. Dump the slots that hold
         // a vertex fetch and the first floats each one points at.
+        // Phase 909: phases 895-907 assumed the null in fetch slot 2 is what
+        // starves these draws, without checking that the shader reads slot 2
+        // at all. The vertex shader lists the constants it fetches from, so
+        // ask it rather than assuming.
+        {
+          Shader* vs = active_vertex_shader();
+          std::string need;
+          if (vs) {
+            for (auto& vb : vs->vertex_bindings()) {
+              uint32_t fc = vb.fetch_constant;
+              uint32_t s0 = drf[0x4800 + fc * 2];
+              uint32_t s1 = drf[0x4801 + fc * 2];
+              need += fmt::format("slot{}(type={} addr={:08X} words={}) ", fc,
+                                  s0 & 0x3u, s0 & 0xFFFFFFFCu,
+                                  (s1 >> 2) & 0xFFFFFFu);
+            }
+          }
+          XELOGI("GuideVSBindings: shader={} bindings={} | {}",
+                 vs ? "present" : "NONE",
+                 vs ? vs->vertex_bindings().size() : 0,
+                 need.empty() ? "<none>" : need);
+        }
         for (uint32_t slot = 0; slot < 6; ++slot) {
           uint32_t d0 = drf[0x4800 + slot * 2];
           uint32_t d1 = drf[0x4801 + slot * 2];
