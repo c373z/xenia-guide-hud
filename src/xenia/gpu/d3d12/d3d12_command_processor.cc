@@ -2817,6 +2817,19 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
   if (!primitive_processor_->Process(primitive_processing_result)) {
     return false;
   }
+  // Phase 966: the vertex path is the last input taken on trust. Report what
+  // the primitive processor actually hands the GPU for the Guide's draws.
+  if (guide_overlay_exec_) {
+    static uint32_t pp = 0;
+    if (++pp <= 3) {
+      XELOGI("GuidePrimProc: host_vertex_count={} host_primitive_type={} "
+             "index_buffer_type={} guest_index_base={:08X}",
+             primitive_processing_result.host_draw_vertex_count,
+             uint32_t(primitive_processing_result.host_primitive_type),
+             uint32_t(primitive_processing_result.index_buffer_type),
+             primitive_processing_result.guest_index_base);
+    }
+  }
   if (!primitive_processing_result.host_draw_vertex_count) {
     // Phase 947: another silent success - the primitive processor produced no
     // vertices, so the draw returns true without drawing.
