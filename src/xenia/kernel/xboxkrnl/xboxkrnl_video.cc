@@ -8070,14 +8070,15 @@ void VdSwap_entry(
               // 256-entry ramp reaching the register path blacks the display on
               // its own, independently of the missing geometry. Refuse to
               // execute a range whose parse overran.
-              if (::cvars::guide_execute_command_stream &&
-                  !emit_blocks.empty()) {
+              if (!emit_blocks.empty()) {
                 uint32_t d0 = gso2->command_processor()->guide_draw_count_;
                 uint32_t total = 0;
                 for (auto& b : emit_blocks) {
                   uint32_t nw = (b.second - b.first) / 4;
-                  gso2->command_processor()->ExecuteGuestBufferVirtualUnsafe(
-                      b.first, nw);
+                  if (::cvars::guide_execute_command_stream) {
+                    gso2->command_processor()->ExecuteGuestBufferVirtualUnsafe(
+                        b.first, nw);
+                  }
                   total += nw;
                 }
                 // Phase 872: the EmitFrame blocks are the head of the arena
@@ -8105,8 +8106,21 @@ void VdSwap_entry(
                 }
                 uint32_t d1 = gso2->command_processor()->guide_draw_count_;
                 if (start && after > start) {
-                  gso2->command_processor()->ExecuteGuestBufferVirtualUnsafe(
-                      start, (after - start) / 4);
+                  if (::cvars::guide_execute_command_stream) {
+                    // Inline, on the title thread, mid-frame. Phase 874: this
+                    // runs the draws but the title's render state does not
+                    // survive them.
+                    gso2->command_processor()->ExecuteGuestBufferVirtualUnsafe(
+                        start, (after - start) / 4);
+                  } else {
+                    // Phase 875: hand the tail to the GPU thread instead. The
+                    // swap handler executes guide_overlay_ptr_ just before the
+                    // swap, which is after the title's own frame - the point
+                    // the inline path was clobbering.
+                    gso2->command_processor()->guide_overlay_words_ =
+                        (after - start) / 4;
+                    gso2->command_processor()->guide_overlay_ptr_ = start;
+                  }
                 }
                 static uint32_t blk_logs = 0;
                 if (blk_logs++ < 3) {
