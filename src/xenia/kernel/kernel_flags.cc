@@ -365,6 +365,16 @@ DEFINE_bool(guide_patch_null_render, false,
             "time, before anything JITs the function.",
             "Kernel");
 
+DEFINE_bool(guide_split_reserve_buf, false,
+            "Allocate a SEPARATE buffer for the reservation window "
+            "[dev+0x30]/[0x34] instead of pointing it at the command buffer. "
+            "Phase 812: GuideBindDeviceCmdbuf widens the reservation onto the "
+            "same allocation it binds as the command buffer, so reservation "
+            "payload (matrices, clip planes) lands inside what reads back as "
+            "the command stream - which invalidated every packet count in "
+            "phases 806-811. Splitting them makes the command stream "
+            "readable.",
+            "GuideResearch");
 DEFINE_string(guide_status_fns, "",
               "Comma-separated hex guest addresses. On the coverage readback, "
               "report each one's symbol status (DEFINED-translated = it ran, "

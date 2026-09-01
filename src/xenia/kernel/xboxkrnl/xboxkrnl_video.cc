@@ -1262,9 +1262,28 @@ uint32_t GuideBindDeviceCmdbuf(uint32_t dev, void* ts, uint32_t kb) {
   // 81A042E0, the reservation that seeds the emitter's cursor, allocates from
   // [dev+0x30]/[dev+0x34] - a different pair from the block above, and the
   // fit test fails if they are not widened too.
-  xe::store_and_swap<uint32_t>(mem->TranslateVirtual(dev + 0x30u), cbuf);
+  // Phase 813: by default this points the reservation window at the same
+  // allocation as the command buffer, which is what made the command stream
+  // unreadable (812). With guide_split_reserve_buf the reservation gets its
+  // own buffer of the same size, so the two no longer overlap.
+  uint32_t rbuf = cbuf;
+  if (::cvars::guide_split_reserve_buf) {
+    static uint32_t rb = 0;
+    if (!rb) {
+      rb = mem->SystemHeapAlloc(csize, 4096, kSystemHeapPhysical);
+      if (rb) std::memset(mem->TranslateVirtual(rb), 0, csize);
+    }
+    if (rb) {
+      rbuf = rb;
+      XELOGI("GuideBindDeviceCmdbuf: split reserve buffer {:08X} (cmd {:08X})",
+             rb, cbuf);
+    } else {
+      XELOGW("GuideBindDeviceCmdbuf: split reserve alloc failed; aliasing");
+    }
+  }
+  xe::store_and_swap<uint32_t>(mem->TranslateVirtual(dev + 0x30u), rbuf);
   xe::store_and_swap<uint32_t>(mem->TranslateVirtual(dev + 0x34u),
-                               cbuf + csize);
+                               rbuf + csize);
   // Phase 684: [+0x38] is the writer's safety limit, and xam's own installer
   // (81A018C8) derives it as end - 0xA0. Setting the pair without it left
   // 40870D00 with a limit still pointing into the device's old buffer while
@@ -4441,6 +4460,97 @@ void VdSwap_entry(
                 XELOGI("GuideDevVT: dev={:08X} vt={:08X} [+F4]={:08X} "
                        "[[+F4]+8]={:08X} (818FA030 = the live path)",
                        dv, ord(dv), sec, sec ? ord(sec + 8u) : 0u);
+                // Phase 805: with the skin the Guide runs on its OWN device
+                // whose command buffer lives at [dev+0x30] in the 4087xxxx
+                // range - not the 512KB buffer we bind at 3009xxxx. Every
+                // "0 words emitted" measurement so far (790 onward) read our
+                // buffer's cursor while the Guide was writing into its own.
+                // Scan the real one for draw packets.
+                uint32_t cur = ord(dv + 0x30u), end = ord(dv + 0x34u);
+                if (cur) {
+                  auto* mm = kernel_state()->memory();
+                  uint32_t lo = cur > 0x8000u ? cur - 0x8000u : 0u;
+                  uint32_t di = 0, di2 = 0, t3 = 0, scanned = 0;
+                  std::map<uint32_t, uint32_t> ops;
+                  for (uint32_t a = lo; a + 4 <= cur; a += 4) {
+                    auto* hp = mm->LookupHeap(a);
+                    if (!hp || hp->QueryRangeAccess(a, a + 4u) ==
+                                   xe::memory::PageAccess::kNoAccess) {
+                      continue;
+                    }
+                    uint32_t v = xe::load_and_swap<uint32_t>(
+                        mm->TranslateVirtual(a));
+                    ++scanned;
+                    if ((v & 0xC0000000u) != 0xC0000000u) continue;
+                    ++t3;
+                    uint32_t op = (v >> 8) & 0x7Fu;
+                    if (op == 0x22u) ++di;
+                    if (op == 0x36u) ++di2;
+                    // Phase 806: what it DOES emit says which stage it
+                    // reaches. Count opcodes rather than only looking for the
+                    // one that is missing.
+                    ++ops[op];
+                  }
+                  std::string oh;
+                  for (auto& kv : ops) {
+                    oh += fmt::format("{:02X}x{} ", kv.first, kv.second);
+                  }
+                  XELOGI("GuideOwnBuf: dev={:08X} [30]={:08X} [34]={:08X} | "
+                         "scanned {} words below cursor: type3={} "
+                         "DRAW_INDX={} DRAW_INDX_2={} | ops: {}",
+                         dv, cur, end, scanned, t3, di, di2, oh);
+                  // Phase 807: 0x7F dominates the histogram and is not an
+                  // opcode - it is 0xFFFFFFFF filler passing the type-3 mask.
+                  // Dump the words immediately below the cursor so the real
+                  // tail of the stream can be decoded by hand instead of
+                  // inferred from a histogram that counts unwritten memory.
+                  std::string tail;
+                  uint32_t tlo = cur > 0x100u ? cur - 0x100u : 0u;
+                  for (uint32_t a = tlo; a + 4 <= cur; a += 4) {
+                    auto* hp2 = mm->LookupHeap(a);
+                    if (!hp2 || hp2->QueryRangeAccess(a, a + 4u) ==
+                                    xe::memory::PageAccess::kNoAccess) {
+                      continue;
+                    }
+                    tail += fmt::format(
+                        "{:08X} ",
+                        xe::load_and_swap<uint32_t>(mm->TranslateVirtual(a)));
+                  }
+                  XELOGI("GuideBufTail {:08X}-{:08X}: {}", tlo, cur, tail);
+                  // Phase 809: the scans above look BELOW the cursor. With a
+                  // freshly bound buffer the cursor is base-4, so that window
+                  // is entirely outside the buffer and necessarily empty -
+                  // which is what 808 read as "nothing was written". Scan
+                  // FORWARD from the command base instead.
+                  uint32_t cbase = ord(dv + 0x2B48u);
+                  if (cbase) {
+                    std::map<uint32_t, uint32_t> fops;
+                    uint32_t fd = 0, ft3 = 0, fscan = 0;
+                    for (uint32_t a = cbase; a < cbase + 0x8000u; a += 4) {
+                      auto* hp3 = mm->LookupHeap(a);
+                      if (!hp3 || hp3->QueryRangeAccess(a, a + 4u) ==
+                                      xe::memory::PageAccess::kNoAccess) {
+                        continue;
+                      }
+                      uint32_t v = xe::load_and_swap<uint32_t>(
+                          mm->TranslateVirtual(a));
+                      ++fscan;
+                      if (v == 0u || v == 0xFFFFFFFFu) continue;
+                      if ((v & 0xC0000000u) != 0xC0000000u) continue;
+                      ++ft3;
+                      uint32_t op = (v >> 8) & 0x7Fu;
+                      ++fops[op];
+                      if (op == 0x22u || op == 0x36u) ++fd;
+                    }
+                    std::string fh;
+                    for (auto& kv : fops) {
+                      fh += fmt::format("{:02X}x{} ", kv.first, kv.second);
+                    }
+                    XELOGI("GuideCmdFwd: base={:08X} cur={:08X} scanned {} | "
+                           "type3={} draws={} | ops: {}",
+                           cbase, ord(dv + 0x2B4Cu), fscan, ft3, fd, fh);
+                  }
+                }
               }
             }
           }
@@ -4874,10 +4984,26 @@ void VdSwap_entry(
               // returns 0 - which is the zero cursor the emitter faults on.
             if (ckpt_on) XELOGI("GuideCk: survey_start");
               // Point them at the buffer we just allocated.
+              // Phase 813: this is the site that actually aliases the
+              // reservation window onto the command buffer (the boot binder
+              // needs guide_second_context_kb and never runs here). Give the
+              // reservation its own allocation when asked, so the command
+              // stream can be read without reservation payload in it.
+              uint32_t rsv = cbuf;
+              if (::cvars::guide_split_reserve_buf) {
+                static uint32_t rb2 = 0;
+                if (!rb2) {
+                  rb2 = cm->SystemHeapAlloc(csize, 4096, kSystemHeapPhysical);
+                  if (rb2) std::memset(cm->TranslateVirtual(rb2), 0, csize);
+                  XELOGI("GuideSplitReserve: cmd={:08X} reserve={:08X}", cbuf,
+                         rb2);
+                }
+                if (rb2) rsv = rb2;
+              }
               xe::store_and_swap<uint32_t>(
-                  cm->TranslateVirtual(cdev + 0x30u), cbuf);
+                  cm->TranslateVirtual(cdev + 0x30u), rsv);
               xe::store_and_swap<uint32_t>(
-                  cm->TranslateVirtual(cdev + 0x34u), cbuf + csize);
+                  cm->TranslateVirtual(cdev + 0x34u), rsv + csize);
               xe::store_and_swap<uint32_t>(
                   cm->TranslateVirtual(cdev + 0x38u), cbuf + csize - 0xA0u);
               if (ckpt_on) XELOGI("GuideCk: sv_reads");
@@ -8412,6 +8538,94 @@ void VdSwap_entry(
                "limit[2B50]={:08X} pend[2B54]={:08X} reserve[30]={:08X}",
                drawbr, qdv, q(qdv + 0x2B48u), q(qdv + 0x2B4Cu),
                q(qdv + 0x2B50u), q(qdv + 0x2B54u), g_draw_entry_reserve);
+        // Phase 809: scan the command buffer FORWARD from its base, here at
+        // the draw, where the base is actually populated. The earlier scans
+        // looked below the cursor, and with cur = base-4 that window lies
+        // outside the buffer entirely - which is what 808 read as an empty
+        // stream.
+        {
+          uint32_t cb = q(qdv + 0x2B48u);
+          auto* mq = kernel_state()->memory();
+          if (cb) {
+            std::map<uint32_t, uint32_t> fo;
+            uint32_t t3 = 0, dr = 0, sc = 0, waits = 0;
+            for (uint32_t a = cb; a < cb + 0x8000u; a += 4) {
+              auto* hp = mq->LookupHeap(a);
+              if (!hp || hp->QueryRangeAccess(a, a + 4u) ==
+                             xe::memory::PageAccess::kNoAccess) {
+                continue;
+              }
+              uint32_t v =
+                  xe::load_and_swap<uint32_t>(mq->TranslateVirtual(a));
+              ++sc;
+              if (v == 0u || v == 0xFFFFFFFFu) continue;
+              if ((v & 0xC0000000u) != 0xC0000000u) continue;
+              ++t3;
+              uint32_t op = (v >> 8) & 0x7Fu;
+              ++fo[op];
+              if (op == 0x22u || op == 0x36u) ++dr;
+              // Phase 810: 3C is WAIT_REG_MEM. A wait that never clears would
+              // stop the stream exactly where this one stops - after the
+              // shader loads, before any draw. Dump its payload so the poll
+              // register, reference and mask can be read.
+              if ((op == 0x3Cu || op == 0x3Bu) && waits < 4) {
+                ++waits;
+                uint32_t cnt = ((v >> 16) & 0x3FFFu) + 1u;
+                std::string pl;
+                for (uint32_t k = 0; k <= cnt && k < 8u; ++k) {
+                  uint32_t pa = a + k * 4u;
+                  auto* hpp = mq->LookupHeap(pa);
+                  if (!hpp || hpp->QueryRangeAccess(pa, pa + 4u) ==
+                                  xe::memory::PageAccess::kNoAccess) {
+                    break;
+                  }
+                  pl += fmt::format(
+                      "{:08X} ",
+                      xe::load_and_swap<uint32_t>(mq->TranslateVirtual(pa)));
+                }
+                XELOGI("CmdWait op={:02X} at {:08X} count={}: {}", op, a, cnt,
+                       pl);
+              }
+            }
+            std::string fh;
+            for (auto& kv : fo) fh += fmt::format("{:02X}x{} ", kv.first, kv.second);
+            XELOGI("CmdFwd #{}: base={:08X} scanned {} type3={} draws={} | {}",
+                   drawbr, cb, sc, t3, dr, fh);
+            // Phase 812: counting matches cannot distinguish a three-word
+            // stream from a fragmented one - every packet-count claim in
+            // 806-809 turned on that. Dump the words raw, from the first
+            // non-zero onward, and read the structure instead of tallying it.
+            {
+              uint32_t first = 0;
+              for (uint32_t a = cb; a < cb + 0x8000u; a += 4) {
+                auto* hp = mq->LookupHeap(a);
+                if (!hp || hp->QueryRangeAccess(a, a + 4u) ==
+                               xe::memory::PageAccess::kNoAccess) {
+                  continue;
+                }
+                uint32_t v =
+                    xe::load_and_swap<uint32_t>(mq->TranslateVirtual(a));
+                if (v != 0u && v != 0xFFFFFFFFu) { first = a; break; }
+              }
+              if (first) {
+                std::string raw;
+                for (uint32_t k = 0; k < 48u; ++k) {
+                  uint32_t a = first + k * 4u;
+                  auto* hp = mq->LookupHeap(a);
+                  if (!hp || hp->QueryRangeAccess(a, a + 4u) ==
+                                 xe::memory::PageAccess::kNoAccess) {
+                    break;
+                  }
+                  raw += fmt::format(
+                      "{:08X} ",
+                      xe::load_and_swap<uint32_t>(mq->TranslateVirtual(a)));
+                }
+                XELOGI("CmdRaw #{}: first nonzero at {:08X} (+{}): {}", drawbr,
+                       first, first - cb, raw);
+              }
+            }
+          }
+        }
         // The crash unwinds to 913EABC4, inside the hud render entry
         // (913EAB28) - it is THIS path that faults, not the paint. The reserve
         // 81A042E0 draws its window from [dev+0x30]/[dev+0x34]; every widening
