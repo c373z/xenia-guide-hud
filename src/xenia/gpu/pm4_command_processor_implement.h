@@ -1082,6 +1082,16 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
     XELOGI("GuideVTE: passthru patches={} clip patches={} marker patches={}",
            guide_ov_vtepatch_, guide_ov_clippatch_, guide_ov_markerpatch_);
     if (cvars::guide_quad_census) {
+      std::string rts;
+      for (uint32_t i = 0; i < guide_rt_distinct_; ++i) {
+        rts += fmt::format("SURFACE={:08X}/COLOR={:08X} x{} ",
+                           uint32_t(guide_rt_key_[i] >> 32),
+                           uint32_t(guide_rt_key_[i]), guide_rt_count_[i]);
+      }
+      XELOGI("GuideRTCensus: {} distinct target(s) over the burst | {}",
+             guide_rt_distinct_, rts.empty() ? "<none>" : rts);
+    }
+    if (cvars::guide_quad_census) {
       XELOGI("GuideQuadCensus: measured={} thin(<1px tall)={} "
              "narrow(<1px wide)={} degenerate={} non-finite={} skipped={} | "
              "max {}x{} | union x[{}..{}] y[{}..{}]",
@@ -2263,6 +2273,26 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
     // (964): one pixel tall. A sub-pixel primitive rasterises to nothing
     // however correct everything feeding it is, and the extent has only ever
     // been computed for that one draw. Measure all of them.
+    // Phase 991: which surface each draw of the burst targets, for all of
+    // them. A clear of the bound target reaches the display (982) and the
+    // draws do not (983), so where the draws are actually pointed is the one
+    // thing about the target that has only ever been sampled three times.
+    if (cvars::guide_quad_census) {
+      uint64_t rtk = (uint64_t(drf[0x2000]) << 32) | uint64_t(drf[0x2001]);
+      bool found = false;
+      for (uint32_t i = 0; i < guide_rt_distinct_; ++i) {
+        if (guide_rt_key_[i] == rtk) {
+          ++guide_rt_count_[i];
+          found = true;
+          break;
+        }
+      }
+      if (!found && guide_rt_distinct_ < kGuideRTCensus) {
+        guide_rt_key_[guide_rt_distinct_] = rtk;
+        guide_rt_count_[guide_rt_distinct_] = 1;
+        ++guide_rt_distinct_;
+      }
+    }
     if (cvars::guide_quad_census) {
       Shader* qvs = active_vertex_shader();
       uint32_t qfc = 0xFFFFFFFFu;

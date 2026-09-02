@@ -586,6 +586,12 @@ class CommandProcessor {
   uint32_t guide_ov_qdegen_ = 0, guide_ov_qnonfin_ = 0, guide_ov_qskip_ = 0;
   float guide_ov_qmaxw_ = 0.0f, guide_ov_qmaxh_ = 0.0f;
   float guide_ov_qbb_[4] = {1e30f, 1e30f, -1e30f, -1e30f};
+  // Phase 991: HostRT only prints when the binding changes and is capped at
+  // three lines, so nothing in this log covers where the OTHER 538 draws go.
+  static constexpr uint32_t kGuideRTCensus = 8;
+  uint64_t guide_rt_key_[kGuideRTCensus] = {};
+  uint32_t guide_rt_count_[kGuideRTCensus] = {};
+  uint32_t guide_rt_distinct_ = 0;
   bool guide_seen_burst_ = false;
   size_t guide_burst_list_bytes_ = 0;
   // Phase 894: the whole RB/PA block from the title's last draw, not a
