@@ -4812,11 +4812,28 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
   // uses - Presenter::CaptureGuestOutput - is reachable from the graphics
   // system, and RawImage is plain R8G8B8X8, so the frame can be dumped raw and
   // turned into a PNG afterwards.
-  if (cvars::guide_capture_seconds > 0) {
+  if (cvars::guide_capture_seconds > 0 || cvars::guide_capture_on_burst) {
     int cap_delay = cvars::guide_capture_seconds;
     std::thread([this, cap_delay]() {
       xe::threading::set_name("GuideCapture");
-      xe::threading::Sleep(std::chrono::seconds(cap_delay));
+      // Phase 997: the burst emits draws on exactly one frame (996), and this
+      // thread has always slept a fixed number of seconds - so every capture
+      // in this investigation has photographed a frame the Guide did not draw
+      // in. Wait for the event instead, when asked to.
+      if (cvars::guide_capture_on_burst) {
+        uint32_t waited_ms = 0;
+        while (xe::gpu::g_guide_bursts_drawn.load(std::memory_order_acquire) ==
+                   0 &&
+               waited_ms < 120000) {
+          xe::threading::Sleep(std::chrono::milliseconds(2));
+          waited_ms += 2;
+        }
+        XELOGI("GuideCapture: burst-drawn seen after {} ms ({} burst(s))",
+               waited_ms,
+               xe::gpu::g_guide_bursts_drawn.load(std::memory_order_acquire));
+      } else {
+        xe::threading::Sleep(std::chrono::seconds(cap_delay));
+      }
       auto* gs = graphics_system();
       auto* presenter = gs ? gs->presenter() : nullptr;
       if (!presenter) {

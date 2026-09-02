@@ -127,6 +127,7 @@ bool GetGPUSetting(GPUSetting setting) {
 }
 
 bool g_guide_in_draw_scope = false;  // phase 528
+std::atomic<uint32_t> g_guide_bursts_drawn{0};  // phase 997
 bool g_guide_replaying = false;      // phase 536
 uint32_t g_guide_current_ib = 0;     // phase 746
 uint32_t g_guide_current_ib_words = 0;

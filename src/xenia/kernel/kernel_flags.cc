@@ -1351,6 +1351,13 @@ DEFINE_int32(guide_capture_interval_ms, 8,
              "phases 872-878 describes one wall-clock instant that nothing "
              "synchronises with. Widen it to sample a trajectory instead.",
              "Guide");
+DEFINE_bool(guide_capture_on_burst, false,
+            "Take the capture when the Guide's burst first emits draws, "
+            "instead of after guide_capture_seconds. Phase 997: the burst "
+            "emits draws on exactly ONE frame - re-executions of the same "
+            "published range produce 0 draws (996) - so a wall-clock capture "
+            "has never photographed a frame the Guide drew in.",
+            "Kernel");
 DEFINE_int32(guide_capture_count, 1,
              "Capture this many consecutive presented frames, 8ms apart, to "
              "guide_capture_N.raw. Phase 718: the Guide resolves to 1E69E000 "

@@ -235,6 +235,21 @@ DEFINE_bool(guide_overlay_repeat, false,
             "rendered perfectly for one frame would have been photographed 10 "
             "seconds later and recorded as 0 pixels.",
             "GuideResearch");
+DEFINE_bool(guide_clear_rt_mid, false,
+            "Clear the bound colour target to magenta once, in the MIDDLE of "
+            "the burst, between two of the Guide's draws. Phase 996: clears "
+            "immediately before and immediately after the burst both reach the "
+            "display, and the draws in between do not - so this separates "
+            "'the draws are special' from 'the interval is special'.",
+            "GuideResearch");
+DEFINE_bool(guide_d3d12_messages, false,
+            "Drain the Direct3D 12 info queue into the log around the Guide's "
+            "burst, with the storage filter cleared. Phase 995: Xenia "
+            "configures the info queue but never reads it, and its deny list "
+            "silences RENDER_TARGET_FORMAT_MISMATCH_PIPELINE_STATE and "
+            "RENDERTARGETVIEW_NOT_SET - the two messages that would explain "
+            "fragments being produced and no pixel written.",
+            "GuideResearch");
 DEFINE_bool(guide_clear_rt_pre, false,
             "Clear the bound colour target to magenta BEFORE the burst rather "
             "than after. Phase 987: a clear after the burst survives to the "

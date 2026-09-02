@@ -114,6 +114,11 @@ enum class GammaRampType {
 // reference to the command processor, and the RT-identity question has to be
 // answered from inside it.
 extern bool g_guide_in_draw_scope;
+// Phase 997: how many bursts have actually emitted draws. The capture in
+// emulator.cc fires on a wall clock, and the burst emits draws on exactly ONE
+// frame (996), so every capture in this log has been of a frame the Guide did
+// not draw in. This lets the capture wait for the event instead of the clock.
+extern std::atomic<uint32_t> g_guide_bursts_drawn;
 // Phase 536: set while the captured IB is being replayed, so the render target
 // cache can report what state the replayed draws actually get - the suspicion
 // is that they run against the title's state, not the Guide's.
@@ -568,6 +573,7 @@ class CommandProcessor {
   virtual void GuideOcclusionBegin() {}
   virtual void GuideOcclusionEnd() {}
   virtual void GuideClearRenderTarget(bool green = false) {}
+  virtual void GuideDrainDebugMessages(const char* when) {}
 
   bool guide_overlay_exec_ = false;
   uint32_t guide_ov_seen_ = 0, guide_ov_predrop_ = 0, guide_ov_vizdrop_ = 0;

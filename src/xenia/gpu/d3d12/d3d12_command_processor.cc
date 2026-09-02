@@ -3679,7 +3679,16 @@ bool D3D12CommandProcessor::IssueCopy() {
     if (cvars::guide_clear_rt_pre) {
       GuideClearRenderTarget(true);
     }
+    // Phase 992: the occlusion query has only ever run at the swap-time
+    // placement, which 980 showed is dead. Whether fragments are produced at
+    // the placement that DOES reach the display (982) has never been measured,
+    // and it is the difference between "the draws write nothing" and "at this
+    // placement the draws are dropped before the rasteriser".
+    GuideDrainDebugMessages("pre");
+    GuideOcclusionBegin();
     ExecuteGuestBufferVirtualUnsafe(bptr, bwords);
+    GuideOcclusionEnd();
+    GuideDrainDebugMessages("post");
     // Phase 978: the same two probes the swap-time placement has, so the two
     // can be compared on what the rasteriser did rather than only on what
     // reached the screen.
@@ -3687,6 +3696,9 @@ bool D3D12CommandProcessor::IssueCopy() {
       GuideClearRenderTarget();
     }
     guide_overlay_exec_ = false;
+    if (guide_draw_count_ != before_draws) {
+      g_guide_bursts_drawn.fetch_add(1, std::memory_order_release);
+    }
     static uint32_t brl = 0;
     if (brl++ < 4) {
       XELOGI("GuideBeforeResolve: ran {} words at {:08X}, {} draws, just "
@@ -4320,6 +4332,63 @@ void D3D12CommandProcessor::GuideInvalidateGuestRange(uint32_t addr,
 // the last fork this line has. Standalone rather than driven through the ZPD
 // pool, which needs report handles and segments a synthetic burst does not
 // have.
+// Phase 995: Xenia configures the D3D12 info queue and never reads it, so
+// every validation message the debug layer has ever produced has gone
+// nowhere. Its deny list also silences RENDER_TARGET_FORMAT_MISMATCH_PIPELINE_
+// STATE and CREATEGRAPHICSPIPELINESTATE_RENDERTARGETVIEW_NOT_SET, which are
+// exactly the two that would explain fragments being produced (976) and no
+// pixel written (983). Clear the filter and drain.
+void D3D12CommandProcessor::GuideDrainDebugMessages(const char* when) {
+  if (!cvars::guide_d3d12_messages) {
+    return;
+  }
+  ID3D12Device* device = GetD3D12Provider().GetDevice();
+  ID3D12InfoQueue* queue = nullptr;
+  if (!device || FAILED(device->QueryInterface(IID_PPV_ARGS(&queue))) ||
+      !queue) {
+    static bool warned = false;
+    if (!warned) {
+      warned = true;
+      XELOGW("GuideD3D12Msg: no info queue - is the debug layer enabled?");
+    }
+    return;
+  }
+  static bool filter_cleared = false;
+  if (!filter_cleared) {
+    filter_cleared = true;
+    queue->ClearStorageFilter();
+    queue->SetMuteDebugOutput(false);
+    XELOGI("GuideD3D12Msg: storage filter cleared, draining from now on");
+  }
+  UINT64 count = queue->GetNumStoredMessages();
+  static uint32_t drained_total = 0;
+  for (UINT64 i = 0; i < count; ++i) {
+    SIZE_T length = 0;
+    if (FAILED(queue->GetMessage(i, nullptr, &length)) || !length) {
+      continue;
+    }
+    std::vector<uint8_t> storage(length);
+    auto* message = reinterpret_cast<D3D12_MESSAGE*>(storage.data());
+    if (FAILED(queue->GetMessage(i, message, &length))) {
+      continue;
+    }
+    if (drained_total++ < 60) {
+      XELOGI("GuideD3D12Msg[{}]: sev={} cat={} id={} | {}", when,
+             uint32_t(message->Severity), uint32_t(message->Category),
+             uint32_t(message->ID),
+             std::string(message->pDescription,
+                         message->DescriptionByteLength
+                             ? message->DescriptionByteLength - 1
+                             : 0));
+    }
+  }
+  if (count) {
+    XELOGI("GuideD3D12Msg[{}]: {} message(s) this drain", when, count);
+  }
+  queue->ClearStoredMessages();
+  queue->Release();
+}
+
 void D3D12CommandProcessor::GuideClearRenderTarget(bool green) {
   if (!render_target_cache_) {
     return;

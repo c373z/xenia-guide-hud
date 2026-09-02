@@ -1036,6 +1036,9 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
     COMMAND_PROCESSOR::GuideOcclusionEnd();
     {
       size_t dcl_after = COMMAND_PROCESSOR::GuideCommandListBytes();
+      if (guide_draw_count_ != draws_before) {
+        g_guide_bursts_drawn.fetch_add(1, std::memory_order_release);
+      }
       guide_seen_burst_ = true;
       guide_burst_list_bytes_ = dcl_after;
       static uint32_t dl = 0;
@@ -2384,6 +2387,15 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
       drf[0x2202] = (drf[0x2202] & ~0x1Fu) | 0x7u;  // alpha test/to-mask off
       COMMAND_PROCESSOR::GuideInvalidateFloatConstants();
       ++guide_ov_markerpatch_;
+    }
+    // Phase 996: a clear immediately before the burst reaches the display
+    // (987) and so does one immediately after (982), while the 541 draws in
+    // between write nothing (983). Put one in the middle.
+    // guide_ov_seen_ is cumulative across bursts, so "== 270" fires once in a
+    // whole session - the same trap as 980. The burst is exactly 541 draws.
+    if (cvars::guide_clear_rt_mid && (guide_ov_seen_ % 541u) == 270u) {
+      COMMAND_PROCESSOR::GuideClearRenderTarget();
+      XELOGI("GuideClearMid: cleared after draw #{}", guide_ov_seen_);
     }
     uint32_t mode_now = drf[0x2208] & 0x7u;
     // Phase 918: the vertex data was read once, for draw #1, and generalised
