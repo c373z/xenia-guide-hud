@@ -30,6 +30,7 @@ DECLARE_bool(guide_d3d12_messages);
 DECLARE_bool(guide_clear_rt_mid);
 DECLARE_bool(guide_suppress_draws);
 DECLARE_bool(guide_rebind_rt);
+DECLARE_bool(guide_degenerate_quad);
 DECLARE_bool(guide_overlay_repeat);
 DECLARE_bool(guide_occlusion_query);
 DECLARE_bool(guide_invalidate_vertex);

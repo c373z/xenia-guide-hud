@@ -235,6 +235,13 @@ DEFINE_bool(guide_overlay_repeat, false,
             "rendered perfectly for one frame would have been photographed 10 "
             "seconds later and recorded as 0 pixels.",
             "GuideResearch");
+DEFINE_bool(guide_degenerate_quad, false,
+            "Collapse the Guide's vertex data to a single point, so its draws "
+            "still run - and still trigger Xenia's ownership transfers - but "
+            "cover no pixels. Phase 1002: guide_suppress_draws skips IssueDraw "
+            "entirely, which also skips Update() and its transfer draws, so it "
+            "cannot tell the Guide's fragments from Xenia's. This can.",
+            "GuideResearch");
 DEFINE_bool(guide_rebind_rt, false,
             "Invalidate the command list's render target binding before every "
             "Guide draw, so OMSetRenderTargets is re-issued. Phase 1000: the "

@@ -2317,6 +2317,22 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
         std::memcpy(&f, &v, 4);
         return f;
       };
+      // Phase 1002: collapse the quad to a point. The draw still issues, the
+      // render target cache still runs Update() and whatever transfers it
+      // implies, and the Guide's own geometry covers nothing - so an occlusion
+      // count taken here is Xenia's contribution alone.
+      if (cvars::guide_degenerate_quad && qaddr && qwords >= 8) {
+        uint8_t* dp = memory_->TranslatePhysical(qaddr);
+        if (dp) {
+          uint32_t first_x = xe::load_and_swap<uint32_t>(dp + 0);
+          uint32_t first_y = xe::load_and_swap<uint32_t>(dp + 4);
+          for (uint32_t k = 1; k < 4; ++k) {
+            xe::store_and_swap<uint32_t>(dp + (k * 2) * 4, first_x);
+            xe::store_and_swap<uint32_t>(dp + (k * 2 + 1) * 4, first_y);
+          }
+          COMMAND_PROCESSOR::GuideInvalidateGuestRange(qaddr, 8 * 4u);
+        }
+      }
       if (cvars::guide_invalidate_vertex && qaddr && qwords) {
         COMMAND_PROCESSOR::GuideInvalidateGuestRange(qaddr, qwords * 4u);
       }

@@ -3277,6 +3277,45 @@ ID3D12PipelineState* PipelineCache::CreateD3D12Pipeline(
     state_desc.DepthStencilState.StencilEnable = false;
   }
 
+  // Phase 1004: everything read so far is the PipelineDescription, which is
+  // Xenia's own struct. This is the actual D3D12 desc, after every translation
+  // step - the last artefact between the guest and the driver.
+  {
+    // Phase 1005: pipelines are created on Xenia's own worker threads, where
+    // guide_overlay_exec_ is false - so gating this on it printed nothing for
+    // the Guide at all. Identify it by its shader hash instead: the Guide's
+    // pixel shader is E2467BCFFC6F4C1E and its vertex shader
+    // E91536F60A69ABF3.
+    static uint32_t sdl_g = 0, sdl_t = 0;
+    bool gpso = description.pixel_shader_hash == 0xE2467BCFFC6F4C1Eull ||
+                description.vertex_shader_hash == 0xE91536F60A69ABF3ull;
+    if ((gpso ? sdl_g : sdl_t)++ < 3) {
+      const auto& b0 = state_desc.BlendState.RenderTarget[0];
+      XELOGI(
+          "GuidePSODesc[{}]: VS={} PS={} GS={} | NumRT={} RTV0={} DSV={} "
+          "SampleMask={:08X} SampleCount={} | blend en={} logic={} src={} "
+          "dst={} op={} writemask={:X} | rast cull={} fill={} ccw={} "
+          "depthclip={} forcedsamples={} | ds depth={} stencil={} | "
+          "AlphaToCoverage={} IndependentBlend={}",
+          gpso ? "guide" : "title",
+          state_desc.VS.BytecodeLength, state_desc.PS.BytecodeLength,
+          state_desc.GS.BytecodeLength, state_desc.NumRenderTargets,
+          uint32_t(state_desc.RTVFormats[0]), uint32_t(state_desc.DSVFormat),
+          state_desc.SampleMask, state_desc.SampleDesc.Count,
+          uint32_t(b0.BlendEnable), uint32_t(b0.LogicOpEnable),
+          uint32_t(b0.SrcBlend), uint32_t(b0.DestBlend), uint32_t(b0.BlendOp),
+          uint32_t(b0.RenderTargetWriteMask),
+          uint32_t(state_desc.RasterizerState.CullMode),
+          uint32_t(state_desc.RasterizerState.FillMode),
+          uint32_t(state_desc.RasterizerState.FrontCounterClockwise),
+          uint32_t(state_desc.RasterizerState.DepthClipEnable),
+          state_desc.RasterizerState.ForcedSampleCount,
+          uint32_t(state_desc.DepthStencilState.DepthEnable),
+          uint32_t(state_desc.DepthStencilState.StencilEnable),
+          uint32_t(state_desc.BlendState.AlphaToCoverageEnable),
+          uint32_t(state_desc.BlendState.IndependentBlendEnable));
+    }
+  }
   // Create the D3D12 pipeline state object.
   ID3D12Device* device = command_processor_.GetD3D12Provider().GetDevice();
   ID3D12PipelineState* state;
