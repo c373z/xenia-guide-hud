@@ -432,6 +432,7 @@ class D3D12CommandProcessor final : public CommandProcessor {
   void GuideOcclusionEnd() override;
   void GuideClearRenderTarget(bool green = false) override;
   void GuideDrainDebugMessages(const char* when) override;
+  void GuideRebindRenderTargets() override;
   ID3D12QueryHeap* guide_oq_heap_ = nullptr;
   ID3D12Resource* guide_oq_readback_ = nullptr;
   bool guide_oq_open_ = false;

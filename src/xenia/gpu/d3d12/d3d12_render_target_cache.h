@@ -46,6 +46,7 @@ class D3D12RenderTargetCache final : public RenderTargetCache {
   // question "do the Guide's fragments land in a target that is displayed"
   // can be asked without depending on any per-fragment state.
   bool GuideClearColor0(const float color[4]);
+  void GuideLogHostRTCensus();
 
   D3D12RenderTargetCache(const RegisterFile& register_file,
                          const Memory& memory, TraceWriter& trace_writer,
@@ -783,6 +784,13 @@ class D3D12RenderTargetCache final : public RenderTargetCache {
   // pointer-to-pointer and only ever memcpy'd into, so it cannot be read back
   // as a target. Keep the colour target of the last binding directly.
   const RenderTarget* guide_bound_color0_ = nullptr;
+  // Phase 1000: HostRT prints only when the binding changes and is capped at
+  // three lines, and 991's census covered the GUEST registers, not the host
+  // resource. Count distinct host colour targets bound across the burst.
+  void* guide_host_rt_[8] = {};
+  uint32_t guide_host_rt_count_[8] = {};
+  uint32_t guide_host_rt_distinct_ = 0;
+  uint32_t guide_host_rt_binds_ = 0;
 
   // Temporary storage for descriptors used in PerformTransfersAndResolveClears
   // and DumpRenderTargets.

@@ -5785,6 +5785,27 @@ void D3D12RenderTargetCache::SetCommandListRenderTargets(
       if (i == 0) {
         guide_bound_color0_ = render_target;
       }
+      // Phase 1000: g_guide_in_draw_scope is NOT set during the overlay burst -
+      // HostRT[guide] printed zero times while RTKey[guide], which uses
+      // guide_overlay_exec_, printed three. Same silent-probe trap as 984.
+      if (i == 0 && command_processor_.guide_overlay_exec_) {
+        void* res = static_cast<void*>(
+            static_cast<const D3D12RenderTarget*>(render_target)->resource());
+        ++guide_host_rt_binds_;
+        bool seen = false;
+        for (uint32_t k = 0; k < guide_host_rt_distinct_; ++k) {
+          if (guide_host_rt_[k] == res) {
+            ++guide_host_rt_count_[k];
+            seen = true;
+            break;
+          }
+        }
+        if (!seen && guide_host_rt_distinct_ < 8) {
+          guide_host_rt_[guide_host_rt_distinct_] = res;
+          guide_host_rt_count_[guide_host_rt_distinct_] = 1;
+          ++guide_host_rt_distinct_;
+        }
+      }
     }
     // Phase 730: guest RB_COLOR_INFO matches the title's (723), but that is
     // what the guest asked for. Print which host resource is actually bound,
@@ -5811,6 +5832,16 @@ void D3D12RenderTargetCache::SetCommandListRenderTargets(
         depth_and_color_render_targets[0] ? &dsv_handle : nullptr);
     are_current_command_list_render_targets_valid_ = true;
   }
+}
+
+void D3D12RenderTargetCache::GuideLogHostRTCensus() {
+  std::string t;
+  for (uint32_t i = 0; i < guide_host_rt_distinct_; ++i) {
+    t += fmt::format("{} x{} ", guide_host_rt_[i], guide_host_rt_count_[i]);
+  }
+  XELOGI("GuideHostRTCensus: {} bind(s), {} distinct host target(s) | {}",
+         guide_host_rt_binds_, guide_host_rt_distinct_,
+         t.empty() ? "<none>" : t);
 }
 
 bool D3D12RenderTargetCache::GuideClearColor0(const float color[4]) {

@@ -3689,6 +3689,8 @@ bool D3D12CommandProcessor::IssueCopy() {
     ExecuteGuestBufferVirtualUnsafe(bptr, bwords);
     GuideOcclusionEnd();
     GuideDrainDebugMessages("post");
+    static_cast<D3D12RenderTargetCache*>(render_target_cache_.get())
+        ->GuideLogHostRTCensus();
     // Phase 978: the same two probes the swap-time placement has, so the two
     // can be compared on what the rasteriser did rather than only on what
     // reached the screen.
@@ -4387,6 +4389,13 @@ void D3D12CommandProcessor::GuideDrainDebugMessages(const char* when) {
   }
   queue->ClearStoredMessages();
   queue->Release();
+}
+
+void D3D12CommandProcessor::GuideRebindRenderTargets() {
+  if (render_target_cache_) {
+    static_cast<D3D12RenderTargetCache*>(render_target_cache_.get())
+        ->InvalidateCommandListRenderTargets();
+  }
 }
 
 void D3D12CommandProcessor::GuideClearRenderTarget(bool green) {

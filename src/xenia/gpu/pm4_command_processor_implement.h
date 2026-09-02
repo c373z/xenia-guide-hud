@@ -2397,6 +2397,9 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
       COMMAND_PROCESSOR::GuideClearRenderTarget();
       XELOGI("GuideClearMid: cleared after draw #{}", guide_ov_seen_);
     }
+    if (cvars::guide_rebind_rt) {
+      COMMAND_PROCESSOR::GuideRebindRenderTargets();
+    }
     uint32_t mode_now = drf[0x2208] & 0x7u;
     // Phase 918: the vertex data was read once, for draw #1, and generalised
     // to all 416 (917). Sample across the burst instead - if the quads grow to
@@ -2688,11 +2691,19 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
       // shader has memexport.
       // TODO(Triang3l || JoelLinn): Handle this properly in the render
       // backends.
+      if (guide_overlay_exec_ && cvars::guide_suppress_draws) {
+        // Phase 999: the stream still runs, its state writes still land, and
+        // Xenia's own transfer draws still happen - only the Guide's draws are
+        // withheld. Whatever the occlusion query counts in this configuration
+        // is not the Guide's geometry.
+        draw_succeeded = true;
+      } else {
       draw_succeeded = COMMAND_PROCESSOR::IssueDraw(
           vgt_draw_initiator.prim_type, vgt_draw_initiator.num_indices,
           is_indexed ? &index_buffer_info : nullptr,
           xenos::IsMajorModeExplicit(vgt_draw_initiator.major_mode,
                                      vgt_draw_initiator.prim_type));
+      }
       if (guide_overlay_exec_) {
         if (draw_succeeded) ++guide_ov_issued_; else ++guide_ov_failed_;
       }

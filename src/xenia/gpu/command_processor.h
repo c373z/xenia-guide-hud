@@ -574,6 +574,7 @@ class CommandProcessor {
   virtual void GuideOcclusionEnd() {}
   virtual void GuideClearRenderTarget(bool green = false) {}
   virtual void GuideDrainDebugMessages(const char* when) {}
+  virtual void GuideRebindRenderTargets() {}
 
   bool guide_overlay_exec_ = false;
   uint32_t guide_ov_seen_ = 0, guide_ov_predrop_ = 0, guide_ov_vizdrop_ = 0;

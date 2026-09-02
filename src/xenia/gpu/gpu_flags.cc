@@ -235,6 +235,22 @@ DEFINE_bool(guide_overlay_repeat, false,
             "rendered perfectly for one frame would have been photographed 10 "
             "seconds later and recorded as 0 pixels.",
             "GuideResearch");
+DEFINE_bool(guide_rebind_rt, false,
+            "Invalidate the command list's render target binding before every "
+            "Guide draw, so OMSetRenderTargets is re-issued. Phase 1000: the "
+            "host render target census reports ZERO binds across the burst, "
+            "so the draws inherit whatever binding the command list already "
+            "had - while ClearRenderTargetView takes an explicit handle and is "
+            "unaffected, which is exactly the asymmetry being seen.",
+            "GuideResearch");
+DEFINE_bool(guide_suppress_draws, false,
+            "Execute the Guide's stream but skip IssueDraw for its draws. "
+            "Phase 999: the occlusion count is taken around the whole burst, "
+            "which also contains Xenia's own ownership-transfer draws, and "
+            "985's 6.7x scaling with the geometry does not separate them - "
+            "enlarging the quads also enlarges the transfers. This is the "
+            "control that does.",
+            "GuideResearch");
 DEFINE_bool(guide_clear_rt_mid, false,
             "Clear the bound colour target to magenta once, in the MIDDLE of "
             "the burst, between two of the Guide's draws. Phase 996: clears "
