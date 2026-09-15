@@ -9,6 +9,8 @@
 
 #include "xenia/base/exception_handler.h"
 
+#include <atomic>
+
 #include "xenia/base/assert.h"
 #include "xenia/base/math.h"
 #include "xenia/base/platform_win.h"
@@ -80,7 +82,13 @@ static void RestoreThreadContext(PCONTEXT ctx,
 #endif
 }
 
+// Phase 1054 fps: every vectored exception the process takes (guest access
+// violations on watched pages included), for the Guide paint's per-paint delta.
+std::atomic<uint64_t> g_xe_exception_count{0};
+uint64_t ExceptionCount() { return g_xe_exception_count.load(); }
+
 LONG CALLBACK ExceptionHandlerCallback(PEXCEPTION_POINTERS ex_info) {
+  ++g_xe_exception_count;
   // Visual Studio SetThreadName.
   if (ex_info->ExceptionRecord->ExceptionCode == 0x406D1388) {
     return EXCEPTION_CONTINUE_SEARCH;
@@ -95,6 +103,13 @@ LONG CALLBACK ExceptionHandlerCallback(PEXCEPTION_POINTERS ex_info) {
   switch (ex_info->ExceptionRecord->ExceptionCode) {
     case STATUS_ILLEGAL_INSTRUCTION:
       ex.InitializeIllegalInstruction(&thread_context);
+      break;
+    case STATUS_SINGLE_STEP:
+      // Phase 1097zj: route the trap-flag step to the same handler chain. No
+      // handler raised TF before this, so this case was unreachable; handlers
+      // that do not care return false and the dispatcher falls through to
+      // CONTINUE_SEARCH exactly as it did.
+      ex.InitializeSingleStep(&thread_context);
       break;
     case STATUS_ACCESS_VIOLATION: {
       Exception::AccessViolationOperation access_violation_operation;

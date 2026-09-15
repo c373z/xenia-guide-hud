@@ -105,6 +105,29 @@ void EntryTable::Delete(uint32_t address) {
   }
 }
 
+size_t EntryTable::DeleteRange(uint32_t low, uint32_t high,
+                               size_t* out_failed) {
+  auto global_lock = global_critical_region_.Acquire();
+  size_t deleted = 0, failed = 0;
+  uint32_t idx = map_.IndexForKey(low);
+  while (idx < map_.size() && *map_.KeyAt(idx) < high) {
+    Entry* entry = *map_.ValueAt(idx);
+    if (entry->status == Entry::STATUS_COMPILING) {
+      ++idx;
+      continue;
+    }
+    if (entry->status == Entry::STATUS_FAILED) {
+      ++failed;
+    }
+    map_.EraseAt(idx);
+    ++deleted;
+  }
+  if (out_failed) {
+    *out_failed = failed;
+  }
+  return deleted;
+}
+
 std::vector<Function*> EntryTable::FindWithAddress(uint32_t address) {
   auto global_lock = global_critical_region_.Acquire();
   std::vector<Function*> fns;

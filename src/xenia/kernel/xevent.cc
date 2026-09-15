@@ -58,19 +58,47 @@ void XEvent::InitializeNative(void* native_ptr,
   assert_not_null(event_);
 }
 
+// Phase 1095am: InitializeNative's `default: assert_always(); return;`
+// leaves event_ NULL in release, where the assert is compiled out. Set,
+// Pulse and Reset then dereferenced it and took the whole emulator down
+// with a host access violation - symbolicated from xenia_canary.pdb as
+// XEvent::Set <- xeKeSetEvent <- the KeSetEvent trampoline, fault_addr
+// FFFFFFFFFFFFFFFF, on xam's task-pool worker threads.
+//
+// An uninitialised event cannot be signalled, so say so and let the
+// caller carry on. This does not paper over the cause (something is
+// handing us a dispatch header whose type is neither
+// EventNotificationObject nor EventSynchronizationObject) - it stops
+// that cause from being fatal, and logs it once per event so it stays
+// visible.
+bool XEvent::WarnUninitialised(const char* op) {
+  if (event_) return false;
+  if (!warned_uninitialised_) {
+    warned_uninitialised_ = true;
+    XELOGE("XEvent::{}: event is UNINITIALISED (guest object {:08X}) - "
+           "InitializeNative bailed on an unsupported dispatch type. "
+           "Ignoring instead of faulting.",
+           op, guest_object());
+  }
+  return true;
+}
+
 int32_t XEvent::Set(uint32_t priority_increment, bool wait) {
   set_priority_increment(priority_increment);
+  if (WarnUninitialised("Set")) return 0;
   event_->Set();
   return 1;
 }
 
 int32_t XEvent::Pulse(uint32_t priority_increment, bool wait) {
   set_priority_increment(priority_increment);
+  if (WarnUninitialised("Pulse")) return 0;
   event_->Pulse();
   return 1;
 }
 
 int32_t XEvent::Reset() {
+  if (WarnUninitialised("Reset")) return 0;
   event_->Reset();
   return 1;
 }

@@ -244,6 +244,10 @@ class XObject {
   uint32_t priority_increment() const { return priority_increment_; }
   void set_priority_increment(uint32_t inc) { priority_increment_ = inc; }
 
+  // Phase 1099z25: let a wrapper object forward waits to another object.
+  xe::threading::WaitHandle* ForwardedWaitHandle() { return GetWaitHandle(); }
+  void ForwardedWaitCallback() { WaitCallback(); }
+
  protected:
   bool SaveObject(ByteStream* stream);
   bool RestoreObject(ByteStream* stream);

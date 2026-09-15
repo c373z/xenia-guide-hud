@@ -8,14 +8,147 @@
  */
 
 #include <map>
+#include <set>
+#include <functional>
+#include <atomic>
+#include <chrono>
+#include <cmath>
+#include <thread>
+#include <deque>
+#include <condition_variable>
+#include <mutex>
+#include <unordered_map>
+
+// Phase 1052: set to 1 by the per-paint XuiAnimRun block to make the
+// navigation-time tree dump run once more, later.
+static int g_guide_redo_dump = 0;
+static uint32_t g_guide_dump_from = 0;     // phase 1053: redo dump from this handle (focus subtree)
+static uint32_t g_guide_cnt17 = 0, g_guide_cnt6 = 0;  // phase 1053: per-paint dirty-bit counts from the walk
+static uint32_t g_guide_last_dr = 0;       // phase 1053: draw packets of the last gated paint
+static bool g_guide_opened = false;        // phase 1053: first publish with real draws seen
+static bool g_guide_hidden = false;        // phase 1053: overlay hidden by the Guide button / hud close
+static uint32_t g_guide_last_pub = 0, g_guide_last_words = 0;
+static uint32_t g_guide_hudscene = 0, g_guide_tabscene = 0;  // phase 1053: for the open animation
+static bool g_guide_play_open = false;     // phase 1053: play %uOpen..%uOpenEnd next paint
+static bool g_guide_want_redraw = false;    // phase 1053: re-record the whole frame next paint
+static uint32_t g_guide_hud_root = 0;        // phase 1054: xam's HUD root scene (hudbkgnd.xur) under the boot canvas
+static uint32_t g_guide_bkgnd_singleton = 0; // phase 1054: the CHUDBkgndScene object, [81D3F924]
+static uint32_t g_guide_hud_canvas = 0;      // phase 1054: the HUD root scene's parent (laid out each paint)
+static uint32_t g_guide_first_e0 = 0;        // phase 1054: reserve cursor before the first painted element's render
+static uint32_t g_guide_first_b0 = 0;        // phase 1054: block cursor before the first painted element's render
+static std::vector<std::pair<uint32_t, uint32_t>> g_guide_plist;  // phase 1054: (handle, words) painted this walk
+static std::chrono::steady_clock::time_point g_guide_bkgnd_open_at{};  // phase 1054: play ClosedToFull at this time
+static std::chrono::steady_clock::time_point g_guide_bkgnd_close_at{};  // phase 1054: play HalfToClosed at this time
+static bool g_guide_warmup = false;  // phase 1054: render xam's root scene while hidden, publish nothing
+static uint32_t g_guide_el_legend = 0, g_guide_el_datetime = 0, g_guide_el_gamerpic = 0, g_guide_el_gamertag = 0;  // phase 1054af: xam root scene elements
+// Phase 1054 fps: the GPU thread replays the last published paint every frame,
+// so a paint is only needed when something changed. A keystroke, a toggle, a
+// pending timer or the keepalive make the hook active; otherwise the paint
+// (pre-dirty walk, device-changed, layout, render walk) is skipped.
+static std::chrono::steady_clock::time_point g_guide_active_until{};
+static std::chrono::steady_clock::time_point g_guide_last_full_paint{};
+static bool g_guide_idle = false;
+static void GuideActive(int ms) {
+  auto t = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+  if (t > g_guide_active_until) g_guide_active_until = t;
+}
+static std::chrono::steady_clock::time_point g_guide_t_pre{}, g_guide_t_begin{}, g_guide_t_end{};
+static double g_guide_ms_render[8] = {};
+static uint32_t g_guide_words_render[8] = {};
+
+static uint32_t g_guide_pf_render[8] = {};  // phase 1054 slide: page faults during the render (probe)
+static uint32_t g_guide_full_logs_reset = 0;
+static uint32_t g_guide_render_h[8] = {}, g_guide_render_n = 0;
+static uint32_t g_guide_idle_paints = 0, g_guide_full_paints = 0;
+// Phase 1054 fps: interleaved paints (one plan handle per swap, composed at publish).
+struct GuideSegPaint { uint32_t h, e0, e1; };
+static std::vector<GuideSegPaint> g_guide_segs_paint;          // rendered this paint
+static std::map<uint32_t, std::vector<uint8_t>> g_guide_segs;  // latest stream bytes per handle
+static std::vector<uint32_t> g_guide_plan;                       // the cached plan, in render order
+static bool g_guide_interleave_now = false, g_guide_keepalive_paint = false;
+static uint32_t g_guide_interleave_idx = 0, g_guide_interleave_round = 0, g_guide_plan_pos = 0;
+// Phase 1054 fps: spread mode - one XUI frame across swaps.
+static bool g_guide_spread_now = false, g_guide_round_done = true;
+static bool g_guide_hot_now = false, g_guide_hot_force_all = false;  // phase 1054 tabs: hot composition this paint / re-render every plan handle this paint
+static uint32_t g_guide_hot_skipped = 0;                                // phase 1054 tabs: plan handles composed from their last render this paint
+static uint32_t g_guide_hot_seq = 0;                                    // phase 1054 slide: hot paints since the window opened (0 = the first)
+static std::map<uint32_t, double> g_guide_page_enter;                   // phase 1054 slide: animation clock when a page entered the plan
+static double g_guide_anim_clock = 0.0;                                 // phase 1054 slide: sum of the (capped) dt handed to XuiAnimRun, ms
+static std::map<uint32_t, double> g_guide_render_ms_last;               // phase 1054 slide: each handle's last render time, ms
+static uint32_t g_guide_hot_every_now = 1;                              // phase 1054 slide: this paint's page/layout cadence inside a hot window
+static std::map<uint32_t, std::pair<uint32_t, uint32_t>> g_guide_ring_span;  // phase 1054 marker: arena cursor before/after each handle's render this paint
+static int g_guide_segdump_done = 0;                                    // phase 1054 marker: GuideSegDump dumps written
+static std::map<uint32_t, bool> g_guide_segdump_last_hot;               // phase 1054 marker: per dumped handle, its last store was from a hot paint
+static uint32_t g_guide_round_pos = 0, g_guide_round_before = 0;
+static uint32_t g_guide_round_step = 1;  // phase 1054 open: plan entries rendered per swap (guide_open_burst while the entrance plays)
+static std::chrono::steady_clock::time_point g_guide_open_burst_until{};  // phase 1054 open: faster rounds until then
+static uint32_t g_guide_round_save30 = 0, g_guide_round_save34 = 0, g_guide_round_save2b4c = 0;
+// Phase 1054 transitions: hud's scene lives under xam's AppHost element.
+static bool g_guide_hosted = false;
+static std::vector<GuideSegPaint> g_guide_segs_round;   // every handle rendered in the current round
+static uint32_t g_guide_el_apphost = 0;
+static uint32_t g_guide_el_frame = 0;  // xam's root-scene Blade_Center (the HUD frame)
+static float g_guide_fade_applied = -1.0f;  // phase 1054 transitions: last opacity copied onto hud
+static float g_guide_fade_want = -1.0f;     // phase 1054 bugs: the opacity the next round applies
+static bool g_guide_closing_edge = false;   // phase 1054 bugs: close_pending changed this swap
+static std::chrono::steady_clock::time_point g_guide_tab_settle_until{};
+static uint32_t g_guide_tab_watch_cur = 0xFFFFFFFFu;  // phase 1054 tabs: current tab last logged by the switch watcher  // phase 1054 blades: rebuild the plan while a tab slide plays
+static std::vector<uint32_t> g_guide_fade_targets;  // hud handles that take the fade opacity
+static uint32_t g_guide_show_count = 0;
+static std::mutex g_guide_script_mu;                                   // phase 1054 tabs: scripted keystrokes (guide_script)
+static std::deque<std::pair<uint16_t, uint16_t>> g_guide_script_keys;  // (virtual key, flags)
+static std::chrono::steady_clock::time_point g_guide_fade_out_t0{};  // close key time
+static uint32_t g_guide_vb_addr = 0, g_guide_vb_snap[32] = {}, g_guide_vb_seg = 0, g_guide_vb_paint = 0;
+static std::chrono::steady_clock::time_point g_guide_show_time{};
+static std::chrono::steady_clock::time_point g_guide_t_hook{}, g_guide_t_walk0{}, g_guide_t_walk1{};  // phase 1054: phase timing
+static double GuideHookMs() {
+  return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - g_guide_t_hook).count();
+}
+static std::chrono::steady_clock::time_point g_guide_t_tail1{};
+static bool g_guide_close_pending = false;   // phase 1054: the close is playing
+// Phase 1091c: WHEN THE CLOSE IS OVER IS XAM'S ANSWER, NOT A NUMBER OF OURS.
+// PlayTransition sets [scene+0x14] to 1 (8174E3A0) and xam clears it when the
+// transition finishes. Measured in reg1091b: the close starts at paint 1117 and
+// xam clears the word by paint 1131 - about 240 ms - while guide_close_ms=350
+// kept the panel painting to paint 1138, seven paints past the point xam had
+// already said it was done. g_guide_close_scene is the scene whose word to
+// watch; g_guide_close_until is now only a BACKSTOP for the case where xam sets
+// the word and never clears it, and its firing is logged as the fault it is.
+static uint32_t g_guide_close_scene = 0;
+static std::chrono::steady_clock::time_point g_guide_close_until{};
+static std::chrono::steady_clock::time_point g_guide_anim_hold{};  // phase 1054: empty paints clear the overlay until then
+// Phase 1053: set by xam's input shims when the Guide button is seen, so the
+// button works while the title owns the pad (the harness cannot win the race
+// for the keystroke queue against a title that polls every frame).
+std::atomic<uint32_t> g_guide_button_edge{0};
+// Phase 1052b: the slide-in.
+static uint32_t g_guide_slide_scene = 0;   // HUDScene handle being slid
+static float g_guide_slide_x0 = 0.0f, g_guide_slide_y0 = 0.0f, g_guide_slide_w = 852.0f;
+static std::chrono::steady_clock::time_point g_guide_slide_t0;
+static bool g_guide_slide_armed = false, g_guide_slide_done = false;
+#include "xenia/cpu/breakpoint.h"
+#include <deque>
+#include <condition_variable>
 #include <mutex>
 #include "xenia/kernel/kernel_flags.h"
+#include "xenia/kernel/xboxkrnl/xboxkrnl_memory.h"
+#include "xenia/hid/input_system.h"
+#include <array>
+#include <cstring>
 #include "xenia/kernel/xboxkrnl/xboxkrnl_video.h"
 
+#include "xenia/base/exception_handler.h"
+#include "xenia/cpu/backend/code_cache.h"
+#include "xenia/cpu/stack_walker.h"
+#include "xenia/cpu/ppc/ppc_context.h"
 #include "xenia/base/logging.h"
+#include "xenia/base/platform_win.h"
+#include <psapi.h>
+#include "xenia/gpu/xenos.h"
 #include "xenia/emulator.h"
 #include "xenia/cpu/function.h"
 #include "xenia/gpu/command_processor.h"
+#include "xenia/gpu/gpu_flags.h"
 #include "xenia/gpu/register_file.h"
 #include "xenia/gpu/graphics_system.h"
 #include "xenia/kernel/kernel_state.h"
@@ -23,10 +156,45 @@
 #include "xenia/kernel/util/shim_utils.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_private.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_rtl.h"
+#include "xenia/kernel/xboxkrnl/xboxkrnl_threading.h"  // phase 1055 menus: xeKeGetCurrentProcessType
 #include "xenia/kernel/xconfig.h"
 #include "xenia/xbox.h"
 
 DEFINE_bool(interlaced, false, "Toggles interlaced mode.", "Video");
+
+// Phase 1098h: see VdQuerySystemCommandBuffer_entry below. Default TRUE because
+// 0 is an answer no running console gives and it deadlocks xam's HUD tick; set
+// false to restore the phase-1097 stub for an A/B.
+// Phase 1098p: route the PM4 stream xam submits through
+// VdSetSystemCommandBuffer to the GPU, instead of dropping it. The 360 has a
+// system command buffer alongside the title's ring; Xenia models only the ring,
+// so every Guide frame xam builds is written to physical memory and ignored.
+// Phase 1098w: make VdQuerySystemCommandBuffer answer truthfully about the
+// host's backlog instead of an unconditional "free", so the guest waits before
+// recycling a slot the host has not executed yet.
+DEFINE_bool(guide_syscmd_slot_contract, true,
+            "VdQuerySystemCommandBuffer reports a slot busy while the host has "
+            "that many submits still unexecuted.",
+            "Guide");
+DEFINE_int32(guide_syscmd_slots, 3,
+             "How many submits the host will accept before reporting busy. The "
+             "guest's own ring has three buffers.",
+             "Guide");
+
+DEFINE_bool(guide_desc_census, false,
+            "Census every dword of the guest's system-command-buffer "
+            "submit descriptor - how many distinct values each takes.",
+            "Guide");
+DEFINE_bool(guide_route_sys_cmdbuf, true,
+            "Execute the PM4 stream xam submits via VdSetSystemCommandBuffer "
+            "on the GPU thread at swap. False drops it, as before.",
+            "Guide");
+
+DEFINE_bool(guide_sys_cmdbuf_ready, true,
+            "VdQuerySystemCommandBuffer reports a free system command buffer "
+            "slot (what a console answers). False restores the 1097 stub that "
+            "always answered 0.",
+            "Guide");
 // BT.709 on modern monitors and TVs looks the closest to the Xbox 360 connected
 // to an HDTV.
 DEFINE_uint32(kernel_display_gamma_type, 2,
@@ -81,8 +249,133 @@ static std::pair<uint32_t, uint32_t> CalculateScaledAspectRatio(
 }
 
 namespace xe {
+extern uint32_t g_guide_msgbox_parent;
 namespace kernel {
 namespace xboxkrnl {
+
+// Phase 1054 black: the physical pages a published stream reads while the GPU
+// replays it every frame. Fetch constants: a vertex fetch (an even fetch dword
+// with type 3: address in the top 30 bits, size in words in the next dword)
+// and a texture fetch (a slot's first dword with type 2: base address in dword
+// 1 bits 12-31, mip address in dword 4). Packets: IM_LOAD (shader microcode -
+// xam's debug D3D keeps each shader in one of the single pages the page cache
+// recycles, and re-creates its shaders every paint), DRAW_INDX (an index
+// buffer), LOAD_ALU_CONSTANT and INDIRECT_BUFFER (scanned too).
+struct GuidePinTally {
+  uint32_t vertex = 0, texture = 0, shader = 0, index = 0, alu = 0, ib = 0;
+  uint32_t shader_addr[8] = {};
+};
+
+static void GuidePinRange(uint32_t addr, uint32_t size,
+                          std::vector<uint32_t>& out) {
+  addr &= 0x1FFFFFFFu;
+  if (!size) size = 4u;
+  uint32_t p0 = addr >> 12, p1 = (addr + size - 1u) >> 12;
+  // The cache holds single pages only: a range spanning more than a few is
+  // a large allocation it never sees, and the first pages are what a
+  // one-page buffer with an oversized fetch size needs.
+  if (p1 > p0 + 3u) p1 = p0 + 3u;
+  for (uint32_t p = p0; p <= p1; ++p) out.push_back(p);
+}
+
+static void GuideNoteFetchWords(uint32_t reg, const uint32_t* w, uint32_t n,
+                                std::vector<uint32_t>& out, GuidePinTally& t) {
+  for (uint32_t k = 0; k < n; ++k) {
+    uint32_t r = reg + k;
+    if (r < 0x4800u || r > 0x48BFu) continue;
+    uint32_t idx = r - 0x4800u;
+    uint32_t v = w[k];
+    if ((idx & 1u) == 0u && (v & 3u) == 3u) {
+      uint32_t size = (k + 1 < n) ? ((w[k + 1] >> 2) & 0xFFFFFFu) * 4u : 4u;
+      GuidePinRange(v & ~3u, size, out);
+      ++t.vertex;
+    }
+    if ((idx % 6u) == 0u && (v & 3u) == 2u) {
+      if (k + 1 < n) {
+        GuidePinRange(w[k + 1] & 0xFFFFF000u, 4096u, out);
+        ++t.texture;
+      }
+      if (k + 4 < n && (w[k + 4] & 0xFFFFF000u)) {
+        GuidePinRange(w[k + 4] & 0xFFFFF000u, 4096u, out);
+      }
+    }
+  }
+}
+
+static void GuideCollectStreamPages(const uint8_t* op, uint32_t ow,
+                                    std::vector<uint32_t>& out,
+                                    GuidePinTally& t, int depth) {
+  std::vector<uint32_t> tmp;
+  uint32_t i = 0;
+  auto word = [&](uint32_t j) {
+    return xe::load_and_swap<uint32_t>(op + size_t(j) * 4);
+  };
+  while (i < ow) {
+    uint32_t h = word(i);
+    uint32_t ty = h >> 30;
+    if (ty == 0) {
+      uint32_t count = ((h >> 16) & 0x3FFF) + 1;
+      uint32_t base = h & 0x7FFF;
+      bool one = ((h >> 15) & 1u) != 0;
+      if (i + 1 + count > ow) break;
+      if (!one && base <= 0x48BFu && base + count > 0x4800u) {
+        tmp.resize(count);
+        for (uint32_t k = 0; k < count; ++k) tmp[k] = word(i + 1 + k);
+        GuideNoteFetchWords(base, tmp.data(), count, out, t);
+      }
+      i += 1 + count;
+    } else if (ty == 3) {
+      uint32_t count = ((h >> 16) & 0x3FFF) + 1;
+      uint32_t opc = (h >> 8) & 0x7F;
+      if (i + 1 + count > ow) break;
+      auto d = [&](uint32_t k) { return word(i + 1 + k); };
+      if (opc == 0x2D && count >= 2) {  // SET_CONSTANT
+        uint32_t ot = d(0);
+        if (((ot >> 16) & 0xFF) == 1u) {  // fetch constants, index in dwords
+          tmp.resize(count - 1);
+          for (uint32_t k = 0; k + 1 < count; ++k) tmp[k] = d(k + 1);
+          GuideNoteFetchWords(0x4800u + (ot & 0x7FFu), tmp.data(), count - 1,
+                              out, t);
+        }
+      } else if (opc == 0x27 && count >= 2) {  // IM_LOAD: shader microcode
+        uint32_t addr = d(0) & ~3u;
+        uint32_t size_dwords = d(1) & 0xFFFFu;
+        GuidePinRange(addr, size_dwords * 4u, out);
+        if (t.shader < 8) t.shader_addr[t.shader] = addr;
+        ++t.shader;
+      } else if (opc == 0x22 && count >= 4) {  // DRAW_INDX with an index buffer
+        uint32_t dword1 = d(1);
+        if (((dword1 >> 6) & 3u) == 0u) {
+          uint32_t base = d(2);
+          uint32_t size = (d(3) & 0xFFFFFFu) * (((dword1 >> 11) & 1u) ? 4u : 2u);
+          GuidePinRange(base, size, out);
+          ++t.index;
+        }
+      } else if (opc == 0x2F && count >= 3) {  // LOAD_ALU_CONSTANT
+        GuidePinRange(d(0) & 0x3FFFFFFFu, (d(2) & 0xFFFu) * 4u, out);
+        ++t.alu;
+      } else if ((opc == 0x3F || opc == 0x37) && count >= 2) {  // INDIRECT_BUFFER
+        uint32_t ptr = d(0) & 0x1FFFFFFFu;
+        uint32_t words = d(1) & 0xFFFFFu;
+        GuidePinRange(ptr, words * 4u, out);
+        ++t.ib;
+        if (depth < 2 && words && words < 0x40000u) {
+          const uint8_t* ip = kernel_state()->memory()->TranslatePhysical(ptr);
+          if (ip) GuideCollectStreamPages(ip, words, out, t, depth + 1);
+        }
+      }
+      i += 1 + count;
+    } else if (ty == 2) {
+      i += 1;
+    } else {
+      i += 3;
+    }
+  }
+  if (depth == 0) {
+    std::sort(out.begin(), out.end());
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+  }
+}
 
 // Set while the Guide draw is executing, so kernel entries can tell
 // whether a call came from the Guide or from the title.
@@ -308,22 +601,33 @@ dword_result_t VdSetDisplayModeOverride_entry(dword_t width, dword_t height,
 }
 DECLARE_XBOXKRNL_EXPORT1(VdSetDisplayModeOverride, kVideo, kStub);
 
+// Phase 1099z138: kernel 800F7E68, defined after VdPersistDisplay below.
+static void GuideEngineNotifyXam(bool initializing, const ppc_context_t& ctx);
+
 dword_result_t VdInitializeEngines_entry(unknown_t unk0, function_t callback,
                                          lpvoid_t arg, lpdword_t pfp_ptr,
-                                         lpdword_t me_ptr) {
+                                         lpdword_t me_ptr,
+                                         const ppc_context_t& ctx) {
   // r3 = 0x4F810000
   // r4 = function ptr (cleanup callback?)
   // r5 = function arg
   // r6 = PFP Microcode
   // r7 = ME Microcode
+  // 17489 kernel 800F7F58..68: first, unless the caller is a system process,
+  // tell xam a title is taking the GPU (graphics notification 4). xam's
+  // launch fade thread stops and releases its device before this returns.
+  GuideEngineNotifyXam(true, ctx);
   return 1;
 }
 DECLARE_XBOXKRNL_EXPORT1(VdInitializeEngines, kVideo, kStub);
 
-void VdShutdownEngines_entry() {
-  // Ignored for now.
-  // Games seem to call an Initialize/Shutdown pair to query info, then
-  // re-initialize.
+void VdShutdownEngines_entry(const ppc_context_t& ctx) {
+  // Engine teardown itself is not modelled: games call an Initialize/Shutdown
+  // pair to query info, then re-initialize.
+  // 17489 kernel 800F8308..18: last, unless the caller is a system process,
+  // tell xam the title released the GPU (graphics notification 5), with the
+  // persisted front buffer. xam starts its launch fade thread (8178E9F0).
+  GuideEngineNotifyXam(false, ctx);
 }
 DECLARE_XBOXKRNL_EXPORT1(VdShutdownEngines, kVideo, kStub);
 
@@ -363,6 +667,8 @@ void VdSetGraphicsInterruptCallback_entry(function_t callback,
 }
 DECLARE_XBOXKRNL_EXPORT1(VdSetGraphicsInterruptCallback, kVideo, kImplemented);
 
+static void RecordGuideRingBuffer(uint32_t ptr);  // defined by VdPersistDisplay
+
 void VdInitializeRingBuffer_entry(lpvoid_t ptr, int_t size_log2) {
   // r3 = result of MmGetPhysicalAddress
   // r4 = log2(size)
@@ -378,6 +684,7 @@ void VdInitializeRingBuffer_entry(lpvoid_t ptr, int_t size_log2) {
     }
     XELOGI("VdInitializeRingBuffer(ptr={:08X}, size_log2={}) from lr={:08X}",
            ptr.guest_address(), int32_t(size_log2), lr);
+    RecordGuideRingBuffer(ptr.guest_address());
     // Phase 639: the mode-1 device owns this ring, its fence and the
     // submitted/completed counters the interrupt service reads - and the
     // 81A0FE48 breakpoint that was supposed to capture it never fires. It is
@@ -530,16 +837,288 @@ void VdGetSystemCommandBuffer_entry(lpunknown_t p0_ptr, lpunknown_t p1_ptr,
 }
 DECLARE_XBOXKRNL_EXPORT1(VdGetSystemCommandBuffer, kVideo, kStub);
 
+// Phase 1097: VdQuerySystemCommandBuffer (xboxkrnl 0x1C8) was declared in
+// xboxkrnl_table.inc with NO BODY - the eighth export of that shape this
+// project has hit. It only became visible once xam's own task pool started
+// running (guest_native_timers + letting the guest dispatch its own skin
+// loader): xam's HUD-manager loop polls it, and every call took Xenia's
+// undefined-extern path, which FORMATS AND WRITES A LOG LINE. A 120 s run
+// produced a 354 MB log, 264,560 of those lines in a single 20 MB slice.
+// That is not a cosmetic problem - the logging is what the run spends its
+// time on.
+//
+// The return value is MEASURED from the user's own kernel, not chosen.
+// Ordinal 0x1C8 is VA 8008FEF8 there, and its first act after taking the lock
+// at 800D0DE0 is:
+//     8008FF18  lwz r10, 0x1CC(r31)     ; r31 = 800D0C00
+//     8008FF20  cmplwi cr6, r10, 0
+//     8008FF24  bne -> the three-slot ring at 800D0DD8
+//     8008FF28  li r30, 0               ; else the result is zero
+//     8008FF90  ... mr r3, r30          ; and that is what it returns
+// so on a machine where the system command buffer subsystem was never brought
+// up - which is exactly this emulator - the console's own answer is 0. The
+// guest agrees: its only call site is 819FED58, which passes 0 and returns
+// the result unchanged.
+//
+// This is the same value the undefined-extern path already returned, so guest
+// behaviour is unchanged; what changes is that the emulator stops writing a
+// log line per poll.
+// Phase 1098h: THE RETURN VALUE ABOVE WAS RIGHT ABOUT THE KERNEL AND WRONG
+// ABOUT THE CONSOLE, AND IT IS WHY THE GUIDE DOES NOT RENDER.
+//
+// Reading the whole of 8008FEF8 rather than its first branch, the result is a
+// BOOLEAN, not a pointer:
+//     8008FF18  r10 = [800D0C00+0x1CC]    ; null only if the subsystem is down
+//     8008FF30  r11 = ([800D0C00+0x1D8]+1) % 3        ; next of three slots
+//     8008FF50  r9  = [800D0C00+4 + r11*4]            ; that slot
+//     8008FF64  r9  = head - slot ; r11 = head - gpu_pos
+//     8008FF6C  subfc/subfe/addic. -> r30 = 1 or 0    ; "has the GPU passed it"
+//     8008FF9C  return r30
+// i.e. "IS A SYSTEM COMMAND BUFFER SLOT FREE". The `which` argument only
+// selects an extra out-struct (8008FE80) and is 0 on the one path that matters.
+//
+// The old comment reasoned that a machine whose command-buffer subsystem was
+// never brought up answers 0, and that is true of the KERNEL IMAGE. But on a
+// console the kernel brings that subsystem up itself at video init, long before
+// xam runs, so the console's answer is 1. Returning 0 here is not "the same
+// value the undefined-extern path returned" in any meaningful sense - it is an
+// answer no running console ever gives.
+//
+// MEASURED consequence of returning 0, phase 1098h:
+//     81793288  bl 819FED58          ; -> this export, with which = 0
+//     8179328C  cmpwi r3, 0
+//     81793290  beq  8179329C        ; 0 -> SKIP the next two instructions
+//     81793298  bl 81792928          ; xam's HUD TICK: XuiAnimRun, and the
+//                                    ; call to 81A00080 -> VdSetSystemCommandBuffer
+// The skip is two instructions long, which is below the >=4 threshold Xenia's
+// coverage reports as a span, so it was invisible for eight phases. With the
+// tick skipped: XuiAnimRun and XUITimeline_Run never run (both measured
+// DECLARED-not-run), so the Guide's blade timeline - started by
+// XuiElementPlayTimeline in 8174E220 for the Closed->Half transition - never
+// advances, never posts its completion message 0x0F, never clears
+// [CHUDBkgndScene+0x14], and the HUD-manager loop 81794BC8 spins on E_PENDING
+// forty million times a run.
+//
+// It is also self-deadlocking: the tick is what calls VdSetSystemCommandBuffer
+// (81A00080, measured DECLARED-not-run), so with the query answering 0 the
+// buffer is never registered, and nothing can ever make the query answer
+// anything else.
+//
+// What is truthful for Xenia: there is no three-slot system command buffer ring
+// here, and the command processor consumes what is submitted rather than
+// leaving a slot outstanding, so a slot is always free. That is a statement
+// about the HOST's own state, which is this function's job to report; it
+// hardcodes nothing about the Guide, and every decision that follows is the
+// guest's. Gated so the old behaviour is one flag away.
+dword_result_t VdQuerySystemCommandBuffer_entry(dword_t which) {
+  if (!cvars::guide_sys_cmdbuf_ready) return 0;
+  // Phase 1098w: answer the question the console answers, which is not "yes"
+  // but "has the host finished with the slot you want to reuse".
+  //
+  // The guest writes its streams into THREE physical buffers and asks here
+  // before recycling one. Answering an unconditional 1 - what unblocked this
+  // phase - tells it every slot is always free, so it recycles ~236 times a
+  // frame while the host executes one, and any queue the host keeps fills with
+  // pointers to buffers that have been overwritten dozens of times. That is
+  // measured: draining such a queue faulted the PM4 parser (1098v).
+  //
+  // So gate on the host's own backlog. Outstanding = submits published but not
+  // yet executed; while that reaches the ring's depth, the slot the guest wants
+  // is still in use and the truthful answer is 0. The guest then waits, exactly
+  // as it would on hardware, the backlog stays small, and every queued pointer
+  // still describes the bytes that were in it.
+  if (cvars::guide_syscmd_slot_contract) {
+    auto* gs = kernel_state()->emulator()->graphics_system();
+    auto* cp = gs ? gs->command_processor() : nullptr;
+    if (cp) {
+      uint32_t h = cp->guide_syscmd_head_.load(std::memory_order_acquire);
+      uint32_t t = cp->guide_syscmd_tail_.load(std::memory_order_acquire);
+      if ((h - t) >= uint32_t(cvars::guide_syscmd_slots)) return 0;
+    }
+  }
+  return 1;
+}
+DECLARE_XBOXKRNL_EXPORT1(VdQuerySystemCommandBuffer, kVideo, kStub);
+
 // Phase 593: ordinal 0x1D8 is in the export table but had no implementation,
 // so xam's import of it resolved to nothing. It is the call by which the
 // system command buffer is registered, and phase 592 showed the Guide's
 // buffer is never handed to the command processor. Log it to establish
 // whether xam calls it at all, and with what.
 void VdSetSystemCommandBuffer_entry(dword_t r3, dword_t r4) {
+  // Phase 1098o: this takes ONE argument - a pointer to a descriptor the guest
+  // builds ON ITS STACK. Measured at the call site 81A001E0:
+  //     81A001D0  bl 8180D9F0          ; memcpy 0x38 bytes into [sp+0xA8]
+  //     81A001E0  addi r3, r1, 0x50    ; r3 = &[sp+0x50]
+  //     81A001E4  bl 81D10A0C          ; VdSetSystemCommandBuffer
+  // so the 7027FA20 logged before was a STACK address and r4 was leftover
+  // register content, not a second argument. The descriptor is transient: it
+  // has to be read here, at the call, not remembered as a pointer.
+  //
+  // Dump it rather than guess its layout - the whole point of this phase is
+  // that the Guide now writes a real PM4 stream into the buffer this
+  // descriptor names, and the host does not consume it (src/xenia/gpu/ has no
+  // notion of a system command buffer and only the one VdInitializeRingBuffer
+  // ring). Knowing the field offsets is the prerequisite for routing it.
   static std::atomic<uint32_t> once{0};
-  if (once++ < 4) {
-    XELOGI("VdSetSystemCommandBuffer(r3={:08X}, r4={:08X})", uint32_t(r3),
-           uint32_t(r4));
+  uint32_t n = ++once;
+  // Phase 1098o: the descriptor's base changes every call (1FC68000, 1FC28000,
+  // 1FBE8000 ...), which is the signature of a per-frame SUBMIT rather than a
+  // one-time registration. Sample late as well as early so the call RATE is
+  // measurable - that is what decides whether this export is the routing point.
+  if (n <= 3 || n == 100 || n == 1000 || (n % 5000) == 0) {
+    auto* mem = kernel_state()->memory();
+    auto* d = mem->TranslateVirtual(uint32_t(r3));
+    std::string dump;
+    if (d) {
+      for (uint32_t i = 0; i < 0x90; i += 4) {
+        dump += fmt::format("{:08X} ", xe::load_and_swap<uint32_t>(
+                                           static_cast<uint8_t*>(d) + i));
+      }
+    }
+    XELOGI("VdSetSystemCommandBuffer #{} desc@{:08X}: {}", n, uint32_t(r3),
+           dump.empty() ? "<unmapped>" : dump);
+  }
+  // Phase 1098p: publish the submitted stream for the GPU thread.
+  if (cvars::guide_route_sys_cmdbuf) {
+    auto* mem = kernel_state()->memory();
+    auto* d = mem->TranslateVirtual(uint32_t(r3));
+    if (d) {
+      const uint32_t phys =
+          xe::load_and_swap<uint32_t>(static_cast<uint8_t*>(d) + 0x00);
+      const uint32_t words =
+          xe::load_and_swap<uint32_t>(static_cast<uint8_t*>(d) + 0x04);
+      auto* gs = kernel_state()->emulator()->graphics_system();
+      auto* cp = gs ? gs->command_processor() : nullptr;
+      if (cp && phys && words) {
+        const uint64_t pair = (uint64_t(phys) << 32) | uint64_t(words);
+        cp->guide_syscmd_pair_.store(pair, std::memory_order_release);
+        // Phase 1098s: queue EVERY submit. Keeping only the latest dropped
+        // ~235 of every 236 streams, and the resolve that moves the Guide's
+        // pixels out of EDRAM was in the dropped ones.
+        uint32_t h = cp->guide_syscmd_head_.load(std::memory_order_relaxed);
+        uint32_t t = cp->guide_syscmd_tail_.load(std::memory_order_acquire);
+        if (h - t < xe::gpu::CommandProcessor::kGuideSysCmdQueue) {
+          cp->guide_syscmd_ring_[h % xe::gpu::CommandProcessor::kGuideSysCmdQueue].store(
+              pair, std::memory_order_release);
+          cp->guide_syscmd_head_.store(h + 1, std::memory_order_release);
+        } else {
+          cp->guide_syscmd_dropped_.fetch_add(1, std::memory_order_relaxed);
+        }
+        // Phase 1098zi: the descriptor's own logical surface size (+0x14 /
+        // +0x18), which is 852x480 where the resolve pitch is 864.
+        cp->guide_desc_width_ =
+            xe::load_and_swap<uint32_t>(static_cast<uint8_t*>(d) + 0x14);
+        cp->guide_desc_height_ =
+            xe::load_and_swap<uint32_t>(static_cast<uint8_t*>(d) + 0x18);
+        // Phase 1099a: WHERE DOES THE GUEST STATE THE GUIDE'S OPACITY?
+        // The resolved surface is opaque (alpha 255 everywhere), so if there
+        // is a background/plane alpha it is stated somewhere else. The submit
+        // descriptor is 0x94 bytes and only +0x00/+0x04/+0x14/+0x18/+0x60..
+        // +0x6C have ever been decoded. Census EVERY dword: how many distinct
+        // values each one takes, and what they are. A per-frame opacity varies
+        // or sits in [0,1] as a float; a constant does neither. This only
+        // reads the guest's own descriptor.
+        if (::cvars::guide_desc_census) {
+          static std::array<std::set<uint32_t>, 0x94 / 4> seen;
+          static std::atomic<uint32_t> ndesc{0};
+          auto* db = static_cast<uint8_t*>(d);
+          for (uint32_t i = 0; i < 0x94 / 4; ++i) {
+            auto& sv = seen[i];
+            if (sv.size() < 8) {
+              sv.insert(xe::load_and_swap<uint32_t>(db + i * 4));
+            }
+          }
+          uint32_t n = ++ndesc;
+          if (n == 1 || n == 4000) {
+            std::string out;
+            for (uint32_t i = 0; i < 0x94 / 4; ++i) {
+              const uint32_t v0 = *seen[i].begin();
+              float f;
+              std::memcpy(&f, &v0, 4);
+              // Flag anything that reads as a plausible normalised float or a
+              // small integer that could be a 0-255 alpha.
+              const char* tag = "";
+              if (f > 0.0f && f <= 1.0f) {
+                tag = " <FLOAT[0,1]";
+              } else if (v0 > 0 && v0 <= 255) {
+                tag = " <BYTE";
+              }
+              out += fmt::format("\n  +{:02X} n={} v={:08X}{}", i * 4,
+                                 seen[i].size(), v0, tag);
+            }
+            XELOGI("GuideDescCensus after {} submits:{}", n, out);
+          }
+        }
+        // Phase 1099b: DOES THE GUEST'S COMMAND BUFFER GROW? "The Guide never
+        // resets the draw, it piles on itself forever" would show here as a
+        // word count that climbs instead of returning to a steady size each
+        // frame. Log min/max/current periodically - all three from the guest's
+        // own descriptor field +0x04.
+        {
+          static std::atomic<uint32_t> wmin{0xFFFFFFFFu}, wmax{0}, wn{0};
+          uint32_t cur = words;
+          uint32_t om = wmin.load();
+          while (cur < om && !wmin.compare_exchange_weak(om, cur)) {}
+          uint32_t oM = wmax.load();
+          while (cur > oM && !wmax.compare_exchange_weak(oM, cur)) {}
+          uint32_t k = ++wn;
+          if ((k % 2000) == 0) {
+            XELOGI("GuideCmdWords: submit {} cur={} min={} max={}", k, cur,
+                   wmin.load(), wmax.load());
+          }
+        }
+        cp->guide_syscmd_submits_.fetch_add(1, std::memory_order_relaxed);
+        // Phase 1098u: does ANY submitted stream put the GPU in copy mode? A
+        // resolve in Xenia is a draw issued while RB_MODECONTROL (0x2208) says
+        // edram_mode == kCopy. The one stream dumped in 1098t does not write
+        // that register, and the destination census never saw the Guide's
+        // surface. Sample streams and count the ones that do, so "the guest
+        // never asks for a resolve" is measured rather than inferred from a
+        // single sample.
+        static std::atomic<uint32_t> scan_n{0};
+        static std::atomic<uint32_t> with_copy{0};
+        static std::atomic<uint32_t> scanned{0};
+        if ((scan_n.fetch_add(1, std::memory_order_relaxed) % 37) == 0) {
+          const uint8_t* sp = mem->TranslatePhysical(phys);
+          bool found = false;
+          uint32_t found_val = 0;
+          if (sp && words < 0x20000) {
+            uint32_t i = 0;
+            while (i < words) {
+              uint32_t hdr = xe::load_and_swap<uint32_t>(sp + i * 4);
+              uint32_t ty = hdr >> 30;
+              if (ty == 0) {
+                uint32_t cnt = ((hdr >> 16) & 0x3FFF) + 1;
+                uint32_t base = hdr & 0x7FFF;
+                bool one = (hdr & 0x8000) != 0;
+                for (uint32_t k = 0; k < cnt && i + 1 + k < words; ++k) {
+                  if ((one ? base : base + k) == 0x2208) {
+                    found = true;
+                    found_val =
+                        xe::load_and_swap<uint32_t>(sp + (i + 1 + k) * 4);
+                  }
+                }
+                i += 1 + cnt;
+              } else if (ty == 1) {
+                i += 3;
+              } else if (ty == 2) {
+                i += 1;
+              } else {
+                i += 1 + (((hdr >> 16) & 0x3FFF) + 1);
+              }
+            }
+          }
+          uint32_t sc = scanned.fetch_add(1, std::memory_order_relaxed) + 1;
+          if (found) with_copy.fetch_add(1, std::memory_order_relaxed);
+          if ((sc % 200) == 0) {
+            XELOGI("GuideModeControl: {} of {} sampled streams write 0x2208 "
+                   "(last value {:08X})",
+                   with_copy.load(std::memory_order_relaxed), sc, found_val);
+          }
+        }
+      }
+    }
   }
 }
 DECLARE_XBOXKRNL_EXPORT1(VdSetSystemCommandBuffer, kVideo, kStub);
@@ -570,6 +1149,29 @@ dword_result_t VdInitializeScalerCommandBuffer_entry(
                         // sources from.
     dword_t dest_count  // Count in words.
 ) {
+  // Phase 1098z9: THIS MAY BE THE MISSING COMPOSITE. On the console this returns
+  // a real PM4 command buffer that SCALES A SOURCE RECT ONTO AN OUTPUT RECT -
+  // which is how the system overlay reaches the display - and the caller submits
+  // it. Xenia fills it with NOPs, so whatever xam asks to be composited is
+  // replaced by nothing. Every parameter is the GUEST's, so acting on them
+  // invents no placement.
+  //
+  // Log the call before deciding anything: does xam call it at all, and with
+  // what rectangles?
+  {
+    static std::atomic<uint32_t> sc_n{0};
+    uint32_t n = ++sc_n;
+    if (n <= 8 || (n % 500) == 0) {
+      XELOGI("VdInitializeScalerCommandBuffer #{}: src xy={:08X} wh={:08X} | "
+             "out xy={:08X} wh={:08X} | fb wh={:08X} | vfilt={} hfilt={} | "
+             "dest={:08X} words={}",
+             n, uint32_t(scaler_source_xy), uint32_t(scaler_source_wh),
+             uint32_t(scaled_output_xy), uint32_t(scaled_output_wh),
+             uint32_t(front_buffer_wh), uint32_t(vertical_filter_type),
+             uint32_t(horizontal_filter_type), dest_ptr.guest_address(),
+             uint32_t(dest_count));
+    }
+  }
   // We could fake the commands here, but I'm not sure the game checks for
   // anything but success (non-zero ret).
   // For now, we just fill it with NOPs.
@@ -1034,7 +1636,7 @@ void GuideInstallAllocStub() {
   // payload against that run's 6917 words of command data. A bump allocator
   // that runs out returns nothing, and geometry is what stops being produced,
   // so restore the size the working measurement used.
-  const uint32_t kSize = 8u * 1024u * 1024u;
+  const uint32_t kSize = 32u * 1024u * 1024u;  // phase 1054: sizes are 4x what the stub assumed; keep ~100 paints of vertex data
   uint32_t buf = 0;
   if (!heap->Alloc(kSize, 4096,
                    kMemoryAllocationReserve | kMemoryAllocationCommit,
@@ -1070,6 +1672,11 @@ void GuideInstallAllocStub() {
   xe::store_and_swap<uint32_t>(mem->TranslateVirtual(buf + 4u), allow_lo);
   xe::store_and_swap<uint32_t>(mem->TranslateVirtual(buf + 8u), allow_hi);
   xe::store_and_swap<uint32_t>(mem->TranslateVirtual(buf + 12u), buf + kSize);
+  // Phase 1054: [buf+16] is where the cursor wraps to. The settled Guide
+  // allocates ~72 KB a paint through this allocator (vertex and constant
+  // payload), so a bump allocator empties 8 MB in four seconds; a ring keeps
+  // the last few paints' payload intact, which is all a replayed stream needs.
+  xe::store_and_swap<uint32_t>(mem->TranslateVirtual(buf + 16u), buf + 256u);
   guide_alloc_arena_ = buf;
   guide_alloc_end_ = buf + kSize;
   // Phase 908: 819E01E0 converts a pointer to a GPU address and returns zero
@@ -1097,14 +1704,26 @@ void GuideInstallAllocStub() {
   } else {
     code.push_back(0x3D600000u | hi);          // lis    r11, hi
   }
+  // Phase 1054: the original (81A02940: mr r29,r4; slwi r29,r29,2; cmplw
+  // r29,[dev+0x3FE0]) takes the size in DWORDS. Advancing by r4 bytes made
+  // every block a quarter of its true size, so each draw's vertex data was
+  // overwritten from byte 256 on by the next allocation - the fifth, ninth,
+  // thirteenth glyph of every string vanished ("Xbox ome", "Sele t"), and
+  // stray triangles (the hairline) came from the same overlap.
+  code.push_back(0x5484103Au);                 // slwi   r4, r4, 2      dwords -> bytes
   code.push_back(0x814B0000u | lo);            // lwz    r10, lo(r11)  cursor
   code.push_back(0x394A00FFu);                 // addi   r10, r10, 255
   code.push_back(0x554A002Eu);                 // rlwinm r10, r10, 0, 0, 23
   code.push_back(0x7D2A2214u);                 // add    r9, r10, r4
   code.push_back(0x810B0000u | (lo + 12u));    // lwz    r8, lo+12(r11) end
   code.push_back(0x7C094040u);                 // cmplw  r9, r8
+  // Phase 1054: on overflow wrap to [buf+16] (the ring) and retry once.
+  code.push_back(0x40810014u);                 // ble    +0x14 -> store
+  code.push_back(0x814B0000u | (lo + 16u));    // lwz    r10, lo+16(r11) wrap base
+  code.push_back(0x7D2A2214u);                 // add    r9, r10, r4
+  code.push_back(0x7C094040u);                 // cmplw  r9, r8
   to_zero.push_back(code.size());
-  code.push_back(0x41810000u);                 // bgt    -> return 0 (overflow)
+  code.push_back(0x41810000u);                 // bgt    -> return 0 (block larger than the ring)
   code.push_back(0x912B0000u | lo);            // stw    r9, lo(r11)
   code.push_back(0x7D435378u);                 // mr     r3, r10
   code.push_back(0x4E800020u);                 // blr
@@ -1614,20 +2233,165 @@ dword_result_t VdIsHSIOTrainingSucceeded_entry() {
 }
 DECLARE_XBOXKRNL_EXPORT1(VdIsHSIOTrainingSucceeded, kVideo, kStub);
 
-dword_result_t VdPersistDisplay_entry(unknown_t unk0, lpdword_t unk1_ptr) {
-  // unk1_ptr needs to be populated with a pointer passed to
-  // MmFreePhysicalMemory(1, *unk1_ptr).
-  if (unk1_ptr) {
-    auto heap = kernel_memory()->LookupHeapByType(true, 16 * 1024);
-    uint32_t unk1_value;
-    heap->Alloc(64, 32, kMemoryAllocationReserve | kMemoryAllocationCommit,
-                kMemoryProtectNoAccess, false, &unk1_value);
-    *unk1_ptr = unk1_value;
-  }
+// Phase 1099z: VdPersistDisplay(new_desc, out_prev) - real kernel 80096688.
+// The kernel holds ONE persisted display descriptor (800D0E80, 3 words:
+// +0 front buffer PHYSICAL base, +4 width:16 height:16, +8 format). Under a
+// lock it returns whether one is held, copies it to out_prev if given, and if
+// new_desc is given replaces it: the old buffer loses its persistent mark
+// (8006C388(base, 0)) and the new one gains it (8006C388(base, 1)) so title
+// memory release skips it. The exiting title's D3D terminate notification
+// persists its front buffer (dash 921B1E90, out_prev = 0); the next title's
+// D3D init persists its own and frees the previous one with
+// MmFreePhysicalMemory(1, prev.base) when the return is TRUE (dash 921A6154).
+// The old stub returned TRUE with a fresh 64-byte allocation every time, so
+// every D3D init freed a buffer that was never a front buffer.
+// Not modelled: the persistent page mark (Xenia's Mm title release does not
+// exist yet, so nothing would free the buffer anyway).
+static std::mutex persist_lock;
+static uint32_t persisted[3] = {0, 0, 0};
+static std::atomic<uint32_t> guide_ring_buffer_ptr{0};
+static void RecordGuideRingBuffer(uint32_t ptr) { guide_ring_buffer_ptr = ptr; }
 
-  return 1;
+// Phase 1099z97: addresses a title switch must not free - the live ring
+// buffer (until the next title's VdInitializeRingBuffer replaces it) and the
+// front buffer handed over by VdPersistDisplay.
+void GuideTitleSwitchKeepAddresses(std::vector<uint32_t>* out) {
+  std::lock_guard<std::mutex> lock(persist_lock);
+  for (uint32_t v : persisted) {
+    if (v) out->push_back(v);
+  }
+  if (uint32_t r = guide_ring_buffer_ptr.load()) {
+    out->push_back(r);
+  }
 }
-DECLARE_XBOXKRNL_EXPORT2(VdPersistDisplay, kVideo, kImplemented, kSketchy);
+
+dword_result_t VdPersistDisplay_entry(lpdword_t new_desc, lpdword_t out_prev) {
+  std::lock_guard<std::mutex> lock(persist_lock);
+  const uint32_t had = persisted[0] != 0 ? 1 : 0;
+  uint32_t lr = 0;
+  if (auto* th = XThread::GetCurrentThread()) {
+    lr = static_cast<uint32_t>(th->thread_state()->context()->lr);
+  }
+  if (out_prev) {
+    for (int i = 0; i < 3; ++i) {
+      out_prev[i] = persisted[i];
+    }
+  }
+  if (new_desc) {
+    for (int i = 0; i < 3; ++i) {
+      persisted[i] = new_desc[i];
+    }
+  }
+  XELOGI("VdPersistDisplay(new {:08X} = {:08X} {:08X} {:08X}, out {:08X}) "
+         "had {} -> held {:08X} lr={:08X}",
+         new_desc.guest_address(), new_desc ? uint32_t(new_desc[0]) : 0,
+         new_desc ? uint32_t(new_desc[1]) : 0,
+         new_desc ? uint32_t(new_desc[2]) : 0, out_prev.guest_address(), had,
+         persisted[0], lr);
+  XELOGI("VdPersistDisplay: chain {}", kernel_state()->GuestBackChain());
+  return had;
+}
+DECLARE_XBOXKRNL_EXPORT1(VdPersistDisplay, kVideo, kImplemented);
+
+// Phase 1099z138: kernel 800F7E68 -> 800EC6A0. The descriptor is the persisted
+// display (80102898 peeks it without clearing: +0 physical base, +4 width:16
+// height:16, +8 format) or, with none, {0, display w:h, 0x28280106}. 800EC6A0
+// calls xam's routine as (0, 4 + !initializing, &desc) on the caller's thread,
+// then every title routine as (entry, id, &desc).
+// Not modelled (declared): the title routines are not called for 4/5 - Xenia
+// calls them with a different first argument and none has been seen to need
+// it; the no-persist fallback uses 1280x720 instead of the D1GRPH mode
+// registers and ignores the 0x136 format variant.
+// [801E6FB4]: a title owns the engines. Set by VdInitializeEngines and
+// cleared by VdShutdownEngines, each only for a non-system caller
+// (800F7FE8..FC, 800F8264..90), and cleared by the kernel's 6D000000 title
+// terminate notification.
+static std::atomic<bool> guide_title_owns_engines{false};
+
+static void GuideSendXamEngineNotification(uint32_t id, uint32_t words[3]);
+
+static void GuideEngineNotifyXam(bool initializing, const ppc_context_t& ctx) {
+  if (!cvars::guide_engine_notifications) return;
+  if (xeKeGetCurrentProcessType(ctx) == X_PROCTYPE_SYSTEM) {
+    XELOGI("VdEngines: {} from a system-process thread (lr {:08X}) - no "
+           "notification",
+           initializing ? "VdInitializeEngines" : "VdShutdownEngines",
+           uint32_t(ctx->lr));
+    return;
+  }
+  guide_title_owns_engines = initializing;
+  GuideSendXamEngineNotification(initializing ? 4u : 5u, nullptr);
+}
+
+// The kernel's own title terminate notifications, registered at boot
+// (801B1DF4..801B1E08). Xenia's HLE kernel never registered them, so the
+// launch fade's id 5 was never sent: the dash's VdShutdownEngines runs from
+// xam's system task-pool worker and sends nothing, by design.
+//   800F8778, priority 6E800000: register 0x1860 = 0; if a title owns the
+//     engines, VdShutdownEngines (a no-op from a system thread); send id 9 with
+//     an 8-byte zero block.
+//   800F8358, priority 6D000000: if a title owns the engines, VdShutdownEngines,
+//     clear the flag and send id 5 with the persisted display (800F83D0).
+// Not modelled (declared): the 0x1860 write, the display-state resets in
+// 800F8358 (800EE370, 800F6C08, 800F6638, 800EBB28, 800F68B8) and its lock.
+void GuideKernelEngineTerminateSlot(bool send_id5) {
+  if (!cvars::guide_engine_notifications) return;
+  const bool owned = guide_title_owns_engines.load();
+  XELOGI("VdEngines: kernel title terminate notification {} (title owns "
+         "engines {})",
+         send_id5 ? "800F8358" : "800F8778", owned);
+  if (!send_id5) {
+    uint32_t zero[3] = {0, 0, 0};
+    GuideSendXamEngineNotification(9u, zero);
+    return;
+  }
+  if (!owned) return;
+  guide_title_owns_engines = false;
+  GuideSendXamEngineNotification(5u, nullptr);
+}
+
+// 800EC6A0: xam's routine as (0, id, &desc). words == nullptr builds the
+// 800F7E68 descriptor.
+static void GuideSendXamEngineNotification(uint32_t id, uint32_t words[3]) {
+  uint32_t xam_callback = 0;
+  {
+    auto global_lock = graphics_notification_region_.Acquire();
+    if (graphics_notification_routines_) {
+      for (auto& r : *graphics_notification_routines_) {
+        if (r.is_xam) xam_callback = r.callback;
+      }
+    }
+  }
+  if (!xam_callback) return;
+  uint32_t desc_words[3];
+  if (words) {
+    std::memcpy(desc_words, words, sizeof(desc_words));
+  } else {
+    std::lock_guard<std::mutex> lock(persist_lock);
+    if (persisted[0]) {
+      std::memcpy(desc_words, persisted, sizeof(desc_words));
+    } else {
+      desc_words[0] = 0;
+      desc_words[1] = (1280u << 16) | 720u;
+      desc_words[2] = 0x28280106u;
+    }
+  }
+  auto* memory = kernel_memory();
+  const uint32_t desc = memory->SystemHeapAlloc(12);
+  if (!desc) return;
+  for (int i = 0; i < 3; ++i) {
+    xe::store_and_swap<uint32_t>(memory->TranslateVirtual(desc + i * 4),
+                                 desc_words[i]);
+  }
+  XELOGI("VdEngines: graphics notification {} to xam {:08X} desc {:08X} "
+         "{:08X} {:08X}",
+         id, xam_callback, desc_words[0], desc_words[1], desc_words[2]);
+  uint64_t args[] = {0, id, desc};
+  kernel_state()->processor()->Execute(XThread::GetCurrentThread()->thread_state(),
+                                       xam_callback, args, xe::countof(args));
+  XELOGI("VdEngines: graphics notification {} returned", id);
+  memory->SystemHeapFree(desc);
+}
 
 dword_result_t VdRetrainEDRAMWorker_entry(unknown_t unk0) { return 0; }
 DECLARE_XBOXKRNL_EXPORT1(VdRetrainEDRAMWorker, kVideo, kStub);
@@ -1728,7 +2492,139 @@ static std::atomic<bool> guide_bs_ready_{false};
 
 uint32_t GuideBootDc() { return guide_boot_dc_; }
 
+// Phase 1054 transitions: xam's HUD background transition, played on xam's
+// root scene only (8174E220 recurses into child scenes, which now include
+// hud's; their timelines mean something else at those frame numbers).
+// Phase 1088: XUI's class table in registration order - the 39
+// 8194F118(descriptor, 1, slot) calls fill 81D6CDC8..81D6CE54 step 4 plus three
+// strays at 81D6EF2C/EF30/F16C (descriptor +04 class name, +08 base, +10
+// message handler, +14 factory, +18 destructor). Registration is base-first, so
+// the LAST cast that succeeds names the most derived class; returning the first
+// reported a XuiNineGrid or a XuiButton as the XuiControl it also is.
+static const char* const kGuideClassNames[36] = {
+    "?base", "XuiText", "XuiLabel", "XuiCanvas", "XuiFigure", "XuiControl",
+    "XuiVisual", "XuiScene", "XuiButton", "XuiNavButton", "XuiBackButton",
+    "XuiCheckbox", "XuiRadioButton", "XuiRadioGroup", "XuiTextPresenter",
+    "XuiGroup", "XuiSound", "XuiTransition", "XuiListItem", "XuiScrollEnd",
+    "XuiScrollBar", "XuiList", "XuiCommonList", "XuiEdit", "XuiCaret",
+    "XuiMessageBox", "XuiImagePresenter", "XuiImage", "XuiTabScene",
+    "XuiPerspectiveScene", "XuiNineGrid", "XuiGridPanel", "?CE48",
+    "XuiTextureSurface", "XuiShader", "XuiVariable"};
+template <typename Call, typename Read>
+static std::string GuideElemClass(Call&& pcall, Read&& prd2, uint32_t h) {
+  if (!h) return std::string("?");
+  std::string best;
+  for (uint32_t i = 1; i < 36u; ++i) {
+    uint32_t co = prd2(0x81D6CDC8u + i * 4u);
+    if (!(co >= 0x40000000u && co < 0x50000000u)) continue;
+    if (pcall(0x81930FE8u, {h, co})) best = kGuideClassNames[i];
+  }
+  static const struct { uint32_t slot; const char* nm; } kStray[] = {
+      {0x81D6EF2Cu, "XuiSlider"},
+      {0x81D6EF30u, "XuiProgressBar"},
+      {0x81D6F16Cu, "XuiSoundXAudio"}};
+  for (const auto& st : kStray) {
+    uint32_t co = prd2(st.slot);
+    if (!(co >= 0x40000000u && co < 0x50000000u)) continue;
+    if (pcall(0x81930FE8u, {h, co})) best = st.nm;
+  }
+  return best.empty() ? std::string("?") : best;
+}
+
+// Phase 1089: WHICH STATE THE GUIDE OPENS TO IS XAM'S, NOT OURS. The toggle
+// used to force the CHUDBkgndScene singleton's state word to 0 and play a
+// hardcoded ClosedToFull - a number the harness picked, which is the class of
+// thing 1059 deleted. xam does not hardcode it either: five of the six callers
+// of PlayTransition (8174E220) take the state from a field, 8174EBF4 applies a
+// deferred REQUEST ([obj+0x70] 1 = Closed, 2 = the state in [obj+0x64]) and
+// 8174EDFC defaults to [r31+0x10] before letting the callback at [r31+0x18]
+// overwrite it. On a run where nothing of ours plays a transition (watch1,
+// --guide_bkgnd_state=-1) the singleton's own [+0x10] reads 1 and never moves,
+// with no request pending. Latch that value the first time it is wanted -
+// before anything of ours writes the word - and open to it.
+static uint32_t g_guide_bkgnd_guest_state = 0xFFFFFFFFu;
+static uint32_t GuideBkgndGuestState() {
+  if (g_guide_bkgnd_guest_state != 0xFFFFFFFFu) return g_guide_bkgnd_guest_state;
+  auto* ks = kernel_state();
+  if (!ks) return 0xFFFFFFFFu;
+  auto* mem = ks->memory();
+  uint32_t single =
+      xe::load_and_swap<uint32_t>(mem->TranslateVirtual(0x81D3F924u));
+  if (single < 0x40000000u || single >= 0x50000000u) return 0xFFFFFFFFu;
+  uint32_t st = xe::load_and_swap<uint32_t>(mem->TranslateVirtual(single + 0x10u));
+  if (st > 4u) return 0xFFFFFFFFu;
+  g_guide_bkgnd_guest_state = st;
+  static const char* kNames[] = {"Closed", "Half", "Full", "Error", "NuiFull"};
+  XELOGI("GuideBkgnd: xam's own background state is {} ({}) - the Guide opens to that",
+         st, kNames[st]);
+  return st;
+}
+// -1 = do not play at all; >= 0 = an explicit override, for experiments only;
+// anything else (-2, the harness's setting) = xam's own state. No fallback: if
+// the guest value cannot be read the transition is NOT played, because the only
+// alternative is putting a number of ours back.
+static uint32_t GuideBkgndTarget() {
+  int32_t f = ::cvars::guide_bkgnd_state;
+  if (f >= 0) return uint32_t(f);
+  return GuideBkgndGuestState();
+}
+static uint32_t GuidePlayBkgnd(uint32_t to_state, const char* why) {
+  // Phase 1091: ONE CALL INTO XAM, AND XAM DOES THE REST.
+  // This used to re-implement CHUDBkgndScene::PlayTransition in the host:
+  // read the state word, build "<from>To<to>" from a table of our own, look
+  // the two named frames up with XuiElementFindNamedFrame, WRITE THE STATE
+  // WORD OURSELVES and drive XuiElementPlayTimeline. That reproduced xam's
+  // naming but not xam's bookkeeping - [scene+0x14] ("a transition is in
+  // progress", set at 8174E394/8174E3A0) was never set or cleared, [scene+0x68]
+  // (the pending target PlayTransition honours before its argument, 8174E22C)
+  // was never consulted, and the request list at [scene+0x5C] never moved.
+  // The A/B is rec1091 against reg1091, the full plan both times:
+  //   handed to xam   +10 1->3 and +5C 0->4015A130 when the message box opens,
+  //                   then 3->1 and the queue empties when it closes; +14 goes
+  //                   1 and back to 0 around EVERY transition
+  //   re-implemented  +10 moves, +14 and +5C never do
+  // and the frames are the same to within run-to-run noise (655 px at rest,
+  // 1267 in the box, against 2033 px between two runs of the SAME build - all
+  // of it the clock and Plants vs. Zombies' own animated legend). So the
+  // re-implementation is gone, along with guide_bkgnd_recurse, which selected
+  // between them: xam picks the timeline from its own table at 81D21680, sets
+  // its own state, and runs its own message-box request queue.
+  // The state we pass is still xam's - GuideBkgndTarget latches it out of the
+  // scene - and PlayTransition early-outs itself when it already holds it
+  // (8174E258), so there is no test of ours in front of it.
+  auto* ks = kernel_state();
+  if (!ks) return 0xDEADu;
+  auto* mem = ks->memory();
+  auto rd = [&](uint32_t a) { return xe::load_and_swap<uint32_t>(mem->TranslateVirtual(a)); };
+  uint32_t single = rd(0x81D3F924u);
+  if (single < 0x40000000u || single >= 0x50000000u) return 0xDEADu;
+  auto* th = XThread::GetCurrentThread();
+  if (!th) return 0xDEADu;
+  static const char* names[] = {"Closed", "Half", "Full", "Error", "NuiFull"};
+  uint32_t cur = rd(single + 0x10u);
+  uint64_t a[] = {single, to_state};
+  uint32_t r = uint32_t(ks->processor()->Execute(th->thread_state(), 0x8174E220u, a, 2));
+  uint32_t now = rd(single + 0x10u), busy = rd(single + 0x14u);
+  XELOGI("GuideBkgnd: {} PlayTransition({} {} -> {} {}) -> {:08X}; state now {}, in progress {}",
+         why, cur, cur <= 4u ? names[cur] : "?", to_state,
+         to_state <= 4u ? names[to_state] : "?", r, now, busy);
+  return r;
+}
 bool GuideBootstrapReady() { return guide_bs_ready_; }
+
+void GuideScriptPushKey(uint16_t virtual_key, uint16_t flags) {
+  std::lock_guard<std::mutex> lk(g_guide_script_mu);
+  g_guide_script_keys.emplace_back(virtual_key, flags);
+}
+uint32_t GuideShowCount() { return g_guide_show_count; }
+void GuideScriptGuideButton() { g_guide_button_edge.store(1); }
+static std::atomic<int> g_guide_script_dump{0};  // phase 1055 menus: the "dump" step
+void GuideScriptDump() { g_guide_script_dump.store(1); }
+static std::atomic<int> g_guide_script_watch{0};  // phase 1055 menus: the "watch" step (paints left)
+static uint32_t g_guide_last_focus = 0;            // phase 1055 menus: the input poll's last focused element
+static int g_guide_focus_restore = 0;              // phase 1055 menus: paints left to give the focus back after a box
+static uint32_t g_guide_bk_state_prev = 0xFFu;
+void GuideScriptWatch() { g_guide_script_watch.store(150); }
 static std::atomic<bool> guide_bs_pending_{false};
 
 static gpu::CommandProcessor::GuideRing saved_ring_{};
@@ -1767,6 +2663,14 @@ void GuideRestoreTitleRing() {
 
 void QueueGuideBootstrap(uint32_t hud_base, uint32_t guide_obj,
                          bool use_title_device, uint32_t skin_module) {
+  // Phase 1054: the emulator's Guide-button path queues this on every press,
+  // and each re-run built a whole new scene tree under a new draw root
+  // (p1054b: three trees, three arenas). Once the first bootstrap is up, a
+  // press is a toggle (handled at the top of the swap hook), nothing more.
+  if (guide_bs_ready_) {
+    XELOGI("GuideBootstrap: already up; ignoring the re-press");
+    return;
+  }
   guide_bs_hud_base_ = hud_base;
   guide_bs_obj_ = guide_obj;
   guide_bs_use_title_device_ = use_title_device;
@@ -2418,6 +3322,14 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
     XELOGI("GuideBootstrap: scene creator {:08X} -> {:08X}, scene={:08X}",
            scene_fn, static_cast<uint32_t>(ir),
            scene_out ? rd(scene_out) : 0);
+    // Phase 1054ae: the ready flag was only set on the off-thread path, so
+    // the Guide-button gate never fired and every press built another tree
+    // from xam's UIRUNTIME heap (run ae: five trees, then "Out of memory
+    // allocating 36 bytes from heap 4" and a 188k-line heap dump).
+    if (guide_bs_scene_ >= 0x00010000u && guide_bs_scene_ < 0x00100000u) {
+      guide_bs_ready_ = true;
+      XELOGI("GuideBootstrap: ready (scene {:08X}); later presses toggle", guide_bs_scene_);
+    }
     // Create a scene AND NAVIGATE TO IT, the way hud does.
     //
     // hud never calls the bare creator through a bl - it is vtable dispatch
@@ -2536,15 +3448,43 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
                  "scene={:08X}",
                  lr, sr, new_scene);
           if (new_scene) {
-            uint64_t ca[] = {guide_bs_scene_, new_scene};
+            // Phase 1054 transitions: host hud's scene under xam's AppHost
+            // element (hudbkgnd.xur "AppHostElementId"), as xam does on the
+            // console. Its opacity is what ClosedToFull / FullToClosed animate,
+            // so the panel fades with the legend and clock instead of popping.
+            uint32_t host = guide_bs_scene_;
+            if (::cvars::guide_host_in_apphost) {
+              uint32_t single = rd(0x81D3F924u);
+              uint32_t hroot = (single >= 0x40000000u && single < 0x50000000u) ? rd(single + 8u) : 0u;
+              uint32_t f_byid = xmg ? xmg->GetProcAddressByOrdinal(0x32A) : 0;
+              uint32_t ah = 0, br = 0xDEADu;
+              if (hroot >= 0x10000u && hroot < 0x100000u && f_byid) {
+                uint32_t wbuf = memory->SystemHeapAlloc(0x80, 16);
+                uint32_t obuf = memory->SystemHeapAlloc(16, 16);
+                if (wbuf && obuf) {
+                  std::memset(memory->TranslateVirtual(wbuf), 0, 0x80);
+                  std::memset(memory->TranslateVirtual(obuf), 0, 16);
+                  const char* id = "AppHostElementId";
+                  auto* b = memory->TranslateVirtual<uint8_t*>(wbuf);
+                  for (size_t i = 0; id[i]; ++i) b[i * 2 + 1] = uint8_t(id[i]);
+                  uint64_t ba[] = {hroot, wbuf, obuf};
+                  br = uint32_t(processor->Execute(ts, f_byid, ba, xe::countof(ba)));
+                  ah = br == 0 ? rd(obuf) : 0u;
+                  if (ah >= 0x10000u && ah < 0x100000u) { host = ah; g_guide_hosted = true; }
+                }
+              }
+              XELOGI("GuideNavM: xam HUD root {:08X} AppHostElementId -> {:08X} (r {:08X}); hosting {}",
+                     hroot, ah, br, g_guide_hosted ? "under it" : "on hud's own scene (re-link at the probe)");
+            }
+            uint64_t ca[] = {host, new_scene};
             uint32_t cr = uint32_t(
                 processor->Execute(ts, f_add, ca, xe::countof(ca)));
-            uint64_t va[] = {guide_bs_scene_, 0, new_scene, 0};
+            uint64_t va[] = {host, 0, new_scene, 0};
             uint32_t vr = uint32_t(
                 processor->Execute(ts, f_nav, va, xe::countof(va)));
             XELOGI("GuideNavM: AddChild({:08X},{:08X}) -> {:08X}; "
                    "NavigateForward -> {:08X}",
-                   guide_bs_scene_, new_scene, cr, vr);
+                   host, new_scene, cr, vr);
             // Navigating does not repoint the draw. hud's composite draw uses
             // [this+8] as its root, which still holds the ORIGINAL scene, so
             // a successful navigate to Status.xur changes what XUI considers
@@ -2608,6 +3548,47 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
       //   anything else     -> E_FAIL 0x80004005
       // So this word decides whether the Guide can reach its blade.
       if (nav_obj) {
+        // Phase 1050: log both sides of the tab loader's comparison at
+        // 913E9250 (installed here because a breakpoint set before hud's
+        // code is translated never fires).
+        if (::cvars::guide_trace_tabcmp) {
+          static std::unique_ptr<cpu::Breakpoint> tabcmp_bp2;
+          if (!tabcmp_bp2) {
+            tabcmp_bp2 = std::make_unique<cpu::Breakpoint>(
+        kernel_state()->processor(), cpu::Breakpoint::AddressType::kGuest,
+        0x913E924Cull,
+        [](cpu::Breakpoint* bp, cpu::ThreadDebugInfo* ti, uint64_t host_pc) {
+          auto* th = XThread::GetCurrentThread();
+          if (!th) return;
+          auto* c = th->thread_state()->context();
+          static std::atomic<uint32_t> n{0};
+          if (++n > 12) return;
+          auto* m = kernel_state()->memory();
+          auto rd4 = [&](uint32_t a) -> uint32_t {
+            if (!((a >= 0x40000000u && a < 0x50000000u) || (a >= 0x70000000u && a < 0x80000000u) || (a >= 0x81000000u && a < 0x81E00000u))) return 0u;
+            return xe::load_and_swap<uint32_t>(m->TranslateVirtual(a));
+          };
+          XELOGI("TabCmpArg #{}: GetCurrentTab(r3={:08X}) loading r30={:08X} page [r27]={:08X} r27={:08X}",
+                 uint32_t(n), uint32_t(c->r[3]), uint32_t(c->r[30]), rd4(uint32_t(c->r[27])), uint32_t(c->r[27]));
+        });
+    kernel_state()->processor()->AddBreakpoint(tabcmp_bp2.get());
+    static std::unique_ptr<cpu::Breakpoint> init_bp;
+    init_bp = std::make_unique<cpu::Breakpoint>(
+        kernel_state()->processor(), cpu::Breakpoint::AddressType::kGuest,
+        0x913E9490ull,
+        [](cpu::Breakpoint* bp, cpu::ThreadDebugInfo* ti, uint64_t host_pc) {
+          auto* th = XThread::GetCurrentThread();
+          if (!th) return;
+          auto* c = th->thread_state()->context();
+          static std::atomic<uint32_t> n{0};
+          if (++n > 6) return;
+          XELOGI("SceneInit #{}: r3={:08X} r4={:08X} lr={:08X}", uint32_t(n),
+                 uint32_t(c->r[3]), uint32_t(c->r[4]), uint32_t(c->lr));
+        });
+    kernel_state()->processor()->AddBreakpoint(init_bp.get());
+            XELOGI("TabCmp2 trace installed at 913E9250 (pre-nav)");
+          }
+        }
         XELOGI("GuideNav: state [+72]={} [+76]={} [+88]={} [+240]={} "
                "(76 in {{0,4}} selects GuideMain.xur)",
                rd(nav_obj + 72u), rd(nav_obj + 76u), rd(nav_obj + 88u),
@@ -2783,7 +3764,14 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
           uint32_t po_ = GuideResolveHandle(guide_bs_scene_);
           if (po_) parent_arg = po_;
         }
-        uint64_t na[] = {nav_obj, parent_arg};
+        // Phase 1052: the dispatcher's third argument is an out pointer that
+        // receives [navObj+0x18] once NavigateFirst succeeds (913EC858). It
+        // never mattered while the bootstrap's unfinished boot transition made
+        // NavigateFirst fail; with that transition finished it is written.
+        static uint32_t nav_out = 0;
+        if (!nav_out) nav_out = memory->SystemHeapAlloc(16, 16);
+        if (nav_out) std::memset(memory->TranslateVirtual(nav_out), 0, 16);
+        uint64_t na[] = {nav_obj, parent_arg, nav_out};
         uint32_t nav_entry =
             (::cvars::guide_nav_state >= 0) ? 0xC6D0u : 0xB7D8u;
         // Phase 585: coverage located the failure precisely. 913EC6D0 does
@@ -2819,13 +3807,95 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
                    rd(sub + 8u));
           }
         }
+        // Phase 1052: the 40-frame transition 0001012D (old canvas 000100A9 ->
+        // new canvas) is what crashes once XuiAnimRun advances it. Is it there
+        // before hud's dispatcher runs, or does the dispatcher make it?
+        auto nav_probe = [&](const char* tag) {
+          if (!::cvars::guide_anim_run) return;
+          auto pc = [&](uint32_t fn, std::initializer_list<uint64_t> a) {
+            std::vector<uint64_t> v(a);
+            return fn ? uint32_t(processor->Execute(ts, fn, v.data(), v.size())) : 0xDEADu;
+          };
+          uint32_t out = memory->SystemHeapAlloc(16, 16);
+          uint32_t cnt = rd(0x81D6CDBCu + 4u);
+          std::string tls;
+          for (uint32_t i = 0; i < cnt && i < 48; ++i) {
+            uint32_t e = pc(0x81933928u, {0x81D6CDBCu, i});
+            uint32_t tl = e ? rd(e) : 0;
+            uint32_t owner = tl ? rd(tl) : 0;
+            if (owner >= 0x00010100u) tls += fmt::format("[{}:{:08X} {}-{}] ", i, owner, rd(tl + 8u), rd(tl + 0xCu));
+          }
+          XELOGI("GuideNavProbe {}: timelines {} | late owners: {}", tag, cnt, tls);
+          uint32_t xs = rd(0x81D6CDE4u), xt = rd(0x81D6CE0Cu);
+          for (uint32_t h : {0x000100A9u, 0x0001012Cu, 0x0001012Du, 0x0001012Eu, 0x0001012Fu, 0x00010130u, 0x00010137u}) {
+            uint32_t ob = pc(0x81931040u, {h});
+            if (!ob) continue;
+            std::memset(memory->TranslateVirtual(out), 0, 16);
+            pc(0x81931BF0u, {h, out});
+            uint32_t par = rd(out);
+            std::memset(memory->TranslateVirtual(out), 0, 16);
+            pc(0x81931C90u, {h, out});
+            uint32_t kid = rd(out);
+            XELOGI("GuideNavProbe {}: {:08X} obj {:08X} scene {:08X} transition {:08X} parent {:08X} firstchild {:08X}",
+                   tag, h, ob, pc(0x81930FE8u, {h, xs}), pc(0x81930FE8u, {h, xt}), par, kid);
+          }
+        };
+        nav_probe("before");
+        // Phase 1052: the bootstrap's scene creator (vtable[27]) navigated the
+        // boot scene into the boot canvas with a 40-frame transition
+        // (0001012D under 000100A9) that nothing ever advanced. Once XuiAnimRun
+        // runs per paint it completes, and the XuiTransition handler 81965880
+        // then dereferences a child that is no longer a scene. Finish it now,
+        // the way NavigateFirst finishes the current scene's transitions
+        // (81936BC8), while the boot scene is still intact.
+        if (::cvars::guide_anim_run && guide_bs_scene_) {
+          auto xmi = kernel_state()->GetModule("xam.xex", true);
+          uint32_t f_int = xmi ? xmi->GetProcAddressByOrdinal(0x39E) : 0;
+          // The export wants a scene: walk boot canvas -> transition -> boot
+          // scene and interrupt there; if the 40-frame timeline is still in
+          // xam's list afterwards, destroy the boot canvas outright (the real
+          // dispatcher builds its own canvas; this one is bootstrap residue).
+          uint32_t out2 = memory->SystemHeapAlloc(16, 16);
+          auto first_child = [&](uint32_t h) {
+            std::memset(memory->TranslateVirtual(out2), 0, 16);
+            uint64_t a[] = {h, out2};
+            processor->Execute(ts, 0x81931C90u, a, 2);
+            return rd(out2);
+          };
+          uint32_t tr = first_child(guide_bs_scene_);
+          uint32_t boot_scene = tr ? first_child(tr) : 0;
+          uint64_t ia[] = {boot_scene};
+          uint32_t ir2 = (f_int && boot_scene) ? uint32_t(processor->Execute(ts, f_int, ia, 1)) : 0xDEADu;
+          auto has_boot_tl = [&]() {
+            uint32_t cnt = rd(0x81D6CDBCu + 4u);
+            for (uint32_t i = 0; i < cnt && i < 64; ++i) {
+              uint64_t a[] = {0x81D6CDBCu, i};
+              uint32_t e = uint32_t(processor->Execute(ts, 0x81933928u, a, 2));
+              uint32_t tl = e ? rd(e) : 0;
+              if (tl && rd(tl) == tr) return true;
+            }
+            return false;
+          };
+          bool still = has_boot_tl();
+          XELOGI("GuideNav: boot canvas {:08X} -> transition {:08X} -> scene {:08X}; "
+                 "XuiSceneInterruptTransitions(scene) -> {:08X}; transition timeline still listed: {}",
+                 guide_bs_scene_, tr, boot_scene, ir2, still);
+          if (still) {
+            uint32_t f_del = xmi ? xmi->GetProcAddressByOrdinal(0x326) : 0;
+            uint64_t da[] = {guide_bs_scene_};
+            uint32_t dr = f_del ? uint32_t(processor->Execute(ts, f_del, da, 1)) : 0xDEADu;
+            XELOGI("GuideNav: XuiDestroyObject(boot canvas {:08X}) -> {:08X}; timelines now {}; still listed: {}",
+                   guide_bs_scene_, dr, rd(0x81D6CDBCu + 4u), has_boot_tl());
+          }
+        }
         uint64_t nr = processor->Execute(ts, hud_base + nav_entry, na,
                                          xe::countof(na));
+        nav_probe("after");
         XELOGI("GuideNav: hud+{:04X}(navObj {:08X}, parent scene {:08X}) -> "
-               "{:08X}; [navObj+500]={:08X} [navObj+508]={:08X}",
+               "{:08X}; [navObj+500]={:08X} [navObj+508]={:08X}; out={:08X}",
                nav_entry, nav_obj, guide_bs_scene_,
                static_cast<uint32_t>(nr),
-               rd(nav_obj + 0x500u), rd(nav_obj + 0x508u));
+               rd(nav_obj + 0x500u), rd(nav_obj + 0x508u), nav_out ? rd(nav_out) : 0);
         // hud's own path now succeeds: giving the manually created scene a
         // parent first satisfies NavigateForward's check inside 913EB508, so
         // 913EB7D8 builds AND navigates to a properly initialised Status
@@ -2833,6 +3903,13 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
         // hud's construction path, unlike the phase 192 one, so it is the
         // fair comparison phase 215 said was missing.
         uint32_t hud_scene = rd(nav_obj + 0x508u);
+        // Phase 1050: the real dispatcher's output slot is [sub+8] =
+        // [navObj+0x18] (phase 586), not the Status path's [+508].
+        if (!hud_scene && ::cvars::guide_nav_state >= 0) {
+          uint32_t slot = rd(nav_obj + 0x18u);
+          XELOGI("GuideNav: dispatcher slot [navObj+18] = {:08X}", slot);
+          if (slot && (slot >> 16) < 0x10u) hud_scene = slot;
+        }
         // 913EB7D8 is hardcoded to Status.xur (phase 284), so this re-point
         // always lands on the loading screen and silently discards a scene
         // chosen with guide_scene_name. If the caller named a scene, that is
@@ -3592,25 +4669,6 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
               XELOGI("GuideClass: {:08X} matches {}", kid,
                      got.empty() ? std::string("NOTHING") : got);
             }
-            if (::cvars::guide_inject_label_text) {
-              uint32_t stf = xmod ? xmod->GetProcAddressByOrdinal(0x363)
-                                  : 0;
-              uint32_t str = memory->SystemHeapAlloc(64, 16);
-              if (stf && str) {
-                static const char16_t kTxt[] = u"XENIA GUIDE TEST";
-                std::memset(memory->TranslateVirtual(str), 0, 64);
-                for (uint32_t w = 0; kTxt[w]; ++w) {
-                  xe::store_and_swap<uint16_t>(
-                      memory->TranslateVirtual(str + w * 2),
-                      uint16_t(kTxt[w]));
-                }
-                uint64_t ta[] = {kid, str};
-                uint64_t tr = processor->Execute(ts, stf, ta,
-                                                xe::countof(ta));
-                XELOGI("GuideScene:   {:08X} SetText -> {:08X}", kid,
-                       static_cast<uint32_t>(tr));
-              }
-            }
             kid = next;
           }
         }
@@ -3633,9 +4691,24 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
           memory->TranslateVirtual(guide_bs_obj_ + 64), 1u);
       XELOGI("GuideBootstrap: preset [obj+28,32,64] as the scene creator does");
     }
-    uint64_t a2[] = {render_obj, 0};
-    ir = processor->Execute(ts, (g_hud_xuiinit ? g_hud_xuiinit : guide_bs_hud_base_ + 0xA898u), a2,
-                            xe::countof(a2));
+    // Phase 1097r: this Execute is why hud's init runs at all. Measured with
+    // a controlled probe (r12 at entry+4; control 818FAE6C reads its real
+    // caller 913EAB4C 2000 times): hud's init is entered with lr = BCBCBCBC,
+    // the sentinel Execute leaves, and no guest thread has 913EA898 as an
+    // entry. So the render path is host-driven in exactly the way the skin
+    // loader was until this same phase stopped driving THAT - and stopping it
+    // is what let the guest arm its own HUD-manager loop and open the gate.
+    // guide_guest_hud_init removes the host's copy here so the question "does
+    // xam ever call hud's init itself" can be asked at all.
+    if (::cvars::guide_guest_hud_init) {
+      XELOGI("GuideBootstrap: NOT calling hud's init - leaving it to the "
+             "guest (guide_guest_hud_init)");
+      ir = 0;
+    } else {
+      uint64_t a2[] = {render_obj, 0};
+      ir = processor->Execute(ts, (g_hud_xuiinit ? g_hud_xuiinit : guide_bs_hud_base_ + 0xA898u), a2,
+                              xe::countof(a2));
+    }
   }
   XELOGI("GuideBootstrap: after init -> {:08X}  +8={:08X} +12={:08X}",
          static_cast<uint32_t>(ir), rd(render_obj + 8), rd(render_obj + 12));
@@ -3831,7 +4904,8 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   // initialisation can complete - and still register visuals - without this one
   // dispatch. If it can, the visuals and the draw hook stop being mutually
   // exclusive (phase 516).
-  if (::cvars::guide_patch_skin_dispatch && XamIsDashrootLayout()) {
+  if (::cvars::guide_patch_skin_dispatch && ::cvars::guide_skin_dispatch_nop &&
+      XamIsDashrootLayout()) {
     GuidePatchWord(0x81901E88u, 0x409A0010u, 0x60000000u, "SkinDispatchPatch");
   }
   // Phase 840: 81A14110 defaults the primitive type when the descriptor field
@@ -3893,6 +4967,57 @@ static void RunGuideBootstrapOnTitleThread(XThread* thread) {
   // (Applied from the paint loop in emulator.cc instead: this bootstrap
   // runs AFTER hud's render has already faulted - the patch landed at log
   // line 3259 and the crash was at 3131.)
+  if (::cvars::guide_patch_dc_loader && XamIsDashrootLayout()) {
+    auto* pm = kernel_state()->memory();
+    const uint32_t site = 0x81901E88u;  // bne cr6, 0x81901E98 -> b
+    uint8_t* hp = pm->TranslateVirtual(site);
+    xe::memory::PageAccess old_access = xe::memory::PageAccess::kNoAccess;
+    bool unprot = xe::memory::Protect(
+        reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(hp) & ~0xFFFull),
+        0x1000, xe::memory::PageAccess::kReadWrite, &old_access);
+    uint32_t was = xe::load_and_swap<uint32_t>(hp);
+    if (unprot && was == 0x409A0010u) {
+      xe::store_and_swap<uint32_t>(hp, 0x48000010u);
+    }
+    XELOGI("DcLoaderPatch: {:08X} was {:08X} unprotect={} -> now {:08X}", site,
+           was, unprot ? "ok" : "FAILED", xe::load_and_swap<uint32_t>(hp));
+  }
+  if (::cvars::guide_patch_xui_warn && XamIsDashrootLayout()) {
+    auto* pm = kernel_state()->memory();
+    const uint32_t site = 0x819710D0u;
+    // bl 81D0F98C from 819710D0: offset 0x39E8BC, link bit set.
+    const uint32_t want = 0x4839E8BDu;
+    uint8_t* hp = pm->TranslateVirtual(site);
+    xe::memory::PageAccess old_access = xe::memory::PageAccess::kNoAccess;
+    bool unprot = xe::memory::Protect(
+        reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(hp) & ~0xFFFull),
+        0x1000, xe::memory::PageAccess::kReadWrite, &old_access);
+    uint32_t was = xe::load_and_swap<uint32_t>(hp);
+    if (unprot && was == 0x4BE86669u) {
+      xe::store_and_swap<uint32_t>(hp, want);
+    }
+    XELOGI("XuiWarnPatch: {:08X} was {:08X} unprotect={} -> now {:08X}", site,
+           was, unprot ? "ok" : "FAILED", xe::load_and_swap<uint32_t>(hp));
+  }
+  if (::cvars::guide_patch_text_cull && XamIsDashrootLayout()) {
+    auto* pm = kernel_state()->memory();
+    const uint32_t sites[2] = {0x81915C88u, 0x81915CA4u};
+    const uint32_t expect[2] = {0x41980384u, 0x41990368u};
+    for (int i = 0; i < 2; ++i) {
+      uint8_t* hp = pm->TranslateVirtual(sites[i]);
+      xe::memory::PageAccess old_access = xe::memory::PageAccess::kNoAccess;
+      bool unprot = xe::memory::Protect(
+          reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(hp) & ~0xFFFull),
+          0x1000, xe::memory::PageAccess::kReadWrite, &old_access);
+      uint32_t was = xe::load_and_swap<uint32_t>(hp);
+      if (unprot && was == expect[i]) {
+        xe::store_and_swap<uint32_t>(hp, 0x60000000u);
+      }
+      XELOGI("TextCullPatch: {:08X} was {:08X} unprotect={} -> now {:08X}",
+             sites[i], was, unprot ? "ok" : "FAILED",
+             xe::load_and_swap<uint32_t>(hp));
+    }
+  }
   if (::cvars::guide_patch_rt_unbind && XamIsDashrootLayout()) {
     auto* pm = kernel_state()->memory();
     uint32_t site = 0x819F4C34u;
@@ -4101,15 +5226,345 @@ static void EmitGuideCoverageOnce() {
   }
 }
 
-void VdSwap_entry(
-    lpvoid_t buffer_ptr,        // ptr into primary ringbuffer
-    lpvoid_t fetch_ptr,         // frontbuffer Direct3D 9 texture header fetch
-    lpunknown_t unk2,           // system writeback ptr
-    lpunknown_t unk3,           // buffer from VdGetSystemCommandBuffer
-    lpunknown_t unk4,           // from VdGetSystemCommandBuffer (0xBEEF0001)
-    lpdword_t frontbuffer_ptr,  // ptr to frontbuffer address
-    lpdword_t texture_format_ptr, lpdword_t color_space_ptr, lpdword_t width,
-    lpdword_t height) {
+// Phase 1054 fps: the Guide's swap-time work - everything the hook did inside
+// VdSwap_entry (button toggle, close, layout writes, the input poll, XuiAnimRun,
+// the layout pass, the renders, segment store, composition, publish) - as a
+// function, so it can run on the Guide's own guest thread (GuideSwapDispatch)
+// instead of stalling the title's swap for the length of a paint. It uses
+// nothing of the swap but fetch_ptr's guest address (one log line).
+static std::atomic<uint64_t> g_guide_swap_total{0};  // phase 1054 fps: VdSwap calls on the title thread
+static uint32_t g_guide_pcalls = 0;                   // phase 1054 walk: guest calls made by the current paint
+static std::atomic<int> g_guide_stage{0};             // phase 1054 walk: the paint's current stage, for the sampler
+static double g_guide_ms_anim = 0, g_guide_ms_input = 0, g_guide_ms_timers = 0, g_guide_ms_track = 0;  // phase 1054 input: sub-stages of the poll stage, ms
+static const char* const kGuideStageNames[] = {"idle", "pre", "anim", "input", "timers", "layout", "walk", "render", "store", "publish", "tail"};
+static std::atomic<bool> g_guide_pt_in_paint{false};  // phase 1054 fps: GuideSwapWork is running (the sampler samples then)
+static std::atomic<void*> g_guide_pt_native{nullptr};  // phase 1054 fps: the paint thread's native handle
+// Phase 1055 bugs: the GPU thread takes the published pointer and word count
+// as one 64-bit value (guide_overlay_pair_), so a replay never pairs one
+// publish's pointer with another's length. Call after either field changes.
+template <typename CP>
+static inline void GuideSyncOverlayPair(CP* cp) {
+  if (!cp) return;
+  cp->guide_overlay_pair_.store(
+      (uint64_t(cp->guide_overlay_ptr_) << 32) | uint64_t(cp->guide_overlay_words_),
+      std::memory_order_release);
+}
+static void GuideSwapWorkBody(uint32_t fetch_ptr_ga);
+static void GuideSwapWork(uint32_t fetch_ptr_ga) {
+  g_guide_pt_in_paint = true;
+  g_guide_stage = 1;
+  g_guide_ms_anim = g_guide_ms_input = g_guide_ms_timers = g_guide_ms_track = 0;  // per paint
+  GuideSwapWorkBody(fetch_ptr_ga);
+  g_guide_stage = 0;
+  g_guide_pt_in_paint = false;
+}
+static void GuideSwapWorkBody(uint32_t fetch_ptr_ga) {
+  struct GuideHookExitLog {
+    ~GuideHookExitLog() {
+      if (::cvars::guide_anim_run && n < (::cvars::guide_walk_verbose ? 150u : 16u)) XELOGI("GuideStage: hook paint {} +{:.1f}ms returning to title", n, GuideHookMs());
+      auto tend = std::chrono::steady_clock::now();
+      double ms = std::chrono::duration<double, std::milli>(tend - t0).count();
+      static uint32_t slow_logs = 0;
+      if (n && ms > 40.0 && slow_logs++ < 40) {
+        XELOGI("GuideHookTime: paint {} took {:.1f} ms", n, ms);
+      }
+      static uint32_t full_logs = 0;
+      if (g_guide_full_logs_reset) { full_logs = 0; g_guide_full_logs_reset = 0; }
+      bool logit = (n >= 40 && n <= 42) || (n % 150u) == 0u || (!g_guide_idle && full_logs < 30);
+      if (logit && g_guide_t_walk1 >= g_guide_t_walk0 && g_guide_t_walk0 >= t0) {
+        if (!g_guide_idle) ++full_logs;
+        auto d = [](std::chrono::steady_clock::time_point a, std::chrono::steady_clock::time_point b) {
+          return std::chrono::duration<double, std::milli>(b - a).count();
+        };
+        std::string per;
+        for (uint32_t i = 0; i < g_guide_render_n; ++i) per += fmt::format("{:08X}={:.1f}ms/{}w/{}pf ", g_guide_render_h[i], g_guide_ms_render[i], g_guide_words_render[i], g_guide_pf_render[i]);
+        if (g_guide_interleave_now) per += fmt::format("| seg {}/{}", g_guide_interleave_idx, g_guide_plan.size());
+        if (g_guide_spread_now) per += fmt::format("| round pos->{} of {} step {} done={}", g_guide_round_pos, g_guide_plan.size(), g_guide_round_step, g_guide_round_done ? 1 : 0);
+        if (g_guide_hot_now) per += fmt::format("| hot #{}: composed {} of {}", g_guide_hot_seq, g_guide_hot_skipped, g_guide_plan.size());
+        per += fmt::format("| calls {} | anim {:.2f} input {:.2f} timers {:.2f} track {:.2f}", g_guide_pcalls,
+                           g_guide_ms_anim, g_guide_ms_input, g_guide_ms_timers, g_guide_ms_track);
+        g_guide_pcalls = 0;
+        {
+          // Phase 1054 fps: host exceptions taken since the previous paint
+          // (a fault per written word would explain a constant cost a word)
+          static uint64_t exc_prev = 0;
+          uint64_t exc_now = xe::ExceptionCount();
+          per += fmt::format("| exc {}", exc_now - exc_prev);
+          exc_prev = exc_now;
+        }
+        XELOGI("GuidePhase: paint {} {} poll {:.1f} ms, predirty+redraw+layout {:.1f} ms, walk {:.1f} ms ({}), end+present {:.1f} ms, publish {:.1f} ms, tail {:.1f} ms, total {:.1f} ms",
+               n, g_guide_idle ? "IDLE" : "full", d(t0, g_guide_t_pre), d(g_guide_t_pre, g_guide_t_walk0),
+               d(g_guide_t_walk0, g_guide_t_walk1), per, d(g_guide_t_walk1, g_guide_t_end), d(g_guide_t_end, g_guide_t_tail1), d(g_guide_t_tail1, tend), ms);
+      }
+      // Phase 1054 fps: the title's swap rate and how many paints were skipped.
+      static std::chrono::steady_clock::time_point rate_t0{};
+      static uint32_t rate_n = 0, rate_idle0 = 0, rate_full0 = 0;
+      static uint64_t rate_sw0 = 0;
+      static double rate_ms = 0;
+      if (!rate_t0.time_since_epoch().count()) { rate_t0 = tend; rate_sw0 = g_guide_swap_total.load(); }
+      ++rate_n; rate_ms += ms;
+      double el = std::chrono::duration<double>(tend - rate_t0).count();
+      if (el >= 5.0) {
+        // Phase 1054 fps: the title's swaps (counted by the dispatcher on the
+        // title thread) and the paints (this thread) separately.
+        uint64_t sw = g_guide_swap_total.load();
+        XELOGI("GuideFps: {:.1f} swaps/s, {:.1f} paints/s over {:.1f} s; paint {:.1f} ms avg; paints idle {} full {}",
+               double(sw - rate_sw0) / el, rate_n / el, el, rate_ms / rate_n, g_guide_idle_paints - rate_idle0, g_guide_full_paints - rate_full0);
+        rate_t0 = tend; rate_sw0 = sw; rate_n = 0; rate_ms = 0; rate_idle0 = g_guide_idle_paints; rate_full0 = g_guide_full_paints;
+      }
+    }
+    uint32_t n;
+    std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+  } guide_hook_exit_log{0};
+  g_guide_t_hook = guide_hook_exit_log.t0;
+
+  // Phase 1053: the Guide button toggles the overlay. This sits at the top of
+  // the hook because everything below is gated on the Guide painting, and
+  // while it is hidden nothing down there runs. The press arrives either from
+  // xam's input shims (they swallow it, so the title never sees it) or, while
+  // the Guide has input, from the harness's own poll further down.
+  // Phase 1054: the first open. xam's background scene is played to Closed
+  // and then, through the toggle's own re-show below, to Full - both from
+  // here, before the paint: the same ClosedToFull issued from inside the
+  // render pass (the input poll) ended in the Half layout every time.
+  if (g_guide_bkgnd_close_at.time_since_epoch().count() &&
+      std::chrono::steady_clock::now() >= g_guide_bkgnd_close_at) {
+    g_guide_bkgnd_close_at = {};
+    auto* mem_b = kernel_state()->memory();
+    uint32_t single = xe::load_and_swap<uint32_t>(mem_b->TranslateVirtual(0x81D3F924u));
+    auto* th_b = XThread::GetCurrentThread();
+    if (single >= 0x40000000u && single < 0x50000000u && th_b) {
+      uint64_t a[] = {single, 0ull};
+      (void)a;
+      uint32_t r = GuidePlayBkgnd(0u, "hook-top close");
+      XELOGI("GuideBkgnd: PlayTransition(0) at the hook top -> {:08X}; state {}", r,
+             xe::load_and_swap<uint32_t>(mem_b->TranslateVirtual(single + 0x10u)));
+    }
+  }
+  if (g_guide_bkgnd_open_at.time_since_epoch().count() &&
+      std::chrono::steady_clock::now() >= g_guide_bkgnd_open_at) {
+    g_guide_bkgnd_open_at = {};
+    g_guide_warmup = false;
+    g_guide_button_edge.store(1);  // consumed by the toggle right below: ClosedToFull, dim, input, overlay
+    XELOGI("GuideBkgnd: first show through the toggle path");
+  }
+  if (g_guide_vb_addr && (g_guide_idle_paints + g_guide_full_paints) > g_guide_vb_paint) {
+    // Phase 1054 transitions: has the later-swap segment's vertex data changed?
+    auto* mem_v = kernel_state()->memory();
+    uint32_t diff = 0, first = 0xFFFFFFFFu;
+    std::string ov, nv;
+    for (uint32_t q = 0; q < 32; ++q) {
+      uint32_t cur = xe::load_and_swap<uint32_t>(mem_v->TranslateVirtual(g_guide_vb_addr + q * 4u));
+      if (cur != g_guide_vb_snap[q]) { ++diff; if (first == 0xFFFFFFFFu) first = q; }
+      if (q < 8) { ov += fmt::format("{:08X} ", g_guide_vb_snap[q]); nv += fmt::format("{:08X} ", cur); }
+    }
+    static uint32_t vb_logs = 0;
+    if (vb_logs++ < 8) {
+      XELOGI("GuideVB: seg {} vb {:08X} snapped at paint {}, now paint {}: {} of 32 dwords differ (first {}) | was {}| now {}",
+             g_guide_vb_seg, g_guide_vb_addr, g_guide_vb_paint, g_guide_idle_paints + g_guide_full_paints, diff, first, ov, nv);
+    }
+    g_guide_vb_addr = 0;
+  }
+  // Phase 1054/1091c: the close animation ran its course - hide the panel now.
+  // "Ran its course" is xam's own [scene+0x14] going back to 0; the deadline is
+  // only reached when xam never answers, and says so when it is.
+  bool close_done = false, close_by_backstop = false;
+  if (g_guide_close_pending) {
+    uint32_t busy = 1u;
+    if (g_guide_close_scene >= 0x40000000u && g_guide_close_scene < 0x50000000u) {
+      busy = xe::load_and_swap<uint32_t>(
+          kernel_state()->memory()->TranslateVirtual(g_guide_close_scene + 0x14u));
+    } else {
+      busy = 0u;  // no scene to ask - nothing of xam's is animating
+    }
+    if (!busy) {
+      close_done = true;
+    } else if (std::chrono::steady_clock::now() >= g_guide_close_until) {
+      close_done = true;
+      close_by_backstop = true;
+    }
+  }
+  if (close_done) {
+    if (close_by_backstop) {
+      XELOGW("GuideToggle: xam never cleared its transition flag ([{:08X}+0x14] still {:08X}) - "
+             "hiding on the {} ms backstop; the close was NOT timed by the guest",
+             g_guide_close_scene,
+             g_guide_close_scene ? xe::load_and_swap<uint32_t>(
+                 kernel_state()->memory()->TranslateVirtual(g_guide_close_scene + 0x14u)) : 0u,
+             int32_t(::cvars::guide_close_ms));
+    } else {
+      XELOGI("GuideToggle: xam cleared its transition flag - the close is done "
+             "({:.0f} ms after the press, backstop was {} ms)",
+             std::chrono::duration<double, std::milli>(
+                 std::chrono::steady_clock::now() - g_guide_fade_out_t0).count(),
+             int32_t(::cvars::guide_close_ms));
+    }
+    g_guide_close_pending = false;
+    g_guide_close_scene = 0;
+    g_guide_hidden = true;
+    g_guide_fade_applied = -1.0f;
+    if (!g_guide_fade_targets.empty()) {
+      auto* th_f = XThread::GetCurrentThread();
+      auto xm_f = kernel_state()->GetModule("xam.xex", true);
+      uint32_t f_setop_f = xm_f ? xm_f->GetProcAddressByOrdinal(0x37E) : 0u;
+      if (th_f && f_setop_f) {
+        static uint32_t one_vec = 0;
+        if (!one_vec) {
+          one_vec = kernel_state()->memory()->SystemHeapAlloc(16, 16);
+          if (one_vec) {
+            xe::store_and_swap<uint32_t>(kernel_state()->memory()->TranslateVirtual(one_vec), 0x3F800000u);
+            xe::store_and_swap<uint32_t>(kernel_state()->memory()->TranslateVirtual(one_vec + 4u), 0x3F800000u);
+            xe::store_and_swap<uint32_t>(kernel_state()->memory()->TranslateVirtual(one_vec + 8u), 0x3F800000u);
+          }
+        }
+        for (uint32_t h : g_guide_fade_targets) {
+          th_f->thread_state()->context()->f[1] = 1.0;
+          uint64_t a[] = {h};
+          kernel_state()->processor()->Execute(th_f->thread_state(), f_setop_f, a, 1);
+          if (one_vec && h != g_guide_el_legend && h != g_guide_el_datetime) {
+            uint64_t s2[] = {h, one_vec};
+            kernel_state()->processor()->Execute(th_f->thread_state(), 0x819323B0u, s2, 2);  // XuiElementSetScale 1
+          }
+        }
+      }
+    }
+    auto* gs_c = kernel_state()->emulator()->graphics_system();
+    auto* cp_c = gs_c ? gs_c->command_processor() : nullptr;
+    if (cp_c) { cp_c->guide_overlay_ptr_ = 0; GuideSyncOverlayPair(cp_c); }
+    xe::kernel::xboxkrnl::GuidePageCachePin({});  // phase 1054 black: rolls the pin history
+    kernel_state()->xam_state()->is_xam_dialog_present_.store(false);
+    XELOGI("GuideToggle: hidden (close animation done)");
+  }
+  if (::cvars::guide_toggle) {  // phase 1054: the first show comes through here too, before any publish
+    if (g_guide_button_edge.exchange(0)) {
+      // The keyboard driver reports the Guide binding as an up event and the
+      // pad as a held button, so one press can arrive several times: collapse
+      // anything inside 400 ms into a single toggle.
+      static std::chrono::steady_clock::time_point last_toggle{};
+      auto now_t = std::chrono::steady_clock::now();
+      bool too_soon = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          now_t - last_toggle).count() < 400;
+      last_toggle = now_t;
+      if (too_soon) {
+        XELOGI("GuideToggle: ignored (debounced)");
+      }
+      auto* gs_t = kernel_state()->emulator()->graphics_system();
+      auto* cp_t = gs_t ? gs_t->command_processor() : nullptr;
+      auto* mem_t = kernel_state()->memory();
+      if (cp_t && !too_soon) {
+        // Phase 1054: xam's background scene (CHUDBkgndScene, the dim, legend
+        // and clock) plays FullToClosed / ClosedToFull through its own
+        // PlayTransition (8174E220) - the console's exit and entrance.
+        auto play_bkgnd = [&](uint32_t st) -> uint32_t {
+          uint32_t single = xe::load_and_swap<uint32_t>(mem_t->TranslateVirtual(0x81D3F924u));
+          if (::cvars::guide_bkgnd_state == -1 || st > 4u || single < 0x40000000u ||
+              single >= 0x50000000u)
+            return 0xDEADu;
+          auto* th = XThread::GetCurrentThread();
+          if (!th) return 0xDEADu;
+          (void)th;
+          return GuidePlayBkgnd(st, "toggle");
+        };
+        bool was_closing = g_guide_close_pending;
+        g_guide_close_pending = false;
+        bool to_hidden = !g_guide_hidden && !was_closing;
+        uint32_t nav_t = guide_bs_hud_base_
+                             ? xe::load_and_swap<uint32_t>(
+                                   mem_t->TranslateVirtual(guide_bs_hud_base_ + 0x20694u))
+                             : 0u;
+        if (to_hidden) {
+          uint32_t pr = 0;
+          g_guide_fade_out_t0 = std::chrono::steady_clock::now();
+          pr = play_bkgnd(0);  // xam's frame shrinks and fades out from here
+          // Phase 1091c: arm the wait only if XAM says it is animating. Reading
+          // [scene+0x14] right after PlayTransition asks the guest whether a
+          // transition actually started - it early-outs when it is already in
+          // the state asked for (8174E258), and then there is nothing to wait
+          // for and the panel hides at once, with no deadline involved.
+          uint32_t sc_c = xe::load_and_swap<uint32_t>(mem_t->TranslateVirtual(0x81D3F924u));
+          uint32_t busy_c = (sc_c >= 0x40000000u && sc_c < 0x50000000u)
+                                ? xe::load_and_swap<uint32_t>(mem_t->TranslateVirtual(sc_c + 0x14u))
+                                : 0u;
+          if (pr != 0xDEADu && busy_c && ::cvars::guide_close_ms > 0) {
+            // keep painting while xam's close plays; [sc_c+0x14] going 0 hides
+            g_guide_close_pending = true;
+            g_guide_close_scene = sc_c;
+            g_guide_close_until = std::chrono::steady_clock::now() +
+                                  std::chrono::milliseconds(::cvars::guide_close_ms);
+            XELOGI("GuideToggle: closing - xam is animating ([{:08X}+0x14]={:08X}); "
+                   "hiding when it clears that, backstop {} ms",
+                   sc_c, busy_c, int32_t(::cvars::guide_close_ms));
+          } else {
+            XELOGI("GuideToggle: closing - xam is not animating ([{:08X}+0x14]={:08X}, play -> {:08X}); hiding at once",
+                   sc_c, busy_c, pr);
+            g_guide_hidden = true;
+            cp_t->guide_overlay_ptr_ = 0;
+            GuideSyncOverlayPair(cp_t);
+            kernel_state()->xam_state()->is_xam_dialog_present_.store(false);
+          }
+        } else {
+          g_guide_hidden = false;
+          GuideActive(1800);  // phase 1054 fps: the open transition, the layout write and its settle
+          g_guide_show_time = std::chrono::steady_clock::now();
+          ++g_guide_show_count;
+          // the first open finds xam's scene in Half; a Guide press on the
+          // console plays ClosedToFull, whose first keyframes set the Closed
+          // state, so start every open from Closed
+          // Phase 1089: read xam's own target BEFORE the word is forced to
+          // Closed, or the latch would read back our own write.
+          uint32_t want_o = GuideBkgndTarget();
+          // Phase 1091: THE FORCED "FROM CLOSED" IS GONE. This used to write
+          // 0 into the scene's state word before playing, so the first open
+          // always played ClosedTo<target>. That word is the guest's: the
+          // constructor 8174E170 zeroes it and the only other writer in the
+          // image is PlayTransition itself (8174E394), so the 1 (Half) it
+          // holds at rest was put there by real guest code, and 1089's rule
+          // says do not overwrite a value the guest keeps.
+          // The justification for forcing it was that the elements sit on
+          // Closed keyframes before the first open. Measured, that is not so:
+          // run words2 (guide_bkgnd_state=-1, the harness plays nothing) and
+          // run hudmgr1 (the default -2) are pixel-identical at rest - 397
+          // differing pixels of 921600, all of them the clock and the title's
+          // own animation - so the elements are already laid out for Half
+          // when the Guide is first shown, exactly as xam's word says.
+          // The close still plays xam's own HalfToClosed (film2 vs film1:
+          // the panel shrinks out over three frames with it, vanishes in one
+          // without), and because that close leaves the word at 0 through
+          // xam's own PlayTransition, every later open still plays xam's own
+          // ClosedToHalf entrance - now with a "from" xam wrote rather than
+          // one we did.
+          // Phase 1088: the open state is guide_bkgnd_state, not a hardcoded
+          // 2. It was Full, and at Full xam's Blade_Center grows from its
+          // authored 386x235 at (231,122) to 595x375 at (126,48) while hud's
+          // OWN Blade_Center (00010150) stays at 386x235 at (231,122) - the
+          // same authored rect - so two nested panels are drawn. The flag
+          // already gates whether the transition plays at all and already
+          // selects the state on the poll re-show path; this makes the toggle
+          // agree with it.
+          uint32_t pr = play_bkgnd(want_o);
+          if (pr != 0xDEADu)
+            XELOGI("GuideToggle: opened to state {} -> {:08X}{}", want_o, pr,
+                   was_closing ? " (reopened during the close)" : "");
+          if (nav_t >= 0x40000000u && nav_t < 0x50000000u) {
+            xe::store_and_swap<uint32_t>(mem_t->TranslateVirtual(nav_t + 0x5Cu), 1u);
+          }
+          kernel_state()->xam_state()->is_xam_dialog_present_.store(true);
+          g_guide_want_redraw = true;
+          if (::cvars::guide_open_anim > 0) g_guide_play_open = true;
+          // phase 1054 open: faster rounds while hud's authored entrance plays
+          g_guide_open_burst_until = std::chrono::steady_clock::now() + std::chrono::milliseconds(::cvars::guide_open_burst_ms);
+          cp_t->guide_overlay_words_ = g_guide_last_words;
+          cp_t->guide_slide_rearm_ = true;
+          if (!g_guide_hosted && !::cvars::guide_fade_hud) cp_t->guide_overlay_ptr_ = g_guide_last_pub;  // fading: the first round publishes it
+          GuideSyncOverlayPair(cp_t);
+        }
+        XELOGI("GuideToggle: {} (Guide button at swap) ptr {:08X} words {}",
+               g_guide_close_pending ? "closing" : (g_guide_hidden ? "hidden" : "shown"),
+               g_guide_last_pub, g_guide_last_words);
+      }
+    }
+  }
+
   // Phase 377: drive the coverage readback from the swap path too, so it
   // reports in configurations where the composite-draw hook does not fire
   // (e.g. with guide_clear_cmd_overflow). One-shot inside the function.
@@ -4327,7 +5782,7 @@ void VdSwap_entry(
     if (!fetch_once && guide_draw_fn_) {
       fetch_once = true;
       auto* fm = kernel_state()->memory();
-      uint32_t fp = fetch_ptr.guest_address();
+      uint32_t fp = fetch_ptr_ga;
       XELOGI("VdSwap fetch_ptr={:08X}", fp);
       if (fp) {
         for (uint32_t i = 0; i < 8; ++i) {
@@ -4519,7 +5974,7 @@ void VdSwap_entry(
                   std::map<uint32_t, uint32_t> ops;
                   for (uint32_t a = lo; a + 4 <= cur; a += 4) {
                     auto* hp = mm->LookupHeap(a);
-                    if (!hp || hp->QueryRangeAccess(a, a + 4u) ==
+                    if (!hp || hp->QueryRangeAccessUnlocked(a, a + 4u) ==
                                    xe::memory::PageAccess::kNoAccess) {
                       continue;
                     }
@@ -4553,7 +6008,7 @@ void VdSwap_entry(
                   uint32_t tlo = cur > 0x100u ? cur - 0x100u : 0u;
                   for (uint32_t a = tlo; a + 4 <= cur; a += 4) {
                     auto* hp2 = mm->LookupHeap(a);
-                    if (!hp2 || hp2->QueryRangeAccess(a, a + 4u) ==
+                    if (!hp2 || hp2->QueryRangeAccessUnlocked(a, a + 4u) ==
                                     xe::memory::PageAccess::kNoAccess) {
                       continue;
                     }
@@ -4573,7 +6028,7 @@ void VdSwap_entry(
                     uint32_t fd = 0, ft3 = 0, fscan = 0;
                     for (uint32_t a = cbase; a < cbase + 0x8000u; a += 4) {
                       auto* hp3 = mm->LookupHeap(a);
-                      if (!hp3 || hp3->QueryRangeAccess(a, a + 4u) ==
+                      if (!hp3 || hp3->QueryRangeAccessUnlocked(a, a + 4u) ==
                                       xe::memory::PageAccess::kNoAccess) {
                         continue;
                       }
@@ -5206,7 +6661,7 @@ void VdSwap_entry(
               uint32_t cand = r2(tdev + off);
               if (cand < 0x40000000u || cand >= 0x50000000u) continue;
               auto* hp = rm->LookupHeap(cand);
-              if (!hp || hp->QueryRangeAccess(cand, cand + 0x28u) ==
+              if (!hp || hp->QueryRangeAccessUnlocked(cand, cand + 0x28u) ==
                              xe::memory::PageAccess::kNoAccess) {
                 continue;
               }
@@ -5261,7 +6716,7 @@ void VdSwap_entry(
           if (cur_rt0 >= 0x10000u) {
             auto* rh = rm->LookupHeap(cur_rt0);
             rt0_plausible =
-                rh && rh->QueryRangeAccess(cur_rt0, cur_rt0 + 0x27u) !=
+                rh && rh->QueryRangeAccessUnlocked(cur_rt0, cur_rt0 + 0x27u) !=
                           xe::memory::PageAccess::kNoAccess;
           }
           {
@@ -6976,7 +8431,12 @@ void VdSwap_entry(
                  guide_draw_this_);
         }
       }
+      static uint32_t hook_paint_n = 0;
+      if (::cvars::guide_anim_run && ::cvars::guide_paint_frame && guide_draw_this_ && hook_paint_n < 150) {
+        XELOGI("GuideStage: hook paint {} +{:.1f}ms begin", hook_paint_n + 1, GuideHookMs());
+      }
       if (::cvars::guide_paint_frame && guide_draw_this_) {
+        guide_hook_exit_log.n = ++hook_paint_n;
         auto* pm2 = kernel_state()->memory();
         // Clear the 0x20 latch immediately before the paint, not only in the
         // composite-draw hook. 81A02940 refuses every vertex allocation while
@@ -7023,7 +8483,12 @@ void VdSwap_entry(
         auto prd2 = [pm2](uint32_t a) {
           return a ? xe::load_and_swap<uint32_t>(pm2->TranslateVirtual(a)) : 0u;
         };
-        auto xmp = kernel_state()->GetModule("xam.xex", true);
+        // Phase 1054 walk: GetModule with a path resolves it through the VFS
+        // on every call (a lock and a "ResolvePath(xam.xex) failed" warning
+        // each paint - 7000 lines a run); the module does not move.
+        static xe::kernel::object_ref<xe::kernel::XModule> xmp_cached;
+        if (!xmp_cached) xmp_cached = kernel_state()->GetModule("xam.xex", true);
+        auto xmp = xmp_cached;
         auto po = [&](uint32_t o) {
           return xmp ? xmp->GetProcAddressByOrdinal(o) : 0u;
         };
@@ -7047,11 +8512,674 @@ void VdSwap_entry(
         if (dc2 && rt2 && pmsg && f_b && f_e && f_p && f_lc && f_v) {
           auto* prc = kernel_state()->processor();
           auto* tsp = gth->thread_state();
-          auto pcall = [&](uint32_t fn, std::initializer_list<uint64_t> a) {
-            std::vector<uint64_t> v(a);
-            return fn ? uint32_t(prc->Execute(tsp, fn, v.data(), v.size()))
-                      : 0xDEADu;
+          // Phase 1054 dbg: Processor::Execute resolves the address through
+          // the JIT's entry table on every call, taking a lock the title
+          // thread contends for constantly (a quarter of a paint was that
+          // lock, the walk making ~1000 guest calls a paint). Resolve each
+          // address once, keep the Function, and call it the way Execute does.
+          auto pcall = [&](uint32_t fn, std::initializer_list<uint64_t> a) -> uint32_t {
+            if (!fn) return 0xDEADu;
+            ++g_guide_pcalls;  // phase 1054 walk: guest calls this paint
+            static std::unordered_map<uint32_t, xe::cpu::Function*> fcache;
+            xe::cpu::Function* f = nullptr;
+            auto fit = fcache.find(fn);
+            if (fit != fcache.end()) {
+              f = fit->second;
+            } else {
+              f = prc->ResolveFunction(fn);
+              if (f) fcache[fn] = f;
+            }
+            if (!f) return 0xDEADu;
+            auto* ctx = tsp->context();
+            size_t i = 0;
+            for (uint64_t v : a) {
+              if (i < 8) ctx->r[3 + i] = v;
+              ++i;
+            }
+            if (a.size() > 8) {
+              // Execute's stack convention for the rest (32-bit values)
+              auto stack_arg_base = pm2->TranslateVirtual(uint32_t(ctx->r[1]) + 0x54u - (64u + 112u));
+              size_t k = 0;
+              for (uint64_t v : a) {
+                if (k >= 8) xe::store_and_swap<uint32_t>(stack_arg_base + (k - 8) * 8, uint32_t(v));
+                ++k;
+              }
+            }
+            ctx->r[1] -= 64 + 112;
+            uint64_t previous_lr = ctx->lr;
+            ctx->lr = 0xBCBCBCBC;
+            bool ok = f->Call(tsp, uint32_t(ctx->lr));
+            ctx->lr = previous_lr;
+            ctx->r[1] += 64 + 112;
+            return ok ? uint32_t(ctx->r[3]) : 0xDEADBABEu;
           };
+          // Phase 1088 dim: the one visible difference from a console Guide is
+          // that the game behind it is not dimmed. hudbkgnd.xur's COLR table
+          // holds ONE colour, 0F0F0F, at five alphas - 00 32 64 80 FF - and
+          // nothing else in that file repeats a colour that way: a full-canvas
+          // dim keyed across Closed/Half/Full/Error. 1059 deleted the last
+          // host-painted dim as a fake and 1064/1065 concluded by inference
+          // that the element carrying it is missing. Settle it by measurement:
+          // scan the guest address space for words whose low 24 bits are
+          // 0F0F0F on several paints and report the ones that MOVED. A parsed
+          // XUR table cannot move; a live animated property must. Every mover
+          // is then attributed to the element object that contains it.
+          if (::cvars::guide_dim_scan > 0) {
+            static uint32_t scan_paint = 0, scan_done = 0;
+            static std::map<uint32_t, uint32_t> dim_prev;
+            ++scan_paint;
+            uint32_t dim_first = uint32_t(::cvars::guide_dim_scan);
+            uint32_t dim_every = uint32_t(::cvars::guide_dim_scan_every);
+            if (dim_every < 1u) dim_every = 1u;
+            if (scan_done < uint32_t(::cvars::guide_dim_scan_count) &&
+
+                scan_paint >= dim_first &&
+                ((scan_paint - dim_first) % dim_every) == 0u) {
+              ++scan_done;
+              auto t_s0 = std::chrono::steady_clock::now();
+              std::map<uint32_t, uint32_t> dim_now;
+              uint32_t dim_float_hits = 0;  // phase 1092: float-form matches
+              struct DimR { uint32_t lo, hi; };
+              // The guest heaps, plus xam's own image: the module is an LLE
+              // load whose pages the heap never recorded (phase 1073), so its
+              // range comes from the module and is read directly. It is the
+              // POSITIVE CONTROL - the file's parsed COLR table has to turn up
+              // somewhere, or a "nothing moved" result is measuring nothing.
+              const DimR dim_ranges[] = {{0x00010000u, 0x10000000u},
+                                         {0x40000000u, 0x50000000u},
+                                         {g_xam_lo, g_xam_hi}};
+              uint64_t bytes_scanned = 0;
+              for (const DimR& r : dim_ranges) {
+                uint32_t a = r.lo;
+                while (r.lo && a < r.hi) {
+                  uint8_t* hp = pm2->TranslateVirtual(a);
+                  uint32_t run = 0x1000u;
+                  bool readable = false;
+                  if (r.lo == g_xam_lo) {
+                    readable = hp != nullptr;
+                    run = 0x10000u;
+                  } else if (hp) {
+                    // xe::memory::QueryProtect takes the MEMORY_BASIC_INFORMATION
+                    // buffer length THROUGH its length parameter on the NTDLL
+                    // path, so calling it with 0 - which is what every existing
+                    // caller does - fails for every page. Ask Xenia's own page
+                    // table instead.
+                    auto* heap = pm2->LookupHeap(a);
+                    uint32_t prot = 0, state = 0;
+                    // COMMITTED as well as readable: a page whose protection
+                    // bits survive a free is still not backed on the host, and
+                    // reading one faults (dimscan2 took two host faults at
+                    // guest 40A20001 on the protection test alone).
+                    readable = heap &&
+                               heap->QueryPageEntry(a, &state, nullptr, &prot,
+                                                    nullptr, nullptr) &&
+                               (state & kMemoryAllocationCommit) != 0 &&
+                               (prot & kMemoryProtectRead) != 0;
+                    run = heap ? heap->page_size() : 0x1000u;
+                    if (run < 0x1000u) run = 0x1000u;
+                  }
+                  if (!readable) {
+                    a += run;
+                    continue;
+                  }
+                  run = uint32_t(std::min<uint64_t>(run, r.hi - a));
+                  bytes_scanned += run;
+                  // guest memory is stored big-endian, so 0x??0F0F0F is the
+                  // byte triple 0F 0F 0F at +1..+3 of an aligned word.
+                  for (uint32_t o = 0; o + 4u <= run; o += 4u) {
+                    if (hp[o + 1] == 0x0Fu && hp[o + 2] == 0x0Fu &&
+                        hp[o + 3] == 0x0Fu) {
+                      dim_now[a + o] = (uint32_t(hp[o]) << 24) | 0x000F0F0Fu;
+                      continue;
+                    }
+                    // Phase 1092: THE BLIND SPOT 1090 NAMED. This scan only
+                    // ever matched the PACKED byte form ??0F0F0F, so "220
+                    // words, 0 moved" could never have seen a live colour XUI
+                    // keeps as FLOATS - and XUI element colours are float RGBA.
+                    // 0x0F/255 = 0.058823529 = 0x3D70F0F1; the alphas
+                    // hudbkgnd.xur keys are 0x32/255 = 0x3E48D3A0, 0x64/255 =
+                    // 0x3EC8D3A0 and 0x80/255 = 0x3F008081. Match those too, so
+                    // a null from this scan finally says something about the
+                    // LIVE values and not just about the parsed tables.
+                    uint32_t wv = (uint32_t(hp[o]) << 24) | (uint32_t(hp[o + 1]) << 16) |
+                                  (uint32_t(hp[o + 2]) << 8) | uint32_t(hp[o + 3]);
+                    if (wv == 0x3D70F0F1u || wv == 0x3E48D3A0u ||
+                        wv == 0x3EC8D3A0u || wv == 0x3F008081u) {
+                      dim_now[a + o] = wv;
+                      ++dim_float_hits;
+                    }
+                  }
+                  a += run;
+                }
+              }
+              double scan_ms = std::chrono::duration<double, std::milli>(
+                                   std::chrono::steady_clock::now() - t_s0)
+                                   .count();
+              XELOGI("GuideDimScan #{} at paint {}: {} words, {} of them the FLOAT forms "
+                     "(3D70F0F1/3E48D3A0/3EC8D3A0/3F008081), over {} MB in {:.0f} ms",
+                     scan_done, scan_paint, dim_now.size(), dim_float_hits,
+                     bytes_scanned / (1024u * 1024u), scan_ms);
+              if (scan_done == 1u) {
+                // control: the file's own parsed COLR table must be in here.
+                std::string sample;
+                uint32_t k = 0;
+                for (auto& kv : dim_now) {
+                  if (k++ >= 300u) break;
+                  sample += fmt::format("{:08X}={:08X} ", kv.first, kv.second);
+                }
+                XELOGI("GuideDimScan   first found: {}", sample);
+              } else {
+                // every element in both trees, so a mover can be named.
+                std::vector<std::pair<uint32_t, uint32_t>> els;
+                std::function<void(uint32_t, int)> collect = [&](uint32_t h, int d) {
+                  if (!h || d > 9 || els.size() > 900u) return;
+                  els.emplace_back(h, pcall(0x81931040u, {h}));
+                  if (!f_fc || !f_ns) return;
+                  std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                  pcall(f_fc, {h, pout});
+                  for (uint32_t c = prd2(pout), q = 0; c && q < 64u; ++q) {
+                    collect(c, d + 1);
+                    std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                    pcall(f_ns, {c, pout});
+                    uint32_t nx = prd2(pout);
+                    if (nx == c) break;
+                    c = nx;
+                  }
+                };
+                uint32_t xam_root = g_guide_bkgnd_singleton
+                                        ? prd2(g_guide_bkgnd_singleton + 8u)
+                                        : 0u;
+                collect(xam_root, 0);
+                collect(rt2, 0);
+                uint32_t moved = 0, gone = 0, appeared = 0, shown = 0;
+                for (auto& kv : dim_now) {
+                  auto it = dim_prev.find(kv.first);
+                  if (it == dim_prev.end()) {
+                    ++appeared;
+                  } else if (it->second == kv.second) {
+                    continue;
+                  } else {
+                    ++moved;
+                  }
+                  if (shown++ >= 40u) continue;
+                  std::string owner = "-";
+                  for (auto& e : els) {
+                    if (e.second && kv.first >= e.second &&
+                        kv.first < e.second + 0x400u) {
+                      owner = fmt::format("element {:08X} ob {:08X} +{:X}",
+                                          e.first, e.second, kv.first - e.second);
+                      break;
+                    }
+                  }
+                  XELOGI("GuideDimScan   {:08X}: {:08X} -> {:08X} | {}", kv.first,
+                         it == dim_prev.end() ? 0u : it->second, kv.second, owner);
+                }
+                for (auto& kv : dim_prev) {
+                  if (!dim_now.count(kv.first)) ++gone;
+                }
+                XELOGI("GuideDimScan #{}: {} moved, {} appeared, {} gone; {} elements walked (xam root {:08X}, hud root {:08X})",
+                       scan_done, moved, appeared, gone, els.size(), xam_root, rt2);
+              }
+              dim_prev = std::move(dim_now);
+            }
+          }
+          // Phase 1089: WHO ASKS FOR THE STATE. Our toggle passes a number
+          // (it was a hardcoded 2 = Full) and that choice is ours, not
+          // measured - the same class of thing 1059 deleted. xam does not
+          // hardcode it either: of the six callers of CHUDBkgndScene::
+          // PlayTransition (8174E220) only one passes a literal (0, Closed);
+          // 8174EBF4 applies a DEFERRED REQUEST - [obj+0x70] == 1 means go
+          // Closed, == 2 means go to the state in [obj+0x64], and it clears
+          // the flag - and 8174EDFC defaults to [r31+0x10] and then calls
+          // through [r31+0x18] so a registered callback can overwrite it,
+          // range-checked < 6. So watch the request pair on the singleton
+          // ([81D3F924], +0x10 state, +0x64 requested, +0x70 flag) and log it
+          // on change: if the guest ever asks for a state, its value is the
+          // console's answer and ours can go.
+          if (::cvars::guide_bkgnd_watch) {
+            // Phase 1091d: IS XAM'S HUD SHOW PATH AN EXPORT? Neither the HUD
+            // show loop 81794BC8 nor the pump 81793230 nor 81792928 has a
+            // single `bl` caller in the image, and refscan finds no formed
+            // address for them - their only appearance is one word each in the
+            // function-info table at 816F8B60.., which is not a dispatch table.
+            // So they are entered from outside the module, and "outside" is
+            // either an export another module calls or a thread xam's own boot
+            // starts. The PE export directory cannot answer it statically here
+            // (the data directory's RVA points at a XUIZ package in the
+            // decompressed basefile, so the section layout the header
+            // describes is not the loaded one), but the loader can: walk the
+            // ordinals xam actually publishes and see which of these addresses
+            // comes back. Once, on the first watch sample.
+            // Phase 1092o: WALK XuiScene's PROPERTY DESCRIPTORS. The XUR
+            // object stream stores properties positionally, in class-hierarchy
+            // order base-first, against each class's own descriptor table
+            // (81980B98 -> 8197FF70; 8193F308 reads [desc+0x1C] count and
+            // [desc+0x20] table, 8193F2A0 reads [desc+0x28] base, and each
+            // entry is 12 bytes from 8197FFFC's `mulli r11, 0xC`). The
+            // descriptors are built on the stack at registration, so they
+            // cannot be read statically (1092n) - but at runtime 1064's slot
+            // table names them, and [81D6CDE4] IS XuiScene's. Walk it and its
+            // bases and dump the property lists in parse order; the slot
+            // HudBackground's value occupies in hudbkgnd's scene block then
+            // names the property, with nothing inferred.
+            // Phase 1094b: READ-ONLY WORKER CENSUS. 1094 read the two worker
+            // creation sites' arguments: 8177BB20 passes flags 0x20080000 (the
+            // resume bit SET) with r5=0 (NOT suspended), while 8177BAA8 passes
+            // 0x40000000 (bit CLEAR) with r5=1 (suspended). So one site's
+            // workers should be RUNNING and the other's suspended. 1071's
+            // numbers came from a probe that RESUMED them, so they cannot
+            // separate the two. Count them without touching anything: if every
+            // worker is suspended, 8177BB20's never ran or its workers are not
+            // at 8177AD80, and that is the thing to chase - not "xam never
+            // resumes", which 1094 showed is the wrong question.
+            {
+              static bool wc_done = false;
+              if (!wc_done) {
+                wc_done = true;
+                auto ths = kernel_state()->object_table()
+                               ->GetObjectsByType<XThread>(XObject::Type::Thread);
+                uint32_t at_proc = 0, susp = 0, running = 0;
+                std::string det;
+                for (auto& th : ths) {
+                  if (!th || th->start_address() != 0x8177AD80u) continue;
+                  ++at_proc;
+                  uint32_t sc = th->suspend_count();
+                  if (sc) ++susp; else ++running;
+                  if (at_proc <= 20u)
+                    det += fmt::format("tid {:08X} susp {}; ", th->thread_id(), sc);
+                }
+                // the pool init's own worker array is [pool+0x134 + 4i]
+                std::string slots;
+                for (uint32_t i = 0; i < 8u; ++i)
+                  slots += fmt::format("{:08X} ", prd2(0x81D423C0u + 0x134u + i * 4u));
+                // Phase 1095b: 1091's note that xam's HUD-manager loop
+                // 81794BC8 "does not run here" is the same shape of premise
+                // that guide_xam_task_init's turned out to be, and it was
+                // formed while every pool worker was frozen. Census EVERY
+                // guest thread by start address so the claim is measured
+                // rather than assumed.
+                {
+                  std::map<uint32_t, std::pair<uint32_t, uint32_t>> by_start;
+                  for (auto& th : ths) {
+                    if (!th) continue;
+                    auto& e = by_start[th->start_address()];
+                    ++e.first;
+                    if (th->suspend_count()) ++e.second;
+                  }
+                  std::string all;
+                  for (auto& kv : by_start)
+                    all += fmt::format("{:08X} x{}{}; ", kv.first, kv.second.first,
+                                       kv.second.second
+                                           ? fmt::format(" ({} susp)", kv.second.second)
+                                           : "");
+                  XELOGI("GuideThreadCensus: {} guest thread(s) by start: {}",
+                         ths.size(), all);
+                  // Phase 1095g: the pool's dispatch objects. 817517E4 calls
+                  // 8177BF80 ungated during xam's boot and its successor
+                  // 8178F748 demonstrably ran, so the init happened - yet the
+                  // workers' KeWaitForMultipleObjects reports 81D424A8 as
+                  // dispatch type 255. reg1091u (before the guard fix, workers
+                  // frozen) reported type 0 eight times; p1095reg4 reports 255
+                  // four hundred times. Read the headers rather than argue.
+                  XELOGI("GuidePoolObjs: [81D42450]={:08X} [81D424A8]={:08X} "
+                         "[81D424E4]={:08X} [81D42514]={:08X} | pool[+154 "
+                         "count]={:08X}",
+                         prd2(0x81D42450u), prd2(0x81D424A8u),
+                         prd2(0x81D424E4u), prd2(0x81D42514u),
+                         prd2(0x81D423C0u + 0x154u));
+                  // Phase 1095i: did 81750FA8's task ever run? It is queued at
+                  // 817518EC with context 0x04000000, and its 81751294 branch
+                  // calls 81727500, which creates the object at 81D3C8E8 and
+                  // self-links the list head at 81D3CA08. Both are .bss (all
+                  // zero in xam.bin - checked statically), so a zero here means
+                  // that task has NOT run, and the fault at 817286C0 is a
+                  // missing dispatch rather than a race between two tasks.
+                  XELOGI("GuideUiGlobals: [81D3C8E8]={:08X} [81D3CA08]={:08X} "
+                         "[81D3C8F8]={:08X} | self-linked? {}",
+                         prd2(0x81D3C8E8u), prd2(0x81D3CA08u),
+                         prd2(0x81D3C8F8u),
+                         prd2(0x81D3CA08u) == 0x81D3CA08u ? "yes" : "no");
+                }
+                XELOGI("GuideWorkerCensus: {} thread(s) at 8177AD80 - {} RUNNING, {} suspended "
+                       "| {}| pool[+134..]: {}",
+                       at_proc, running, susp, det, slots);
+                // Phase 1094c: DO THE POOL'S OWN SIX WORKER OBJECTS HAVE THREADS?
+                // 1094b left exactly that open. 1071 noted [worker+0x1C] reads
+                // back as a STACK address (30096010, 3009A010, spaced 0x4000),
+                // not a handle - so dump each object whole and say which of its
+                // words, if any, matches a live thread's stack or handle.
+                for (uint32_t i = 0; i < 6u; ++i) {
+                  uint32_t wob = prd2(0x81D423C0u + 0x134u + i * 4u);
+                  if (wob < 0x10000u) { XELOGI("GuideWorkerObj: slot {} = {:08X} (not an object)", i, wob); continue; }
+                  auto* mh = kernel_state()->memory()->LookupHeap(wob);
+                  if (!mh || mh->QueryRangeAccessUnlocked(wob, wob + 0x40u) ==
+                                xe::memory::PageAccess::kNoAccess) {
+                    XELOGW("GuideWorkerObj: slot {} = {:08X} NOT MAPPED - not read", i, wob);
+                    continue;
+                  }
+                  std::string w;
+                  for (uint32_t o = 0; o < 0x40u; o += 4u)
+                    w += fmt::format("{:08X} ", prd2(wob + o));
+                  // does any word name a live thread?
+                  std::string match;
+                  for (uint32_t o = 0; o < 0x40u; o += 4u) {
+                    uint32_t v = prd2(wob + o);
+                    if (!v) continue;
+                    for (auto& th : ths) {
+                      if (!th) continue;
+                      if (th->thread_id() == v || th->handle() == v)
+                        match += fmt::format("+{:02X}->tid/handle {:08X} (start {:08X}); ",
+                                             o, v, th->start_address());
+                    }
+                  }
+                  XELOGI("GuideWorkerObj: slot {} {:08X} [+00..3C]: {}| {}", i, wob, w,
+                         match.empty() ? std::string("no word names a live thread") : match);
+                }
+              }
+            }
+            {
+              static bool props_done = false;
+              if (!props_done) {
+                props_done = true;
+                auto rdstr = [&](uint32_t a) -> std::string {
+                  if (!a) return std::string("(null)");
+                  auto* mh = kernel_state()->memory()->LookupHeap(a);
+                  if (!mh || mh->QueryRangeAccessUnlocked(a, a + 2) ==
+                                xe::memory::PageAccess::kNoAccess)
+                    return fmt::format("(unmapped {:08X})", a);
+                  std::string o;
+                  for (uint32_t i = 0; i < 48; ++i) {
+                    uint8_t c = *kernel_state()->memory()->TranslateVirtual<uint8_t*>(a + i);
+                    if (!c) break;
+                    o += (c >= 32 && c < 127) ? char(c) : '?';
+                  }
+                  return o;
+                };
+                uint32_t desc = prd2(0x81D6CDE4u);   // XuiScene's slot (1064)
+                XELOGI("GuideXuiProps: [81D6CDE4] XuiScene descriptor = {:08X}", desc);
+                uint32_t level = 0;
+                std::vector<uint32_t> chain;
+                for (uint32_t dsc = desc; dsc && level < 12u; ++level) {
+                  chain.push_back(dsc);
+                  dsc = (dsc >= 0x10000u) ? prd2(dsc + 0x28u) : 0u;
+                }
+                // parse order is BASE FIRST, so walk the chain backwards
+                for (size_t k = chain.size(); k-- > 0;) {
+                  uint32_t dsc = chain[k];
+                  // 1092o first cut had these swapped: 8193F308 hands
+                  // [desc+0x1C] back as arg4 and [desc+0x20] as arg5, and the
+                  // run says which is which - [+0x1C] read 81DFxxxx (a pointer
+                  // into the image) and [+0x20] read 27/19/8 (plausible counts
+                  // for XuiScene / XuiControl / base). So +0x1C is the TABLE
+                  // and +0x20 is the COUNT.
+                  uint32_t tbl = prd2(dsc + 0x1Cu), cnt = prd2(dsc + 0x20u);
+                  std::string dn;
+                  for (uint32_t o = 0; o <= 0x18u; o += 4u) {
+                    uint32_t v = prd2(dsc + o);
+                    dn += fmt::format("+{:02X}:{:08X} ", o, v);
+                  }
+                  XELOGI("GuideXuiProps: level {} desc {:08X} count {} table {:08X} | {}",
+                         chain.size() - 1 - k, dsc, cnt, tbl, dn);
+                  // Entry stride is 0x30, NOT the 0xC of 8197FFFC - that 12 is
+                  // the size of a VALUE slot on the object, not of a descriptor.
+                  // Layout read off the first run: +0x04 index, +0x08 offset,
+                  // +0x10 name (a WIDE string), +0x14 type. The tables live in
+                  // .data and are filled at registration, so they read as zeros
+                  // in the image - they have to be read here (1092n's lesson).
+                  auto rdwstr = [&](uint32_t a) -> std::string {
+                    if (!a) return std::string("(null)");
+                    auto* mh = kernel_state()->memory()->LookupHeap(a);
+                    if (!mh || mh->QueryRangeAccessUnlocked(a, a + 2) ==
+                                  xe::memory::PageAccess::kNoAccess)
+                      return fmt::format("(unmapped {:08X})", a);
+                    std::string o;
+                    for (uint32_t i = 0; i < 48; ++i) {
+                      uint16_t u = xe::load_and_swap<uint16_t>(
+                          kernel_state()->memory()->TranslateVirtual(a + i * 2u));
+                      if (!u) break;
+                      o += (u >= 32 && u < 127) ? char(u) : '?';
+                    }
+                    return o;
+                  };
+                  if (!tbl || cnt > 128u) continue;
+                  for (uint32_t e = 0; e < cnt; ++e) {
+                    uint32_t b = tbl + e * 0x30u;
+                    XELOGI("GuideXuiProps:    slot {} idx {} off {:#06x} type {} name '{}'",
+                           e, prd2(b + 4u), prd2(b + 8u), prd2(b + 0x14u),
+                           rdwstr(prd2(b + 0x10u)));
+                  }
+                }
+              }
+            }
+            {
+              static bool ord_done = false;
+              if (!ord_done) {
+                ord_done = true;
+                auto xm_o = kernel_state()->GetModule("xam.xex", true);
+                if (!xm_o) {
+                  XELOGW("GuideXamOrd: xam.xex module not found - nothing scanned");
+                } else {
+                  // Phase 1091p: 81795548 (the skin loader) added. It has no
+                  // callers in xam and reads [81D43C50+0x28], which nothing in
+                  // xam writes (four scans now, the last over all 64 formations
+                  // of the base, forward, indexed stores included). If it is
+                  // EXPORTED, another module calls it - and that module is what
+                  // sets the slot up on hardware. If it is not, the producer is
+                  // somewhere neither module boundary nor scan has shown yet.
+                  const uint32_t kTargets[] = {0x81794BC8u, 0x81793230u, 0x81792928u,
+                                               0x817908F8u, 0x8174FDA0u, 0x8174FDC8u,
+                                               0x8174E220u, 0x81793AA0u, 0x81784EE8u,
+                                               0x81795548u, 0x8177BFC8u, 0x8177BFB0u};
+                  const char* kNames[] = {"HUD show loop 81794BC8", "pump 81793230",
+                                          "pump 81792928", "claim-slot 817908F8",
+                                          "ShowHud 8174FDA0", "HideHud 8174FDC8",
+                                          "PlayTransition 8174E220", "XamAppLoad 81793AA0",
+                                          "XamShowSigninUIp 81784EE8 (control)",
+                                          "SKIN LOADER 81795548",
+                                          "current-task-handle 8177BFC8",
+                                          "register-proc 8177BFB0"};
+                  uint32_t hits = 0, scanned = 0, resolved = 0;
+                  for (uint32_t ord = 1; ord <= 0x1000u; ++ord) {
+                    ++scanned;
+                    uint32_t a = xm_o->GetProcAddressByOrdinal(ord);
+                    if (!a) continue;
+                    ++resolved;
+                    for (size_t k = 0; k < xe::countof(kTargets); ++k) {
+                      if (a == kTargets[k]) {
+                        ++hits;
+                        XELOGI("GuideXamOrd: ordinal {:#05x} ({}) -> {:08X}  {}", ord,
+                               ord, a, kNames[k]);
+                      }
+                    }
+                  }
+                  XELOGI("GuideXamOrd: scanned ordinals 1..0x1000 ({} tried, {} resolved to an address); {} of {} target(s) are exports",
+                         scanned, resolved, hits, uint32_t(xe::countof(kTargets)));
+                  for (size_t k = 0; k < xe::countof(kTargets); ++k) {
+                    bool seen = false;
+                    for (uint32_t ord = 1; ord <= 0x1000u && !seen; ++ord)
+                      seen = xm_o->GetProcAddressByOrdinal(ord) == kTargets[k];
+                    if (!seen)
+                      XELOGI("GuideXamOrd: {} is NOT an export in 1..0x1000", kNames[k]);
+                  }
+                }
+              }
+            }
+            // Phase 1091u: CAN ANY THREAD HERE SUPPLY XAM'S TASK HANDLE?
+            // The loader's orphan caller would plausibly do
+            // [81D43C50+0x28] = Xam_0x1B6() (8177BFC8, "current task handle,
+            // tagged") before calling it - that is the idiom everywhere else
+            // in xam (81746250 stores the result into its own struct). 8177BFC8
+            // reads xam's per-thread context out of TLS slot [81D227F0]
+            // (measured 0) and returns [worker+0x0C]. Calling it on a thread
+            // without that context FAULTS (1091n, worker1), so read the slot
+            // HOST-SIDE instead - XThread::GetTLSValue is a plain guest-memory
+            // read and executes nothing. If any live thread has a non-zero
+            // value there, that thread could hand us a GUEST-PRODUCED handle
+            // and the fabricated stand-in could go.
+            {
+              // Phase 1091v: log on CHANGE, not once. 1091u sampled a single
+              // early paint and found no thread with a context - but 1084
+              // showed a pool worker CAN run a task when the workers are
+              // resumed and a task is dispatched, and a worker running a task
+              // is exactly what would put a context in this slot. A one-shot
+              // sample taken before that could never see it. Track the count
+              // and the index, and report every time either moves.
+              {
+                static uint32_t last_nonzero = 0xFFFFFFFFu, last_idx = 0xFFFFFFFFu;
+                static uint32_t tls_logs = 0;
+                uint32_t idx = prd2(0x81D227F0u);
+                if (idx == 0xFFFFFFFFu) {
+                  XELOGW("GuideXamTls: xam's TLS index [81D227F0] is -1 - never "
+                         "allocated; nothing to read on any thread");
+                } else {
+                  auto ths = kernel_state()->object_table()
+                                 ->GetObjectsByType<XThread>(XObject::Type::Thread);
+                  // Phase 1091w: track the TASK slot too, not just the context.
+                  // 1091v measured 16 workers holding a context and every
+                  // [ctx+0x0C] at 0 - but it only logged when the CONTEXT count
+                  // moved, so a task arriving on a worker could never have shown
+                  // up. [ctx+0x0C] going non-zero is the one unmeasured step in
+                  // the whole chain: it is what 8177B058 returns, so it is what
+                  // decides whether Xam_0x1B6() can hand back a real handle.
+                  uint32_t nonzero = 0, read_ok = 0, read_fail = 0, withtask = 0;
+                  std::string hits;
+                  for (auto& th : ths) {
+                    if (!th) continue;
+                    uint32_t v = 0;
+                    if (!th->GetTLSValue(idx, &v)) { ++read_fail; continue; }
+                    ++read_ok;
+                    if (v) {
+                      ++nonzero;
+                      uint32_t tk = prd2(v + 0x0Cu);
+                      if (tk) ++withtask;
+                      hits += fmt::format("tid {:08X} start {:08X} ctx {:08X} task {:08X}; ",
+                                          th->thread_id(), th->start_address(), v, tk);
+                    }
+                  }
+                  static uint32_t last_withtask = 0xFFFFFFFFu;
+                  if ((nonzero != last_nonzero || idx != last_idx ||
+                       withtask != last_withtask) && tls_logs++ < 30u) {
+                    last_withtask = withtask;
+                    XELOGI("GuideXamTls: slot {} on {} live thread(s): {} read, "
+                           "{} unreadable, {} with a CONTEXT (was {}), {} with a TASK -> {}",
+                           idx, uint32_t(ths.size()), read_ok, read_fail, nonzero,
+                           last_nonzero == 0xFFFFFFFFu ? 0u : last_nonzero,
+                           withtask,
+                           nonzero ? hits
+                                   : std::string("(none - no thread here has xam's task "
+                                                 "context, so 8177BFC8 can give nothing)"));
+                    last_nonzero = nonzero; last_idx = idx;
+                  }
+                }
+              }
+            }
+            uint32_t sgl = prd2(0x81D3F924u);
+            if (sgl >= 0x40000000u && sgl < 0x50000000u) {
+              static uint32_t last[3] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
+              static uint32_t logs = 0;
+              uint32_t now3[3] = {prd2(sgl + 0x10u), prd2(sgl + 0x64u), prd2(sgl + 0x70u)};
+              if ((now3[0] != last[0] || now3[1] != last[1] || now3[2] != last[2]) &&
+                  logs++ < 200u) {
+                XELOGI("GuideBkgndWatch: singleton {:08X} state[+10]={:08X} requested[+64]={:08X} flag[+70]={:08X} (was {:08X}/{:08X}/{:08X})",
+                       sgl, now3[0], now3[1], now3[2], last[0], last[1], last[2]);
+                last[0] = now3[0]; last[1] = now3[1]; last[2] = now3[2];
+              }
+            }
+            // Phase 1091: WHO ASKS FOR THE STATE, ANSWERED - and it is not the
+            // singleton's request pair. xam's own show/hide of the HUD is a
+            // pair of one-line wrappers on the app/HUD manager struct at
+            // 0x81D43C50 (the same base whose [+4] is the app task and whose
+            // [+B4]/[+B8]/[+E0] are XamAppLoad's gates, phases 1080-1082):
+            //   ShowHud 8174FDA0(mgr, state): asserts [mgr+0x3C]==0, takes the
+            //     scene from [mgr+0x38] and tail-calls 8174F680(scene, state),
+            //     which plays a transition ONLY IF [scene+0x10] == 0 (Closed).
+            //   HideHud 8174FDC8(mgr): scene = [mgr+0x38], tail-calls
+            //     8174F5E8(scene), which - if [scene+0x10] != 0 - flushes the
+            //     pending request list ([scene+0x5C], 8174EC10) and plays to 0.
+            // Their only callers are 81795058 and 81794E88, inside 81794BC8,
+            // and the state ShowHud is given is NOT a literal there:
+            //   r3 = [81D43C50+0x80]  (the HUD scene manager)
+            //   r4 = [81D43C50+0xBC]  (the state xam recorded)
+            // and [+0xBC] has exactly one writer in the whole image, 817909E0
+            // inside 817908F8(state) - the routine every XamShow*UI entry
+            // point calls first to claim the system-UI slot and declare which
+            // background state it wants (81785670 passes 2, 817873F0 passes 1,
+            // 8178751C passes 4, 81787C1C passes 0, ...). So [81D43C50+0xBC]
+            // IS the guest's own answer to "which state does the Guide open
+            // to", and [81D43C50+0x44] is the mode word 81795040 tests before
+            // reading it. Read them beside the singleton, and say what was
+            // skipped - a probe that reports nothing must report how much it
+            // actually looked at (1088).
+            {
+              static uint32_t lastm[6] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
+                                          0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
+              static uint32_t mlogs = 0;
+              uint32_t mgr = 0x81D43C50u;
+              uint32_t nm[6] = {prd2(mgr), prd2(mgr + 0x44u), prd2(mgr + 0x80u),
+                                prd2(mgr + 0xBCu), 0xFFFFFFFFu, 0xFFFFFFFFu};
+              bool have_scene = false;
+              if (nm[2] >= 0x40000000u && nm[2] < 0x50000000u) {
+                nm[4] = prd2(nm[2] + 0x38u);   // the CHUDBkgndScene ShowHud uses
+                nm[5] = prd2(nm[2] + 0x3Cu);   // ShowHud's own assert, must be 0
+                have_scene = true;
+              }
+              bool ch = false;
+              for (int i = 0; i < 6; ++i) ch = ch || nm[i] != lastm[i];
+              if (ch && mlogs++ < 200u) {
+                XELOGI("GuideHudMgr: 81D43C50 state={:08X} mode[+44]={:08X} sceneMgr[+80]={:08X} showState[+BC]={:08X} bkgnd[+38]={} guard[+3C]={}",
+                       nm[0], nm[1], nm[2], nm[3],
+                       have_scene ? fmt::format("{:08X}", nm[4])
+                                  : std::string("(sceneMgr not a heap pointer - not read)"),
+                       have_scene ? fmt::format("{:08X}", nm[5])
+                                  : std::string("(not read)"));
+                if (have_scene) {
+                  uint32_t sc = nm[4];
+                  if (sc >= 0x40000000u && sc < 0x50000000u) {
+                    XELOGI("GuideHudMgr: ShowHud would see scene {:08X} state[+10]={:08X} queue[+5C]={:08X} (it plays only from 0=Closed); singleton {:08X} {}",
+                           sc, prd2(sc + 0x10u), prd2(sc + 0x5Cu), sgl,
+                           sc == sgl ? "IS the singleton" : "is NOT the singleton");
+                  } else {
+                    XELOGI("GuideHudMgr: [sceneMgr+0x38]={:08X} is not a heap pointer - the scene fields were not read", sc);
+                  }
+                }
+                for (int i = 0; i < 6; ++i) lastm[i] = nm[i];
+              }
+            }
+            // Phase 1091: the scene's own transition bookkeeping, dumped whole.
+            // PlayTransition (8174E220) reads [+0x68] FIRST and, when it is
+            // non-zero, uses it INSTEAD of the caller's target (8174E22C..
+            // 8174E254) - so a pending target of xam's own would answer both
+            // halves of the question our toggle currently answers with
+            // literals. It early-outs when the target equals [+0x10]
+            // (8174E258), and on a real play it writes [+0x10] = target and
+            // [+0x14] = 1 (8174E394/8174E3A0). The constructor 8174E170 zeroes
+            // +0x10, so the 1 the probe reads at rest was written by a real
+            // PlayTransition in guest flow, not by a default. Dump +0x00..0x7C
+            // whenever any word in it moves, so which words are xam's live
+            // bookkeeping is measured rather than assumed.
+            if (sgl >= 0x40000000u && sgl < 0x50000000u) {
+              static uint32_t lastw[32];
+              static bool have_last = false;
+              static uint32_t wlogs = 0;
+              uint32_t cw[32];
+              for (int i = 0; i < 32; ++i) cw[i] = prd2(sgl + uint32_t(i * 4));
+              bool ch = !have_last;
+              if (have_last)
+                for (int i = 0; i < 32; ++i) ch = ch || cw[i] != lastw[i];
+              if (ch && wlogs++ < 40u) {
+                std::string line, diff;
+                for (int i = 0; i < 32; ++i) {
+                  line += fmt::format("{}{:08X}", i ? " " : "", cw[i]);
+                  if (have_last && cw[i] != lastw[i])
+                    diff += fmt::format(" +{:02X}:{:08X}->{:08X}", i * 4, lastw[i], cw[i]);
+                }
+                XELOGI("GuideBkgndWords #{} scene {:08X} [+00..7C]: {}", wlogs, sgl, line);
+                if (have_last) XELOGI("GuideBkgndWords #{} moved:{}", wlogs, diff);
+                for (int i = 0; i < 32; ++i) lastw[i] = cw[i];
+                have_last = true;
+              }
+            }
+          }
           // Sample the dirty bit between SetBounds and the layout.
           //
           // Phase 230 changed an element's bounds through the API and found
@@ -7083,6 +9211,9 @@ void VdSwap_entry(
               xe::store_and_swap<uint32_t>(
                   vm2->TranslateVirtual(ri3 + 0xB4u), f_mid | 0x20000u);
               uint32_t f_forced = prd2(ri3 + 0xB4u);
+              // Phase 1050: hud shows the current tab through XuiScenePlayToTransition;
+              // transitions and timelines only advance in XuiTimersRun, which nothing
+              // in this loop ever called. Run the timers once per paint.
               pcall(f_b, {dc2, ::cvars::guide_paint_clear});
               pcall(f_l, {rt2});
               uint32_t f_after_layout = prd2(ri3 + 0xB4u);
@@ -7097,10 +9228,2375 @@ void VdSwap_entry(
               }
             }
           }
-          if (!::cvars::guide_dirty_via_api) {
-            pcall(f_b, {dc2, ::cvars::guide_paint_clear});
-            pcall(f_l, {rt2});
+          // Phase 1050: hud goes to a tab only on message 0x1D (payload
+          // type 1) from the tab scene, which XuiTabSceneGoto raises. The
+          // open path never raises it, so every page stays as built. Find
+          // the tab scene under the root (the cast against [81D6CE38]
+          // succeeds only for it) and call Goto once.
+          if (::cvars::guide_goto_tab >= 0) {
+            static bool goto_done = false;
+            if (!goto_done && f_fc && f_ns) {  // phase 1054 blades: once, on the first open; a re-fire reverted every tab switch
+              goto_done = true;
+              uint32_t f_cast = 0x81930FE8u, f_goto = po(0x3B9),
+                       f_cur = po(0x3BA), tabcls = prd2(0x81D6CE38u);
+              std::vector<uint32_t> q{rt2};
+              uint32_t found = 0, seen = 0;
+              for (size_t qi = 0; qi < q.size() && seen < 600 && !found; ++qi) {
+                uint32_t h = q[qi];
+                ++seen;
+                if (pcall(f_cast, {h, tabcls})) { found = h; break; }
+                std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                pcall(f_fc, {h, pout});
+                for (uint32_t c = prd2(pout), k = 0; c && k < 256; ++k) {
+                  q.push_back(c);
+                  std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                  pcall(f_ns, {c, pout});
+                  uint32_t nx = prd2(pout);
+                  if (nx == c) break;
+                  c = nx;
+                }
+              }
+              uint32_t before = found ? pcall(f_cur, {found, pout}) : 0xDEADu;
+              uint32_t gr = found ? pcall(f_goto, {found, uint64_t(::cvars::guide_goto_tab), 1}) : 0xDEADu;
+              uint32_t after = found ? pcall(f_cur, {found, pout}) : 0xDEADu;
+              XELOGI("GuideGotoTab: root {:08X} searched {} nodes, tab scene {:08X}, "
+                     "current {:08X} -> Goto({}) = {:08X} -> current {:08X}",
+                     rt2, seen, found, before, ::cvars::guide_goto_tab, gr, after);
+              // Phase 1051: raise hud's tab notification (message 0x1D with a
+              // payload whose word 0 is the type) to the navigated scene, the
+              // way the tab scene would, and let hud's own handler react.
+              if (::cvars::guide_send_notify >= 0) {
+                uint32_t f_send = po(0x35F);
+                uint32_t blk = pm2->SystemHeapAlloc(0x40, 16);
+                if (blk && f_send) {
+                  std::memset(pm2->TranslateVirtual(blk), 0, 0x40);
+                  auto st = [&](uint32_t a, uint32_t v) {
+                    xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(a), v);
+                  };
+                  st(blk + 0x04u, uint32_t(::cvars::guide_send_notify_id));
+                  st(blk + 0x10u, blk + 0x20u);
+                  st(blk + 0x20u, uint32_t(::cvars::guide_send_notify));
+                  st(blk + 0x24u, found);
+                  // hud's scene is the tab scene's parent, not the canvas host.
+                  std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                  pcall(0x81931BF0u, {found, pout});
+                  uint32_t target = prd2(pout) ? prd2(pout) : rt2;
+                  // Phase 1051: id 0x13 (init) goes to each page child of the
+                  // tab scene (flag bit 0x1000 marks the pages) instead.
+                  if (::cvars::guide_send_notify_id == 0x13) {
+                    std::vector<uint32_t> pages;
+                    std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                    pcall(f_fc, {found, pout});
+                    for (uint32_t c = prd2(pout), k = 0; c && k < 48; ++k) {
+                      std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                      pcall(0x819426F0u, {c, pout});
+                      uint32_t ob = prd2(pout);
+                      if (ob && (prd2(ob + 0xB4u) & 0x1000u)) pages.push_back(c);
+                      std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                      pcall(f_ns, {c, pout});
+                      uint32_t nx = prd2(pout);
+                      if (nx == c) break;
+                      c = nx;
+                    }
+                    for (uint32_t pg : pages) {
+                      st(blk + 0x08u, 0);
+                      uint32_t r = pcall(f_send, {pg, blk});
+                      XELOGI("GuideNotify: init 0x13 -> page {:08X}: {:08X} handled={:08X}",
+                             pg, r, prd2(blk + 8u));
+                    }
+                    target = 0;
+                  }
+                  uint32_t sr = target ? pcall(f_send, {target, blk}) : 0u;
+                  XELOGI("GuideNotify: XuiSendMessage(scene {:08X}, id {:X} type {}) -> "
+                         "{:08X} handled={:08X}",
+                         target, ::cvars::guide_send_notify_id, ::cvars::guide_send_notify, sr, prd2(blk + 8u));
+                }
+              }
+              // Phase 1052b: backdrop dim + slide-in setup, once, after navigation.
+              if (found && !g_guide_slide_armed) {  // phase 1054: always (probes live here)
+                std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                pcall(0x81931BF0u, {found, pout});
+                uint32_t hudscene2 = prd2(pout);
+                // canvas rect from the root element object
+                std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                pcall(0x819426F0u, {rt2, pout});
+                uint32_t cob = prd2(pout);
+                float cw = 852.0f, ch = 480.0f;
+                if (cob) {
+                  uint32_t ww = prd2(cob + 0x1Cu), wh = prd2(cob + 0x20u);
+                  float fw, fh; std::memcpy(&fw, &ww, 4); std::memcpy(&fh, &wh, 4);
+                  if (fw > 1.0f && fw < 4096.0f) cw = fw;
+                  if (fh > 1.0f && fh < 4096.0f) ch = fh;
+                }
+                g_guide_slide_w = cw;
+                if (found && hudscene2) {
+                  g_guide_tabscene = found;
+                  g_guide_hudscene = hudscene2;
+                  if (::cvars::guide_open_anim > 0) g_guide_play_open = true;
+                  // phase 1054 open: faster rounds while hud's authored entrance plays
+                  g_guide_open_burst_until = std::chrono::steady_clock::now() + std::chrono::milliseconds(::cvars::guide_open_burst_ms);
+                  // Phase 1054 probes. (a) The scene's transition names: the
+                  // XuiScene object holds four wide strings at +0x38/+0x3C/
+                  // +0x40/+0x44 that XuiScenePlayFrom/ToTransition (8193B960,
+                  // 8193B8F0) and the end routines (8193B810, 8193B880) hand
+                  // to 8193A5D0, which looks them up in the transition table
+                  // at [81D6CE5C] (81938740). Empty names = no authored
+                  // entrance for the HUDScene.
+                  static uint32_t wb4 = 0;
+                  if (!wb4) wb4 = pm2->SystemHeapAlloc(0x80, 16);
+                  auto wstr4 = [&](const char* a) {
+                    std::memset(pm2->TranslateVirtual(wb4), 0, 0x80);
+                    auto* b = pm2->TranslateVirtual<uint8_t*>(wb4);
+                    for (size_t i = 0; a[i] && i < 60; ++i) b[i * 2 + 1] = uint8_t(a[i]);
+                    return wb4;
+                  };
+                  auto mapped4 = [&](uint32_t a, uint32_t n) {
+                    if (!a) return false;
+                    auto* mh = pm2->LookupHeap(a);
+                    return mh && mh->QueryRangeAccessUnlocked(a, a + n) != xe::memory::PageAccess::kNoAccess;
+                  };
+                  auto rdws4 = [&](uint32_t a) {
+                    std::string o;
+                    if (!mapped4(a, 80)) return std::string("<unmapped>");
+                    for (uint32_t i = 0; i < 40; ++i) {
+                      uint16_t u = xe::load_and_swap<uint16_t>(pm2->TranslateVirtual(a + i * 2u));
+                      if (!u) break;
+                      o += (u >= 32 && u < 127) ? char(u) : '?';
+                    }
+                    return o;
+                  };
+                  uint32_t sobj = pcall(0x81931088u, {hudscene2});
+                  std::string tn;
+                  if (mapped4(sobj, 0x60)) {
+                    for (uint32_t off : {0x38u, 0x3Cu, 0x40u, 0x44u}) {
+                      uint32_t sp = prd2(sobj + off);
+                      tn += fmt::format("+{:X}={:08X}'{}' ", off, sp, sp ? rdws4(sp) : "");
+                    }
+                  }
+                  XELOGI("GuideProbe: HUDScene {:08X} scene-object {:08X} transition names {}",
+                         hudscene2, sobj, tn.empty() ? "(object unmapped)" : tn);
+                  // (b) the classes xam's HUD host registers (817503E8):
+                  // HUDBkgndScene, HUDScene, GamerPicButton. 81949E00 is the
+                  // class lookup by name.
+                  std::string cls4;
+                  for (const char* cn : {"HUDBkgndScene", "HUDScene", "GamerPicButton", "XuiCanvas", "GuideMainScene", "XuiScene"}) {
+                    cls4 += fmt::format("{}={:08X} ", cn, pcall(0x81949E00u, {wstr4(cn)}));
+                  }
+                  g_guide_bkgnd_singleton = prd2(0x81D3F924u);
+                  XELOGI("GuideProbe: classes {}| CHUDBkgndScene singleton [81D3F924]={:08X}{}",
+                         cls4, g_guide_bkgnd_singleton,
+                         mapped4(g_guide_bkgnd_singleton, 0x80)
+                             ? fmt::format(" scene handle [+8]={:08X} state [+10]={} pending [+68]={:08X}",
+                                           prd2(g_guide_bkgnd_singleton + 8u), prd2(g_guide_bkgnd_singleton + 0x10u),
+                                           prd2(g_guide_bkgnd_singleton + 0x68u))
+                             : "");
+                  // (c) the boot canvas' scene: canvas -> (transition ->) scene.
+                  // If it holds HudBackground / AppHostElementId / Legend it
+                  // is hudbkgnd.xur's HUDRootScene, created by xam's skin
+                  // loader (81795894 -> 8174CC38) - the dim, legend, gamertag
+                  // and clock the reference shows and hud's canvas lacks.
+                  uint32_t f_byid4 = po(0x32A);
+                  auto first_child4 = [&](uint32_t h) {
+                    std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                    pcall(0x81931C90u, {h, pout});
+                    return prd2(pout);
+                  };
+                  uint32_t bc = guide_bs_scene_;
+                  uint32_t bs = bc ? first_child4(bc) : 0;
+                  if (bs && pcall(0x81930FE8u, {bs, prd2(0x81D6CE0Cu)})) bs = first_child4(bs);
+                  auto by_id4 = [&](uint32_t h, const char* id) -> uint32_t {
+                    if (!h || !f_byid4) return 0;
+                    std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                    uint32_t r = pcall(f_byid4, {h, wstr4(id), pout});
+                    return r == 0 ? prd2(pout) : 0;
+                  };
+                  uint32_t hb = by_id4(bs, "HudBackground"), ah = by_id4(bs, "AppHostElementId"),
+                           lg = by_id4(bs, "Legend"), gt = by_id4(bs, "Gamertag"),
+                           dt4 = by_id4(bs, "DateTimeTextId"), gp = by_id4(bs, "GamerPic");
+                  XELOGI("GuideProbe: boot canvas {:08X} -> scene {:08X}: HudBackground {:08X} AppHostElementId {:08X} Legend {:08X} Gamertag {:08X} DateTime {:08X} GamerPic {:08X} | alloc arena cursor {:08X} of {:08X}..{:08X}",
+                         bc, bs, hb, ah, lg, gt, dt4, gp,
+                         guide_alloc_arena_ ? prd2(guide_alloc_arena_) : 0u, guide_alloc_arena_, guide_alloc_end_);
+                  if (hb) g_guide_hud_root = bs;
+                  // The singleton's own scene handle ([+8], 00010059 in p1054b) is the
+                  // HUD root scene xam's skin loader created; the boot canvas is not.
+                  uint32_t hs2 = mapped4(g_guide_bkgnd_singleton, 0x80) ? prd2(g_guide_bkgnd_singleton + 8u) : 0u;
+                  if (hs2 && !g_guide_hud_root) {
+                    uint32_t hb2 = by_id4(hs2, "HudBackground"), ah2 = by_id4(hs2, "AppHostElementId"),
+                             lg2 = by_id4(hs2, "Legend"), gt2 = by_id4(hs2, "Gamertag"),
+                             dt2 = by_id4(hs2, "DateTimeTextId"), gp2 = by_id4(hs2, "GamerPic");
+                    std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                    pcall(0x81931BF0u, {hs2, pout});
+                    uint32_t par2 = prd2(pout);
+                    uint32_t sob2 = pcall(0x819426F0u, {hs2, pout}) ? 0u : prd2(pout);
+                    uint32_t fl2 = (sob2 >= 0x40000000u && sob2 < 0x50000000u) ? prd2(sob2 + 0xB4u) : 0u;
+                    XELOGI("GuideProbe: singleton scene {:08X} parent {:08X} flags {:08X}: HudBackground {:08X} AppHostElementId {:08X} Legend {:08X} Gamertag {:08X} DateTime {:08X} GamerPic {:08X}",
+                           hs2, par2, fl2, hb2, ah2, lg2, gt2, dt2, gp2);
+                    if (hb2 || ah2 || lg2) {
+                      g_guide_hud_root = hs2;
+                      g_guide_el_legend = lg2; g_guide_el_datetime = dt2;
+                      g_guide_el_gamerpic = gp2; g_guide_el_gamertag = gt2;
+                      g_guide_el_apphost = ah2;
+                      // Phase 1062: the render collection. 8195AA00 forwards the
+                      // render message by iterating a {ptr,count} pair on the
+                      // element's node, NOT the navigable child tree - which is
+                      // why hosting hud under the AppHost element (a tree edit)
+                      // changed nothing (phases 1060-1061b). Print the raw head
+                      // of the element object and of its node so the pair can be
+                      // located and its count read, for a container that does
+                      // render its children (xam's root scene) next to the app
+                      // host and hud's root.
+                      auto coll_dump = [&](const char* what, uint32_t h) {
+                        if (!::cvars::guide_dump_collections || !h) return;
+                        std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                        pcall(0x819426F0u, {h, pout});
+                        uint32_t ob = prd2(pout);
+                        if (!(ob >= 0x40000000u && ob < 0x50000000u)) {
+                          XELOGI("GuideColl: {} {:08X} -> no object", what, h);
+                          return;
+                        }
+                        // 8195AA00 reads the pair off the class INSTANCE (its
+                        // r31, whose +0 is the class object), not off the element
+                        // object 819426F0 returns. 81931040 is the other resolver
+                        // the walk uses; dump both heads and let the +0 word say
+                        // which is which.
+                        uint32_t inst = pcall(0x81931040u, {h});
+                        std::string obw, iw;
+                        for (uint32_t o = 0; o < 0x40u; o += 4u) {
+                          obw += fmt::format("{:08X} ", prd2(ob + o));
+                        }
+                        if (inst >= 0x40000000u && inst < 0x50000000u) {
+                          for (uint32_t o = 0; o < 0x40u; o += 4u) {
+                            iw += fmt::format("{:08X} ", prd2(inst + o));
+                          }
+                        } else {
+                          iw = "(unmapped)";
+                        }
+                        XELOGI("GuideColl: {} h={:08X} ob(819426F0)={:08X} inst(81931040)={:08X}", what, h, ob, inst);
+                        XELOGI("GuideColl:   ob  +00..3C: {}", obw);
+                        XELOGI("GuideColl:   inst+00..3C: {}", iw);
+                      };
+                      coll_dump("xam-root-scene(renders its children)", hs2);
+                      // Phase 1064: the dim. XuiFigure's render case (819677EC,
+                      // via the class handler 8193FB70 -> 819676C8) bails at its
+                      // first test - `lwz r11,8(r31); cmpwi 1; blt` - so a figure
+                      // with fewer than one shape entry draws nothing. 81933A20
+                      // is the handle -> figure-object resolver (the phase-1053
+                      // block read its +8 as the entry count after SetShape).
+                      // HudBackground is authored in hudbkgnd.xur as a XuiFigure
+                      // and its by-name lookup returns 0, so read the count off
+                      // xam's root scene's first child, which is the 852x480
+                      // element phase 1054 called the dim.
+                      if (::cvars::guide_dump_collections) {
+                        uint32_t bk = first_child4(hs2);
+                        uint32_t fo = bk ? pcall(0x81933A20u, {bk}) : 0u;
+                        uint32_t cnt = (fo >= 0x40000000u && fo < 0x50000000u) ? prd2(fo + 8u) : 0xFFFFFFFFu;
+                        std::string fw;
+                        if (fo >= 0x40000000u && fo < 0x50000000u) {
+                          for (uint32_t o = 0; o < 0x40u; o += 4u) fw += fmt::format("{:08X} ", prd2(fo + o));
+                        }
+                        // Phase 1064: cast against the WHOLE class table, not
+                        // the 81D6CDC8..81D6CDFC window guide_probe_class scans.
+                        // The registrations (8194F118(desc,1,slot)) name every
+                        // slot: 81D6CDC8..81D6CE54 step 4, plus 81D6EF2C,
+                        // 81D6EF30, 81D6F16C.
+                        static const char* kClassNames[] = {
+                            "?base", "XuiText", "XuiLabel", "XuiCanvas", "XuiFigure",
+                            "XuiControl", "XuiVisual", "XuiScene", "XuiButton",
+                            "XuiNavButton", "XuiBackButton", "XuiCheckbox",
+                            "XuiRadioButton", "XuiRadioGroup", "XuiTextPresenter",
+                            "XuiGroup", "XuiSound", "XuiTransition", "XuiListItem",
+                            "XuiScrollEnd", "XuiScrollBar", "XuiList", "XuiCommonList",
+                            "XuiEdit", "XuiCaret", "XuiMessageBox", "XuiImagePresenter",
+                            "XuiImage", "XuiTabScene", "XuiPerspectiveScene",
+                            "XuiNineGrid", "XuiGridPanel", "?CE48", "XuiTextureSurface",
+                            "XuiShader", "XuiVariable"};
+                        std::string cls;
+                        for (uint32_t i = 0; bk && i < 36u; ++i) {
+                          uint32_t slot = 0x81D6CDC8u + i * 4u;
+                          uint32_t co = prd2(slot);
+                          if (!(co >= 0x40000000u && co < 0x50000000u)) continue;
+                          if (pcall(0x81930FE8u, {bk, co})) cls += fmt::format("{} ", kClassNames[i]);
+                        }
+                        for (uint32_t slot : {0x81D6EF2Cu, 0x81D6EF30u, 0x81D6F16Cu}) {
+                          uint32_t co = bk ? prd2(slot) : 0u;
+                          if (!(co >= 0x40000000u && co < 0x50000000u)) continue;
+                          if (pcall(0x81930FE8u, {bk, co})) cls += fmt::format("[{:08X}] ", slot);
+                        }
+                        uint32_t isfig = bk ? pcall(0x81930FE8u, {bk, prd2(0x81D6CDD8u)}) : 0u;
+                        XELOGI("GuideFigure: first child {:08X} classes: {} | XuiFigure-cast {:08X} figobj {:08X} entries {:08X}",
+                               bk, cls.empty() ? std::string("NONE") : cls, isfig, fo, cnt);
+                        if (!fw.empty()) XELOGI("GuideFigure:   figobj+00..3C: {}", fw);
+                        coll_dump("hud-background(first child)", bk);
+                        // Phase 1064: a proper inventory of xam's root scene -
+                        // every child with its real id (0x348 GetId), its class
+                        // (cast against the whole table) and its rect. The tree
+                        // dump's name column reads [ob+12] as a "node", but that
+                        // is the LAST-CHILD pointer, so its ids are unreliable.
+                        {
+                          static uint32_t f_gid_i = po(0x348), f_fc_i = po(0x32B), f_ns_i = po(0x330);
+                          uint32_t scratch = pm2->SystemHeapAlloc(64, 16);
+                          auto id_of = [&](uint32_t h) -> std::string {
+                            if (!f_gid_i || !h || !scratch) return std::string();
+                            std::memset(pm2->TranslateVirtual(scratch), 0, 64);
+                            if (pcall(f_gid_i, {h, scratch}) != 0) return std::string();
+                            uint32_t sp = prd2(scratch);
+                            if (!(sp >= 0x10000u && sp < 0xC0000000u)) return std::string();
+                            std::string o;
+                            for (uint32_t k = 0; k < 40u; ++k) {
+                              uint16_t u = xe::load_and_swap<uint16_t>(pm2->TranslateVirtual(sp + k * 2u));
+                              if (!u) break;
+                              o += char(u & 0x7Fu);
+                            }
+                            return o;
+                          };
+                          // Phase 1088: the comment below said "most-derived
+                          // wins: keep scanning" and the code returned on the
+                          // FIRST hit, which is the least derived - a
+                          // XuiNineGrid or a XuiButton was reported as the
+                          // XuiControl it also casts to. The table is
+                          // registered base-first, so the LAST cast that
+                          // succeeds is the most derived one.
+                          auto class_of = [&](uint32_t h) -> std::string {
+                            std::string best;
+                            for (uint32_t i = 0; i < 36u; ++i) {
+                              uint32_t co = prd2(0x81D6CDC8u + i * 4u);
+                              if (!(co >= 0x40000000u && co < 0x50000000u)) continue;
+                              if (i > 0 && pcall(0x81930FE8u, {h, co})) {
+                                best = kClassNames[i];
+                              }
+                            }
+                            for (uint32_t slot : {0x81D6EF2Cu, 0x81D6EF30u, 0x81D6F16Cu}) {
+                              uint32_t co = prd2(slot);
+                              if (!(co >= 0x40000000u && co < 0x50000000u)) continue;
+                              if (pcall(0x81930FE8u, {h, co})) {
+                                best = slot == 0x81D6EF2Cu   ? "XuiSlider"
+                                       : slot == 0x81D6EF30u ? "XuiProgressBar"
+                                                             : "XuiSoundXAudio";
+                              }
+                            }
+                            return best.empty() ? std::string("?") : best;
+                          };
+                          // Phase 1064: look up every id hudbkgnd.xur authors, so
+                          // "which authored elements exist" is a list rather than
+                          // an inference. by_id4 is XuiElementGetChildById.
+                          // Phase 1064: by_id4 is XuiElementGetChildById - DIRECT
+                          // children only, which is why nested ids read 0. Search
+                          // the whole subtree for the dim's authored id before
+                          // concluding it is absent.
+                          {
+                            std::function<uint32_t(uint32_t, const char*, int)> deep =
+                                [&](uint32_t h, const char* nm, int d) -> uint32_t {
+                              if (!h || d > 8) return 0u;
+                              uint32_t hit = by_id4(h, nm);
+                              if (hit) return hit;
+                              std::memset(pm2->TranslateVirtual(pout + 32u), 0, 16);
+                              if (!f_fc_i) return 0u;
+                              pcall(f_fc_i, {h, pout + 32u});
+                              for (uint32_t c = prd2(pout + 32u), k = 0; c && k < 40u; ++k) {
+                                uint32_t r = deep(c, nm, d + 1);
+                                if (r) return r;
+                                std::memset(pm2->TranslateVirtual(pout + 32u), 0, 16);
+                                if (!f_ns_i) break;
+                                pcall(f_ns_i, {c, pout + 32u});
+                                uint32_t nx = prd2(pout + 32u);
+                                if (nx == c) break;
+                                c = nx;
+                              }
+                              return 0u;
+                            };
+                            for (const char* nm : {"HudBackground", "HUD_Bladedark", "bottom",
+                                                   "ErrorHostElement", "Loading_Small"}) {
+                              XELOGI("GuideDeepId: '{}' under xam root -> {:08X} | under hud root -> {:08X}",
+                                     nm, deep(hs2, nm, 0), rt2 ? deep(rt2, nm, 0) : 0u);
+                            }
+                          }
+                          for (const char* nm : {"HudBackground", "ErrorShader", "Blade_Center",
+                                                 "HUD_Bladedark", "Nui_Center", "bottom", "Legend",
+                                                 "imgPlayTimerIcon", "DateTimeTextId", "Gamertag",
+                                                 "GamerPic", "GamerPicButton", "btn_image64",
+                                                 "AppHostElementId", "ErrorHUD", "ErrorHostElement",
+                                                 "GuideSound", "Spinner", "Loading_Small"}) {
+                            XELOGI("GuideXurId: '{}' -> {:08X}", nm, by_id4(hs2, nm));
+                          }
+                          std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                          if (f_fc_i) pcall(f_fc_i, {hs2, pout});
+                          for (uint32_t c = prd2(pout), k = 0; c && k < 40u; ++k) {
+                            uint32_t ob = pcall(0x81931040u, {c});
+                            bool okob = (ob >= 0x40000000u && ob < 0x50000000u);
+                            auto fv = [&](uint32_t a) { uint32_t u = prd2(a); float v; std::memcpy(&v, &u, 4); return v; };
+                            XELOGI("GuideInv: {:08X} id='{}' class={} {:.0f}x{:.0f} at ({:.0f},{:.0f}) vis={} op={:.2f} flags {:08X}",
+                                   c, id_of(c), class_of(c),
+                                   okob ? fv(ob + 0x1Cu) : -1.0f, okob ? fv(ob + 0x20u) : -1.0f,
+                                   okob ? fv(ob + 0x28u) : -1.0f, okob ? fv(ob + 0x2Cu) : -1.0f,
+                                   okob ? (prd2(ob + 0xB4u) & 1u) : 2u,
+                                   okob ? fv(ob + 0x24u) : -1.0f,
+                                   okob ? prd2(ob + 0xB4u) : 0u);
+                            std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                            if (!f_ns_i) break;
+                            pcall(f_ns_i, {c, pout});
+                            uint32_t nx = prd2(pout);
+                            if (nx == c) break;
+                            c = nx;
+                          }
+                        }
+                      }
+                      coll_dump("apphost-before", ah2);
+                      coll_dump("hud-root-before", rt2);
+                      if (::cvars::guide_host_in_apphost && !g_guide_hosted && ah2 && rt2) {
+                        // the bootstrap ran before xam's HUD root existed: move
+                        // hud's draw root under the AppHost element now
+                        uint32_t f_unl3 = po(0x384), f_add3 = po(0x328);
+                        uint32_t ur3 = f_unl3 ? pcall(f_unl3, {rt2}) : 0xDEADu;
+                        uint32_t ar3 = f_add3 ? pcall(f_add3, {ah2, rt2}) : 0xDEADu;
+                        if (ar3 == 0) g_guide_hosted = true;
+                        XELOGI("GuideBkgnd: re-linked hud's draw root {:08X} under AppHostElementId {:08X}: unlink {:08X}, add {:08X}",
+                               rt2, ah2, ur3, ar3);
+                        coll_dump("apphost-after", ah2);
+                        coll_dump("hud-root-after", rt2);
+                        g_guide_dump_from = rt2;
+                        g_guide_redo_dump = 1;  // one-time look at the hosted subtree
+                      }
+                      g_guide_hud_canvas = par2;
+                      // Phase 1054: xam's root scene owns the HUD frame
+                      // (Blade_Center); note it for the transition tracker.
+                      g_guide_el_frame = by_id4(hs2, "Blade_Center");
+                    }
+                  }
+                  // (d) put the background scene into a state, as xam's HUD
+                  // host does when the Guide opens (state 2 = Full).
+                  // Phase 1089: -2 (xam's own state) must schedule the first
+                  // show too; only -1 means "do nothing".
+                  // Phase 1091: SCHEDULING THE FIRST SHOW IS NOT PLAYING A
+                  // TRANSITION, and conflating them made -1 useless as a
+                  // control: it meant "play nothing" AND "never show the
+                  // Guide", so the one run that would answer "what does the
+                  // guest's own state produce with the host playing nothing"
+                  // could not be taken (words1 captured 0 shots). The show is
+                  // routing - the harness has to originate it because xam's
+                  // own HUD-manager loop (81794BC8, which is what calls
+                  // ShowHud 8174FDA0) does not run here - so it happens under
+                  // every setting; only the transition is gated.
+                  g_guide_hidden = true;
+                  g_guide_bkgnd_close_at = {};
+                  if (::cvars::guide_host_show) {
+                    g_guide_bkgnd_open_at = std::chrono::steady_clock::now() +
+                    std::chrono::milliseconds(300);
+                  }
+                  if (::cvars::guide_bkgnd_state != -1) {
+                    uint32_t st4 = GuideBkgndTarget();
+                    if (mapped4(g_guide_bkgnd_singleton, 0x80)) {
+                      // xam's init left the scene in Half. Play HalfToClosed first
+                      // (the elements then sit on real Closed keyframes; forcing the
+                      // state word left the Half layout's centre panel on screen),
+                      // and ClosedToFull 450 ms later from the per-paint block.
+                      // Played from the per-paint block once paints (and XuiAnimRun)
+                      // are running: called here, at navigation time, neither play
+                      // created a timeline (the count stayed 58) and the scene kept
+                      // xam's Half layout - legend at the screen bottom, clock at the
+                      // top - until the first close/open cycle.
+                      // 1054u: ClosedToFull 450 ms after HalfToClosed did not take
+                      // (the legend stayed on Closed's keyframes); the toggle's
+                      // cycle, with more than a second between the two, does.
+                      // 1054x: the first open takes the toggle's own path, the one
+                      // that ends in the Full layout every time: nothing painted,
+                      // the background played to Closed, then the re-show (which
+                      // plays ClosedToFull, dims and captures input).
+                      // 1054z: ClosedToFull keys visibility only; positions come
+                      // from the Half<->Full ranges. xam's init leaves the scene in
+                      // Half, so the first open plays HalfToFull (state 1 -> 2)
+                      // straight from the hook top, with hud shown at once.
+                      // 1054aa: HalfToFull keeps Half's positions too. The one
+                      // sequence that ends in the reference layout is the toggle's
+                      // FullToClosed (which lays the elements out for Closed) then
+                      // ClosedToFull (which shows them there). Start it from a
+                      // forced Full state word.
+                      // 1054ab: the same pair from a forced Full state still gave the
+                      // other layout; every failing sequence played before xam's scene
+                      // had ever been rendered, every succeeding one after seconds of
+                      // it. Warm up: render the root scene while hidden (nothing
+                      // published), then the pair.
+                      // 1054ad: none of the sequences (hidden or not, warmed up or
+                      // not, forced state or not) ends in the compact layout on the
+                      // first open, and later cycles no longer reach it either. Take
+                      // the simplest: HalfToFull through the toggle's re-show at
+                      // +0.3 s. The legend sits at the screen bottom and the clock
+                      // at the top right; the big centre blade is unlinked below.
+                      uint32_t r = 0;
+                      (void)st4;
+                      // Phase 1089: this logs a call it does NOT make (r is a
+                      // literal 0 and st4 is unused) - it only samples xam's
+                      // own state word. Named accordingly; the old wording made
+                      // "PlayTransition(..., 2) -> 0; state now 1" read as a
+                      // call that returned success, which it never was.
+                      XELOGI("GuideBkgnd: pre-show sample (no call made): singleton {:08X} state {} timelines {}",
+                             g_guide_bkgnd_singleton, prd2(g_guide_bkgnd_singleton + 0x10u), prd2(0x81D6CDBCu + 4u));
+                    } else if (g_guide_hud_root) {
+                      uint32_t f_fnf4 = po(0x329), f_ptl4 = po(0x335);
+                      auto fnf4 = [&](const char* nm) -> uint32_t {
+                        xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(pout), 0xFFFFFFFFu);
+                        uint32_t r = pcall(f_fnf4, {g_guide_hud_root, wstr4(nm), pout});
+                        return (r & 0x80000000u) ? 0xFFFFFFFFu : prd2(pout);
+                      };
+                      const char* rn = st4 == 1 ? "ClosedToHalf" : "ClosedToFull";
+                      const char* re = st4 == 1 ? "EndClosedToHalf" : "EndClosedToFull";
+                      uint32_t s4 = fnf4(rn), e4 = fnf4(re);
+                      uint32_t r = (s4 != 0xFFFFFFFFu && e4 != 0xFFFFFFFFu)
+                                       ? pcall(f_ptl4, {g_guide_hud_root, s4, s4, e4, 1u, 1u})
+                                       : 0xDEADu;
+                      XELOGI("GuideBkgnd: no singleton; PlayTimeline(HUDRootScene {:08X}, {} {}..{} {}) -> {:08X}",
+                             g_guide_hud_root, rn, s4, e4, re, r);
+                    }
+                  }
+                  if (g_guide_hud_root) {
+                    g_guide_dump_from = g_guide_hud_root;
+                    g_guide_redo_dump = 1;
+                  }
+                  // (e) the rotated blade labels: pivot and the element words
+                  // past the rect, for the misplacement seen in p1054b.
+                  {
+                    uint32_t f_piv = po(0x815);
+                    for (const char* lid : {"txt_Games", "txt_home", "txt_Media", "txt_Settings", "txt_homeSel", "txt_gamesSel"}) {
+                      uint32_t lh = by_id4(found, lid);
+                      if (!lh) continue;
+                      uint32_t lob = pcall(0x81931040u, {lh});
+                      std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                      uint32_t pr = f_piv ? pcall(f_piv, {lh, pout}) : 0xDEADu;
+                      uint32_t px = prd2(pout), py = prd2(pout + 4u), pz = prd2(pout + 8u);
+                      float fpx, fpy, fpz;
+                      std::memcpy(&fpx, &px, 4); std::memcpy(&fpy, &py, 4); std::memcpy(&fpz, &pz, 4);
+                      std::string ws;
+                      if (mapped4(lob, 0x80)) {
+                        for (uint32_t off = 0x14; off <= 0x6C; off += 4) {
+                          uint32_t wv = prd2(lob + off); float fv; std::memcpy(&fv, &wv, 4);
+                          ws += (std::isfinite(fv) && std::fabs(fv) < 100000.0f && (fv == 0.0f || std::fabs(fv) >= 0.001f))
+                                    ? fmt::format("{:.2f} ", fv) : fmt::format("{:08X} ", wv);
+                        }
+                      }
+                      // the XuiText class data (handle record [+0]) holds the
+                      // font at +0x28 (phase 1017); its atlas fields: cell
+                      // height +0x3C, caches +0x44/+0x48, atlas +0x4A x +0x4C.
+                      std::string fs;
+                      {
+                        uint32_t tcls = pcall(0x81949E00u, {wstr4("XuiText")});
+                        uint32_t th = tcls ? pcall(0x81943378u, {lh, tcls}) : 0;
+                        std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                        if (th) pcall(0x81942938u, {th, pout});
+                        uint32_t rec = th, ctx = prd2(pout);
+                        uint32_t fnt = mapped4(ctx, 0x40) ? prd2(ctx + 0x28u) : 0;
+                        if (mapped4(fnt, 0x60)) {
+                          auto u16 = [&](uint32_t a) { return uint32_t(xe::load_and_swap<uint16_t>(pm2->TranslateVirtual(a))); };
+                          fs = fmt::format("font {:08X} cell {} caches {:08X}x{} atlas {}x{}", fnt, u16(fnt + 0x3Cu),
+                                           prd2(fnt + 0x44u), u16(fnt + 0x48u), u16(fnt + 0x4Au), u16(fnt + 0x4Cu));
+                        } else {
+                          fs = fmt::format("rec {:08X} ctx {:08X} font {:08X} (unmapped)", rec, ctx, fnt);
+                        }
+                      }
+                      XELOGI("GuideLabel: {} {:08X} obj {:08X} pivot({:08X}) {:.1f},{:.1f},{:.1f} | +14..+6C: {} | {}",
+                             lid, lh, lob, pr, fpx, fpy, fpz, ws, fs);
+                    }
+                  }
+                }
+                if (::cvars::guide_slide_ms > 0 && hudscene2) {
+                  uint32_t f_gp = po(0x3DF);
+                  std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                  pcall(f_gp, {hudscene2, pout, pout + 4u});
+                  uint32_t px = prd2(pout), py = prd2(pout + 4u);
+                  std::memcpy(&g_guide_slide_x0, &px, 4); std::memcpy(&g_guide_slide_y0, &py, 4);
+                  g_guide_slide_scene = hudscene2;
+                  XELOGI("GuideSlide: scene {:08X} rest position {:.1f},{:.1f} width {:.0f}, {} ms",
+                         hudscene2, g_guide_slide_x0, g_guide_slide_y0, cw, ::cvars::guide_slide_ms);
+                }
+                if (::cvars::guide_input && hudscene2) {
+                  // Phase 1053: keystrokes reached XuiProcessInput (819359A0)
+                  // but no paint re-drew, so ask who holds focus.
+                  // XuiElementGetFocus() (0x32C) returns [81D6CED0], the
+                  // global focus; XuiElementInitFocus(hObj, 0) (0x333) walks
+                  // the tree for the first focusable element.
+                  uint32_t f_gf = po(0x32C), f_if = po(0x333), f_guf = po(0x332);
+                  uint32_t fo0 = pcall(f_gf, {});
+                  uint32_t fu0 = pcall(f_guf, {0u});
+                  uint32_t ir = 0xDEADu, fo1 = fo0;
+                  if (!fo0 && f_if) {
+                    ir = pcall(f_if, {hudscene2, 0u});
+                    fo1 = pcall(f_gf, {});
+                  }
+                  XELOGI("GuideFocus: focus {:08X} user0 {:08X} -> InitFocus {:08X} -> focus {:08X}",
+                         fo0, fu0, ir, fo1);
+                }
+                g_guide_slide_armed = true;
+              }
+              // Phase 1052: the strip/frame are shown by hud's 913E8A48, which
+              // plays the "%uOpen" named frames on the HUDScene and tab scene
+              // timelines when a scene-transition notification (0x1D type 2/4)
+              // arrives. Play the scene's own to-transition, as xam's navigation
+              // would, and report the named frames hud will look for.
+              if (::cvars::guide_play_transition >= 0 && found) {
+                uint32_t f_ptt = po(0x35E), f_fnf = po(0x329), f_cur2 = po(0x3BA);
+                std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                pcall(0x81931BF0u, {found, pout});
+                uint32_t hudscene = prd2(pout);
+                uint32_t cur = pcall(f_cur2, {found, pout + 8u});
+                uint32_t wbuf = pm2->SystemHeapAlloc(0x40, 16);
+                auto wstr = [&](const char* a) {
+                  std::memset(pm2->TranslateVirtual(wbuf), 0, 0x40);
+                  auto* b = pm2->TranslateVirtual<uint8_t*>(wbuf);
+                  for (size_t i = 0; a[i] && i < 30; ++i) { b[i * 2] = 0; b[i * 2 + 1] = uint8_t(a[i]); }
+                  return wbuf;
+                };
+                auto fnf = [&](uint32_t h, const char* nm) -> uint32_t {
+                  if (!h || !f_fnf || !wbuf) return 0xDEADu;
+                  xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(pout), 0xFFFFFFFFu);
+                  uint32_t r = pcall(f_fnf, {h, wstr(nm), pout});
+                  return (r & 0x80000000u) ? r : prd2(pout);
+                };
+                std::string open_n = fmt::format("{}Open", cur + 1), end_n = fmt::format("{}OpenEnd", cur + 1),
+                            tab_n = fmt::format("Tab{}", cur + 1);
+                XELOGI("GuideTrans: exports PlayTimeline(335)={:08X} FindNamedFrame(329)={:08X}; 1To2: HUDScene={:08X} Tabscene={:08X}; "
+                       "1To2End: HUDScene={:08X} Tabscene={:08X}; Default: HUDScene={:08X} Tabscene={:08X}",
+                       po(0x335), po(0x329), fnf(hudscene, "1To2"), fnf(found, "1To2"), fnf(hudscene, "1To2End"),
+                       fnf(found, "1To2End"), fnf(hudscene, "Default"), fnf(found, "Default"));
+                XELOGI("GuideTrans: tab scene {:08X} parent {:08X} root {:08X} current {}; named frames "
+                       "HUDScene[{}]={:08X} [{}]={:08X} [{}]={:08X} | Tabscene[{}]={:08X} [{}]={:08X} [{}]={:08X}",
+                       found, hudscene, rt2, cur, open_n, fnf(hudscene, open_n.c_str()), end_n,
+                       fnf(hudscene, end_n.c_str()), tab_n, fnf(hudscene, tab_n.c_str()), open_n,
+                       fnf(found, open_n.c_str()), end_n, fnf(found, end_n.c_str()), tab_n,
+                       fnf(found, tab_n.c_str()));
+                // Phase 1052: XuiSceneCreate's worker (8193AFB8) keeps the
+                // XUR's canvas root unless a child passes 819427D0(child,
+                // XuiScene class). Ask that test the same way it does.
+                {
+                  uint32_t xs = prd2(0x81D6CDE4u);
+                  XELOGI("GuideTrans: 819427D0(HUDScene {:08X}, XuiScene)={:08X} (root {:08X})={:08X}; "
+                         "XuiDynamicCast HUDScene={:08X} root={:08X}; XuiSceneCreate(357)={:08X} root parent={:08X}",
+                         hudscene, pcall(0x819427D0u, {hudscene, xs}), rt2, pcall(0x819427D0u, {rt2, xs}),
+                         pcall(0x81930FE8u, {hudscene, xs}), pcall(0x81930FE8u, {rt2, xs}), po(0x357),
+                         [&]() { std::memset(pm2->TranslateVirtual(pout), 0, 16); pcall(0x81931BF0u, {rt2, pout}); return prd2(pout); }());
+                }
+                int mode = ::cvars::guide_play_transition;
+                if ((mode == 2 || mode == 3) && rt2 && f_ptt) {
+                  uint32_t r = pcall(f_ptt, {rt2, 0});
+                  XELOGI("GuideTrans: XuiScenePlayToTransition(root {:08X}) -> {:08X}", rt2, r);
+                }
+                if ((mode == 1 || mode == 3) && hudscene && f_ptt) {
+                  uint32_t r = pcall(f_ptt, {hudscene, 0});
+                  XELOGI("GuideTrans: XuiScenePlayToTransition(HUDScene {:08X}) -> {:08X}", hudscene, r);
+                }
+              }
+              // Phase 1051: the tree three levels down, with class, visibility
+              // and opacity, to find the frame and strip elements.
+              {
+                uint32_t f_op = po(0x37D), f_obj = 0x819426F0u;
+                auto tname = [&](uint32_t td) {
+                  uint32_t a = (td >= 0x10000000u && td < 0xA0000000u) ? prd2(td + 4u) : 0;
+                  if (!(a >= 0x10000000u && a < 0xA0000000u)) return std::string("?");
+                  std::string o;
+                  // Phase 1088: 8 words is 16 characters, which silently cut
+                  // 'SettingsTabSignedIn' to 'SettingsTabSigne' in every dump.
+                  for (uint32_t w = 0; w < 24; ++w) {
+                    uint32_t v = prd2(a + w * 4u);
+                    for (int h = 1; h >= 0; --h) {
+                      uint16_t u = uint16_t((v >> (h * 16)) & 0xFFFFu);
+                      if (!u) return o.empty() ? std::string("?") : o;
+                      o += (u >= 32 && u < 127) ? char(u) : '.';
+                    }
+                  }
+                  return o;
+                };
+                std::function<void(uint32_t, int)> dump = [&](uint32_t h, int depth) {
+                  std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                  pcall(f_obj, {h, pout});
+                  uint32_t ob = prd2(pout);
+                  uint32_t fl = ob ? prd2(ob + 0xB4u) : 0;
+                  xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(pout + 8u), 0xFFFFFFFFu);
+                  pcall(f_op, {h, pout + 8u});
+                  uint32_t opw = prd2(pout + 8u);
+                  float op;
+                  std::memcpy(&op, &opw, 4);
+                  // Phase 1088: [ob+0x0C] is the LAST-CHILD pointer and
+                  // [child+0x18] is its parent, so this round trip lands back
+                  // on ob and tname reads the string at [ob+4] - the element's
+                  // ID, not its class. Say so; the class comes from the cast
+                  // table below. A null here means "no children", which is how
+                  // the empty 852x480 visual 00010097 reads.
+                  uint32_t nd = ob ? prd2(ob + 12u) : 0;
+                  std::string cls = nd ? tname(prd2(nd + 0x18u)) : "?";
+                  // Phase 1052: is it a XuiTransition (the class XuiScene's
+                  // timeline-complete handler expects as first child)?
+                  // [81D6CDE4] is the XuiScene class, [81D6CE0C] XuiTransition
+                  // (registered at 81952580 with base XuiElement).
+                  uint32_t is_sc = pcall(0x81930FE8u, {h, prd2(0x81D6CDE4u)});
+                  uint32_t is_tr = pcall(0x81930FE8u, {h, prd2(0x81D6CE0Cu)});
+                  if (cls == "?") {
+                    cls = fmt::format("?[ob={:08X} nd={:08X} nm={:08X}]", ob, nd,
+                                      nd ? prd2(nd + 0x18u) : 0);
+                  }
+                  if (is_sc) cls += "(XuiScene)";
+                  if (is_tr) cls += "(XuiTransition)";
+                  // Phase 1088: the rect is SIZE at [obj+0x1C]/[+0x20] and
+                  // POSITION at [obj+0x28]/[+0x2C] (measured in 1062/1064).
+                  // This used to read x,y from +0x14/+0x18 - +0x18 is the
+                  // PARENT POINTER, so every "rect 4,4" and "rect 0,4" in the
+                  // record is a pointer printed as a float (0x40880000 reads
+                  // as 4.25).
+                  float ex = 0, ey = 0, ew = 0, eh = 0;
+                  if (ob) {
+                    uint32_t ww = prd2(ob + 0x1Cu), wh = prd2(ob + 0x20u);
+                    uint32_t wx = prd2(ob + 0x28u), wy = prd2(ob + 0x2Cu);
+                    std::memcpy(&ex, &wx, 4); std::memcpy(&ey, &wy, 4); std::memcpy(&ew, &ww, 4); std::memcpy(&eh, &wh, 4);
+                  }
+                  std::string fw;
+                  for (uint32_t off = 0x14; ob && off <= 0x34; off += 4) {
+                    uint32_t wv = prd2(ob + off); float fv; std::memcpy(&fv, &wv, 4);
+                    fw += (std::isfinite(fv) && std::fabs(fv) < 100000.0f) ? fmt::format("{:.0f} ", fv) : fmt::format("{:08X} ", wv);
+                  }
+                  XELOGI("GuideTreeDump: {}{:08X} id='{}' class={} vis={} op={:.2f} flags {:08X} ob={:08X} {:.0f}x{:.0f} at ({:.0f},{:.0f}) | +14..+34: {}",
+                         std::string(depth * 2, ' '), h, cls, GuideElemClass(pcall, prd2, h),
+                         fl & 1u, op, fl, ob, ew, eh, ex, ey, fw);
+                  if (depth >= 7) return;
+                  std::vector<uint32_t> kids;
+                  std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                  pcall(f_fc, {h, pout});
+                  for (uint32_t c = prd2(pout), k = 0; c && k < 48; ++k) {
+                    kids.push_back(c);
+                    std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                    pcall(f_ns, {c, pout});
+                    uint32_t nx = prd2(pout);
+                    if (nx == c) break;
+                    c = nx;
+                  }
+                  for (uint32_t c : kids) dump(c, depth + 1);
+                };
+                dump(g_guide_dump_from ? g_guide_dump_from : rt2, 0);
+                g_guide_dump_from = 0;
+                // Phase 1052 range probe (guide_play_transition=11): play each
+                // named range of GuideMain.xur the way hud's 913E8A48 does
+                // (PlayTimeline on the HUDScene and the Tabscene), advance the
+                // guest's animation clock with XuiAnimRun/XuiTimersRun between
+                // host sleeps, then dump the tree - keyframes are applied only
+                // when the playhead crosses them, so a frame->frame jump shows
+                // nothing (p1052frames).
+                if (::cvars::guide_play_transition == 11 && found) {
+                  uint32_t f_ptl = po(0x335), f_anim = po(0x320), f_tmr = po(0x365);
+                  std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                  pcall(0x81931BF0u, {found, pout});
+                  uint32_t hs = prd2(pout);
+                  struct R { uint32_t s, e; const char* n; };
+                  static const R ranges[] = {{128, 144, "2Open"}, {145, 180, "2Close"}, {1, 12, "1To2"},
+                                             {13, 24, "2To1"}, {25, 36, "2To3"}, {37, 48, "3To2"},
+                                             {73, 90, "1Open"}, {128, 144, "2Open again"}};
+                  // XuiAnimRun from here crashed (p1052ranges: transition-end
+                  // message with a null field), so follow hud's own type-2
+                  // sequence instead: PlayTimeline, XUITimeline_Run(tl, 0),
+                  // then let XuiTimersRun tick with real time passing.
+                  uint32_t f_gtl2 = po(0x3A3), f_run2 = po(0x3D3);
+                  (void)f_anim;
+                  auto run0 = [&](uint32_t h) {
+                    std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                    pcall(f_gtl2, {h, pout});
+                    uint32_t tl = prd2(pout);
+                    if (!tl || !f_run2) return;
+                    auto* cxf = gth->thread_state()->context();
+                    cxf->f[1] = 0.0;
+                    uint64_t fa[] = {tl};
+                    prc->Execute(tsp, f_run2, fa, 1);
+                  };
+                  for (const R& r : ranges) {
+                    uint32_t r1 = hs ? pcall(f_ptl, {hs, r.s, r.e, 0, 0}) : 0xDEADu;
+                    uint32_t r2 = pcall(f_ptl, {found, r.s, r.e, 0, 1});
+                    if (hs) run0(hs);
+                    run0(found);
+                    for (int i = 0; i < 60; ++i) {
+                      uint64_t none[1] = {0};
+                      if (f_tmr) prc->Execute(tsp, f_tmr, none, 0);
+                      std::this_thread::sleep_for(std::chrono::milliseconds(16));
+                    }
+                    XELOGI("GuideRange: {} ({}->{}) PlayTimeline hud {:08X} tab {:08X}; tree after:",
+                           r.n, r.s, r.e, r1, r2);
+                    dump(rt2, 0);
+                  }
+                }
+                // Phase 1052 goto probe (guide_play_transition=12): switch tabs
+                // through xam's own XuiTabSceneGoto (animated and not), let the
+                // timers tick with real time passing, dump after each.
+                if (::cvars::guide_play_transition == 12 && found) {
+                  uint32_t f_goto2 = po(0x3B9), f_cur3 = po(0x3BA), f_tmr2 = po(0x365);
+                  struct G { uint32_t tab, anim; };
+                  static const G steps[] = {{0, 1}, {1, 1}, {2, 0}, {1, 0}, {0, 0}, {1, 1}};
+                  for (const G& g : steps) {
+                    uint32_t before = pcall(f_cur3, {found, pout});
+                    uint32_t r = pcall(f_goto2, {found, g.tab, g.anim});
+                    for (int i = 0; i < 60; ++i) {
+                      uint64_t none[1] = {0};
+                      if (f_tmr2) prc->Execute(tsp, f_tmr2, none, 0);
+                      std::this_thread::sleep_for(std::chrono::milliseconds(16));
+                    }
+                    uint32_t after = pcall(f_cur3, {found, pout});
+                    XELOGI("GuideGoto: current {} -> XuiTabSceneGoto({}, animate={}) = {:08X} -> current {}; tree after:",
+                           before, g.tab, g.anim, r, after);
+                    dump(rt2, 0);
+                  }
+                }
+                // Phase 1052 frame probe (guide_play_transition=10): jump the
+                // HUDScene and Tabscene timelines to each named frame of
+                // GuideMain.xur (Default@0, 1To2@1/12, 1Open@73/90, 1Close@91/127,
+                // 2Close@145/180, 2Open@128/144), apply it with XUITimeline_Run,
+                // and dump the tree after each, to see which frames show the
+                // Blade strip and the frame.
+                if (::cvars::guide_play_transition == 10 && found) {
+                  uint32_t f_ptl = po(0x335), f_gtl = po(0x3A3), f_run = po(0x3D3);
+                  std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                  pcall(0x81931BF0u, {found, pout});
+                  uint32_t hs = prd2(pout);
+                  static const uint32_t frames[] = {0, 1, 12, 13, 73, 90, 91, 127, 145, 180, 128, 144};
+                  for (uint32_t fr : frames) {
+                    for (uint32_t h : {hs, found}) {
+                      if (!h) continue;
+                      uint32_t r1 = pcall(f_ptl, {h, fr, fr, 0, 0});
+                      std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                      pcall(f_gtl, {h, pout});
+                      uint32_t tl = prd2(pout);
+                      uint32_t r2 = 0xDEADu;
+                      if (tl && f_run) {
+                        auto* cxf = gth->thread_state()->context();
+                        cxf->f[1] = 0.0;
+                        uint64_t fa[] = {tl};
+                        r2 = uint32_t(prc->Execute(tsp, f_run, fa, 1));
+                      }
+                      XELOGI("GuideFrame: {:08X} PlayTimeline({},{}) -> {:08X}; timeline {:08X} Run -> {:08X}",
+                             h, fr, fr, r1, tl, r2);
+                    }
+                    XELOGI("GuideFrame: tree at frame {}", fr);
+                    dump(rt2, 0);
+                  }
+                }
+              }
+              // The tab scene's children: visibility bit and opacity.
+              if (found) {
+                uint32_t f_op = po(0x37D), f_obj = 0x819426F0u;
+                std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                pcall(f_fc, {found, pout});
+                for (uint32_t c = prd2(pout), k = 0; c && k < 48; ++k) {
+                  std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                  pcall(f_obj, {c, pout});
+                  uint32_t ob = prd2(pout);
+                  uint32_t fl = ob ? prd2(ob + 0xB4u) : 0;
+                  xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(pout + 8u), 0xFFFFFFFFu);
+                  pcall(f_op, {c, pout + 8u});
+                  uint32_t opw = prd2(pout + 8u);
+                  float op;
+                  std::memcpy(&op, &opw, 4);
+                  XELOGI("GuideTabChild {}: handle {:08X} obj {:08X} flags {:08X} "
+                         "visible={} opacity={:.3f}",
+                         k, c, ob, fl, fl & 1u, op);
+                  std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                  pcall(f_ns, {c, pout});
+                  uint32_t nx = prd2(pout);
+                  if (nx == c) break;
+                  c = nx;
+                }
+              }
+            }
           }
+          if (::cvars::guide_run_timers || ::cvars::guide_anim_run) {
+            static uint32_t f_timers = ::cvars::guide_run_timers ? po(0x365) : 0u;
+            static uint32_t trl2 = 0;
+            uint32_t tl_head = prd2(0x81D6EFACu);
+            static uint32_t stage_paint = 0;
+            ++stage_paint;
+            // Phase 1052: hud's own state words, logged when they change: the
+            // scene slot [navObj+0x18] (also the harness's draw root), the
+            // sub-scene slots [+0x500]/[+0x508], the sign-in state [+0x58] and
+            // the close request [+0x5C]/[+0x60] that vtable slot 0x2C sets.
+            if (::cvars::guide_anim_run && guide_bs_obj_) {
+              static uint32_t last_w[6] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
+              uint32_t w[6] = {prd2(guide_bs_obj_ + 0x18u), prd2(guide_bs_obj_ + 0x500u), prd2(guide_bs_obj_ + 0x508u),
+                               prd2(guide_bs_obj_ + 0x58u), prd2(guide_bs_obj_ + 0x5Cu), prd2(guide_bs_obj_ + 0x60u)};
+              // Scene nodes' Show/opacity each paint (first 150): the walk's
+              // visited count fell from 113 to 36 without the dumps showing why.
+              if (stage_paint <= 150) {
+                static uint32_t f_opx = po(0x37D);
+                std::string vs;
+                for (uint32_t h : {0x00010137u, 0x00010138u, 0x00010174u, 0x00010150u, 0x00010273u, 0x0001037Fu}) {
+                  std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                  pcall(0x819426F0u, {h, pout});
+                  uint32_t ob = prd2(pout);
+                  uint32_t fl = ob ? prd2(ob + 0xB4u) : 0xFFFFFFFFu;
+                  xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(pout + 8u), 0x3F800000u);
+                  pcall(f_opx, {h, pout + 8u});
+                  uint32_t opw = prd2(pout + 8u);
+                  float opf;
+                  std::memcpy(&opf, &opw, 4);
+                  vs += fmt::format("{:08X}:{}/{:.2f} ", h, fl & 1u, opf);
+                }
+                XELOGI("GuideVis: paint {} {}", stage_paint, vs);
+              }
+              if (std::memcmp(w, last_w, sizeof(w)) != 0) {
+                XELOGI("GuideSlots: paint {} [+18]={:08X} [+500]={:08X} [+508]={:08X} state[+58]={} close[+5C]={} reason[+60]={:08X}",
+                       stage_paint, w[0], w[1], w[2], w[3], w[4], w[5]);
+                std::memcpy(last_w, w, sizeof(w));
+              }
+              // Phase 1055 menus: hud's own close request (B at the top
+              // level; vtable slot 0x2C sets [+0x60] = reason, [+0x5C] = 0,
+              // and on the console xam then unloads the app) is honoured
+              // like the Guide button: the toggle plays FullToClosed and
+              // hides. Before, the Guide stayed up while hud thought it was
+              // closing and every later key did nothing. The word goes back
+              // to 1 here (the show path writes it too), so one request is
+              // one close.
+              if (w[4] == 0u && !g_guide_hidden && !g_guide_close_pending && g_guide_show_count > 0) {
+                static uint32_t hc_logs = 0;
+                if (hc_logs++ < 12) XELOGI("GuideClose: hud requested the close (reason {:08X}) at paint {}: toggling", w[5], stage_paint);
+                xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(guide_bs_obj_ + 0x5Cu), 1u);
+                g_guide_button_edge.store(1);
+              }
+            }
+            const bool stage_log = ::cvars::guide_anim_run && stage_paint <= 150;
+            if (stage_log) XELOGI("GuideStage: paint {} timers-in", stage_paint);
+            auto t_tmr0 = std::chrono::steady_clock::now();
+            g_guide_stage = 4;
+            uint32_t tr = f_timers ? pcall(f_timers, {}) : 0xDEADu;
+            g_guide_stage = 1;
+            g_guide_ms_timers += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_tmr0).count();
+            if (stage_log) XELOGI("GuideStage: paint {} timers-out {:08X}", stage_paint, tr);
+            if (::cvars::guide_anim_run) {
+              static uint32_t f_animrun = po(0x320);
+              static auto last_t = std::chrono::steady_clock::now();
+              static uint32_t paints = 0;
+              auto now_t = std::chrono::steady_clock::now();
+              // XUITimeline_Run works in milliseconds (16.6667 per frame at
+              // 8164502C), so the delta is milliseconds too.
+              double dt = std::chrono::duration<double>(now_t - last_t).count() * 1000.0;
+              last_t = now_t;
+              if (dt > 100.0) dt = 100.0;
+              // Phase 1054 slide: at most guide_anim_max_step_ms per paint while
+              // the Guide is up. A paint that renders a new tab's page scenes
+              // (~120 ms on Media) or a 40-50 ms hot paint would otherwise
+              // advance a 200 ms slide by half; with the cap every published
+              // frame is at most two authored frames apart.
+              if (::cvars::guide_anim_max_step_ms > 0 && !g_guide_hidden &&
+                  dt > double(::cvars::guide_anim_max_step_ms)) {
+                dt = double(::cvars::guide_anim_max_step_ms);
+              }
+              g_guide_anim_clock += dt;
+              // Phase 1052: before the first XuiAnimRun, list xam's active
+              // timelines ([81D6CDBC], entries via 81933928): the transition
+              // whose completion crashes in 81965880 is not in the GuideMain
+              // tree, so it must be one of these, started before the Guide.
+              if (paints == 0) {
+                uint32_t cnt = prd2(0x81D6CDBCu + 4u);
+                XELOGI("GuideAnim: timeline list [81D6CDBC] count {}", cnt);
+                for (uint32_t i = 0; i < cnt && i < 40; ++i) {
+                  uint32_t e = pcall(0x81933928u, {0x81D6CDBCu, i});
+                  uint32_t tl = e ? prd2(e) : 0;
+                  uint32_t owner = tl ? prd2(tl) : 0;
+                  uint32_t is_tr = owner ? pcall(0x81930FE8u, {owner, prd2(0x81D6CE0Cu)}) : 0;
+                  uint32_t is_sc = owner ? pcall(0x81930FE8u, {owner, prd2(0x81D6CDE4u)}) : 0;
+                  std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                  if (owner) pcall(0x81931BF0u, {owner, pout});
+                  uint32_t par = prd2(pout);
+                  std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                  if (owner) pcall(0x81931C90u, {owner, pout});
+                  uint32_t kid = prd2(pout);
+                  uint32_t kid_sc = kid ? pcall(0x81930FE8u, {kid, prd2(0x81D6CDE4u)}) : 0;
+                  XELOGI("GuideAnim: tl[{}] {:08X} owner {:08X} obj {:08X} state {:08X} start {} end {} dur {} | "
+                         "transition {:08X} scene {:08X} parent {:08X} firstchild {:08X} (scene {:08X})",
+                         i, tl, owner, tl ? pcall(0x81931040u, {owner}) : 0, tl ? prd2(tl + 4u) : 0,
+                         tl ? prd2(tl + 8u) : 0, tl ? prd2(tl + 0xCu) : 0, tl ? prd2(tl + 0x3Cu) : 0,
+                         is_tr, is_sc, par, kid, kid_sc);
+                }
+              }
+              auto* cxa = gth->thread_state()->context();
+              cxa->f[1] = dt;
+              uint64_t none[1] = {0};
+              if (stage_log) XELOGI("GuideStage: paint {} animrun-in dt={:.1f}", stage_paint, dt);
+              g_guide_stage = 2;
+              auto t_anim0 = std::chrono::steady_clock::now();
+              uint32_t ar = f_animrun ? uint32_t(prc->Execute(tsp, f_animrun, none, 0)) : 0xDEADu;
+              g_guide_ms_anim += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_anim0).count();
+              g_guide_stage = 1;
+              if (stage_log) XELOGI("GuideStage: paint {} animrun-out {:08X}", stage_paint, ar);
+              if (paints < 3) {
+                XELOGI("GuideAnim: XuiAnimRun({:08X}, dt={:.2f} ms) -> {:08X}; XUITimeline_Run(3D3)={:08X}",
+                       f_animrun, dt, ar, po(0x3D3));
+              }
+              ++paints;
+              if (::cvars::guide_walk_verbose && (paints == 20 || paints == 60 || paints == 180 || paints == 420 || paints == 900)) g_guide_redo_dump = 1;
+            }
+            // Phase 1052b: the XUI-side slide (XuiElementSetPosition on the
+            // HUDScene each paint) never returned on the first paint and hung
+            // the title thread; the slide is done on the GPU side instead
+            // (viewport x offset during the burst, gpu_flags guide_slide_ms).
+            // Phase 1052b: host keystrokes -> XuiProcessInput (what hud's tick
+            // does with XamInputGetKeystrokeHud's result at 913EA23C).
+            if (::cvars::guide_input) {
+              static uint32_t f_pi = po(0x349);
+              static uint32_t ks_buf = 0;
+              if (!ks_buf) ks_buf = pm2->SystemHeapAlloc(16, 16);
+              auto* isys = kernel_state()->emulator()->input_system();
+              static uint32_t poll_logs = 0;
+              if (poll_logs++ % 120 == 0) {
+                XELOGI("GuideInput: poll active (XuiProcessInput {:08X}, buf {:08X}, input system {})",
+                       f_pi, ks_buf, isys ? "yes" : "no");
+              }
+              if (g_guide_play_open && g_guide_hudscene && g_guide_tabscene) {
+                // Phase 1053: the Guide's opening animation is authored in the
+                // XUR, not something to fake with a viewport offset. hud plays
+                // "%uOpen".."%uOpenEnd" (%u = current tab + 1) on the HUD scene
+                // and, with recursion, on the tab scene; XuiAnimRun (already
+                // ticking every paint with real dt) advances it.
+                g_guide_play_open = false;
+                uint32_t f_fnf2 = po(0x329), f_ptl2 = po(0x335), f_cur4 = po(0x3BA);
+                static uint32_t wb2 = 0;
+                if (!wb2) wb2 = pm2->SystemHeapAlloc(0x40, 16);
+                auto wstr2 = [&](const std::string& a) {
+                  std::memset(pm2->TranslateVirtual(wb2), 0, 0x40);
+                  auto* b = pm2->TranslateVirtual<uint8_t*>(wb2);
+                  for (size_t i = 0; i < a.size() && i < 30; ++i) b[i * 2 + 1] = uint8_t(a[i]);
+                  return wb2;
+                };
+                auto fnf2 = [&](uint32_t h, const std::string& nm) -> uint32_t {
+                  if (!h || !f_fnf2) return 0xFFFFFFFFu;
+                  xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(ks_buf), 0xFFFFFFFFu);
+                  uint32_t r = pcall(f_fnf2, {h, wstr2(nm), ks_buf});
+                  return (r & 0x80000000u) ? 0xFFFFFFFFu : prd2(ks_buf);
+                };
+                uint32_t cur4 = pcall(f_cur4, {g_guide_tabscene, ks_buf});
+                // Mode 1 plays "%uOpen" (the drill-in: it hides the strip).
+                // Mode 2 (default) plays "%uClose", hud's own answer to the
+                // to-transition-end notification (913E8A48(hud, 3)). Measured
+                // per paint (run oa2t): frame 145 puts the centre and every
+                // blade at opacity 0 with the blades tucked ~30 px toward the
+                // centre; the centre fades in over ~14 paints; after a hold
+                // the blades fan out in a staggered cascade (inner pair, outer
+                // pair, last blade; ~3 paints each, sliding while fading in),
+                // done ~36 paints after the play. XuiAnimRun advances it.
+                const char* kind = (::cvars::guide_open_anim >= 2) ? "Close" : "Open";
+                std::string on = fmt::format("{}{}", cur4 + 1, kind),
+                            oe = fmt::format("{}{}End", cur4 + 1, kind);
+                uint32_t hs = fnf2(g_guide_hudscene, on), he = fnf2(g_guide_hudscene, oe);
+                uint32_t ts = fnf2(g_guide_tabscene, on), te = fnf2(g_guide_tabscene, oe);
+                uint32_t r1 = 0xDEADu, r2 = 0xDEADu;
+                if (f_ptl2 && hs != 0xFFFFFFFFu && he != 0xFFFFFFFFu) {
+                  // hud's own call shape: (hObj, start, current, end, fireEvents, recurse)
+                  r1 = pcall(f_ptl2, {g_guide_hudscene, hs, hs, he, 0u, 0u});
+                }
+                if (f_ptl2 && ts != 0xFFFFFFFFu && te != 0xFFFFFFFFu) {
+                  r2 = pcall(f_ptl2, {g_guide_tabscene, ts, ts, te, 0u, 1u});
+                }
+                XELOGI("GuideOpenAnim: tab {} frames {}..{} HUDScene {}..{} -> {:08X}, Tabscene {}..{} -> {:08X}",
+                       cur4, on, oe, hs, he, r1, ts, te, r2);
+                g_guide_anim_hold = std::chrono::steady_clock::now() + std::chrono::milliseconds(900);
+              }
+              if (g_guide_bkgnd_singleton) {
+                // Phase 1055 menus: when a message box has gone (the
+                // background scene's state drops from Error to Full and the
+                // ErrorHUD is hidden) XUI is left with no focused element -
+                // hud's canvas is not inside xam's AppHost here, so XUI's own
+                // focus return does not reach it - and every later key went
+                // nowhere. Give the element focused before the press its
+                // focus back.
+                const uint32_t bk_now = prd2(g_guide_bkgnd_singleton + 0x10u);
+                if (g_guide_bk_state_prev == 3u && bk_now == 2u) {
+                  g_guide_focus_restore = 120;
+                }
+                g_guide_bk_state_prev = bk_now;
+                if (g_guide_focus_restore > 0) {
+                  --g_guide_focus_restore;
+                  static uint32_t f_gf3 = po(0x32C), f_sf3 = po(0x337);
+                  uint32_t fk3 = f_gf3 ? pcall(f_gf3, {}) : 0;
+                  if (fk3) {
+                    g_guide_focus_restore = 0;
+                  } else {
+                    uint32_t eob = pcall(0x81931040u, {0x1008Fu});  // ErrorHUD
+                    bool err_vis = eob && (prd2(eob + 0xB4u) & 1u);
+                    if (!err_vis && g_guide_last_focus && f_sf3) {
+                      uint32_t r = pcall(f_sf3, {g_guide_last_focus});
+                      XELOGI("GuideFocus: no focus after the message box: XuiElementSetFocus({:08X}) -> {:08X}, focus now {:08X}",
+                             g_guide_last_focus, r, f_gf3 ? pcall(f_gf3, {}) : 0);
+                      g_guide_focus_restore = 0;
+                    }
+                  }
+                }
+              }
+              if (g_guide_script_watch.load() > 0 && g_guide_hud_root) {
+                // Phase 1055 menus: the "watch" step - xam's frame elements
+                // and the background scene's state, every paint for 150 paints.
+                g_guide_script_watch.fetch_sub(1);
+                static uint32_t f_op_w = po(0x37D);
+                static uint32_t wbuf = 0;
+                if (!wbuf) wbuf = pm2->SystemHeapAlloc(32, 16);
+                auto one = [&](uint32_t h) -> std::string {
+                  uint32_t ob = pcall(0x81931040u, {h});
+                  if (!ob || !wbuf) return fmt::format("{:08X}:? ", h);
+                  uint32_t fl = prd2(ob + 0xB4u);
+                  float w = 0, hh = 0, x = 0, y = 0, op = -1.0f;
+                  uint32_t ww = prd2(ob + 0x1Cu), wh = prd2(ob + 0x20u);
+                  std::memcpy(&w, &ww, 4); std::memcpy(&hh, &wh, 4);
+                  std::memset(pm2->TranslateVirtual(wbuf), 0, 32);
+                  if (pcall(0x81932190u, {h, wbuf}) == 0) {
+                    uint32_t px = prd2(wbuf), py = prd2(wbuf + 4u);
+                    std::memcpy(&x, &px, 4); std::memcpy(&y, &py, 4);
+                  }
+                  xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(wbuf + 16u), 0xFFFFFFFFu);
+                  if (f_op_w) pcall(f_op_w, {h, wbuf + 16u});
+                  uint32_t opw = prd2(wbuf + 16u);
+                  std::memcpy(&op, &opw, 4);
+                  return fmt::format("{:08X}:{}/{:.2f} ({:.0f},{:.0f}) {:.0f}x{:.0f} | ", h, fl & 1u, op, x, y, w, hh);
+                };
+                uint32_t single = prd2(0x81D3F924u);
+                uint32_t st = (single >= 0x40000000u && single < 0x50000000u) ? prd2(single + 0x10u) : 0xFFu;
+                XELOGI("GuideWatch: paint {} bkgnd state {} timelines {} | {}{}{}{}", hook_paint_n, st, prd2(0x81D6CDBCu + 4u),
+                       one(0x1005Cu), one(0x1005Au), one(0x10062u), one(0x1008Eu));
+              }
+              if (g_guide_script_dump.exchange(0) && g_guide_hud_root) {
+                // Phase 1055 menus: the tree under hud's root on request (the
+                // guide_script "dump" step) - handle, class, id, visibility,
+                // opacity, flags, rect - to see what a press navigated to.
+                static uint32_t f_gid_d = po(0x32E), f_op_d = po(0x37D), f_fc_d = po(0x32B), f_ns_d = po(0x330);
+                static uint32_t dbuf = 0;
+                if (!dbuf) dbuf = pm2->SystemHeapAlloc(32, 16);
+                auto wstr_d = [&](uint32_t a) -> std::string {
+                  if (!(a >= 0x10000u && a < 0xC0000000u)) return std::string("?");
+                  std::string o;
+                  for (uint32_t w = 0; w < 24; ++w) {
+                    uint32_t v = prd2(a + w * 4u);
+                    for (int hh = 1; hh >= 0; --hh) {
+                      uint16_t u = uint16_t((v >> (hh * 16)) & 0xFFFFu);
+                      if (!u) return o;
+                      o += (u >= 32 && u < 127) ? char(u) : '.';
+                    }
+                  }
+                  return o;
+                };
+                uint32_t dlines = 0;
+                std::function<void(uint32_t, int)> dumpn = [&](uint32_t h, int depth) {
+                  if (dlines++ > 700) return;
+                  uint32_t ob = pcall(0x81931040u, {h});
+                  uint32_t fl = ob ? prd2(ob + 0xB4u) : 0;
+                  std::string id = "?";
+                  if (f_gid_d && dbuf) {
+                    xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(dbuf), 0);
+                    if (pcall(f_gid_d, {h, dbuf}) == 0) id = wstr_d(prd2(dbuf));
+                  }
+                  float op = -1.0f;
+                  if (f_op_d && dbuf) {
+                    xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(dbuf + 8u), 0xFFFFFFFFu);
+                    pcall(f_op_d, {h, dbuf + 8u});
+                    uint32_t opw = prd2(dbuf + 8u);
+                    std::memcpy(&op, &opw, 4);
+                  }
+                  std::string cls = "?";
+                  uint32_t nd = ob ? prd2(ob + 12u) : 0;
+                  if (nd >= 0x10000u && nd < 0xC0000000u) {
+                    uint32_t td = prd2(nd + 0x18u);
+                    uint32_t a = (td >= 0x10000000u && td < 0xA0000000u) ? prd2(td + 4u) : 0;
+                    if (a >= 0x10000000u && a < 0xA0000000u) cls = wstr_d(a);
+                  }
+                  float ex = 0, ey = 0, ew = 0, eh = 0;
+                  if (ob) {
+                    uint32_t ww = prd2(ob + 0x1Cu), wh = prd2(ob + 0x20u);
+                    std::memcpy(&ew, &ww, 4); std::memcpy(&eh, &wh, 4);
+                  }
+                  if (dbuf) {
+                    // XuiElementGetPosition(h, &vec3): the element's position in its parent
+                    std::memset(pm2->TranslateVirtual(dbuf + 16u), 0, 16);
+                    if (pcall(0x81932190u, {h, dbuf + 16u}) == 0) {
+                      uint32_t px = prd2(dbuf + 16u), py = prd2(dbuf + 20u);
+                      std::memcpy(&ex, &px, 4); std::memcpy(&ey, &py, 4);
+                    }
+                  }
+                  XELOGI("GuideMenuTree: {}{:08X} {} \"{}\" vis={} op={:.2f} flags {:08X} pos {:.0f},{:.0f} size {:.0f}x{:.0f}",
+                         std::string(depth * 2, ' '), h, cls, id, fl & 1u, op, fl, ex, ey, ew, eh);
+                  if (depth >= 9 || !f_fc_d || !f_ns_d || !dbuf) return;
+                  std::vector<uint32_t> kids;
+                  xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(dbuf + 16u), 0);
+                  pcall(f_fc_d, {h, dbuf + 16u});
+                  for (uint32_t c = prd2(dbuf + 16u), k = 0; c && k < 64; ++k) {
+                    kids.push_back(c);
+                    xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(dbuf + 16u), 0);
+                    pcall(f_ns_d, {c, dbuf + 16u});
+                    uint32_t nx = prd2(dbuf + 16u);
+                    if (nx == c) break;
+                    c = nx;
+                  }
+                  for (uint32_t c : kids) dumpn(c, depth + 1);
+                };
+                XELOGI("GuideMenuTree: from hud root {:08X} (tab scene {:08X}, HUD scene {:08X})", g_guide_hud_root, g_guide_tabscene, g_guide_hudscene);
+                dumpn(g_guide_hud_root, 0);
+                XELOGI("GuideMenuTree: {} nodes", dlines);
+                {
+                  // hud's own tree: the nav object's canvas host
+                  uint32_t canvas = guide_bs_obj_ ? prd2(guide_bs_obj_ + 0x18u) : 0;
+                  if (canvas >= 0x10000u && canvas < 0x100000u) {
+                    dlines = 0;
+                    XELOGI("GuideMenuTree: from hud's canvas {:08X}", canvas);
+                    dumpn(canvas, 0);
+                    XELOGI("GuideMenuTree: {} nodes under the canvas", dlines);
+                  }
+                }
+                g_guide_script_watch.store(0);
+                {
+                  // the message box's globals and this thread's identity
+                  uint32_t g80 = prd2(0x81D43C50u + 0x80u);
+                  uint32_t g38 = (g80 >= 0x10000u && g80 < 0xC0000000u) ? prd2(g80 + 0x38u) : 0;
+                  uint32_t slot = XamUiThreadSlot();
+                  uint32_t rec = (slot && XamAddrInImage(slot, 4)) ? prd2(slot) : 0;
+                  auto* selft = XThread::GetCurrentThread();
+                  uint32_t r13 = (selft && selft->thread_state()) ? uint32_t(selft->thread_state()->context()->r[13]) : 0;
+                  uint32_t curk = r13 ? prd2(r13 + 256u) : 0;
+                  uint32_t ptype = (selft && selft->thread_state()) ? xeKeGetCurrentProcessType(selft->thread_state()->context()) : 0xFFu;
+                  XELOGI("GuideMenuGlobals: [81D43C50+80]={:08X} [+38]={:08X} | UI thread slot {:08X} holds {:08X}, this thread's KTHREAD {:08X}, process type {}",
+                         g80, g38, slot, rec, curk, ptype);
+                  // Phase 1056: the app manager's own block, the task pool's
+                  // sync objects, and xam's system-app table.
+                  for (uint32_t row = 0; row < 4; ++row) {
+                    std::string ln;
+                    for (uint32_t c = 0; c < 16; ++c) ln += fmt::format("{:08X} ", prd2(0x81D43C50u + (row * 16 + c) * 4u));
+                    XELOGI("GuideAppMgr: 81D43C50+{:03X}: {}", row * 64u, ln);
+                  }
+                  XELOGI("GuideTaskPool: 81D423C0 +7C={:08X} +90={:08X} +E8={:08X} +110={:08X} +124={:08X} +128={:08X} +12C={:08X} +154={:08X} +158={:08X} +15C={:08X}",
+                         prd2(0x81D4243Cu), prd2(0x81D42450u), prd2(0x81D424A8u), prd2(0x81D424D0u), prd2(0x81D424E4u),
+                         prd2(0x81D424E8u), prd2(0x81D424ECu), prd2(0x81D42514u), prd2(0x81D42518u), prd2(0x81D4251Cu));
+                  {
+                    std::string apps;
+                    for (uint32_t id = 0xEFu; id <= 0xFEu; ++id) {
+                      uint32_t e = 0x81D4E550u - id * 0xC0u;
+                      uint32_t f8 = prd2(e + 8u), fc = prd2(e + 0xCu), f10 = prd2(e + 0x10u);
+                      if (f8 || fc || f10) apps += fmt::format("{:02X}@{:08X}[+8={:08X} +C={:08X} +10={:08X}] ", id, e, f8, fc, f10);
+                    }
+                    XELOGI("GuideAppTable: hud slot [81D426C8]={:08X} [81D42688]={:08X} | registered: {}",
+                           prd2(0x81D426C8u), prd2(0x81D42688u), apps.empty() ? "(none)" : apps);
+                  }
+                }
+              }
+              {
+                // Phase 1054: the HUD root's element state at +3 s (first open)
+                // and +9 s (after the driver's close/open cycle).
+                static std::chrono::steady_clock::time_point d_t0{};
+                static int d_step = 0;
+                if (!d_t0.time_since_epoch().count()) d_t0 = std::chrono::steady_clock::now();
+                double el = std::chrono::duration<double>(std::chrono::steady_clock::now() - d_t0).count();
+                if (::cvars::guide_walk_verbose && ((d_step == 0 && el > 3.0) || (d_step == 1 && el > 9.0))) {
+                  ++d_step;
+                  if (g_guide_hud_root) { g_guide_dump_from = g_guide_hud_root; g_guide_redo_dump = 1; }
+                  XELOGI("GuideDumpAt: {:.1f} s (HUD root)", el);
+                }
+              }
+              // (the first-open transitions are issued at the top of the swap
+              // hook, outside the render pass - see GuideBkgnd there)
+              if (::cvars::guide_tab_play > 0 && g_guide_tabscene) {
+                // Phase 1054: which play gives the 4-blade strip of the
+                // reference? The tab scene's XM_INIT goto plays "1To2" for
+                // the initial tab (8195CD28 -> 8195C8F0 -> PlayTimeline(h, f,
+                // f, f, 1, 0)), then NavigateFirst's type-3 notification makes
+                // hud play 2Close..2CloseEnd; at rest Blade3/7/8 stay hidden.
+                static uint32_t tp_paint = 0;
+                ++tp_paint;
+                int tmode = ::cvars::guide_tab_play;
+                uint32_t f_fnf5 = po(0x329), f_ptl5 = po(0x335), f_goto5 = po(0x3B9);
+                static uint32_t wb5 = 0;
+                if (!wb5) wb5 = pm2->SystemHeapAlloc(0x40, 16);
+                auto fnf5 = [&](const char* nm) -> uint32_t {
+                  std::memset(pm2->TranslateVirtual(wb5), 0, 0x40);
+                  auto* b = pm2->TranslateVirtual<uint8_t*>(wb5);
+                  for (size_t i = 0; nm[i] && i < 30; ++i) b[i * 2 + 1] = uint8_t(nm[i]);
+                  xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(ks_buf), 0xFFFFFFFFu);
+                  uint32_t r = pcall(f_fnf5, {g_guide_tabscene, wb5, ks_buf});
+                  return (r & 0x80000000u) ? 0xFFFFFFFFu : prd2(ks_buf);
+                };
+                if (tp_paint == 45) {
+                  uint32_t s5 = fnf5("1To2"), e5 = fnf5("1To2End"), r5 = 0xDEADu;
+                  if (tmode == 1 && s5 != 0xFFFFFFFFu && e5 != 0xFFFFFFFFu) r5 = pcall(f_ptl5, {g_guide_tabscene, s5, s5, e5, 1u, 1u});
+                  if (tmode == 2 && e5 != 0xFFFFFFFFu) r5 = pcall(f_ptl5, {g_guide_tabscene, e5, e5, e5, 1u, 1u});
+                  if (tmode == 3) r5 = pcall(f_goto5, {g_guide_tabscene, 0u, 0u});
+                  XELOGI("GuideTabPlay: mode {} at paint {}: 1To2 {}..{} -> {:08X}", tmode, tp_paint, s5, e5, r5);
+                }
+                if (tp_paint == 75 && tmode == 3) {
+                  uint32_t r5 = pcall(f_goto5, {g_guide_tabscene, 1u, 1u});
+                  XELOGI("GuideTabPlay: mode 3 at paint {}: Goto(1, animate) -> {:08X}", tp_paint, r5);
+                }
+                if (::cvars::guide_walk_verbose && tp_paint == 110) g_guide_redo_dump = 1;
+              }
+              {
+                static uint32_t dl = 0;
+                static uint32_t tl_prev = 0xFFFFFFFFu;
+                uint32_t tl_cnt = prd2(0x81D6CDBCu + 4u);
+                if (g_guide_cnt17 || g_guide_cnt6 || tl_cnt != tl_prev || dl++ % 60 == 0) {
+                  XELOGI("GuideDirty: paint {} bit17 {} bits6 {} timelines {} | arena cursor {:08X}", poll_logs, g_guide_cnt17, g_guide_cnt6, tl_cnt,
+                         guide_alloc_arena_ ? prd2(guide_alloc_arena_) : 0u);
+                }
+                tl_prev = tl_cnt;
+                g_guide_cnt17 = 0;
+                g_guide_cnt6 = 0;
+              }
+              if (g_guide_hidden && isys && ::cvars::guide_toggle) {
+                // Hidden: the title owns the keystroke queue and drains it
+                // every frame, so the Guide button is caught in xam's input
+                // shims instead (they swallow it and set this edge).
+                bool down = g_guide_button_edge.exchange(0) != 0;
+                if (down) {
+                  auto* cpx = kernel_state()->emulator()->graphics_system()->command_processor();
+                  g_guide_hidden = false;
+          GuideActive(1800);  // phase 1054 fps: the open transition, the layout write and its settle
+          g_guide_show_time = std::chrono::steady_clock::now();
+          ++g_guide_show_count;
+                  {
+                    // Phase 1054: xam's background scene opens with the Guide
+                    // (ClosedToFull) on this path too, not only the swap hook's.
+                    uint32_t single = prd2(0x81D3F924u);
+                    uint32_t want_p = GuideBkgndTarget();
+                    if (::cvars::guide_bkgnd_state != -1 && want_p <= 4u &&
+                        single >= 0x40000000u && single < 0x50000000u) {
+                      uint32_t r = GuidePlayBkgnd(want_p, "poll re-show");
+                      XELOGI("GuideToggle: poll re-show to state {} -> {:08X}; state {}",
+                             want_p, r, prd2(single + 0x10u));
+                    }
+                  }
+                  uint32_t nav = guide_bs_hud_base_ ? prd2(guide_bs_hud_base_ + 0x20694u) : 0u;
+                  if (nav >= 0x40000000u && nav < 0x50000000u) {
+                    xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(nav + 0x5Cu), 1u);
+                  }
+                  kernel_state()->xam_state()->is_xam_dialog_present_.store(true);
+                  cpx->guide_overlay_words_ = g_guide_last_words;
+                  cpx->guide_slide_rearm_ = true;
+                  if (!g_guide_hosted && !::cvars::guide_fade_hud) cpx->guide_overlay_ptr_ = g_guide_last_pub;  // fading: the first round publishes it
+                  GuideSyncOverlayPair(cpx);
+                  g_guide_want_redraw = true;
+                  XELOGI("GuideToggle: shown again (Guide button) ptr {:08X} words {}", g_guide_last_pub, g_guide_last_words);
+                }
+              } else if (f_pi && ks_buf && isys) {
+                g_guide_stage = 3;
+                struct InputTimer { std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+                                    ~InputTimer() { g_guide_ms_input += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count(); } } input_timer;
+                for (int pass = 0; pass < 8; ++pass) {
+                  xe::hid::X_INPUT_KEYSTROKE ks = {};
+                  // InputSystem::FilterDrivers keeps a driver only when
+                  // (flags & its InputType) != 0; flags 0 selects nothing.
+                  const uint32_t any_type = 0xFFu;
+                  // Phase 1054 tabs: scripted keystrokes first (guide_script)
+                  bool scripted = false;
+                  {
+                    std::lock_guard<std::mutex> lk(g_guide_script_mu);
+                    if (!g_guide_script_keys.empty()) {
+                      ks.virtual_key = g_guide_script_keys.front().first;
+                      ks.flags = g_guide_script_keys.front().second;
+                      ks.user_index = 0;
+                      g_guide_script_keys.pop_front();
+                      scripted = true;
+                    }
+                  }
+                  X_RESULT r0 = scripted ? X_ERROR_SUCCESS : isys->GetKeystroke(0, any_type, &ks);
+                  X_RESULT r = r0;
+                  // Phase 1054 walk: the any-user query behind it asks every
+                  // driver for every user (four XInput calls) on every paint;
+                  // the Guide belongs to user 0 here, so it is optional.
+                  if (!scripted && r != X_ERROR_SUCCESS && ::cvars::guide_input_any_user) r = isys->GetKeystroke(0xFF, any_type, &ks);
+                  if (r != X_ERROR_SUCCESS) {
+                    static uint32_t empty_logs = 0;
+                    if (pass == 0 && empty_logs++ % 300 == 0) {
+                      XELOGI("GuideInput: no keystroke (user0 -> {:08X}, any -> {:08X})", uint32_t(r0), uint32_t(r));
+                    }
+                    break;
+                  }
+                  // Phase 1054: the Guide button is xam's, never hud's - hud
+                  // took the key-up as its own close and hid its page.
+                  if (ks.virtual_key == 0x5838u) {
+                    if (ks.flags & 3u) g_guide_button_edge.store(1);
+                    XELOGI("GuideInput: Guide key ({:04X}) kept from hud; edge raised", uint16_t(ks.flags));
+                    continue;
+                  }
+                  GuideActive(::cvars::guide_active_ms);  // phase 1054 fps
+                  // Phase 1054 tabs: the authored tab-to-tab slide ("%uTo%u",
+                  // 12 frames) is played by XuiTabScene's own NavTabForward /
+                  // NavTabBackward (8195CAE8 / 8195CC10: PlayTimeline(start,
+                  // start, end) on the Tabscene, old page hidden, new page
+                  // shown and focused), which its XM_KEYDOWN handler (8195D038)
+                  // runs for a dpad right/left nav or the shoulder keys 0x5804 /
+                  // 0x5805. XuiTabSceneGoto (8195CD28) only seeks to "%uTo%uEnd"
+                  // - a zero-length play, the snap the blades phase measured.
+                  // A dpad key fed to XuiProcessInput is consumed below the
+                  // Tabscene as focus navigation onto a blade, so dpad left /
+                  // right are fed as the shoulder keys the console's bumpers
+                  // send: not nav keys, they bubble up to the Tabscene.
+                  // Phase 1055 menus: the left thumbstick's left/right
+                  // keystrokes (0x5823 / 0x5822) count as dpad left/right -
+                  // XUI's own key map (81931168) treats them alike, and
+                  // xenia's keyboard driver sends them for the thumb bindings.
+                  if (::cvars::guide_tab_nav && g_guide_tabscene && !g_guide_hidden &&
+                      (ks.virtual_key == 0x5812u || ks.virtual_key == 0x5813u ||
+                       ks.virtual_key == 0x5822u || ks.virtual_key == 0x5823u ||
+                       ks.virtual_key == 0x5804u || ks.virtual_key == 0x5805u)) {
+                    static uint32_t f_gcur = po(0x3BA), f_ggoto = po(0x3B9);
+                    const bool press = (ks.flags & 1u) != 0u;
+                    const bool fwd = (ks.virtual_key == 0x5813u || ks.virtual_key == 0x5822u || ks.virtual_key == 0x5804u);
+                    const bool dpad = (ks.virtual_key == 0x5812u || ks.virtual_key == 0x5813u ||
+                                       ks.virtual_key == 0x5822u || ks.virtual_key == 0x5823u);
+                    auto arm_switch = [&](uint32_t cur) {
+                      g_guide_tab_watch_cur = cur;
+                      g_guide_tab_settle_until = std::chrono::steady_clock::now() + std::chrono::milliseconds(450);
+                      g_guide_open_burst_until = std::chrono::steady_clock::now() + std::chrono::milliseconds(::cvars::guide_tab_burst_ms);
+                      GuideActive(1500);
+                      g_guide_want_redraw = true;
+                    };
+                    if (::cvars::guide_tab_nav_mode == 2) {
+                      // the phase-1054-blades path: a seek, snaps
+                      if (press && dpad) {
+                        uint32_t cur = f_gcur ? pcall(f_gcur, {g_guide_tabscene, pout}) : 1u;
+                        int ni = int(cur) + (fwd ? 1 : -1);
+                        if (ni < 0) ni = 0;
+                        if (ni > 3) ni = 3;
+                        if (uint32_t(ni) != cur && f_ggoto) {
+                          uint32_t gr = pcall(f_ggoto, {g_guide_tabscene, uint32_t(ni), 1u});
+                          arm_switch(cur);
+                          XELOGI("GuideTabNav: {} tab {} -> {} (goto seek) = {:08X}", fwd ? "right" : "left", cur, ni, gr);
+                        }
+                      }
+                      continue;
+                    } else if (::cvars::guide_tab_nav_mode == 3 && dpad) {
+                      // NavTabForward/Backward on the Tabscene object, no key:
+                      // the authored slide without the focused list seeing a
+                      // bumper first (run tab_f: its indicator showed for a few
+                      // frames). A second switch inside the slide is dropped.
+                      static std::chrono::steady_clock::time_point last_nav{};
+                      auto now_n = std::chrono::steady_clock::now();
+                      if (press && now_n - last_nav >= std::chrono::milliseconds(250)) {
+                        last_nav = now_n;
+                        uint32_t cur = f_gcur ? pcall(f_gcur, {g_guide_tabscene, pout}) : 0xFFu;
+                        // the XuiTabScene class instance ([+0] handle, [+4] flags, [+8] count,
+                        // [+C] current, [+10] page), as the public Goto (81937E90) gets it:
+                        // the class cast 81930FE8(handle, class id [81D6CE38]) - not the element
+                        // object (81931040), on which the nav found nothing to do (run tab_h)
+                        uint32_t tobj = pcall(0x81930FE8u, {g_guide_tabscene, prd2(0x81D6CE38u)});
+                        uint32_t nr = tobj ? pcall(fwd ? 0x8195CAE8u : 0x8195CC10u, {tobj}) : 0xDEADu;
+                        arm_switch(cur);
+                        XELOGI("GuideTabNav: {} NavTab{}(obj {:08X}) = {:08X}, current tab was {}",
+                               fwd ? "right" : "left", fwd ? "Forward" : "Backward", tobj, nr, cur);
+                      } else if (press) {
+                        XELOGI("GuideTabNav: {} dropped (inside the previous slide)", fwd ? "right" : "left");
+                      }
+                      continue;
+                    } else {
+                      uint16_t was = ks.virtual_key;
+                      if (ks.virtual_key == 0x5812u || ks.virtual_key == 0x5823u) ks.virtual_key = 0x5805u;
+                      else if (ks.virtual_key == 0x5813u || ks.virtual_key == 0x5822u) ks.virtual_key = 0x5804u;
+                      if (press) {
+                        uint32_t cur = f_gcur ? pcall(f_gcur, {g_guide_tabscene, pout}) : 0xFFu;
+                        arm_switch(cur);
+                        XELOGI("GuideTabNav: {} key {:04X} fed as {:04X} (NavTab{} through the Tabscene's key handler), current tab {}",
+                               fwd ? "right" : "left", was, uint16_t(ks.virtual_key), fwd ? "Forward" : "Backward", cur);
+                      }
+                      // falls through to XuiProcessInput
+                    }
+                  }
+                  std::memcpy(pm2->TranslateVirtual(ks_buf), &ks, sizeof(ks));
+                  static uint32_t f_gf2 = po(0x32C);
+                  {
+                    // Phase 1055 menus: the element focused before this key,
+                    // while no message box is up - hud's own, to give the
+                    // focus back to when a box has closed.
+                    uint32_t fk0 = f_gf2 ? pcall(f_gf2, {}) : 0;
+                    uint32_t bk0 = g_guide_bkgnd_singleton ? prd2(g_guide_bkgnd_singleton + 0x10u) : 2u;
+                    if (fk0 && bk0 < 3u) g_guide_last_focus = fk0;
+                  }
+                  uint32_t hr = pcall(f_pi, {ks_buf});
+                  uint32_t fk = f_gf2 ? pcall(f_gf2, {}) : 0;
+                  XELOGI("GuideInput: key {:04X} flags {:04X} user {} -> XuiProcessInput {:08X} focus {:08X}",
+                         uint16_t(ks.virtual_key), uint16_t(ks.flags), ks.user_index, hr, fk);
+                  static uint32_t fk_prev = 0;
+                  if ((ks.flags & 1u) && fk && fk != fk_prev) {
+                    // Phase 1053: focus moved but nothing re-rendered. Nudge the
+                    // new and old focus elements through the opacity API so xam
+                    // dirties them, and dump the new focus subtree.
+                    if (::cvars::guide_focus_nudge) {
+                      static uint32_t f_so2 = po(0x37E);
+                      auto* cxn = gth->thread_state()->context();
+                      for (uint32_t hh : {fk, fk_prev}) {
+                        if (!hh || !f_so2) continue;
+                        cxn->f[1] = 0.999;
+                        uint64_t na1[] = {hh};
+                        uint32_t nr = uint32_t(prc->Execute(tsp, f_so2, na1, 1));
+                        XELOGI("GuideNudge: SetOpacity({:08X}, 0.999) -> {:08X}", hh, nr);
+                      }
+                    }
+                    {
+                      static uint32_t f_gpar = po(0x331);  // XuiElementGetParent(h, out)
+                      uint32_t root = fk;
+                      for (int up = 0; up < 2 && f_gpar; ++up) {
+                        std::memset(pm2->TranslateVirtual(ks_buf), 0, 16);
+                        uint32_t pr = pcall(f_gpar, {root, ks_buf});
+                        uint32_t par = prd2(ks_buf);
+                        if (pr != 0 || !par) break;
+                        root = par;
+                      }
+                      g_guide_dump_from = root;
+                    }
+                    g_guide_redo_dump = 1;
+                    g_guide_want_redraw = true;
+                  }
+                  if (ks.flags & 1u) fk_prev = fk;
+                  if (::cvars::guide_toggle &&
+                      (ks.virtual_key == 0x5838u)) {
+                    // The swap-time handler owns the toggle; this only reports
+                    // the press (xam's shims cannot see it while the Guide
+                    // holds input, because they return EMPTY before reading
+                    // the queue).
+                    g_guide_button_edge.store(1);
+                  }
+                }
+              }
+            }
+            if (trl2++ < 3) {
+              std::string ent;
+              for (uint32_t e = tl_head, k = 0; e && k < 4 && e >= 0x40000000u && e < 0x50000000u; ++k) {
+                ent += fmt::format("[{:08X}: {:08X} {:08X} {:08X} {:08X} {:08X} {:08X}] ", e,
+                                   prd2(e), prd2(e + 4u), prd2(e + 8u), prd2(e + 12u),
+                                   prd2(e + 16u), prd2(e + 20u));
+                e = prd2(e + 0x14u);
+              }
+              XELOGI("GuideTimers: XuiTimersRun {:08X} -> {:08X} | list head {:08X} {}",
+                     f_timers, tr, tl_head, ent);
+            }
+          }
+          {
+            // Phase 1054 fps: decide whether this swap paints at all.
+            auto now_i = std::chrono::steady_clock::now();
+            bool timers = g_guide_bkgnd_open_at.time_since_epoch().count() ||
+                          g_guide_bkgnd_open_at.time_since_epoch().count() ||
+                          g_guide_bkgnd_close_at.time_since_epoch().count();
+            bool keep = g_guide_last_full_paint.time_since_epoch().count() &&
+                        (now_i - g_guide_last_full_paint) < std::chrono::milliseconds(::cvars::guide_keepalive_ms);
+            g_guide_idle = ::cvars::guide_paint_idle && !g_guide_warmup && !g_guide_want_redraw &&
+                           !g_guide_close_pending && !timers && now_i >= g_guide_active_until &&
+                           (g_guide_hidden || keep) && g_guide_round_pos == 0;
+            if (g_guide_idle) ++g_guide_idle_paints; else ++g_guide_full_paints;
+            g_guide_keepalive_paint = !g_guide_idle && !keep;
+            if (!g_guide_idle && !g_guide_hidden) g_guide_last_full_paint = now_i;
+            // Phase 1054 bugs: the plan changes at both edges of the close (hud's
+            // pages leave it; they come back on a reopen during the close).
+            // Restart the round here, before the device-changed call and
+            // RenderBegin, so the round the key interrupted is discarded and
+            // the first publish after the key holds only post-key renders.
+            static bool prev_closing_for_plan = false;
+            g_guide_closing_edge = prev_closing_for_plan != g_guide_close_pending;
+            prev_closing_for_plan = g_guide_close_pending;
+            if (g_guide_closing_edge && ::cvars::guide_paint_spread && !g_guide_hidden) g_guide_round_pos = 0;
+            g_guide_t_pre = now_i;
+            g_guide_stage = 5;
+          }
+          if (g_guide_el_apphost && !g_guide_idle && !g_guide_hidden) {
+            // Phase 1054 transitions: hud fades with xam's AppHost element.
+            // xam's HalfToFull / ClosedToFull / FullToClosed animate that
+            // element's opacity; copy it onto hud's draw root and onto the
+            // plan's page/list scenes (rendered separately) every active paint.
+            static uint32_t f_op_h = po(0x37D), f_setop_h = po(0x37E);
+            std::memset(pm2->TranslateVirtual(pout), 0, 16);
+            uint32_t r_op = f_op_h ? pcall(f_op_h, {g_guide_el_apphost, pout + 8u}) : 0xDEADu;
+            uint32_t opw = prd2(pout + 8u);
+            float aph; std::memcpy(&aph, &opw, 4);  // xam's own AppHost opacity, logged only
+            if (r_op != 0 || !std::isfinite(aph)) aph = -1.0f;
+            auto now_f = std::chrono::steady_clock::now();
+            // hud follows xam's own AppHost track (what the hosted app shows
+            // on the console): nothing until the last ~100 ms of the open,
+            // hidden from the first frame of the close.
+            float opf = (aph >= 0.0f) ? std::max(0.02f, std::min(1.0f, aph)) : 1.0f;
+            // Phase 1063 probe: clear the visible bit of the configured
+            // handles on every active paint, so "what covers the descent's copy
+            // of the tab pages" can be answered by removing one candidate at a
+            // time instead of reasoning about draw order. Diagnostic only.
+            // Phase 1066: the app manager's task. HANDOFF's open question is
+            // which case xam's dispatcher 8177B490 takes for it - the switch is
+            // on `[task+8] & 0x1F` (1, 2, 4, 8, 0x10; anything else returns
+            // E_FAIL 0x80004005) - and whether a worker ever dequeues it. The
+            // task pointer lives at [81D43C50+4]. Log the discriminant whenever
+            // it changes, so a menu press that schedules the load shows the
+            // transition rather than a single sample.
+            // Phase 1071: resume xam's task workers. They are created
+            // with ExCreateThread flags 0x83 - bit 0 is CREATE_SUSPENDED -
+            // by 81778940, and the resume that follows at 8177AF3C is gated
+            // on bit 0x00080000 of the caller's flags, which is clear. So
+            // the worker procedure 8177AD80 never runs (measured), nothing
+            // decrements [pool+0x154], it stays at 6, 81779F08 declines to
+            // grow the pool, and no scheduled task is ever dequeued. The
+            // out handle of each worker's thread is at [worker+0x1C]
+            // (`addi r7, r31, 0x1c` at the create site).
+            // Phase 1071: resume xam's task workers. They are created
+            // with ExCreateThread flags 0x83 - bit 0 is CREATE_SUSPENDED -
+            // by 81778940, and the resume that follows at 8177AF3C is gated
+            // on bit 0x00080000 of the caller's flags, which is clear. So
+            // the worker procedure 8177AD80 never runs (measured), nothing
+            // decrements [pool+0x154], it stays at 6, 81779F08 declines to
+            // grow the pool, and no scheduled task is ever dequeued.
+            //
+            // The handle is not findable in the worker structure (its +0x1C,
+            // which the create site passes as the out pointer, reads back as
+            // a stack address and no word of +00..40 resolves), so go at it
+            // from Xenia's side: every XThread whose start_address is the
+            // worker procedure.
+            // Phase 1081: the app manager's state word. XamAppLoad (81793AA0)
+            // asserts [81D43C50] == 1 and runs anyway when it is not (the twui
+            // is silent here); it reads 2 at the Create Profile press but 0 at
+            // task creation, so something moves it during the run. 49 candidate
+            // `stw rX, 0(rY)` sites in the module make a static search
+            // unprofitable - log the transitions instead and let the timing say
+            // which phase writes it. One read a paint, logged only on change.
+            {
+              static uint32_t appmgr_prev = 0xFFFFFFFFu;
+              const uint32_t appmgr = prd2(0x81D43C50u);
+              if (appmgr != appmgr_prev) {
+                // Phase 1082: the task at [81D43C50+4] is the one the harness
+                // creates by hand with 8177C408(0, &out) - i.e. with NO
+                // procedure argument. 81779CE0 runs a task by
+                // `lwz r11,0x30(task); mtctr; bctrl` with context [task+0x34],
+                // so a task whose +0x30 is null can be dispatched and still do
+                // nothing. Print both.
+                const uint32_t tk = prd2(0x81D43C54u);
+                const bool tk_ok = tk >= 0x40000000u && tk < 0x50000000u;
+                XELOGI("GuideAppMgrState: paint {} [81D43C50] {:08X} -> {:08X} "
+                       "| [+B4]={:08X} [+B8]={:08X} [+E0]={:08X} [+4 task]={:08X} "
+                       "| task proc [+30]={:08X} ctx [+34]={:08X} state [+10]={:08X}",
+                       hook_paint_n, appmgr_prev, appmgr, prd2(0x81D43D04u),
+                       prd2(0x81D43D08u), prd2(0x81D43D30u), tk,
+                       tk_ok ? prd2(tk + 0x30u) : 0xDEADu,
+                       tk_ok ? prd2(tk + 0x34u) : 0xDEADu,
+                       tk_ok ? prd2(tk + 0x10u) : 0xDEADu);
+                // Phase 1096: there is a SECOND task. 81795934 arms xam's
+                // HUD-manager loop 81794BC8 - the thing that calls ShowHud
+                // 8174FDA0, i.e. what guide_host_show stands in for - via
+                // 8177BFB0 on the task at [81D43C50+0x28], NOT the +4 task this
+                // probe has always read. That registration demonstrably ran:
+                // the very next instructions set [+B4] and [+B8] to 1 and both
+                // measure 1. So read the +0x28 task too, or "is the HUD manager
+                // armed" stays unanswered.
+                const uint32_t tk2 = prd2(0x81D43C50u + 0x28u);
+                // Phase 1096: do NOT reuse the +4 task's 0x40000000-0x50000000
+                // range here - this pointer measured 30052000, a perfectly valid
+                // guest address in the Guide's heap region, and the narrow check
+                // printed DEAD for every field and said nothing.
+                const bool tk2_ok = tk2 >= 0x10000000u && tk2 < 0xA0000000u;
+                XELOGI("GuideHudMgrTask: [81D43C50+28]={:08X} | proc [+30]={:08X}"
+                       " ctx [+34]={:08X} state [+10]={:08X} disc [+8]={:08X}"
+                       " (81794BC8 = xam's HUD-manager loop -> ShowHud)",
+                       tk2, tk2_ok ? prd2(tk2 + 0x30u) : 0xDEADu,
+                       tk2_ok ? prd2(tk2 + 0x34u) : 0xDEADu,
+                       tk2_ok ? prd2(tk2 + 0x10u) : 0xDEADu,
+                       tk2_ok ? prd2(tk2 + 0x8u) : 0xDEADu);
+                // Phase 1096l: the task that holds KeSetEvent(81D21404) -
+                // procedure 817318F0, the ROOT of the whole stall. 81731B48
+                // creates it with `bl 8177C8E0(817318F0, 0, ..., r6=81D3E1A0)`
+                // and 8177C8E0 stores the task pointer, TAGGED with bit 0, into
+                // that out-param. So the task is at [81D3E1A0] & ~1. Dump its
+                // discriminant [+8] (8177B490 switches on it & 0x1F), state
+                // [+0x10], and procedure [+0x30] - that says which dispatch case
+                // it took and whether it was ever queued. Read-only.
+                {
+                  const uint32_t slot = prd2(0x81D3E1A0u);
+                  const uint32_t tk3 = slot & ~1u;
+                  static uint32_t seen = 0xFFFFFFFFu;
+                  if (slot != seen) {
+                    seen = slot;
+                    const bool ok = tk3 >= 0x10000000u && tk3 < 0xA0000000u;
+                    XELOGI("GuideRootTask: [81D3E1A0]={:08X} task={:08X} "
+                           "disc[+8]={:08X} (case {}) state[+10]={:08X} "
+                           "proc[+30]={:08X} (want 817318F0 - it holds "
+                           "KeSetEvent(81D21404))",
+                           slot, tk3, ok ? prd2(tk3 + 8u) : 0xDEADu,
+                           ok ? (prd2(tk3 + 8u) & 0x1Fu) : 0xDEADu,
+                           ok ? prd2(tk3 + 0x10u) : 0xDEADu,
+                           ok ? prd2(tk3 + 0x30u) : 0xDEADu);
+                  }
+                }
+                // Phase 1096i: the pool's PENDING QUEUE. Workers dequeue from
+                // [pool+0x68] via 817791E0 (head [q+8], tail [q+0xC], count
+                // [q+0x10], link [task+0x24]) and run the task with 81779CE0,
+                // which measurably DOES NOT RETURN (8177AA98 executed,
+                // 8177AA9C+40 not). Dump what is still queued behind it and the
+                // idle-worker count at [pool+0x154], so "which tasks are stuck"
+                // is read rather than guessed. Read-only.
+                {
+                  const uint32_t pool = 0x81D423C0u, q = pool + 0x68u;
+                  const uint32_t head = prd2(q + 8u), cnt = prd2(q + 0x10u);
+                  const uint32_t idle = prd2(pool + 0x154u);
+                  static uint32_t qprev = 0xFFFFFFFFu;
+                  const uint32_t sig = head ^ (cnt << 8) ^ (idle << 16);
+                  if (sig != qprev) {
+                    qprev = sig;
+                    std::string chain;
+                    uint32_t t = head;
+                    for (int i = 0; i < 8 && t >= 0x10000000u && t < 0xA0000000u;
+                         ++i) {
+                      chain += fmt::format("{:08X}(proc={:08X} disc={:08X} "
+                                           "state={:08X}) ",
+                                           t, prd2(t + 0x30u), prd2(t + 8u),
+                                           prd2(t + 0x10u));
+                      t = prd2(t + 0x24u);
+                    }
+                    XELOGI("GuideTaskQueue: head={:08X} tail={:08X} count={:08X} "
+                           "idle[pool+154]={:08X} | {}",
+                           head, prd2(q + 0xCu), cnt, idle,
+                           chain.empty() ? "(empty)" : chain.c_str());
+                  }
+                }
+                // Phase 1087: the system-app table. Entry for id N sits at
+                // 0x81D4E550 - N*0xC0 and is valid when +8 and +0x10 are
+                // non-zero, with the handler at +0xC (lookup 8177EE78, validity
+                // 8177F1F8). Print 0xFE (the id the blocked menu items address)
+                // and 0xFF (the id hud registers) so "did createprofile
+                // register" is answered by the table rather than by the absence
+                // of hud's error message.
+                // Phase 1088: use xam's OWN lookup semantics (8177EE78), not the
+                // phase-1055 note. For id 0xFF it returns the POINTER at
+                // [81D426C8]; for 0xEF..0xFE the entry is 0x81D4E550 - id*0xC0
+                // (ids outside that range trap). Validity is 8177F1F8:
+                // entry != 0 && [entry+8] != 0 && [entry+0x10] != 0 - the note
+                // had those two fields right; it was the 0xFF case it missed,
+                // which is why 1087's 0xFF reading was meaningless.
+                for (uint32_t id : {0xFEu, 0xFFu}) {
+                  const uint32_t e = (id == 0xFFu) ? prd2(0x81D426C8u)
+                                                   : (0x81D4E550u - id * 0xC0u);
+                  const bool ok = e && prd2(e + 8u) && prd2(e + 0x10u);
+                  XELOGI("GuideSysAppTable: id {:02X} entry {:08X} ({}) | +8={:08X} "
+                         "+C={:08X} +10={:08X} | [81D426C8]={:08X} [81D42688]={:08X}",
+                         id, e, ok ? "VALID" : "invalid",
+                         e ? prd2(e + 8u) : 0u, e ? prd2(e + 0xCu) : 0u,
+                         e ? prd2(e + 0x10u) : 0u, prd2(0x81D426C8u),
+                         prd2(0x81D42688u));
+                }
+                appmgr_prev = appmgr;
+              }
+              // Phase 1096u: SAMPLING probe. 1096u eliminated every kernel
+              // blocking primitive for the app-table stall at entry 3
+              // (musicplayer 817D22C0 -> 81AA9FB8 -> tail dispatch 81AAA0BC),
+              // so the thread is RUNNING - spinning in guest code - not
+              // blocked. A running thread's LR moves on every `bl`, so
+              // sampling it once per paint gives a distribution of the call
+              // sites it is actually executing. Racy by construction and that
+              // is fine: this is a sampler, not a trace. Report the top sites
+              // once, late enough to have samples.
+              {
+                // Phase 1096w: TWO windows, not one. 1096w could not tell
+                // whether the Janus DRM call is hung or merely slow. Work that
+                // is progressing moves through DIFFERENT call sites over time;
+                // a hang repeats the same handful. Histogram samples 1-100 and
+                // 101-200 separately and print both - the comparison answers it
+                // without another guess.
+                static std::map<uint32_t, uint32_t> lr_hist;
+                static std::map<uint32_t, uint32_t> lr_hist2;
+                static uint32_t samples = 0;
+                auto ths = kernel_state()->object_table()
+                               ->GetObjectsByType<XThread>(
+                                   XObject::Type::Thread);
+                for (auto& th : ths) {
+                  if (!th || !th->thread_state() ||
+                      !th->thread_state()->context())
+                    continue;
+                  const uint32_t l =
+                      static_cast<uint32_t>(th->thread_state()->context()->lr);
+                  // xam's image only - the title's own threads are noise here
+                  if (l >= 0x815F0000u && l < 0x81E00000u) {
+                    if (samples < 100u) ++lr_hist[l]; else ++lr_hist2[l];
+                  }
+                }
+                ++samples;
+                if (samples == 200u) {  // 1096u: 400 was above the ~324 paints a run reaches; it never fired.
+                  std::vector<std::pair<uint32_t, uint32_t>> v(lr_hist.begin(),
+                                                               lr_hist.end());
+                  std::sort(v.begin(), v.end(),
+                            [](auto& a, auto& b) { return a.second > b.second; });
+                  std::string top;
+                  for (size_t k = 0; k < v.size() && k < 14u; ++k) {
+                    top += fmt::format("{:08X}x{} ", v[k].first, v[k].second);
+                  }
+                  std::vector<std::pair<uint32_t, uint32_t>> v2(lr_hist2.begin(),
+                                                                lr_hist2.end());
+                  std::sort(v2.begin(), v2.end(),
+                            [](auto& a2, auto& b2) { return a2.second > b2.second; });
+                  std::string top2;
+                  for (size_t k = 0; k < v2.size() && k < 14u; ++k) {
+                    top2 += fmt::format("{:08X}x{} ", v2[k].first, v2[k].second);
+                  }
+                  XELOGI("GuideLrSample EARLY (1-100, {} distinct): {}",
+                         uint32_t(lr_hist.size()), top);
+                  XELOGI("GuideLrSample LATE  (101-200, {} distinct): {}",
+                         uint32_t(lr_hist2.size()), top2);
+                }
+              }
+              // Phase 1096z: the slot 819138F0 dereferences and faults on.
+              // 819106F8 is a get-or-create accessor over the static object at
+              // 0x81D6CA00, and 81911D30 calls it - so the question is whether
+              // the slot EVER holds a value. Sample it, report only on change:
+              // a "0 -> X -> 0" means the object is created and torn down; a
+              // constant 0 means the factory never publishes it. Read-only.
+              {
+                const uint32_t slot = prd2(0x81D6C9C8u);
+                const uint32_t stat = prd2(0x81D6CA00u);
+                static uint32_t prev = 0xFFFFFFFFu;
+                if (slot != prev) {
+                  prev = slot;
+                  XELOGI("GuideAppMgrSlot: [81D6C9C8]={:08X} (819138F0 reads "
+                         "this; 0 = the fault) | [81D6CA00]={:08X} | paint {}",
+                         slot, stat, hook_paint_n);
+                }
+              }
+              // Phase 1096: the message-box parent handle, resolved with
+              // xam's OWN table and layout (8194A4E0: limit at
+              // [0x81D6D0D8+0x420], bucket = [base+(idx>>8)*4], entry =
+              // bucket + (idx & 0xFF)*8, entry[0] = tag, entry[1] = object).
+              // If this stops resolving, xam's 8194A4E0 takes the
+              // 8194A568..8194A58C path, returns 0x8030000A and SILENTLY
+              // DROPS the 0x7EC button result - which is the one message hud
+              // needs to start the app load. Read-only; nothing is written.
+              if (g_guide_msgbox_parent) {
+                const uint32_t hnd = g_guide_msgbox_parent;
+                const uint32_t idx = hnd & 0xFFFFu, tag = hnd >> 16;
+                const uint32_t limit = prd2(0x81D6D0D8u + 0x420u);
+                const uint32_t bucket = prd2(0x81D6D0D8u + (idx >> 8) * 4u);
+                const uint32_t entry = bucket ? bucket + (idx & 0xFFu) * 8u : 0;
+                const uint32_t stored = entry ? prd2(entry) : 0;
+                const bool ok = idx < limit && entry && stored == tag;
+                static uint32_t last = 0xFFFFFFFFu;
+                const uint32_t now = ok ? 1u : 0u;
+                if (now != last) {
+                  last = now;
+                  XELOGI("GuideMsgBoxHandle: {:08X} idx={:04X} tag={:04X} "
+                         "limit={:08X} bucket={:08X} entry={:08X} "
+                         "stored_tag={:08X} obj={:08X} -> {} (paint {})",
+                         hnd, idx, tag, limit, bucket, entry, stored,
+                         entry ? prd2(entry + 4u) : 0,
+                         ok ? "resolves" : "MISS - 0x7EC would be DROPPED",
+                         hook_paint_n);
+                  // Phase 1096: dump the receiver's first words. NOTE: an
+                  // earlier version of this probe read [obj+0] as a vtable and
+                  // tried to name the owning module from it. It is NOT a
+                  // vtable - it measured 00010274, the object's OWN handle - so
+                  // that classification was meaningless and has been removed
+                  // rather than left to be believed. Print the raw words only.
+                  const uint32_t robj = entry ? prd2(entry + 4u) : 0;
+                  XELOGI("GuideMsgBoxHandle: receiver obj={:08X} [+0]={:08X} "
+                         "[+4]={:08X} [+8]={:08X} [+C]={:08X} ([+0] is the "
+                         "object's own handle, not a vtable)",
+                         robj, robj ? prd2(robj) : 0, robj ? prd2(robj + 4u) : 0,
+                         robj ? prd2(robj + 8u) : 0,
+                         robj ? prd2(robj + 0xCu) : 0);
+                }
+              }
+            }
+            // Phase 1084: dispatch the app manager's armed task. 1082 showed
+            // XamAppLoad arms it - [task+0x30] := 817935B8, the callback that
+            // loads createprofile.xex - and nothing ever dispatches it. xam's
+            // own dispatcher is 8177B490(task, proc, context): it stores proc at
+            // [task+0x30] and context at [task+0x34], then switches on
+            // [task+8] & 0x1F. Our task reads 04A00004, i.e. case 4 -> 8177B580,
+            // whose branch (bit 0x10000000 clear) sets [task+0x10] = 0x10 and
+            // calls 81779F08. [task+0x10] is 0, so that never ran - the
+            // dispatcher was never called for this task. Call it with xam's own
+            // values rather than inventing anything.
+            if (::cvars::guide_dispatch_app_task) {
+              static bool dispatched = false;
+              const uint32_t tk = prd2(0x81D43C54u);
+              const uint32_t proc = (tk >= 0x40000000u && tk < 0x50000000u) ? prd2(tk + 0x30u) : 0u;
+              if (!dispatched && proc && prd2(0x81D43C50u) == 2u) {
+                dispatched = true;
+                const uint32_t st_before = prd2(tk + 0x10u);
+                uint32_t r = pcall(0x8177B490u, {tk, proc, prd2(tk + 0x34u)});
+                XELOGI("GuideDispatchAppTask: paint {} 8177B490(task {:08X}, proc {:08X}, ctx {:08X}) "
+                       "-> {:08X} | [task+0x10] {:08X} -> {:08X} | [81D43C50]={:08X}",
+                       hook_paint_n, tk, proc, prd2(tk + 0x34u), r, st_before,
+                       prd2(tk + 0x10u), prd2(0x81D43C50u));
+                // Phase 1091x: CATCH THE TASK ON A WORKER. 1091w's per-paint
+                // sampler could not see [ctx+0x0C] because the task runs to
+                // completion inside one paint - 1081's trap. The dispatch
+                // hands off to a worker on ANOTHER host thread and returns, so
+                // poll from here, tight and briefly, instead of once a frame.
+                // This is the one unmeasured step in 1091v's chain: if a
+                // worker's [ctx+0x0C] is ever non-zero, Xam_0x1B6() can hand
+                // back a real handle on that thread and the fabricated
+                // skin-callback manager can be replaced with a guest value.
+                {
+                  uint32_t idx_t = prd2(0x81D227F0u);
+                  auto ths_t = kernel_state()->object_table()
+                                   ->GetObjectsByType<XThread>(XObject::Type::Thread);
+                  uint32_t polls = 0, seen = 0;
+                  std::string first;
+                  auto t_end = std::chrono::steady_clock::now() +
+                               std::chrono::milliseconds(50);
+                  while (std::chrono::steady_clock::now() < t_end) {
+                    ++polls;
+                    // Phase 1091y: DO NOT FILTER TO THE WORKERS. The runner
+                    // 81779CE0 sets the field on WHATEVER THREAD RUNS THE TASK:
+                    //   81779D08 bl 817795A8(0,&out)   ; out = this thread's context
+                    //   81779D40 stw r31, 0xc(r29)     ; [context+0x0C] = the task
+                    //   81779D48 lwz r11, 0x30(r31)
+                    //   81779D50 bctrl                 ; then run the procedure
+                    // so it is set immediately before the call and on the runner's
+                    // own thread. 1091x polled only threads starting at 8177AD80
+                    // and concluded the field is never set - but if the task runs
+                    // anywhere else (inline on the dispatching thread, say) that
+                    // poll could not have seen it. Poll every thread.
+                    for (auto& th : ths_t) {
+                      if (!th) continue;
+                      uint32_t ctx = 0;
+                      if (!th->GetTLSValue(idx_t, &ctx) || !ctx) continue;
+                      uint32_t tkv = prd2(ctx + 0x0Cu);
+                      if (tkv) {
+                        ++seen;
+                        if (first.empty())
+                          first = fmt::format("tid {:08X} start {:08X} ctx {:08X} [ctx+0x0C]={:08X}",
+                                              th->thread_id(), th->start_address(), ctx, tkv);
+                      }
+                    }
+                    if (seen) break;
+                  }
+                  XELOGI("GuideDispatchTaskCatch: polled worker task slots {} time(s) over "
+                         "<=50 ms after the dispatch; {} -> {}",
+                         polls, seen ? "CAUGHT" : "never non-zero",
+                         seen ? first
+                              : std::string("no worker held a task in that window - which "
+                                            "does NOT prove none ever does; the runner may "
+                                            "finish faster than this poll, so hook 81779CE0 "
+                                            "to settle it"));
+                }
+              }
+            }
+            // Phase 1091e: THE HUD SHOW LOOP IS A POOL TASK, AND IT IS ARMED.
+            // 81794BC8 - the loop that pumps (81793230) and then calls xam's
+            // own ShowHud 8174FDA0(mgr, [81D43C50+0xBC]) until it takes - has
+            // no branch to it and no stored pointer anywhere in the image, and
+            // the ordinal scan (1091d) says it is not exported. Its address is
+            // FORMED exactly once, at 81795924/81795934, and handed to
+            //   8177BFB0([81D43C50+0x28], 1, 81794BC8, 0, 0)
+            // which strips the tag bit and tail-branches to the pool's
+            // 8177B2C0, where flag bit 0 means "[task+0x30] = the procedure".
+            // The two stores right after it are [81D43C50+0xB4] = 1 and
+            // [+0xB8] = 1 - the very gates phase 1080 measured as 1 - so that
+            // registration HAS run here and the task IS armed.
+            // That is the same shape as the app task 1082 found at
+            // [81D43C50+4] with [task+0x30] = 817935B8, which 1084 dispatched
+            // with xam's own 8177B490 and which then really did load
+            // createprofile.xex. This drives the HUD task the same way, with
+            // xam's own values read back out of the task.
+            // NOT FREE: 81794BC8 asserts the UI thread (81778BB8 at 81794BDC,
+            // a twui that is silent here) and LOOPS until ShowHud returns, so
+            // it can spin on a pool worker. Default off; captures and a full
+            // regression before and after; expect the first attempt to fault.
+            // Phase 1091g: WATCH THE SLOT ITSELF. [81D43C50+0x28] is STATICALLY
+            // ZERO in xam.bin (flat offset 0x753C50) and reads 30052000 at
+            // runtime, so xam writes it during the run - and xam's own
+            // 8177BFB0 asserts the handle's TAG BIT is set (clrlwi. r3,0x1f /
+            // bne / twui) while 30052000 has it clear, a trap
+            // ignore_trap_instructions has been swallowing every run. Log every
+            // change with the tag bit and the paint, to separate "written once
+            // early with a bad value" from "written correctly then clobbered".
+            // Runs under guide_bkgnd_watch so it costs nothing by default.
+            if (::cvars::guide_bkgnd_watch) {
+              static uint32_t slot_prev = 0xFFFFFFFFu;
+              static uint32_t slot_logs = 0;
+              uint32_t slot = prd2(0x81D43C50u + 0x28u);
+              if (slot != slot_prev && slot_logs++ < 40u) {
+                auto* mh_s = kernel_state()->memory()->LookupHeap(slot & ~1u);
+                bool mapped_s =
+                    (slot & ~1u) &&
+                    mh_s && mh_s->QueryRangeAccessUnlocked(slot & ~1u, (slot & ~1u) + 0x50u) !=
+                                xe::memory::PageAccess::kNoAccess;
+                XELOGI("GuideHudSlot: paint {} [81D43C50+0x28] {:08X} -> {:08X} | tag bit {} "
+                       "(8177BFB0 asserts it SET) | untagged {:08X} {} | vtable {} sentinel {}",
+                       hook_paint_n, slot_prev, slot, (slot & 1u) ? "SET" : "CLEAR",
+                       slot & ~1u, mapped_s ? "mapped" : "NOT MAPPED - fields not read",
+                       mapped_s ? fmt::format("{:08X}{}", prd2(slot & ~1u),
+                                              prd2(slot & ~1u) == 0x81603CB4u ? " OK" : " not the pool vtable")
+                                : std::string("(not read)"),
+                       mapped_s ? fmt::format("{:08X}{}", prd2((slot & ~1u) + 0x38u),
+                                              prd2((slot & ~1u) + 0x38u) == 0xBAADF00Du ? " OK" : " not BAADF00D")
+                                : std::string("(not read)"));
+                slot_prev = slot;
+              }
+            }
+            if (::cvars::guide_dispatch_hud_task) {
+              static bool hud_dispatched = false;
+              // Phase 1091e, second cut: THE FIRST GUARD LIED. It only accepted
+              // 0x40000000..0x50000000 and then printed proc[+30]=00000000 -
+              // a zero it had never read. The task is at 30052000: xam's pool
+              // objects are not all on that heap. Accept anything the guest
+              // has actually mapped (mapped4 walks the heap), and when a field
+              // is NOT read, say so instead of printing a zero.
+              auto hud_mapped = [&](uint32_t a, uint32_t n) {
+                if (!a) return false;
+                auto* mh = kernel_state()->memory()->LookupHeap(a);
+                return mh && mh->QueryRangeAccessUnlocked(a, a + n) !=
+                                 xe::memory::PageAccess::kNoAccess;
+              };
+              const uint32_t htk = prd2(0x81D43C50u + 0x28u);
+              const bool htk_ok = hud_mapped(htk, 0x40u);
+              const uint32_t hproc = htk_ok ? prd2(htk + 0x30u) : 0u;
+              static uint32_t hud_logs = 0;
+              if (!hud_dispatched && hud_logs++ < 4u) {
+                if (!htk_ok) {
+                  XELOGW("GuideDispatchHudTask: paint {} [81D43C50+0x28]={:08X} is NOT MAPPED "
+                         "for 0x40 bytes - the task fields were NOT read",
+                         hook_paint_n, htk);
+                } else {
+                  XELOGI("GuideDispatchHudTask: paint {} task {:08X} proc[+30]={:08X} ctx[+34]={:08X} "
+                         "state[+10]={:08X} flags[+8]={:08X} | mgr state={:08X} showState[+BC]={:08X} "
+                         "gates [+B4]={:08X} [+B8]={:08X}",
+                         hook_paint_n, htk, hproc, prd2(htk + 0x34u), prd2(htk + 0x10u),
+                         prd2(htk + 8u), prd2(0x81D43C50u), prd2(0x81D43C50u + 0xBCu),
+                         prd2(0x81D43C50u + 0xB4u), prd2(0x81D43C50u + 0xB8u));
+                  // Phase 1091f: IS IT EVEN A POOL TASK? The pool's task
+                  // constructor 817785C8 stamps [+0]=81603CB4 (the vtable),
+                  // [+4]=1 and [+0x38]=BAADF00D, and ZEROES [+8] - so a zero
+                  // [+8] is what construction leaves, not evidence of a
+                  // half-built object. Dump the whole 0x50 the allocator
+                  // 81779728 asks for (817B54A0(.., 0x50, ..)) beside the app
+                  // task at [81D43C50+4], which DOES dispatch, so the two can
+                  // be compared field for field instead of guessed at.
+                  auto dump50 = [&](const char* tag, uint32_t o) {
+                    if (!hud_mapped(o, 0x50u)) {
+                      XELOGW("GuideDispatchHudTask: {} {:08X} NOT MAPPED for 0x50 - not dumped", tag, o);
+                      return;
+                    }
+                    std::string ln;
+                    for (uint32_t i = 0; i < 20; ++i)
+                      ln += fmt::format("{}{:08X}", i ? " " : "", prd2(o + i * 4u));
+                    XELOGI("GuideDispatchHudTask: {} {:08X} [+00..4C]: {} | vtable {} sentinel {}",
+                           tag, o, ln,
+                           prd2(o) == 0x81603CB4u ? "OK 81603CB4" : "NOT the pool task vtable",
+                           prd2(o + 0x38u) == 0xBAADF00Du ? "OK BAADF00D" : "NOT BAADF00D");
+                  };
+                  dump50("hud task", htk);
+                  const uint32_t atk = prd2(0x81D43C54u);
+                  dump50("app task (dispatches)", atk);
+                }
+              }
+              if (!hud_dispatched && htk_ok && hproc && hook_paint_n >= 310u) {
+                hud_dispatched = true;
+                const uint32_t st_before = prd2(htk + 0x10u);
+                uint32_t r = pcall(0x8177B490u, {htk, hproc, prd2(htk + 0x34u)});
+                XELOGI("GuideDispatchHudTask: paint {} 8177B490(task {:08X}, proc {:08X}, ctx {:08X}) "
+                       "-> {:08X} | [task+0x10] {:08X} -> {:08X} | [81D43C50]={:08X} showState[+BC]={:08X}",
+                       hook_paint_n, htk, hproc, prd2(htk + 0x34u), r, st_before,
+                       prd2(htk + 0x10u), prd2(0x81D43C50u), prd2(0x81D43C50u + 0xBCu));
+              }
+            }
+            if (::cvars::guide_resume_task_workers) {
+              static bool resumed_once = false;
+              if (!resumed_once) {
+                auto threads = kernel_state()->object_table()
+                                   ->GetObjectsByType<XThread>(XObject::Type::Thread);
+                uint32_t done = 0, seen = 0;
+                std::string rep;
+                for (auto& th : threads) {
+                  if (!th) continue;
+                  if (th->start_address() != 0x8177AD80u) continue;
+                  ++seen;
+                  uint32_t sc = 0xFFFFFFFFu;
+                  X_STATUS st = th->Resume(&sc);
+                  rep += fmt::format("tid {:08X} st={:08X} prev={} ",
+                                     th->thread_id(), uint32_t(st), sc);
+                  if (st == X_STATUS_SUCCESS) ++done;
+                }
+                if (seen) {
+                  resumed_once = true;
+                  XELOGI("GuideResumeWorkers: paint {} found {} worker thread(s) at 8177AD80, resumed {} | {}",
+                         hook_paint_n, seen, done, rep);
+                } else {
+                  static uint32_t miss_logs = 0;
+                  if (miss_logs++ < 3) {
+                    std::string all;
+                    for (auto& th : threads) {
+                      if (th) all += fmt::format("{:08X} ", th->start_address());
+                    }
+                    XELOGI("GuideResumeWorkers: paint {} no thread starts at 8177AD80; {} threads start at: {}",
+                           hook_paint_n, threads.size(), all);
+                  }
+                }
+              }
+            }
+            if (::cvars::guide_log_pool_sync) {
+              uint32_t task = prd2(0x81D43C54u);
+              uint32_t w8 = (task >= 0x40000000u && task < 0x50000000u) ? prd2(task + 8u) : 0xFFFFFFFFu;
+              static uint32_t last_w8 = 0xFFFFFFFEu;
+              static uint32_t last_task = 0xFFFFFFFEu;
+              if (w8 != last_w8 || task != last_task) {
+                last_w8 = w8;
+                last_task = task;
+                const uint32_t disc = (w8 == 0xFFFFFFFFu) ? 0xFFu : (w8 & 0x1Fu);
+                const char* which = "E_FAIL (no case)";
+                switch (disc) {
+                  case 1: which = "case 1 -> 8177B6D4"; break;
+                  case 2: which = "case 2 -> 8177B664"; break;
+                  case 4: which = "case 4 -> 8177B580"; break;
+                  case 8: which = "case 8 -> 8177B56C"; break;
+                  case 0x10: which = "case 0x10 -> 8177B530"; break;
+                  case 0xFFu: which = "(no task)"; break;
+                  default: break;
+                }
+                XELOGI("GuideAppTaskState: paint {} task {:08X} [+8]={:08X} & 0x1F = {:02X} -> {}",
+                       hook_paint_n, task, w8, disc, which);
+                // Phase 1069: the pool at 81D423C0. Dispatcher case 4 goes to
+                // 81779F08, which grows the worker pool: it bails unless
+                // [pool+0x154]==0 and [pool+0x15C]<10 and at least 0x2710 ticks
+                // since [pool+0x158], then CASes a token into [slot+0x24] of one
+                // of the SIX worker slots at [pool+0x130..0x144]. If those slots
+                // are empty there is nothing to wake, which would explain a
+                // schedule that succeeds and a procedure that never runs.
+                std::string slots;
+                for (uint32_t i = 0; i < 6u; ++i) {
+                  uint32_t sl = prd2(0x81D423C0u + 0x130u + i * 4u);
+                  uint32_t at24 = (sl >= 0x40000000u && sl < 0x50000000u) ? prd2(sl + 0x24u) : 0xFFFFFFFFu;
+                  slots += fmt::format("{:08X}/{:08X} ", sl, at24);
+                }
+                XELOGI("GuidePool: [+154]={:08X} [+158]={:08X} [+15C]={:08X} | 6 worker slots (ptr/+24): {}",
+                       prd2(0x81D423C0u + 0x154u), prd2(0x81D423C0u + 0x158u),
+                       prd2(0x81D423C0u + 0x15Cu), slots);
+              }
+            }
+            if (!::cvars::guide_hide_handles.empty()) {
+              static std::vector<uint32_t> hh;
+              static bool hh_parsed = false;
+              if (!hh_parsed) {
+                hh_parsed = true;
+                std::string cur;
+                for (char ch : ::cvars::guide_hide_handles + ",") {
+                  if (ch == ',') {
+                    if (!cur.empty()) hh.push_back(0x10000u | uint32_t(std::strtoul(cur.c_str(), nullptr, 16) & 0xFFFFu));
+                    cur.clear();
+                  } else if (ch != ' ') {
+                    cur += ch;
+                  }
+                }
+                XELOGI("GuideHide: hiding {} handle(s) every paint", hh.size());
+              }
+              for (uint32_t h : hh) {
+                uint32_t ob = pcall(0x81931040u, {h});
+                if (ob >= 0x40000000u && ob < 0x50000000u) {
+                  uint32_t fl = prd2(ob + 0xB4u);
+                  if (fl & 1u) {
+                    xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(ob + 0xB4u), fl & ~1u);
+                  }
+                }
+              }
+            }
+            if (::cvars::guide_tab_nav && g_guide_tabscene && now_f < g_guide_tab_settle_until) {
+              // Phase 1054 tabs: which paint the tab actually changed on
+              static uint32_t f_gcur_w = po(0x3BA);
+              uint32_t curw = f_gcur_w ? pcall(f_gcur_w, {g_guide_tabscene, pout}) : 0xFFu;
+              if (curw != g_guide_tab_watch_cur) {
+                XELOGI("GuideTabNav: current tab {} -> {} at paint {}", g_guide_tab_watch_cur, curw, hook_paint_n);
+                g_guide_tab_watch_cur = curw;
+              }
+            }
+            bool in_transition = g_guide_close_pending ||
+                                 (g_guide_show_time.time_since_epoch().count() &&
+                                  now_f < g_guide_show_time + std::chrono::milliseconds(1500)) ||
+                                 now_f < g_guide_tab_settle_until;  // phase 1054 blades: log the tab slide too
+            // Phase 1054 marker: with handles configured, keep tracking 800 ms
+            // past the tab-settle window (the first spread round after a hot
+            // window is where the "Open Tray" row snaps to its full width).
+            const bool track_ext = !::cvars::guide_track_handles.empty() &&
+                                   now_f < g_guide_tab_settle_until + std::chrono::milliseconds(800);
+            auto t_track0 = std::chrono::steady_clock::now();
+            struct TrackTimer { std::chrono::steady_clock::time_point t0; ~TrackTimer() { g_guide_ms_track += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count(); } } track_timer{t_track0};
+            if ((in_transition || track_ext) && ::cvars::guide_track_log) {
+              // Phase 1054 transitions l: xam's authored tracks, every paint.
+              auto fval = [](uint32_t u) { float v; std::memcpy(&v, &u, 4); return v; };
+              auto vec3 = [&](uint32_t fn, uint32_t h) {
+                std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                uint32_t r = pcall(fn, {h, pout});
+                return r == 0 ? fmt::format("({:.1f},{:.1f},{:.2f})", fval(prd2(pout)), fval(prd2(pout + 4u)), fval(prd2(pout + 8u)))
+                              : fmt::format("(err {:08X})", r);
+              };
+              auto elem = [&](const char* nm, uint32_t h) {
+                if (!h) return std::string(nm) + ":- ";
+                uint32_t ob = pcall(0x81931040u, {h});
+                bool okob = (ob >= 0x40000000u && ob < 0x50000000u);
+                float op = okob ? fval(prd2(ob + 0x24u)) : -1.0f;
+                float w = okob ? fval(prd2(ob + 0x1Cu)) : -1.0f, hh = okob ? fval(prd2(ob + 0x20u)) : -1.0f;
+                uint32_t fl = okob ? prd2(ob + 0xB4u) : 0u;
+                return fmt::format("{}: op {:.3f} vis {} pos {} {:.0f}x{:.0f} scale {} pivot {} | ", nm, op, fl & 1u,
+                                   vec3(0x81932190u, h), w, hh, vec3(0x81932328u, h), vec3(0x81932640u, h));
+              };
+              XELOGI("GuideTrack: paint {} {} +{:.0f} ms | {}{}{}",
+                     hook_paint_n, g_guide_close_pending ? "close" : "open",
+                     std::chrono::duration<double, std::milli>(now_f - (g_guide_close_pending ? g_guide_fade_out_t0 : g_guide_show_time)).count(),
+                     elem("Frame", g_guide_el_frame), elem("AppHost", g_guide_el_apphost), elem("Legend", g_guide_el_legend));
+              if (!::cvars::guide_track_handles.empty()) {
+                // Phase 1054 marker: the configured handles (16-bit hex, comma
+                // separated, 0001xxxx) on every tracked paint - position, size,
+                // scale, pivot and opacity - so an element's motion through a
+                // transition is measured rather than guessed from frames.
+                static std::vector<uint32_t> th;
+                static bool th_parsed = false;
+                if (!th_parsed) {
+                  th_parsed = true;
+                  std::string cur;
+                  for (char ch : ::cvars::guide_track_handles + ",") {
+                    if (ch == ',') {
+                      if (!cur.empty()) th.push_back(0x10000u | uint32_t(std::strtoul(cur.c_str(), nullptr, 16) & 0xFFFFu));
+                      cur.clear();
+                    } else if (ch != ' ') {
+                      cur += ch;
+                    }
+                  }
+                }
+                std::string tl;
+                for (uint32_t h : th) tl += elem(fmt::format("{:04X}", h & 0xFFFFu).c_str(), h);
+                XELOGI("GuideElemTrack: paint {} | {}", hook_paint_n, tl);
+              }
+              // Phase 1054 blades: every direct child of the Tabscene, its
+              // position and visibility, so a slide (position change over the
+              // transition) or its absence is measured, not guessed.
+              if (g_guide_tabscene) {
+                static uint32_t f_fc_b = po(0x32B), f_ns_b = po(0x330), f_gp_b = 0x81932190u;
+                std::string bl;
+                std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                pcall(f_fc_b, {g_guide_tabscene, pout});
+                for (uint32_t c = prd2(pout), k = 0; c && k < 24; ++k) {
+                  uint32_t ob = pcall(0x81931040u, {c});
+                  bool okob = (ob >= 0x40000000u && ob < 0x50000000u);
+                  std::memset(pm2->TranslateVirtual(pout + 16u), 0, 16);
+                  pcall(f_gp_b, {c, pout + 16u});
+                  float x = fval(prd2(pout + 16u)), y = fval(prd2(pout + 20u));
+                  float op = okob ? fval(prd2(ob + 0x24u)) : -1.0f;
+                  uint32_t vis = okob ? (prd2(ob + 0xB4u) & 1u) : 2u;
+                  bl += fmt::format("{:04X}:({:.0f},{:.0f})v{}o{:.2f} ", c & 0xFFFFu, x, y, vis, op);
+                  std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                  pcall(f_ns_b, {c, pout});
+                  uint32_t nx = prd2(pout);
+                  if (nx == c) break;
+                  c = nx;
+                }
+                XELOGI("GuideBladeTrack: paint {} {} | {}", hook_paint_n,
+                       g_guide_close_pending ? "close" : "open", bl);
+              }
+            }
+            uint32_t applied_n = 0;
+            if (::cvars::guide_fade_hud && f_setop_h) {
+              // targets: the draw root's first child (its own opacity is not
+              // applied when it is rendered directly) and every page/list
+              // scene the plan has ever held
+              //
+              // Phase 1063: hosted, xam's own descent reaches hud's canvas, the
+              // legend and the clock, so xam's AppHost track already fades them
+              // and writing them again would fight it. The tab pages are the
+              // only thing left outside that descent - they are nested
+              // XuiScenes, which the descent does not enter (measured: with the
+              // pages out of the plan the page area is empty, and hiding hud's
+              // Blade_Center/HUD_Bladedark reveals the game behind it, not a
+              // covered copy) - so they alone take the value xam computed.
+              auto add_target = [&](uint32_t h) {
+                if (!h || h == g_guide_hud_root || h == rt2) return;
+                for (uint32_t t : g_guide_fade_targets) if (t == h) return;
+                g_guide_fade_targets.push_back(h);
+              };
+              static uint32_t f_fc_h = po(0x32B);
+              std::memset(pm2->TranslateVirtual(pout), 0, 16);
+              if (!g_guide_hosted) {
+                if (f_fc_h && rt2) { pcall(f_fc_h, {rt2, pout}); add_target(prd2(pout)); }
+              }
+              for (uint32_t h : g_guide_plan) add_target(h);
+              if (!g_guide_hosted) {
+                add_target(g_guide_el_legend);
+                add_target(g_guide_el_datetime);
+              }
+              // Phase 1054 bugs: in spread mode the value is applied at the
+              // round's first swap (after the plan decision below), so every
+              // handle of a published round carries the same opacity.
+              g_guide_fade_want = opf;
+              if (!::cvars::guide_paint_spread && std::fabs(opf - g_guide_fade_applied) > 0.002f) {
+                for (uint32_t h : g_guide_fade_targets) {
+                  tsp->context()->f[1] = double(opf);
+                  uint32_t r = pcall(f_setop_h, {h});
+                  if (r == 0) ++applied_n;
+                }
+                g_guide_fade_applied = opf;
+              }
+            }
+            if (in_transition && (hook_paint_n % 3u) == 0u) {
+              XELOGI("GuideHost: paint {} {} fade {:.3f} (xam apphost {:.3f}) -> applied to {} of {} handles",
+                     hook_paint_n, g_guide_close_pending ? "closing" : "opening", opf, aph, applied_n, g_guide_fade_targets.size());
+            }
+          }
+          if ((::cvars::guide_force_render & 8) && !g_guide_hidden && !g_guide_idle) {
+            // Phase 1053: set the layout bits on every visible element before
+            // XuiElementLayoutTree runs, so the layout pass - not the render
+            // message - sees them (input9 set them after the layout pass).
+            static uint32_t f_fc9 = po(0x32B), f_ns9 = po(0x330);
+            std::vector<uint32_t> q9{rt2};
+            uint32_t marked9 = 0;
+            for (size_t qi = 0; qi < q9.size() && qi < 700; ++qi) {
+              uint32_t h9 = q9[qi];
+              uint32_t o9 = pcall(0x81931040u, {h9});
+              if (o9 >= 0x40000000u && o9 < 0x50000000u) {
+                uint32_t fl9 = prd2(o9 + 0xB4u);
+                if (fl9 & 1u) {
+                  uint32_t nb9 = ((::cvars::guide_force_render & 1) ? 0x20000u : 0u) |
+                                 ((::cvars::guide_force_render & 2) ? 0x2u : 0u) |
+                                 ((::cvars::guide_force_render & 4) ? 0x4u : 0u);
+                  xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(o9 + 0xB4u), fl9 | nb9);
+                  ++marked9;
+                }
+              }
+              std::memset(pm2->TranslateVirtual(pout), 0, 16);
+              pcall(f_fc9, {h9, pout});
+              for (uint32_t c = prd2(pout), k = 0; c && k < 48; ++k) {
+                q9.push_back(c);
+                std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                pcall(f_ns9, {c, pout});
+                uint32_t nx = prd2(pout);
+                if (nx == c) break;
+                c = nx;
+              }
+            }
+            static uint32_t pre_logs = 0;
+            if (pre_logs++ < 3) XELOGI("GuidePreDirty: marked {} of {} nodes before layout", marked9, q9.size());
+          }
+          // Phase 1054 transitions: in spread mode the device-changed call
+          // belongs to the round's first swap (the XUI frame begins there).
+          // Phase 1054 slide: inside a hot window the draw context keeps its
+          // recorded geometry (it lives in the vertex ring, which cannot wrap
+          // within a window): re-record at the window's first hot paint and
+          // every guide_hot_dcc_every-th one, so the other hot paints re-emit
+          // state for unchanged visuals and geometry only for what the
+          // timeline dirtied (every hot paint used to re-emit everything:
+          // xam's root 2065 words / 10-19 ms with nothing in it moving).
+          const bool hot_skip_dcc = g_guide_hot_now && g_guide_hot_seq > 0u &&
+                                    (::cvars::guide_hot_dcc_every <= 0 ||
+                                     (g_guide_hot_seq % uint32_t(::cvars::guide_hot_dcc_every)) != 0u);
+          if (!g_guide_idle && g_guide_round_pos == 0 && !hot_skip_dcc && (::cvars::guide_redraw_mode == 1 ||
+              (::cvars::guide_redraw_mode == 2 && g_guide_want_redraw))) {
+            // Phase 1053: a visual records its geometry into the DC once and
+            // re-emits only state afterwards (2512 words then 80), so the
+            // published stream is a snapshot and navigation never shows.
+            // XuiRenderDCDeviceChanged tells the DC its device is gone, which
+            // is the documented way to drop everything it cached.
+            static uint32_t f_dcc = po(0x34D);
+            uint32_t rr = pcall(f_dcc, {dc2});
+            g_guide_want_redraw = false;
+            static uint32_t dcc_logs = 0;
+            if (dcc_logs++ < 4) {
+              XELOGI("GuideRedraw: XuiRenderDCDeviceChanged({:08X}) -> {:08X} (mode {})",
+                     dc2, rr, ::cvars::guide_redraw_mode);
+            }
+          }
+          if (!::cvars::guide_dirty_via_api && !g_guide_idle && g_guide_round_pos == 0) {
+            pcall(f_b, {dc2, ::cvars::guide_paint_clear});
+            // Phase 1054 slide: inside a hot window the layout pass runs on
+            // even hot paints and the pages render on odd ones - hud's list
+            // rendered in the paint of its own layout shows unmeasured items
+            // (half-grown separators, its scroll knob at "Open Tray"), which a
+            // spread round never does because its pages render two or three
+            // paints after the layout. The blades keep sliding: the transform
+            // comes from the position property the timeline sets.
+            const bool hot_layout = !g_guide_hot_now || g_guide_hot_every_now <= 1u ||
+                                    (g_guide_hot_seq % g_guide_hot_every_now) == 0u;
+            if (hot_layout) {
+              if (!g_guide_hosted) pcall(f_l, {rt2});  // hosted: laid out with xam's root below
+              if (::cvars::guide_paint_hud_root && g_guide_hud_root) {
+                // phase 1054: lay out the HUD root's canvas (or the scene) too
+                pcall(f_l, {g_guide_hud_canvas ? g_guide_hud_canvas : g_guide_hud_root});
+              }
+            }
+          }
+          g_guide_t_begin = std::chrono::steady_clock::now();
           // Sample the cursor AFTER RenderBegin. Phase 209's reading spanned
           // the rebind that happens inside it - 3009C030 to 40875814 - and so
           // measured a pointer change rather than an amount of output. Taking
@@ -7190,6 +11686,8 @@ void VdSwap_entry(
             }
           }
           uint32_t before = paint_dev_ ? prd2(paint_dev_ + 0x30u) : 0;
+          if (g_guide_round_pos != 0) before = g_guide_round_before;  // phase 1054 fps: mid-round
+          else g_guide_round_before = before;
           // Phase 901: wipe the arena before the paint fills it. Whatever the
           // paint writes this frame reappears; anything left from an earlier
           // frame does not.
@@ -7200,7 +11698,7 @@ void VdSwap_entry(
                                : before + 0x40000u;
             for (uint32_t a = before; a + 4u <= end; a += 4) {
               auto* zh = pm2->LookupHeap(a);
-              if (!zh || zh->QueryRangeAccess(a, a + 4u) ==
+              if (!zh || zh->QueryRangeAccessUnlocked(a, a + 4u) ==
                              xe::memory::PageAccess::kNoAccess) {
                 continue;
               }
@@ -7241,6 +11739,145 @@ void VdSwap_entry(
           std::memset(pm2->TranslateVirtual(ppay), 0, 256);
           pcall(guide_bs_hud_base_ + 0xA888u,
                 {pmsg, ppay, dc2, 0xFFFFFFFFull, 1});
+          {
+            static uint32_t pml = 0;
+            if (pml++ < 2) {
+              if (::cvars::guide_xui_debug_level) {
+                static bool dbg_done = false;
+                if (!dbg_done) {
+                  dbg_done = true;
+                  uint32_t was = prd2(0x81D27738u), was2 = prd2(0x81D27734u);
+                  xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(0x81D27738u),
+                                               ::cvars::guide_xui_debug_level);
+                  XELOGI("XuiDebugLevel: [81D27738] {:08X} -> {:08X} ([81D27734]={:08X})",
+                         was, prd2(0x81D27738u), was2);
+                }
+              }
+              if (::cvars::guide_install_ctx_callback) {
+                static bool cb_done = false;
+                if (!cb_done) {
+                  cb_done = true;
+                  uint32_t cx = prd2(0x81D6C978u);
+                  auto* ch = cx ? pm2->LookupHeap(cx) : nullptr;
+                  bool cmapped = ch && ch->QueryRangeAccessUnlocked(cx, cx + 0x40u) !=
+                                           xe::memory::PageAccess::kNoAccess;
+                  uint32_t was = cmapped ? prd2(cx + 0x0Cu) : 0xFFFFFFFFu;
+                  if (cmapped && was == 0) {
+                    xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(cx + 0x0Cu),
+                                                 GuideConst(0x81904480u));
+                  }
+                  if (cmapped && prd2(cx + 0x0Cu) != 0 && XamIsDashrootLayout()) {
+                    // Undo SkinDispatchPatch now that the slot is real: the
+                    // DC loader's `bne cr6, 81901E98` must be a branch again.
+                    GuidePatchWord(0x81901E88u, 0x60000000u, 0x409A0010u,
+                                   "DcLoaderRestore");
+                  }
+                  XELOGI("CtxCallback: ctx {:08X} [+C] was {:08X} -> now {:08X} "
+                         "(+10={:08X} +14={:08X} +18={:08X})",
+                         cx, was, cmapped ? prd2(cx + 0x0Cu) : 0u,
+                         cmapped ? prd2(cx + 0x10u) : 0u,
+                         cmapped ? prd2(cx + 0x14u) : 0u,
+                         cmapped ? prd2(cx + 0x18u) : 0u);
+                  {
+                    uint32_t tdev = prd2(0x81D6C980u);
+                    uint32_t sbuf = pm2->SystemHeapAlloc(256, 16);
+                    uint32_t obuf = pm2->SystemHeapAlloc(64, 16);
+                    const char* locs[2] = {"sharedres://A-Button.png",
+                                           "ico_32x_volume.png"};
+                    for (int li = 0; li < 2 && sbuf && obuf && tdev; ++li) {
+                      std::memset(pm2->TranslateVirtual(sbuf), 0, 256);
+                      std::memset(pm2->TranslateVirtual(obuf), 0, 64);
+                      for (uint32_t k = 0; locs[li][k]; ++k) {
+                        xe::store_and_swap<uint16_t>(
+                            pm2->TranslateVirtual(sbuf + k * 2u),
+                            uint16_t(locs[li][k]));
+                      }
+                      {
+                        uint32_t c1 = prd2(tdev + 0x1C8u);
+                        auto* c1h = c1 ? pm2->LookupHeap(c1) : nullptr;
+                        bool c1m = c1h && c1h->QueryRangeAccessUnlocked(c1, c1 + 0x40u) !=
+                                              xe::memory::PageAccess::kNoAccess;
+                        uint32_t c1c = c1m ? prd2(c1 + 0x0Cu) : 0xFFFFFFFFu;
+                        XELOGI("DirectLoadChain: dc {:08X} -> [1C8]={:08X} -> [+C]={:08X} "
+                               "| global ctx [81D6C978]={:08X} its [+C]={:08X}",
+                               tdev, c1, c1c, cx, prd2(cx + 0x0Cu));
+                      }
+                      // DC::LoadTextureFromLocator(dc, locator, &out, &texslot)
+                      uint32_t hr1 = pcall(GuideConst(0x81901E40u),
+                                           {tdev, sbuf, obuf, obuf + 16u});
+                      uint32_t o0 = prd2(obuf), o1 = prd2(obuf + 4u),
+                               o2 = prd2(obuf + 16u);
+                      XELOGI("DirectLoadDC: '{}' 81901E40(dc {:08X}) hr={:08X} "
+                             "out=({:08X},{:08X}) tex={:08X}",
+                             locs[li], tdev, hr1, o0, o1, o2);
+                      std::memset(pm2->TranslateVirtual(obuf), 0, 64);
+                      uint32_t dbuf = pm2->SystemHeapAlloc(128, 16);
+                      if (dbuf) {
+                        std::memset(pm2->TranslateVirtual(dbuf), 0, 128);
+                        // 81904480(receiver=[dc+0x1CC], locator, &desc (0x1C
+                        // bytes), &out) - the way 81901E40 calls the slot.
+                        uint32_t recv = prd2(tdev + 0x1CCu);
+                        uint32_t hr2 = pcall(GuideConst(0x81904480u),
+                                             {recv, sbuf, dbuf, obuf});
+                        XELOGI("DirectLoadXui: '{}' 81904480(ctx) hr={:08X} "
+                               "out={:08X} desc: {:08X} {:08X} {:08X} {:08X} {:08X} "
+                               "{:08X} {:08X}",
+                               locs[li], hr2, prd2(obuf), prd2(dbuf),
+                               prd2(dbuf + 4u), prd2(dbuf + 8u), prd2(dbuf + 12u),
+                               prd2(dbuf + 16u), prd2(dbuf + 20u),
+                               prd2(dbuf + 24u));
+                      }
+                    }
+                  }
+                }
+              }
+              if (::cvars::guide_init_hud_dc) {
+                static bool dc_init_done = false;
+                if (!dc_init_done) {
+                  dc_init_done = true;
+                  uint32_t tdev = prd2(0x81D6C980u);
+                  uint32_t ctxg = prd2(0x81D6C978u), hostg = prd2(0x81D6C97Cu);
+                  auto* th = tdev ? pm2->LookupHeap(tdev) : nullptr;
+                  bool tmapped = th && th->QueryRangeAccessUnlocked(tdev, tdev + 0x1F0u) !=
+                                           xe::memory::PageAccess::kNoAccess;
+                  uint32_t before1c8 = tmapped ? prd2(tdev + 0x1C8u) : 0xFFFFFFFFu;
+                  uint32_t hr = 0xDEADu;
+                  if (tmapped && before1c8 == 0 && ctxg && hostg) {
+                    hr = pcall(GuideConst(0x818FF428u), {tdev});
+                  }
+                  XELOGI("InitHudDC: texdev {:08X} [1C8] before={:08X} ctx={:08X} "
+                         "host[81D6C97C]={:08X} -> 818FF428 hr={:08X} after "
+                         "[1C8]={:08X} [1CC]={:08X} [134]={:08X}",
+                         tdev, before1c8, ctxg, hostg, hr,
+                         tmapped ? prd2(tdev + 0x1C8u) : 0u,
+                         tmapped ? prd2(tdev + 0x1CCu) : 0u,
+                         tmapped ? prd2(tdev + 0x134u) : 0u);
+                }
+              }
+              XELOGI("PaintMsgWords: msg {:08X} {:08X} {:08X} {:08X} {:08X} "
+                     "{:08X} | payload {:08X} {:08X} {:08X} {:08X} {:08X} {:08X}",
+                     prd2(pmsg), prd2(pmsg + 4u), prd2(pmsg + 8u),
+                     prd2(pmsg + 12u), prd2(pmsg + 16u), prd2(pmsg + 20u),
+                     prd2(ppay), prd2(ppay + 4u), prd2(ppay + 8u),
+                     prd2(ppay + 12u), prd2(ppay + 16u), prd2(ppay + 20u));
+              // Phase 1018: the DC-layer entry points (818FB6A0 set texture,
+              // 818FB788 draw, 818FB710 draw text) dispatch through the DC
+              // object's vtable slots +0x20/+0x28/+0x38. Name the targets.
+              uint32_t dcobj = prd2(ppay);
+              auto* dch = dcobj ? pm2->LookupHeap(dcobj) : nullptr; if (dch && dch->QueryRangeAccessUnlocked(dcobj, dcobj + 4u) != xe::memory::PageAccess::kNoAccess) {
+                uint32_t vt = prd2(dcobj);
+                std::string slots;
+                for (uint32_t k = 0; k < 20; ++k) {
+                  slots += fmt::format("[{:02X}]={:08X} ", k * 4,
+                                       (vt >= 0x81000000u && vt < 0x81E00000u)
+                                           ? prd2(vt + k * 4u)
+                                           : 0u);
+                }
+                XELOGI("PaintDCVtable: dc={:08X} vtable={:08X} | {}", dcobj,
+                       vt, slots);
+              }
+            }
+          }
           // The paint gets a visual from 81931040 -> 819426F0, which does not read a
           // field on the widget: it indexes a global table based at 81D6D0D8 with the
           // bound at [81D6D4F8] and twi traps on the range (phase 459). A zero bound
@@ -7253,6 +11890,31 @@ void VdSwap_entry(
                    prd2(0x81D6D4F8u));
           }
           uint32_t painted = 0;
+          g_guide_first_e0 = 0;
+          if (g_guide_spread_now && g_guide_round_pos != 0 && g_guide_round_save30 && paint_dev_) {
+            // phase 1054 fps: something rewinds the reserve cursor between the
+            // swaps of a round; put it back where the previous sub-render left it
+            uint32_t c30 = prd2(paint_dev_ + 0x30u);
+            if (c30 != g_guide_round_save30) {
+              static uint32_t rr_logs = 0;
+              if (rr_logs++ < 10) {
+                XELOGI("GuideRound: paint {} pos {} cursor [30] {:08X} (was {:08X}), [34] {:08X}, [2B4C] {:08X} -> restored",
+                       hook_paint_n, g_guide_round_pos, c30, g_guide_round_save30,
+                       prd2(paint_dev_ + 0x34u), prd2(paint_dev_ + 0x2B4Cu));
+              }
+              xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(paint_dev_ + 0x30u), g_guide_round_save30);
+              xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(paint_dev_ + 0x34u), g_guide_round_save34);
+              xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(paint_dev_ + 0x2B4Cu), g_guide_round_save2b4c);
+            }
+          }
+          auto walk_t0 = std::chrono::steady_clock::now();
+          g_guide_t_walk0 = walk_t0;
+          g_guide_stage = 6;
+          g_guide_render_n = 0;
+          g_guide_segs_paint.clear();
+          g_guide_hot_skipped = 0;
+          if (!g_guide_hot_now) g_guide_page_enter.clear();  // phase 1054 slide: every page is new to the next window
+          if (!g_guide_spread_now || g_guide_round_pos == 0) g_guide_segs_round.clear();
           uint32_t hp = rt2;
           // 819426F0 indexes the visual table with rlwinm r10,rObj,0,16,31 - the low
           // 16 bits of what it is handed - and traps/returns 0 when that exceeds the
@@ -7282,12 +11944,205 @@ void VdSwap_entry(
           // executed individually.
           std::vector<std::pair<uint32_t, uint32_t>> emit_blocks;
           std::vector<uint32_t> todo;
-          if (resolves(hp)) todo.push_back(hp);
+          if (resolves(hp) && !g_guide_hosted && (!g_guide_close_pending || ::cvars::guide_fade_hud)) todo.push_back(hp);  // fading: hud stays through the close
+          // Phase 1054: xam's HUD root scene (hudbkgnd.xur: the backdrop
+          // figure, legend, gamertag, clock) lives under the boot canvas,
+          // which hud's own render loop never paints. Paint it first, under
+          // hud's canvas (top of the stack is popped first).
+          if (::cvars::guide_paint_hud_root && g_guide_hud_root && resolves(g_guide_hud_root)) {
+            todo.push_back(g_guide_hud_root);
+          }
+          // Phase 1054: with root_only the rendered set (roots + visible pages)
+          // rarely changes; keep it for 30 paints and skip the tree walk.
+          static std::vector<uint32_t> render_cache;
+          static uint32_t render_cache_age = 0;
+          std::vector<uint32_t> render_cache_new;
+          std::vector<uint32_t> page_desc;  // phase 1054: scene descendants of the pages found this walk
+          static uint32_t last_dirty6 = 0;
+          bool relayout = last_dirty6 != 0;
+          last_dirty6 = g_guide_cnt6;
+          // Phase 1054 fps: rebuilds are counted on active paints only, and the
+          // first active paint after idle always rebuilds (a keystroke may have
+          // navigated to a new page while the plan was cached).
+          static uint32_t active_paints = 0;
+          static bool prev_idle_for_plan = true;
+          bool first_active = !g_guide_idle && prev_idle_for_plan;
+          prev_idle_for_plan = g_guide_idle;
+          if (!g_guide_idle) ++active_paints;
+          uint32_t rebuild_every = ::cvars::guide_paint_interleave ? 300u : (::cvars::guide_paint_spread ? 15u : 10u);
+          (void)render_cache_age;
+          // Phase 1054 walk: inside a transition window (a tab switch, the
+          // open) the plan used to be rediscovered on every paint - a 214-node
+          // walk, ~1400 guest calls, a fifth of a hot paint - because the
+          // entrance hides and shows pages. Rediscover it on the window's
+          // first paint and then every guide_walk_window_every paints (a
+          // page that appears later is picked up within that many paints),
+          // and every rebuild_every paints at rest as before.
+          const bool in_window = std::chrono::steady_clock::now() < g_guide_tab_settle_until ||
+                                 std::chrono::steady_clock::now() < g_guide_open_burst_until;
+          static bool prev_in_window = false;
+          static uint32_t window_paints = 0;
+          if (in_window) ++window_paints; else window_paints = 0;
+          const bool window_rebuild = in_window && (!prev_in_window || (::cvars::guide_walk_window_every > 0 &&
+                                                    (window_paints % uint32_t(::cvars::guide_walk_window_every)) == 0u));
+          prev_in_window = in_window;
+          bool use_cache = ::cvars::guide_paint_root_only && (!g_guide_close_pending || ::cvars::guide_fade_hud) &&
+                           !render_cache.empty() && !relayout && !first_active && !g_guide_closing_edge &&
+                           !window_rebuild &&
+                           (active_paints % rebuild_every) != 0u;
+          if (use_cache) {
+            todo.clear();
+            for (size_t i = render_cache.size(); i-- > 0;) {
+              if (resolves(render_cache[i])) todo.push_back(render_cache[i]);
+            }
+          }
+          // Phase 1054 fps: render one plan handle per swap when every plan
+          // handle already has a published segment; the publish composes them.
+          g_guide_interleave_now = false;
+          g_guide_plan_pos = 0;
+          g_guide_spread_now = ::cvars::guide_paint_spread && !g_guide_hidden && !g_guide_idle;
+          if (g_guide_spread_now && use_cache) {
+            g_guide_plan = render_cache;
+            if (g_guide_round_pos >= render_cache.size()) g_guide_round_pos = 0;
+          } else if (g_guide_spread_now) {
+            // a rebuild paint: the plan is learned during this walk and the
+            // round goes on from its current position. Phase 1054 open: it
+            // used to restart at entry 0 here, and while a transition kept
+            // the layout dirty (or a settle window forced rebuilds) every
+            // paint was a rebuild paint, so the round never got past xam's
+            // root and nothing was published until the window ended - the
+            // reopen showed nothing for 1.3 s, then the settled panel at once.
+            if (g_guide_round_pos >= 64u) g_guide_round_pos = 0;
+          }
+          g_guide_round_step = 1u;
+          if (g_guide_spread_now && ::cvars::guide_round_all) {
+            // Phase 1055 bugs: the whole plan on every paint. One handle per
+            // paint was the answer to 20-65 ms paints; at ~1 ms a paint the
+            // spread round only meant a published frame every 4 (Home) or 6
+            // (Media) paints - 10-15 Hz for the list highlight, the clock and
+            // the close's content cut. 64 covers any plan (the round position
+            // wraps to 0 when it passes the plan's size).
+            g_guide_round_step = 64u;
+          }
+          if (g_guide_spread_now && ::cvars::guide_open_burst > 1 && !g_guide_close_pending &&
+              std::chrono::steady_clock::now() < g_guide_open_burst_until) {
+            // Phase 1054 open: hud's authored entrance (%uClose) fans the
+            // blades out in three-frame steps; a four-swap round would publish
+            // that as one or two jumps. Render guide_open_burst plan entries
+            // per swap until the entrance is over.
+            g_guide_round_step = std::max(g_guide_round_step, uint32_t(::cvars::guide_open_burst));
+          }
+          g_guide_hot_now = false;
+          g_guide_hot_force_all = false;
+          if (::cvars::guide_hot_compose && !g_guide_hidden && !g_guide_idle && !g_guide_close_pending &&
+              !g_guide_keepalive_paint && !g_guide_hosted &&
+              std::chrono::steady_clock::now() < g_guide_open_burst_until) {
+            // Phase 1054 tabs: hot composition. While an authored animation
+            // plays (the open entrance, a tab slide) only xam's root and hud's
+            // canvas change - the frame, legend, clock, blades and labels; the
+            // page scenes are static. Each swap renders those two (and any
+            // plan handle without a stored segment) as one XUI frame and the
+            // publish composes the page segments from their last render, so a
+            // published frame costs root + canvas instead of the whole round.
+            // The header and clock, which vanish when composed from an older
+            // paint, are always fresh this way.
+            g_guide_hot_now = true;
+            g_guide_spread_now = false;
+            g_guide_round_pos = 0;
+            g_guide_round_step = 1u;
+            g_guide_interleave_now = true;  // the publish composes
+            if (use_cache) g_guide_plan = render_cache;
+          }
+          {
+            static bool prev_hot = false;
+            if (g_guide_hot_now) g_guide_hot_seq = prev_hot ? g_guide_hot_seq + 1u : 0u;
+            prev_hot = g_guide_hot_now;
+          }
+          g_guide_hot_every_now = 1u;
+          if (g_guide_hot_now && ::cvars::guide_hot_page_every > 1) {
+            // Phase 1054 slide: the plan's page scenes render on every hot
+            // paint while the transition plays when they are cheap (Home: the
+            // page and the list, ~17 ms), on every guide_hot_page_every-th
+            // when not (Media: four scenes, ~60 ms). Rendering hud's list on
+            // alternate paints caught its "Open Tray" knob transient and the
+            // composed copy held it for two paints; every paint behaves like
+            // the spread rounds, which never published it.
+            double page_ms = 0.0;
+            for (uint32_t h : g_guide_plan) {
+              if (h == rt2 || h == g_guide_hud_root) continue;
+              auto mit = g_guide_render_ms_last.find(h);
+              page_ms += (mit != g_guide_render_ms_last.end()) ? mit->second : 20.0;
+            }
+            if (page_ms > double(::cvars::guide_hot_page_cheap_ms)) g_guide_hot_every_now = uint32_t(::cvars::guide_hot_page_every);
+          }
+          if (((g_guide_spread_now && g_guide_round_pos == 0) || g_guide_hot_now) && g_guide_fade_want >= 0.0f &&
+              std::fabs(g_guide_fade_want - g_guide_fade_applied) > 0.002f && !g_guide_fade_targets.empty()) {
+            // Phase 1054 bugs: hud's opacity for this round, on every target,
+            // before its first handle renders
+            static uint32_t f_setop_r = po(0x37E);
+            if (f_setop_r) {
+              uint32_t n_ok = 0;
+              for (uint32_t h : g_guide_fade_targets) {
+                tsp->context()->f[1] = double(g_guide_fade_want);
+                if (pcall(f_setop_r, {h}) == 0) ++n_ok;
+              }
+              g_guide_fade_applied = g_guide_fade_want;
+              if (g_guide_hot_now) g_guide_hot_force_all = true;  // the pages carry the opacity: re-render them
+              static uint32_t fr_logs = 0;
+              if (fr_logs++ < 12) {
+                XELOGI("GuideHost: round opacity {:.3f} -> {} of {} targets (plan {} handles)",
+                       g_guide_fade_want, n_ok, g_guide_fade_targets.size(), g_guide_plan.size());
+              }
+            }
+          }
+          if (use_cache && ::cvars::guide_paint_interleave && !::cvars::guide_paint_spread &&
+              !g_guide_keepalive_paint && !g_guide_hidden && !g_guide_idle && render_cache.size() > 1) {
+            bool covered = true;
+            for (uint32_t h : render_cache) {
+              auto it = g_guide_segs.find(h);
+              if (it == g_guide_segs.end() || it->second.empty()) { covered = false; break; }
+            }
+            if (covered) {
+              g_guide_plan = render_cache;
+              g_guide_interleave_idx = g_guide_interleave_round++ % uint32_t(render_cache.size());
+              g_guide_interleave_now = true;
+            }
+          }
+          if (g_guide_hidden || g_guide_idle) todo.clear();  // phase 1053: hidden -> no paint, no publish
+          if (g_guide_hidden && g_guide_warmup && g_guide_hud_root && resolves(g_guide_hud_root)) {
+            todo.push_back(g_guide_hud_root);  // phase 1054: warm-up render of xam's scene
+          }
           uint32_t visited = 0, skipped = 0;
           while (!todo.empty() && visited < 512) {
             hp = todo.back();
             todo.pop_back();
             ++visited;
+            // Phase 1050: honour XUI visibility. hud hides the inactive tab
+            // pages (bit 0 of [obj+0xB4] clear, or opacity 0); this walk
+            // painted them anyway. Skipping here also prunes the subtree.
+            if (::cvars::guide_paint_honor_visibility) {
+              static uint32_t f_op2 = po(0x37D);
+              std::memset(pm2->TranslateVirtual(pout), 0, 16);
+              pcall(0x819426F0u, {hp, pout});
+              uint32_t ob = prd2(pout);
+              uint32_t fl = ob ? prd2(ob + 0xB4u) : 1u;
+              if (fl & 0x20000u) ++g_guide_cnt17;
+              if (fl & 0x6u) ++g_guide_cnt6;
+              xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(pout + 8u), 0x3F800000u);
+              pcall(f_op2, {hp, pout + 8u});
+              uint32_t opw = prd2(pout + 8u);
+              float op;
+              std::memcpy(&op, &opw, 4);
+              if (!(fl & 1u) || op <= 0.001f) {
+                static uint32_t hvl = 0;
+                if (hvl++ < 6) {
+                  XELOGI("PaintHidden: {:08X} obj {:08X} flags {:08X} opacity {:.3f} "
+                         "- subtree skipped", hp, ob, fl, op);
+                }
+                ++skipped;
+                continue;
+              }
+            }
             int d = 0;
             std::memset(pm2->TranslateVirtual(pout), 0, 16);
             // The return value was discarded; only `out` was checked. An
@@ -7309,7 +12164,7 @@ void VdSwap_entry(
               }
             }
             uint32_t vh2 = prd2(pout);
-            if (d < 3) {
+            if (d < 3 && ::cvars::guide_walk_verbose) {  // phase 1054: eight lines per element per paint
               // 81931C90 returns S_OK with *out = 0 when [obj+8] is zero
               // (81931D08: r3=0 / stw r3,0(r30) / return 0), and the export
               // then reports 80300017. Resolve the object the same way it
@@ -7506,7 +12361,10 @@ void VdSwap_entry(
                   XELOGI("TypeDesc: {:08X} {}", td, wds);
                 }
                 std::string ww;
-                for (uint32_t q = 0; q < 8; ++q) {
+                // Phase 1050: vo is null when the root has no visual (the
+                // real dispatcher's canvas); reading it host-faulted and
+                // killed the paint.
+                for (uint32_t q = 0; vo && q < 8; ++q) {
                   ww += fmt::format("+{:X}:{:08X} ", q * 4, prd2(vo + q * 4u));
                 }
                 XELOGI("WidgetObj: {:08X} {}", vo, ww);
@@ -7638,7 +12496,122 @@ void VdSwap_entry(
               }
             }
             if (!vh2) ++skipped;
-            if (vh2) {
+            // Phase 1054: elements without a visual (XuiText directly under a
+            // scene: the blade labels) were never rendered; their class
+            // handler draws them on the render message like any other.
+            // Phase 1054: with guide_paint_root_only, XUI's own recursion from a
+            // scene's render message draws its subtree (the walk was drawing it
+            // all again, twice); render only the roots and the scene elements
+            // (a parent scene's recursion stops at a child scene - the pages).
+            bool render_this = vh2 || ::cvars::guide_paint_novisual;
+            if (::cvars::guide_paint_root_only) {
+              bool is_root = (hp == g_guide_hud_root) || (hp == rt2 && !g_guide_hosted);
+              bool is_page = false, under_page = false;
+              // Phase 1054 dup: the canvas's own recursion draws every visible
+              // page and the nested list scene (dumps: the rest-state canvas
+              // holds the rows, their labels and the Open Tray icon; the page
+              // and list standalone renders were the same draws again, three
+              // copies of every row and a compounded crossfade). The pages
+              // join the plan only with guide_render_pages.
+              if (!is_root && !use_cache && ::cvars::guide_render_pages) {
+                // a tab page: a XuiScene with the page flag (bit 12) set
+                bool is_scene = pcall(0x81930FE8u, {hp, prd2(0x81D6CDE4u)}) != 0;
+                if (is_scene) {
+                  uint32_t obp = pcall(0x81931040u, {hp});
+                  is_page = (obp >= 0x40000000u && obp < 0x50000000u) && (prd2(obp + 0xB4u) & 0x1000u);
+                  if (!is_page) {
+                    for (uint32_t d2 : page_desc) if (d2 == hp) { under_page = true; break; }
+                  }
+                }
+                if (is_page) {
+                  // the page's recursion stops at its own child scenes (the list
+                  // lives in one): collect every scene below it
+                  std::vector<uint32_t> q2{hp};
+                  for (size_t qi = 0; qi < q2.size() && q2.size() < 400; ++qi) {
+                    std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                    pcall(f_fc, {q2[qi], pout});
+                    for (uint32_t c = prd2(pout), k = 0; c && k < 128; ++k) {
+                      q2.push_back(c);
+                      if (c != hp && pcall(0x81930FE8u, {c, prd2(0x81D6CDE4u)})) page_desc.push_back(c);
+                      std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                      pcall(f_ns, {c, pout});
+                      uint32_t nx = prd2(pout);
+                      if (nx == c) break;
+                      c = nx;
+                    }
+                  }
+                }
+              }
+              if (g_guide_close_pending && !is_root) {
+                // Phase 1054 bugs: the pages leave the plan for the close (the
+                // AppHost is hidden at its first frame). xam's root and hud's
+                // canvas stay: the frame's draw sits in the root's segment and
+                // executes only in company (a root-only round drew nothing).
+                is_page = false;
+                under_page = false;
+              }
+              render_this = is_root || is_page || under_page || use_cache;
+              if (render_this && !use_cache) render_cache_new.push_back(hp);
+              if (g_guide_hot_now) {
+                // phase 1054 tabs: hot composition - xam's root and hud's
+                // canvas render every swap; a page renders only when it has
+                // no stored segment, is new to the plan, or the round opacity
+                // changed; the publish composes the rest.
+                if (render_this) {
+                  ++g_guide_plan_pos;
+                  // Phase 1054 slide: xam's root is hot only while the open
+                  // animates it (frame, legend, clock); in a tab slide it is
+                  // static and composed from its last render like the pages.
+                  const bool root_hot = !::cvars::guide_hot_root_compose ||
+                                        (g_guide_show_time.time_since_epoch().count() &&
+                                         std::chrono::steady_clock::now() < g_guide_show_time + std::chrono::milliseconds(1500));
+                  const bool hot = (hp == rt2) || (hp == g_guide_hud_root && root_hot);
+                  if (!hot && !g_guide_hot_force_all) {
+                    auto it = g_guide_segs.find(hp);
+                    const bool cov = it != g_guide_segs.end() && !it->second.empty() &&
+                                     std::find(render_cache.begin(), render_cache.end(), hp) != render_cache.end();
+                    // phase 1054 slide: a page renders for its first
+                    // guide_hot_page_settle hot paints after entering the plan
+                    // and composes afterwards - composing its first render
+                    // froze hud's list entrance (half-grown separators, the
+                    // disc icon on "Open Tray") for the whole window
+                    // Phase 1054 slide: a page animates through the transition
+                    // (its crossfade; hud's list hides its "Open Tray" icon
+                    // from a timer), so a stored render is only right once the
+                    // transition is over: render it while the animation clock
+                    // since it entered the plan is under guide_hot_page_settle_ms
+                    // (on every guide_hot_page_every-th hot paint), compose after.
+                    auto eit = g_guide_page_enter.find(hp);
+                    if (hp == g_guide_hud_root) {
+                      render_this = false;  // static through a tab slide: composed
+                      ++g_guide_hot_skipped;
+                    } else if (!cov || eit == g_guide_page_enter.end()) {
+                      g_guide_page_enter[hp] = g_guide_anim_clock;  // rendered now
+                    } else {
+                      const double age = g_guide_anim_clock - eit->second;
+                      const uint32_t every = std::max(1u, g_guide_hot_every_now);
+                      const bool render_paint = every <= 1 || (g_guide_hot_seq % every) == every - 1u;  // the paints without a layout pass
+                      if (age < double(::cvars::guide_hot_page_settle_ms) && render_paint) {
+                        // rendered: the transition is still playing
+                      } else {
+                        render_this = false;
+                        ++g_guide_hot_skipped;
+                      }
+                    }
+                  }
+                }
+              } else if (use_cache && g_guide_interleave_now) {
+                // phase 1054 fps: this swap renders plan entry g_guide_interleave_idx only
+                uint32_t pidx = g_guide_plan_pos++;
+                if (pidx != g_guide_interleave_idx) render_this = false;
+              } else if (g_guide_spread_now && render_this) {
+                // phase 1054 fps: this swap renders plan entry g_guide_round_pos of the open frame
+                // (phase 1054 open: g_guide_round_step entries while the entrance plays)
+                uint32_t pidx = g_guide_plan_pos++;
+                if (pidx < g_guide_round_pos || pidx >= g_guide_round_pos + g_guide_round_step) render_this = false;
+              }
+            }
+            if (render_this) {
               uint32_t oi2 = pcall(0x81931040u, {hp});
               if (oi2) {
                 // Log each element as it is painted, with the fields that
@@ -7923,12 +12896,128 @@ void VdSwap_entry(
                 // phase-504 two-buffer lesson, not applied one level down.
                 // Sample both.
                 uint32_t e0 = pdev ? prd2(pdev + 0x30u) : 0;
+                if (painted == 0 && e0) g_guide_first_e0 = e0;  // phase 1054
+                if (painted == 0) g_guide_first_b0 = pdev ? prd2(pdev + 0x2B4Cu) : 0;
                 uint32_t b0 = pdev ? prd2(pdev + 0x2B4Cu) : 0;
+                if (::cvars::guide_force_render && oi2) {
+                  // Phase 1053: the walk only draws elements whose layout bits
+                  // are set (transition end, focus loss); a focus move sets
+                  // none, so the display never follows it. Force the bits
+                  // right before this element's render message - phase 229
+                  // set bit 17 in a separate pass and found it cleared by the
+                  // time the paint read it.
+                  uint32_t fl9 = prd2(oi2 + 0xB4u);
+                  uint32_t nb = ((::cvars::guide_force_render & 1) ? 0x20000u : 0u) |
+                                ((::cvars::guide_force_render & 2) ? 0x2u : 0u) |
+                                ((::cvars::guide_force_render & 4) ? 0x4u : 0u);
+                  xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(oi2 + 0xB4u), fl9 | nb);
+                }
                 uint32_t gg = pcall(0x81954468u, {oi2});
+                auto rt_0 = std::chrono::steady_clock::now();
+                // Phase 1054 walk: the page-fault probe (GetProcessMemoryInfo
+                // before and after every render: two ZwQueryInformationProcess
+                // calls, ~10 us each) only when asked for; "pf" reads 0 otherwise.
+                PROCESS_MEMORY_COUNTERS pmc0 = {};
+                pmc0.cb = sizeof(pmc0);
+                if (::cvars::guide_walk_verbose) GetProcessMemoryInfo(GetCurrentProcess(), &pmc0, sizeof(pmc0));
+                uint32_t rc0 = guide_alloc_arena_ ? prd2(guide_alloc_arena_) : 0u;
+                g_guide_stage = 7;
+                // Phase 1054 dup: hud's canvas draws the tab pages inside its
+                // own recursion and a later sibling covers them (the page area
+                // stays a flat light grey when only the canvas renders: run
+                // dup_b), so their copies in the canvas stream - ~3800 of its
+                // 8200 words on Home - are wasted; the pages' own renders are
+                // what shows. Hide every page (and nested scene) of the plan
+                // while the canvas renders, restore them right after.
+                std::vector<std::pair<uint32_t, uint32_t>> hidden_pages;  // obj, saved flags
+                if (::cvars::guide_hide_pages_in_canvas && hp == rt2) {
+                  static std::unordered_map<uint32_t, uint32_t> page_obj;  // handle -> object
+                  // Every page or nested scene any plan has held: on a
+                  // plan-rebuild paint the canvas renders before the walk has
+                  // rediscovered the new tab's pages, and the previous plan
+                  // named the old tab's - Media's canvas kept its panels in
+                  // those paints. A page that is hidden now is skipped anyway.
+                  static std::vector<uint32_t> known_pages;
+                  for (uint32_t ph : g_guide_plan) {
+                    if (ph == rt2 || ph == g_guide_hud_root) continue;
+                    if (std::find(known_pages.begin(), known_pages.end(), ph) == known_pages.end()) known_pages.push_back(ph);
+                  }
+                  // The tab scene's own page children (flag bit 12), so a tab
+                  // seen for the first time is hidden on its first paint too -
+                  // the walk discovers its pages only after the canvas renders.
+                  std::vector<uint32_t> hide_set(known_pages.begin(), known_pages.end());
+                  if (g_guide_tabscene && resolves(g_guide_tabscene)) {
+                    static uint32_t f_fc_p = po(0x32B), f_ns_p = po(0x330);
+                    std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                    pcall(f_fc_p, {g_guide_tabscene, pout});
+                    for (uint32_t c = prd2(pout), k = 0; c && k < 32; ++k) {
+                      if (resolves(c)) {
+                        uint32_t cob = 0;
+                        auto cit = page_obj.find(c);
+                        if (cit != page_obj.end()) {
+                          cob = cit->second;
+                        } else {
+                          cob = pcall(0x81931040u, {c});
+                          if (cob >= 0x40000000u && cob < 0x50000000u) page_obj[c] = cob; else cob = 0;
+                        }
+                        if (cob && (prd2(cob + 0xB4u) & 0x1000u) &&
+                            std::find(hide_set.begin(), hide_set.end(), c) == hide_set.end()) {
+                          hide_set.push_back(c);
+                        }
+                      }
+                      std::memset(pm2->TranslateVirtual(pout), 0, 16);
+                      pcall(f_ns_p, {c, pout});
+                      uint32_t nx = prd2(pout);
+                      if (nx == c) break;
+                      c = nx;
+                    }
+                  }
+                  for (uint32_t ph : hide_set) {
+                    if (ph == rt2 || ph == g_guide_hud_root) continue;
+                    if (!resolves(ph)) continue;
+                    uint32_t pob = 0;
+                    auto pit = page_obj.find(ph);
+                    if (pit != page_obj.end()) {
+                      pob = pit->second;
+                    } else {
+                      pob = pcall(0x81931040u, {ph});
+                      if (pob >= 0x40000000u && pob < 0x50000000u) page_obj[ph] = pob; else pob = 0;
+                    }
+                    if (!pob) continue;
+                    uint32_t pfl = prd2(pob + 0xB4u);
+                    if (pfl & 1u) {
+                      xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(pob + 0xB4u), pfl & ~1u);
+                      hidden_pages.push_back({pob, pfl});
+                    }
+                  }
+                }
                 pcall(0x81968890u, {oi2, pmsg});
+                for (const auto& hpg : hidden_pages) {
+                  xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(hpg.first + 0xB4u), hpg.second);
+                }
+                g_guide_stage = 6;
+                g_guide_render_ms_last[hp] = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - rt_0).count();
+                g_guide_ring_span[hp] = {rc0, guide_alloc_arena_ ? prd2(guide_alloc_arena_) : 0u};  // phase 1054 marker
+                if (g_guide_render_n < 8) {
+                  g_guide_ms_render[g_guide_render_n] = g_guide_render_ms_last[hp];
+                  PROCESS_MEMORY_COUNTERS pmc1 = {};
+                  pmc1.cb = sizeof(pmc1);
+                  if (::cvars::guide_walk_verbose) GetProcessMemoryInfo(GetCurrentProcess(), &pmc1, sizeof(pmc1));
+                  g_guide_pf_render[g_guide_render_n] = uint32_t(pmc1.PageFaultCount - pmc0.PageFaultCount);
+                  g_guide_render_h[g_guide_render_n] = hp;
+                  ++g_guide_render_n;
+                }
                 uint32_t e1 = pdev ? prd2(pdev + 0x30u) : 0;
                 uint32_t b1 = pdev ? prd2(pdev + 0x2B4Cu) : 0;
-                pcall(0x81968890u, {oi2, pmsg});
+                if (e0 && e1 > e0) g_guide_segs_paint.push_back({hp, e0, e1});  // phase 1054 fps
+                if (e0 && e1 > e0) g_guide_segs_round.push_back({hp, e0, e1});
+                if (g_guide_render_n > 0 && g_guide_render_n <= 8 && g_guide_render_h[g_guide_render_n - 1] == hp) {
+                  g_guide_words_render[g_guide_render_n - 1] = (e1 > e0) ? (e1 - e0) / 4u : 0u;
+                }
+                // Phase 1054: the second ("repeat") render existed for the
+                // phase-505 diagnostic only; it doubled the walk's cost and
+                // the stream. Verbose runs keep it.
+                if (::cvars::guide_walk_verbose) pcall(0x81968890u, {oi2, pmsg});
                 uint32_t e2 = pdev ? prd2(pdev + 0x30u) : 0;
                 // Phase 905: attribute DRAW_INDX packets to the element that
                 // wrote them. Three scans for the instruction that builds them
@@ -7938,10 +13027,29 @@ void VdSwap_entry(
                 // whole-arena scan that has misled before.
                 if (e2 > e1 && (e2 - e1) < 0x40000u) {
                   uint32_t nd = 0;
-                  for (uint32_t a = e1; a + 4u <= e2; a += 4) {
+                  for (uint32_t a = (e0 && e0 < e1 && (e1 - e0) < 0x40000u) ? e0 : e1; a + 4u <= e2; a += 4) {
                     uint32_t v =
                         xe::load_and_swap<uint32_t>(pm2->TranslateVirtual(a));
-                    if ((v >> 30) == 3u && ((v >> 8) & 0x7Fu) == 0x22u) ++nd;
+                    if ((v >> 30) == 3u && ((v >> 8) & 0x7Fu) == 0x22u) {
+                      ++nd;
+                      // Phase 1054: a thin diagonal hairline crosses the panel
+                      // in every capture. Name the element whose DRAW_INDX is
+                      // a line or a degenerate (< 4 vertex) primitive.
+                      if (a + 12u <= e2) {
+                        uint32_t init = xe::load_and_swap<uint32_t>(pm2->TranslateVirtual(a + 8u));
+                        uint32_t prim = init & 0x3Fu, cnt = init >> 16;
+                        if (prim <= 3u || cnt < 4u) {
+                          static uint32_t tiny_logs = 0;
+                          if (tiny_logs++ < 12) {
+                            uint32_t wx = prd2(oi2 + 0x14u), wy = prd2(oi2 + 0x18u), ww = prd2(oi2 + 0x1Cu), wh = prd2(oi2 + 0x20u);
+                            float fx, fy, fw, fh;
+                            std::memcpy(&fx, &wx, 4); std::memcpy(&fy, &wy, 4); std::memcpy(&fw, &ww, 4); std::memcpy(&fh, &wh, 4);
+                            XELOGI("GuideTinyDraw: element {:08X} obj {:08X} rect {:.0f},{:.0f} {:.0f}x{:.0f}: DRAW_INDX prim {} count {} (initiator {:08X})",
+                                   hp, oi2, fx, fy, fw, fh, prim, cnt, init);
+                          }
+                        }
+                      }
+                    }
                   }
                   if (nd) {
                     static uint32_t edl = 0;
@@ -7993,12 +13101,571 @@ void VdSwap_entry(
                     }
                   }
                 }
+                g_guide_plist.push_back(std::make_pair(hp, (e1 > e0) ? (e1 - e0) / 4 : 0u));
+                if (::cvars::guide_dump_vb && (hp == uint32_t(::cvars::guide_dump_vb) || hp == g_guide_hud_root) &&
+                    hook_paint_n == 20 && e1 > e0 && (e1 - e0) < 0x40000u) {
+                  // Phase 1054: the glyphs are in the atlas and the texture is
+                  // re-uploaded, yet some letters never land - look at the quads.
+                  uint32_t vf0 = 0, vf1 = 0, nd = 0;
+                  for (uint32_t a = e0; a + 4u <= e1;) {
+                    uint32_t w = prd2(a);
+                    uint32_t ty = w >> 30, cn = ((w >> 16) & 0x3FFFu) + 1u;
+                    if (ty == 0u) {
+                      uint32_t reg = w & 0x7FFFu;
+                      for (uint32_t k = 0; k < cn; ++k) {
+                        uint32_t r = (w & 0x8000u) ? reg : reg + k;
+                        if (r == 0x4800u) vf0 = prd2(a + 4u + k * 4u);
+                        if (r == 0x4801u) vf1 = prd2(a + 4u + k * 4u);
+                      }
+                      a += (cn + 1u) * 4u;
+                    } else if (ty == 3u) {
+                      uint32_t op = (w >> 8) & 0x7Fu;
+                      if (op == 0x22u && ++nd <= 14u) {
+                        uint32_t init = prd2(a + 8u);
+                        uint32_t vaddr = (vf0 & 0x1FFFFFFCu), vsize = (vf1 >> 2) & 0xFFFFFFu;
+                        std::string vs;
+                        uint32_t vb = vaddr | 0xA0000000u;
+                        if (vaddr && pm2->LookupHeap(vb) && (init >> 16) >= 8u) {
+                          for (uint32_t i = 0; i < 96 && i * 4u < vsize * 4u + 4u; ++i) {
+                            uint32_t v = prd2(vb + i * 4u);
+                            float f; std::memcpy(&f, &v, 4);
+                            vs += (std::isfinite(f) && std::fabs(f) < 100000.0f && (f == 0.0f || std::fabs(f) >= 0.0005f))
+                                      ? fmt::format("{:.3f} ", f) : fmt::format("{:08X} ", v);
+                          }
+                        }
+                        XELOGI("GuideVB: element {:08X} draw {} @{:08X} init {:08X} prim {} count {} | fetch0 {:08X} {:08X} -> vb {:08X} size {} dwords | {}",
+                               hp, nd, a, init, init & 0x3Fu, init >> 16, vf0, vf1, vaddr, vsize, vs);
+                      }
+                      a += (cn + 1u) * 4u;
+                    } else if (ty == 2u) {
+                      a += 4u;
+                    } else {
+                      a += 12u;
+                    }
+                  }
+                }
                 ++painted;
               }
             }
             // Push every child, not just the last one. Reversed, so the
             // first child is popped first and the walk reads depth-first in
             // document order.
+            // Phase 1054 (root_only): the children are still pushed so nested
+            // scenes are reached; whether a node is rendered is decided above.
+            if (use_cache) continue;  // the cached list is the whole plan
+            if (::cvars::guide_paint_dispatch) {
+              // The dispatcher walks the handle-table RECORD ([+0] ctx,
+              // [+4] base link, [+28] handler, [+32] userdata, [+8] next) -
+              // the same thing XuiSendMessage resolves - not the element
+              // object 81931040 returns, whose +28 is a float bound (the
+              // 0x44550000 = 852.0f the first attempt branched to).
+              uint32_t mobj = 0;
+              {
+                const uint32_t htb = 0x81D6D0D8u;
+                uint32_t idx = hp & 0xFFFFu;
+                if (idx < prd2(htb + 0x420u)) {
+                  uint32_t bk = prd2(htb + (idx >> 8) * 4u);
+                  if (bk) {
+                    uint32_t en = bk + (idx & 0xFFu) * 8u;
+                    if (prd2(en) == (hp >> 16)) {
+                      mobj = prd2(en + 4u);
+                    }
+                  }
+                }
+              }
+              // Phase 1048: the dispatch sends the render message to every
+              // node in the handle table, so every tab page paints at once.
+              // hud never activates a tab because XuiTabSceneGetCurrentTab
+              // returns -1 (phase 299), so nothing is ever hidden. Select the
+              // page here: remember each XuiTabScene object as it is
+              // dispatched, treat its direct children (parent [obj+0x18]) as
+              // pages in first-seen order, and paint only page
+              // guide_paint_tab_index and its subtree.
+              uint32_t tree_o = 0, tree_par = 0;
+              if (mobj && ::cvars::guide_paint_tab_index >= 0) {
+                // XuiElementGetParent: obj = 819426F0(handle, &out);
+                // parent object = [obj+0x18]; a parent's handle is its word 0.
+                static std::map<uint32_t, std::vector<uint32_t>> tab_pages;
+                static uint32_t tab_scratch = 0;
+                if (!tab_scratch) {
+                  tab_scratch = pm2->SystemHeapAlloc(16, 16);
+                }
+                auto vis_mapped = [&](uint32_t a) {
+                  if (!a) return false;
+                  auto* mh = pm2->LookupHeap(a);
+                  return mh && mh->QueryRangeAccessUnlocked(a, a + 0x20u) !=
+                                   xe::memory::PageAccess::kNoAccess;
+                };
+                bool is_tab_scene = prd2(mobj + 28u) == 0x819403A8u;
+                bool skip = false;
+                uint32_t page = 0, tabh = 0;
+                if (!is_tab_scene && tab_scratch) {
+                  xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(tab_scratch), 0);
+                  pcall(GuideConst(0x819426F0u), {hp, tab_scratch});
+                  uint32_t o = prd2(tab_scratch);
+                  uint32_t oh = o;
+                  tree_o = o;
+                  tree_par = vis_mapped(o) ? prd2(o + 0x18u) : 0;
+                  {
+                    // Probe: the root's direct children, with class.
+                    static uint32_t root_obj = 0;
+                    if (hp == 0x00010135u) root_obj = o;
+                    uint32_t rp = vis_mapped(o) ? prd2(o + 0x18u) : 0;
+                    if (root_obj && rp && (rp > root_obj ? rp - root_obj : root_obj - rp) <= 0x10u) {
+                      static uint32_t rcl = 0;
+                      if (rcl++ < 0) {
+                        XELOGI("PaintRootChild: node {:08X} obj {:08X} handler {:08X}",
+                               hp, o, prd2(mobj + 28u));
+                      }
+                    }
+                  }
+                  {
+                    static uint32_t chl = 0;
+                    if (chl++ < 0) {
+                      std::string ch;
+                      uint32_t q = o;
+                      for (int k = 0; k < 6 && vis_mapped(q); ++k) {
+                        ch += fmt::format("{:08X}[h={:08X} par={:08X}] ", q,
+                                          prd2(q), prd2(q + 0x18u));
+                        q = prd2(q + 0x18u);
+                      }
+                      XELOGI("PaintChain: node {:08X} obj {:08X}: {}", hp, o, ch);
+                    }
+                  }
+                  for (int lvl = 0; lvl < 32 && vis_mapped(o); ++lvl) {
+                    uint32_t par = prd2(o + 0x18u);
+                    if (!vis_mapped(par)) break;
+                    // The parent link points 0x10 inside the tab scene's
+                    // object (40848520 for a scene resolved as 40848510).
+                    uint32_t parh = tab_pages.count(par)          ? par
+                                    : tab_pages.count(par - 0x10u) ? par - 0x10u
+                                    : tab_pages.count(par + 0x10u) ? par + 0x10u
+                                                                   : 0u;
+                    if (parh && tab_pages.count(parh)) {
+                      auto& pages = tab_pages[parh];
+                      uint32_t idx = 0;
+                      for (; idx < pages.size() &&
+                             (pages[idx] > oh ? pages[idx] - oh : oh - pages[idx]) > 0x10u;
+                           ++idx) {
+                      }
+                      if (idx == pages.size()) {
+                        // Only a scene directly under the tab scene is a
+                        // page; its other direct children are decoration
+                        // and always paint.
+                        uint32_t ch = prd2(mobj + 28u);
+                        if (lvl != 0 || (ch != 0x8193FC60u && ch != 0x913E8788u)) {
+                          break;
+                        }
+                        pages.push_back(oh);
+                        // Also hide the page from XUI's own tree render
+                        // (paint gate 81954468 needs bit 0 of [obj+0xB4]).
+                        uint32_t fw = prd2(oh + 0xB4u);
+                        uint32_t nfw = (idx == uint32_t(::cvars::guide_paint_tab_index))
+                                           ? (fw | 1u) : (fw & ~1u);
+                        xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(oh + 0xB4u), nfw);
+                        XELOGI("PaintTabPage: page {} = node {:08X} obj {:08X} flags "
+                               "{:08X} -> {:08X}", idx, hp, oh, fw, nfw);
+                      }
+                      skip = idx != uint32_t(::cvars::guide_paint_tab_index);
+                      page = oh;
+                      tabh = parh;
+                      break;
+                    }
+                    o = par;
+                    oh = par;
+                  }
+                  if (!page) {
+                    static uint32_t npl = 0;
+                    if (npl++ < 0) {
+                      std::string ch;
+                      uint32_t q = prd2(tab_scratch);
+                      for (int k = 0; k < 8 && vis_mapped(q); ++k) {
+                        ch += fmt::format("{:08X}>", prd2(q + 0x18u));
+                        q = prd2(q + 0x18u);
+                      }
+                      XELOGI("PaintNoPage: node {:08X} h {:08X} obj {:08X} chain {}",
+                             hp, prd2(mobj + 28u), prd2(tab_scratch), ch);
+                    }
+                  }
+                } else if (is_tab_scene && tab_scratch) {
+                  xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(tab_scratch), 0);
+                  pcall(GuideConst(0x819426F0u), {hp, tab_scratch});
+                  uint32_t tso = prd2(tab_scratch);
+                  if (tso) tab_pages[tso];
+                  static uint32_t tsl = 0;
+                  if (tsl++ < 2) {
+                    uint32_t cur = pcall(GuideConst(0x81937FB0u), {hp, tab_scratch});
+                    uint32_t cls = prd2(0x81D6CE38u);
+                    uint32_t cast = pcall(GuideConst(0x81930FE8u), {hp, cls});
+                    XELOGI("PaintTabScene: node {:08X} obj {:08X} | GetCurrentTab "
+                           "-> {:08X} | cast(class {:08X}) -> {:08X}",
+                           hp, tso, cur, cls, cast);
+                  }
+                }
+                if (skip) {
+                  static uint32_t hid_n = 0, hid_l = 0;
+                  ++hid_n;
+                  if (hid_l++ < 4) {
+                    XELOGI("PaintTabSkip: node {:08X} on page {:08X} of tab "
+                           "scene {:08X} skipped; {} so far",
+                           hp, page, tabh, hid_n);
+                  }
+                  mobj = 0;
+                }
+              }
+              if (mobj) {
+                uint32_t saved_id = prd2(pmsg + 4u);
+                uint32_t saved_handled = prd2(pmsg + 8u);
+                xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(pmsg + 4u),
+                                             ::cvars::guide_paint_msg_id);
+                xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(pmsg + 8u),
+                                             0);
+                uint32_t mc0 = paint_dev_ ? prd2(paint_dev_ + 0x30u) : 0;
+                if (::cvars::guide_paint_msg_pre) {
+                  xe::store_and_swap<uint32_t>(
+                      pm2->TranslateVirtual(pmsg + 4u),
+                      ::cvars::guide_paint_msg_pre);
+                  uint32_t phr = pcall(GuideConst(0x81949F50u), {mobj, pmsg});
+                  static uint32_t prl = 0;
+                  if (prl++ < 6) {
+                    XELOGI("PaintMsgPre: node {:08X} id={:X} hr={:08X} "
+                           "handled={:08X}",
+                           hp, ::cvars::guide_paint_msg_pre, phr,
+                           prd2(pmsg + 8u));
+                  }
+                  xe::store_and_swap<uint32_t>(
+                      pm2->TranslateVirtual(pmsg + 4u),
+                      ::cvars::guide_paint_msg_id);
+                  xe::store_and_swap<uint32_t>(
+                      pm2->TranslateVirtual(pmsg + 8u), 0);
+                }
+                uint32_t mhr = pcall(GuideConst(0x81949F50u), {mobj, pmsg});
+                uint32_t mc1 = paint_dev_ ? prd2(paint_dev_ + 0x30u) : 0;
+                uint32_t mhandled = prd2(pmsg + 8u);
+                uint32_t mdraws = 0;
+                if (mc1 > mc0 && (mc1 - mc0) < 0x40000u) {
+                  for (uint32_t a = mc0; a + 4u <= mc1; a += 4u) {
+                    uint32_t v = prd2(a);
+                    if ((v >> 30) == 3u && ((v >> 8) & 0x7Fu) == 0x22u) {
+                      ++mdraws;
+                    }
+                  }
+                }
+                static uint32_t dml = 0, dm_nodes = 0, dm_draws = 0,
+                                dm_words = 0;
+                // Phase 1016: attribute the dispatch's output per class. The
+                // record's [+28] is the node's handler (phase 199), and phase
+                // 760 mapped handlers to class names.
+                uint32_t mhandler = prd2(mobj + 28u);
+                auto class_of = [](uint32_t h) -> const char* {
+                  switch (h) {
+                    case 0x8193FB70u: return "XuiFigure";
+                    case 0x81940358u: return "XuiImage";
+                    case 0x8193FAD0u: return "XuiText";
+                    case 0x8193FE80u: return "XuiGroup";
+                    case 0x8193FC60u: return "XuiScene";
+                    case 0x8193FA80u: return "XuiCanvas";
+                    case 0x8193FBC0u: return "XuiControl";
+                    case 0x8193FCB0u: return "XuiButton";
+                    case 0x81943BF0u: return "XuiNavButton";
+                    case 0x819403A8u: return "XuiTabScene";
+                    case 0x8193FA30u: return "XuiElement";
+                    case 0x81940538u: return "XuiShader";
+                    case 0x81940060u: return "XuiList";
+                    default: return "?";
+                  }
+                };
+                static std::map<uint32_t, std::pair<uint32_t, uint32_t>>
+                    dm_by_handler;  // handler -> {nodes, draws}
+                {
+                  auto& e = dm_by_handler[mhandler];
+                  ++e.first;
+                  e.second += mdraws;
+                }
+                ++dm_nodes;
+                dm_draws += mdraws;
+                {
+                  static uint32_t trl = 0;
+                  if (trl++ < 0) {
+                    XELOGI("PaintTree: {:08X} obj {:08X} par {:08X} h {:08X} w {} d {}",
+                           hp, tree_o, tree_par, mhandler,
+                           (mc1 > mc0) ? (mc1 - mc0) / 4u : 0, mdraws);
+                  }
+                }
+                // Phase 1047: which node rewinds the reserve cursor - or
+                // what happens between two nodes.
+                static uint32_t last_mc1 = 0;
+                if (last_mc1 && mc0 < last_mc1) {
+                  static uint32_t gpl = 0;
+                  if (gpl++ < 8) {
+                    XELOGI("PaintGap: before node {:08X} handler {:08X} {} "
+                           "cursor {:08X} (prev node ended {:08X})",
+                           hp, mhandler, class_of(mhandler), mc0, last_mc1);
+                  }
+                }
+                last_mc1 = mc1;
+                if (mc1 < mc0) {
+                  static uint32_t rwl = 0;
+                  if (rwl++ < 8) {
+                    XELOGI("PaintRewind: node {:08X} handler {:08X} {} cursor "
+                           "{:08X} -> {:08X}",
+                           hp, mhandler, class_of(mhandler), mc0, mc1);
+                  }
+                }
+                dm_words += (mc1 > mc0) ? (mc1 - mc0) / 4u : 0;
+                if (dml++ < 12 || (mdraws && dml < 40)) {
+                  XELOGI("PaintMsg: node {:08X} obj {:08X} handler {:08X} {} "
+                         "id={:X} hr={:08X} handled={:08X} words +{} draws +{}",
+                         hp, mobj, mhandler, class_of(mhandler),
+                         ::cvars::guide_paint_msg_id, mhr, mhandled,
+                         (mc1 > mc0) ? (mc1 - mc0) / 4u : 0, mdraws);
+                }
+                // Phase 1017: the fields the id-0 arms test. XuiImage
+                // (81966908 -> 8195C040 / 81966558): [ctx+4] source,
+                // [ctx+0x8C] state (1 load, 2 draw), [ctx+0x90] load state,
+                // [ctx+0xA4] resource handle. XuiText (81960B08): [ctx+0x10]
+                // text, [ctx+0x14] layout, [ctx+0x24], [ctx+0x28] font,
+                // [ctx+0x2C]. ctx is the record's [+0], the handler's r3.
+                auto mapped_str = [&](uint32_t a) {
+                  if (!a) return false;
+                  auto* mh = pm2->LookupHeap(a);
+                  return mh && mh->QueryRangeAccessUnlocked(a, a + 82u) !=
+                                   xe::memory::PageAccess::kNoAccess;
+                };
+                auto mapped_obj = [&](uint32_t a) {
+                  if (!a) return false;
+                  auto* mh = pm2->LookupHeap(a);
+                  return mh && mh->QueryRangeAccessUnlocked(a, a + 0xB0u) !=
+                                   xe::memory::PageAccess::kNoAccess;
+                };
+                if (mhandler == 0x81940358u || mhandler == 0x8193FAD0u) {
+                  static uint32_t rct_logs = 0;
+                  if (rct_logs++ < 12) {
+                    static uint32_t prect = 0;
+                    if (!prect) {
+                      prect = pm2->SystemHeapAlloc(64, 16);
+                    }
+                    if (prect) {
+                      std::memset(pm2->TranslateVirtual(prect), 0, 64);
+                      uint32_t rhr = pcall(GuideConst(0x819A2ED0u),
+                                           {hp, prect, prect + 16u});
+                      float fv[8];
+                      for (uint32_t k = 0; k < 8; ++k) {
+                        uint32_t w = prd2(prect + k * 4u);
+                        std::memcpy(&fv[k], &w, 4);
+                      }
+                      XELOGI("PaintRect: node {:08X} {} 819A2ED0 hr={:08X} a=({}, "
+                             "{}, {}, {}) b=({}, {}, {}, {})",
+                             hp, class_of(mhandler), rhr, fv[0], fv[1], fv[2],
+                             fv[3], fv[4], fv[5], fv[6], fv[7]);
+                    }
+                  }
+                  static uint32_t fdl_i = 0, fdl_t = 0, fdl_dbg = 0;
+                  // Phase 1019: [rec+0] is the handle; the element object the
+                  // trampoline resolves and checks is [rec+32], the handler's r5.
+                  uint32_t ctx = prd2(mobj + 32u);
+                  bool is_img = mhandler == 0x81940358u;
+                  if (fdl_dbg++ < 6) {
+                    auto* dh = ctx ? pm2->LookupHeap(ctx) : nullptr;
+                    XELOGI("PaintFieldsDbg: node {:08X} rec {:08X} [rec+0]={:08X} "
+                           "[rec+4]={:08X} [rec+8]={:08X} [rec+C]={:08X} "
+                           "[rec+20]={:08X} heap={} mapped={}",
+                           hp, mobj, ctx, prd2(mobj + 4u), prd2(mobj + 8u),
+                           prd2(mobj + 12u), prd2(mobj + 32u),
+                           dh ? "yes" : "no", mapped_obj(ctx) ? 1 : 0);
+                  }
+                  if (mapped_obj(ctx) && ((is_img ? fdl_i : fdl_t)++ < 6)) {
+                    if (is_img) {
+                      uint32_t src = prd2(ctx + 4u);
+                      std::string sname;
+                      if (mapped_str(src)) {
+                        for (uint32_t k = 0; k < 40; ++k) {
+                          uint16_t ch = xe::load_and_swap<uint16_t>(
+                              pm2->TranslateVirtual(src + k * 2u));
+                          if (!ch) break;
+                          sname += (ch >= 32 && ch < 127) ? char(ch) : '.';
+                        }
+                      }
+                      {
+                        static uint32_t tgl = 0;
+                        if (tgl++ < 2) {
+                          uint32_t tdev = prd2(0x81D6C980u), rprov = prd2(0x81D6C978u);
+                          {
+                            uint32_t pdc = prd2(ppay);
+                            auto dcf = [&](uint32_t o) -> std::string {
+                              if (!mapped_obj(o)) return "unmapped";
+                              std::string r;
+                              for (uint32_t k = 0x1C8; k <= 0x1E4; k += 4) {
+                                r += fmt::format("[{:X}]={:08X} ", k, prd2(o + k));
+                              }
+                              return r;
+                            };
+                            {
+                              uint32_t cx = mapped_obj(tdev) ? prd2(tdev + 0x1C8u) : 0;
+                              std::string cw;
+                              if (mapped_obj(cx)) {
+                                for (uint32_t k = 0; k < 0x40; k += 4) {
+                                  cw += fmt::format("{:08X} ", prd2(cx + k));
+                                }
+                              }
+                              XELOGI("PaintXuiCtx: ctx {:08X} words: {} | shrdres "
+                                     "pkg[81D45A58]={:08X} provider[81D6D0AC]={:08X}",
+                                     cx, cw, prd2(0x81D45A58u), prd2(0x81D6D0ACu));
+                            }
+                            XELOGI("PaintDCFields: texdev {:08X}: {}", tdev,
+                                   dcf(tdev));
+                            XELOGI("PaintDCFields: paintdc {:08X}: {}", pdc,
+                                   dcf(pdc));
+                          }
+                          XELOGI("PaintTexGlobals: texdev[81D6C980]={:08X} "
+                                 "resprov[81D6C978]={:08X} provvt={:08X} | image "
+                                 "hr[ctx+94]={:08X} state[ctx+8C]={:08X} "
+                                 "[ctx+90]={:08X}",
+                                 tdev, rprov,
+                                 mapped_obj(rprov) ? prd2(rprov) : 0u,
+                                 prd2(ctx + 0x94u), prd2(ctx + 0x8Cu),
+                                 prd2(ctx + 0x90u));
+                        }
+                      }
+                      XELOGI("PaintImg: node {:08X} ctx {:08X} [+0]={:08X} "
+                             "[+4]={:08X} [+8]={:08X} '{}' [+C]={:08X} "
+                             "[+8C]={:08X} [+90]={:08X} [+A4]={:08X} [+20]={:02X} "
+                             "draws +{}",
+                             hp, ctx, prd2(ctx), prd2(ctx + 4u), src, sname,
+                             prd2(ctx + 12u), prd2(ctx + 0x8Cu),
+                             prd2(ctx + 0x90u), prd2(ctx + 0xA4u),
+                             prd2(ctx + 0x20u) >> 24, mdraws);
+                    } else {
+                      uint32_t txt = prd2(ctx + 0x10u);
+                      std::string s;
+                      if (mapped_str(txt)) {
+                        for (uint32_t k = 0; k < 40; ++k) {
+                          uint16_t ch = xe::load_and_swap<uint16_t>(
+                              pm2->TranslateVirtual(txt + k * 2u));
+                          if (!ch) break;
+                          s += (ch >= 32 && ch < 127) ? char(ch) : '.';
+                        }
+                      }
+                      uint32_t tstr = prd2(ctx + 0x28u);
+                      std::string ts;
+                      if (mapped_str(tstr)) {
+                        for (uint32_t k = 0; k < 40; ++k) {
+                          uint16_t ch = xe::load_and_swap<uint16_t>(
+                              pm2->TranslateVirtual(tstr + k * 2u));
+                          if (!ch) break;
+                          ts += (ch >= 32 && ch < 127) ? char(ch) : '.';
+                        }
+                      }
+                      {
+                        uint32_t font = prd2(ctx + 0x14u);
+                        if (mapped_obj(font)) {
+                          uint32_t devo = prd2(font + 0x40u);
+                          uint32_t dvt = mapped_obj(devo) ? prd2(devo) : 0;
+                          bool vt_ok = (dvt >= 0x81000000u && dvt < 0x81E00000u) ||
+                                       (dvt >= 0x91000000u && dvt < 0x92000000u);
+                          XELOGI("PaintFont: font {:08X} init[+18]={:02X} "
+                                 "[+10]={:08X} [+20]={:08X} [+40]=dev {:08X} "
+                                 "vtable {:08X} slot10C={:08X} [+44]={:08X} "
+                                 "[+48]={:04X} size[+4A]={} x [+4C]={}",
+                                 font, prd2(font + 0x18u) >> 24,
+                                 prd2(font + 0x10u), prd2(font + 0x20u), devo,
+                                 dvt, vt_ok ? prd2(dvt + 0x10Cu) : 0u,
+                                 prd2(font + 0x44u), prd2(font + 0x48u) >> 16,
+                                 prd2(font + 0x48u) & 0xFFFFu,
+                                 prd2(font + 0x4Cu) >> 16);
+                        }
+                      }
+                      {
+                        uint32_t lay = prd2(ctx + 0x1Cu);
+                        std::string lw;
+                        if (mapped_obj(lay)) {
+                          for (uint32_t k = 0; k < 0x28; k += 4) {
+                            lw += fmt::format("{:08X} ", prd2(lay + k));
+                          }
+                          uint32_t buf = prd2(lay);
+                          if (mapped_obj(buf)) {
+                            lw += "| buf: ";
+                            for (uint32_t k = 0; k < 0x30; k += 4) {
+                              uint32_t w = prd2(buf + k);
+                              float fv;
+                              std::memcpy(&fv, &w, 4);
+                              lw += fmt::format("{} ", fv);
+                            }
+                          }
+                        }
+                        uint32_t font = prd2(ctx + 0x14u);
+                        std::string fm;
+                        if (mapped_obj(font)) {
+                          for (uint32_t k = 0x30; k < 0x50; k += 4) {
+                            uint32_t w = prd2(font + k);
+                            fm += fmt::format("[{:X}]={:04X}/{:04X} ", k, w >> 16,
+                                              w & 0xFFFFu);
+                          }
+                        }
+                        XELOGI("PaintLayout: node {:08X} layout[+1C]={:08X} {} || font "
+                               "metrics {}",
+                               hp, lay, lw, fm);
+                      }
+                      {
+                        uint32_t szw = prd2(ctx + 0x0Cu);
+                        float szf;
+                        std::memcpy(&szf, &szw, 4);
+                        uint32_t fnt = prd2(ctx + 0x14u);
+                        uint32_t f38 = mapped_obj(fnt) ? prd2(fnt + 0x38u) : 0u;
+                        float f38f;
+                        std::memcpy(&f38f, &f38, 4);
+                        {
+                          static uint32_t tfl = 0;
+                          uint32_t tf = mapped_obj(fnt) ? prd2(fnt + 0x44u) : 0u;
+                          if (tfl++ < 2 && mapped_obj(tf)) {
+                            std::string tw;
+                            for (uint32_t k = 0; k < 0x40; k += 4) {
+                              tw += fmt::format("{:08X} ", prd2(tf + k));
+                            }
+                            uint32_t data = prd2(tf + 0x0Cu);
+                            std::string head;
+                            if (mapped_obj(data)) {
+                              for (uint32_t k = 0; k < 4; ++k) {
+                                head += fmt::format("{:08X} ", prd2(data + k * 4u));
+                              }
+                            }
+                            XELOGI("PaintTypeface: font {:08X} typeface {:08X} words: {} | "
+                                   "[+C]->{:08X} head {}",
+                                   fnt, tf, tw, data, head);
+                          }
+                        }
+                        XELOGI("PaintTxtSize: node {:08X} pointsize[ctx+C]={} ({:08X}) "
+                               "font[+38]={} ({:08X}) font[+3C]={:08X}",
+                               hp, szf, szw, f38f, f38,
+                               mapped_obj(fnt) ? prd2(fnt + 0x3Cu) : 0u);
+                      }
+                      XELOGI("PaintTxt: node {:08X} ctx {:08X} font[+10]={:08X} "
+                             "'{}' layout[+14]={:08X} [+18]={:08X} "
+                             "text[+24]={:08X} '{}' [+28]={:08X} [+2C]={:08X} "
+                             "draws +{}",
+                             hp, ctx, txt, s, prd2(ctx + 0x14u),
+                             prd2(ctx + 0x18u), tstr, ts, prd2(ctx + 0x28u),
+                             prd2(ctx + 0x2Cu), mdraws);
+                    }
+                  }
+                }
+                if ((dm_nodes % 200) == 0) {
+                  std::string hist;
+                  for (auto& kv : dm_by_handler) {
+                    hist += fmt::format("{:08X}/{}:{}n/{}d ", kv.first,
+                                        class_of(kv.first), kv.second.first,
+                                        kv.second.second);
+                  }
+                  XELOGI("PaintMsgTotals: {} nodes dispatched, {} words, {} "
+                         "draws | {}",
+                         dm_nodes, dm_words, dm_draws, hist);
+                }
+                xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(pmsg + 4u),
+                                             saved_id);
+                xe::store_and_swap<uint32_t>(pm2->TranslateVirtual(pmsg + 8u),
+                                             saved_handled);
+              }
+            }
             std::vector<uint32_t> kids;
             std::memset(pm2->TranslateVirtual(pout), 0, 16);
             pcall(f_fc, {hp, pout});
@@ -8013,8 +13680,63 @@ void VdSwap_entry(
             }
             for (size_t i = kids.size(); i-- > 0;) todo.push_back(kids[i]);
           }
+          if (g_guide_spread_now) {
+            if (!use_cache && !render_cache_new.empty()) g_guide_plan = render_cache_new;
+            uint32_t pn = uint32_t(g_guide_plan.size());
+            g_guide_round_pos += g_guide_round_step;
+            if (!pn || g_guide_round_pos >= pn) g_guide_round_pos = 0;
+            g_guide_round_done = (g_guide_round_pos == 0);
+            if (!g_guide_round_done && paint_dev_) {
+              g_guide_round_save30 = prd2(paint_dev_ + 0x30u);
+              g_guide_round_save34 = prd2(paint_dev_ + 0x34u);
+              g_guide_round_save2b4c = prd2(paint_dev_ + 0x2B4Cu);
+            } else {
+              g_guide_round_save30 = 0;
+            }
+          } else {
+            g_guide_round_pos = 0;
+            g_guide_round_done = true;
+          }
+          if (g_guide_hot_now && !use_cache && !render_cache_new.empty()) g_guide_plan = render_cache_new;  // phase 1054 tabs: the compose uses this plan
           XELOGI("PaintWalk: visited {} nodes, painted {}, skipped {}", visited,
                  painted, skipped);
+          if (::cvars::guide_paint_root_only && !use_cache && !render_cache_new.empty()) {
+            if (render_cache_new != render_cache) g_guide_full_logs_reset = 1;
+            render_cache = render_cache_new;
+            static uint32_t rcl = 0;
+            static std::vector<uint32_t> last_logged_plan;
+            if ((render_cache != last_logged_plan && rcl < 60) || rcl < 6) {
+              ++rcl;
+              last_logged_plan = render_cache;
+              std::string rl;
+              for (uint32_t h : render_cache) rl += fmt::format("{:08X} ", h);
+              XELOGI("PaintPlan: {} handles: {}", render_cache.size(), rl);
+            }
+          }
+          {
+            g_guide_t_walk1 = std::chrono::steady_clock::now();
+            g_guide_stage = 8;
+            double wms = std::chrono::duration<double, std::milli>(g_guide_t_walk1 - walk_t0).count();
+            static uint32_t wslow = 0;
+            if (wms > 25.0 && wslow++ < 40) XELOGI("GuideWalkTime: {:.1f} ms for {} painted", wms, painted);
+          }
+          {
+            // Phase 1054: which elements were painted and how much each emitted.
+            static uint32_t plist_walks = 0;
+            ++plist_walks;
+            if (plist_walks == 15 || plist_walks == 100 || plist_walks == 200) {
+              std::string plist;
+              for (auto& pw : g_guide_plist) {
+                plist += fmt::format("{:08X}:{}w ", pw.first, pw.second);
+                if (plist.size() > 700) {
+                  XELOGI("PaintList: walk {} {}", plist_walks, plist);
+                  plist.clear();
+                }
+              }
+              if (!plist.empty()) XELOGI("PaintList: walk {} {}", plist_walks, plist);
+            }
+            g_guide_plist.clear();
+          }
           uint32_t after = paint_dev_ ? prd2(paint_dev_ + 0x30u) : 0;
           uint32_t after_cb = paint_dev_ ? prd2(paint_dev_ + 0x2B4Cu) : 0;
           XELOGI("PaintCursors: dev={:08X} resv {:08X}->{:08X} ({} words) | "
@@ -8025,17 +13747,24 @@ void VdSwap_entry(
                  after_cb, (after_cb > before_cb) ? (after_cb - before_cb) / 4 : 0,
                  paint_dev_ ? prd2(paint_dev_ + 0x2B48u) : 0,
                  paint_dev_ ? prd2(paint_dev_ + 0x2B50u) : 0);
+            if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) {
+              XELOGI("GuideStage: hook paint {} +{:.1f}ms after cursors", hook_paint_n + 1, GuideHookMs());
+            }
           // Segment the rest of the frame too. The paints emit state and no
           // draws, twice confirmed by executing their ranges - so if XUI
           // batches geometry and submits it when the frame closes, the draws
           // would appear across RenderEnd or Present, neither of which has
           // ever been measured.
-          pcall(f_e, {dc2});
+          if (!g_guide_idle && g_guide_round_done) pcall(f_e, {dc2});  // phase 1054 fps
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 1 (line 9364)", hook_paint_n, GuideHookMs()); }
           uint32_t afterEnd = guide_resv_dev_
                                   ? prd2(guide_resv_dev_ + 0x30u) : 0;
-          uint32_t pres = ::cvars::guide_paint_present
+          uint32_t pres = (::cvars::guide_paint_present && !g_guide_idle && g_guide_round_done)
                               ? pcall(f_p, {dc2, 0, 0, 0})
                               : 0u;
+          g_guide_t_end = std::chrono::steady_clock::now();
+          g_guide_stage = 9;
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 2 (line 9369)", hook_paint_n, GuideHookMs()); }
           uint32_t afterPresent = guide_resv_dev_
                                       ? prd2(guide_resv_dev_ + 0x30u) : 0;
           {
@@ -8061,23 +13790,32 @@ void VdSwap_entry(
           // sitting directly under the composition path. Report the flag and
           // the range unconditionally, once, so a null result here can be told
           // apart from the flag never arriving.
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 3 (line 9394)", hook_paint_n, GuideHookMs()); }
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms sub3 mark 1 (line 9397)", hook_paint_n, GuideHookMs()); }
           {
+            if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms sub3 mark 2 (line 9398)", hook_paint_n, GuideHookMs()); }
             static bool once = false;
+            if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms sub3 mark 3 (line 9399)", hook_paint_n, GuideHookMs()); }
             if (!once) {
               once = true;
+              if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms sub3 mark 4 (line 9401)", hook_paint_n, GuideHookMs()); }
               XELOGI("OverlayGate: guide_overlay_at_swap={} range {:08X}->{:08X}"
                      " ({} words) -> {}",
                      ::cvars::guide_overlay_at_swap ? "true" : "FALSE", before,
                      after, (after > before) ? (after - before) / 4 : 0,
                      (::cvars::guide_overlay_at_swap && after > before &&
-                      (after - before) < 0x40000u)
+                      (after - before) < 0x200000u)
                          ? "executing"
                          : "skipped");
             }
           }
-          if (::cvars::guide_overlay_at_swap && !::cvars::guide_overlay_dry &&
-              after > before && (after - before) < 0x40000u) {
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms sub3 mark 5 (line 9411)", hook_paint_n, GuideHookMs()); }
+          // Phase 1054 fps: an idle swap painted nothing; re-walking and re-copying
+          // the previous stream cost 19 ms a frame.
+          if (!g_guide_idle && g_guide_round_done && ::cvars::guide_overlay_at_swap && !::cvars::guide_overlay_dry &&
+              after > before && (after - before) < 0x200000u) {
             auto* gso2 = kernel_state()->emulator()->graphics_system();
+            if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms sub3 mark 6 (line 9414)", hook_paint_n, GuideHookMs()); }
             if (gso2 && gso2->command_processor()) {
               // Publishing to the swap handler does not work: only ONE
               // XE_SWAP packet is seen in a whole run, so that hook is on a
@@ -8086,6 +13824,7 @@ void VdSwap_entry(
               // from the title thread - but it is the same path the phase 171
               // probes used and it is the only way to find out whether this
               // geometry reaches the screen.
+              if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms sub3 mark 7 (line 9422)", hook_paint_n, GuideHookMs()); }
               uint32_t words = (after - before) / 4u;
               // Walk the range as PM4 before executing it. "0 GPU draws" from
               // the executor could mean the stream has no draws or that the
@@ -8093,22 +13832,28 @@ void VdSwap_entry(
               // those, and says what the paint actually produced.
               // Phase 507: set when the PM4 walk desyncs, so the range is not
               // handed to the command processor. See the guard below.
+              if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms sub3 mark 8 (line 9429)", hook_paint_n, GuideHookMs()); }
               uint32_t parse_bad = 0;
+              if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms sub3 mark 9 (line 9430)", hook_paint_n, GuideHookMs()); }
               if (::cvars::guide_overlay_walk) {
               // Phase 514: every walk since phase 504 began on word 0, which
               // the sentinel proved is never written - it is stale memory that
               // decodes as a type-0 header claiming 721 registers, desyncing
               // the parse immediately. With the sentinel on, skip the words the
               // paint did not write and start where it actually did.
+              if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms sub3 mark 10 (line 9436)", hook_paint_n, GuideHookMs()); }
               uint32_t skip = 0;
+              if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms sub3 mark 11 (line 9437)", hook_paint_n, GuideHookMs()); }
               while (skip < words &&
                      prd2(before + skip * 4u) == 0xDEADBEEFu) {
                 ++skip;
               }
+              if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms sub3 mark 12 (line 9441)", hook_paint_n, GuideHookMs()); }
               if (skip) {
                 XELOGI("GuidePaintWalk: skipping {} unwritten word(s) at {:08X}",
                        skip, before);
               }
+              if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms sub3 mark 13 (line 9445)", hook_paint_n, GuideHookMs()); }
               {
                 uint32_t counts[128] = {0};
                 uint32_t t0 = 0, t2 = 0, pk = 0, bad = 0, iw = skip;
@@ -8133,6 +13878,12 @@ void VdSwap_entry(
                 std::string hist;
                 for (uint32_t o = 0; o < 128; ++o)
                   if (counts[o]) hist += fmt::format("{:02X}:{} ", o, counts[o]);
+                // Phase 1052: draw packets per paint (DRAW_INDX 0x22, DRAW_INDX_2 0x36).
+                if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) {
+                  XELOGI("GuideStreamDraws: paint {} words {} packets {} draws {} t0 {} t2 {} | head {:08X} {:08X} {:08X} {:08X} | first {}",
+                         hook_paint_n, words, pk, counts[0x22] + counts[0x36], t0, t2,
+                         prd2(before), prd2(before + 4u), prd2(before + 8u), prd2(before + 12u), first);
+                }
                 static uint32_t wlog = 0;
                 if (wlog++ < 2) {
                   // 688 identical type-3 headers with overrun=1 reads more like
@@ -8196,11 +13947,19 @@ void VdSwap_entry(
               // 256-entry ramp reaching the register path blacks the display on
               // its own, independently of the missing geometry. Refuse to
               // execute a range whose parse overran.
-              if (::cvars::guide_overlay_blocks && !emit_blocks.empty()) {
+              if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms sub3 mark 14 (line 9532)", hook_paint_n, GuideHookMs()); }
+              // Phase 1052: emit_blocks is filled only by the first paint's
+              // EmitFrame calls, so every run published paint 1 alone and the
+              // burst replayed it for the rest of the run. With animation
+              // running paint 1 is mid-fade; publish every whole paint.
+              if (::cvars::guide_overlay_blocks &&
+                  (!emit_blocks.empty() || ::cvars::guide_publish_whole_paint)) {
+                if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 1 (line 9552)", hook_paint_n, GuideHookMs()); }
                 uint32_t d0 = gso2->command_processor()->guide_draw_count_;
                 uint32_t total = 0;
                 for (auto& b : emit_blocks) {
                   uint32_t nw = (b.second - b.first) / 4;
+                  if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 2 (line 9556)", hook_paint_n, GuideHookMs()); }
                   if (::cvars::guide_execute_command_stream) {
                     gso2->command_processor()->guide_overlay_exec_ = true;
                     gso2->command_processor()->ExecuteGuestBufferVirtualUnsafe(
@@ -8219,12 +13978,20 @@ void VdSwap_entry(
                         ? before
                         : ((after > 8192u * 4u) ? after - 8192u * 4u : before);
                 uint32_t start = 0;
+                bool tail_readable = false;  // phase 1054 fps: one range query, not one per word
+                if (::cvars::guide_overlay_search && tail_lo && after > tail_lo) {
+                  auto* th0 = pm2->LookupHeap(tail_lo);
+                  tail_readable = th0 && th0->QueryRangeAccessUnlocked(tail_lo, after) != xe::memory::PageAccess::kNoAccess;
+                }
                 for (uint32_t a = tail_lo;
                      ::cvars::guide_overlay_search && a + 4u <= after; a += 4) {
-                  auto* th = pm2->LookupHeap(a);
-                  if (!th || th->QueryRangeAccess(a, a + 4u) ==
-                                 xe::memory::PageAccess::kNoAccess) {
-                    continue;
+                  if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 3 (line 9577)", hook_paint_n, GuideHookMs()); }
+                  if (!tail_readable) {
+                    auto* th = pm2->LookupHeap(a);
+                    if (!th || th->QueryRangeAccessUnlocked(a, a + 4u) ==
+                                   xe::memory::PageAccess::kNoAccess) {
+                      continue;
+                    }
                   }
                   uint32_t v =
                       xe::load_and_swap<uint32_t>(pm2->TranslateVirtual(a));
@@ -8243,6 +14010,7 @@ void VdSwap_entry(
                 // that. Find every type-0 packet in the extent whose base
                 // register covers 0x4800, and say where they are relative to
                 // the tail start.
+                if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 4 (line 9598)", hook_paint_n, GuideHookMs()); }
                 {
                   static uint32_t vscan = 0;
                   if (vscan++ < 2) {
@@ -8253,11 +14021,13 @@ void VdSwap_entry(
                     // packets from a boundary known to parse instead - it is
                     // the range that executed 125 draws without desyncing.
                     std::string hits;
+                    if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 5 (line 9608)", hook_paint_n, GuideHookMs()); }
                     uint32_t n0 = 0, t0 = 0, t3 = 0;
                     for (uint32_t a = start; start && a + 4u <= after;) {
                       uint32_t w =
                           xe::load_and_swap<uint32_t>(pm2->TranslateVirtual(a));
                       uint32_t ty = w >> 30;
+                      if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 6 (line 9613)", hook_paint_n, GuideHookMs()); }
                       uint32_t cnt = ((w >> 16) & 0x3FFFu) + 1u;
                       if (ty == 0u) {
                         ++t0;
@@ -8279,6 +14049,7 @@ void VdSwap_entry(
                         break;
                       }
                     }
+                    if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 7 (line 9634)", hook_paint_n, GuideHookMs()); }
                     XELOGI("VF0Setup: tail {:08X}..{:08X}: {} type-0, {} "
                            "type-3, {} covering 0x4800 | {}",
                            start, after, t0, t3, n0,
@@ -8293,15 +14064,30 @@ void VdSwap_entry(
                 {
                   static uint32_t gs_log = 0;
                   static uint32_t geom_start = 0;
-                  if (start && gs_log++ < 2) {
+                  // Phase 1052: this scan is O(window x walk) like HeadScan
+                  // (phase 1046) and had no cap; when the paint's geometry
+                  // start sits far from the stream head (a three-draw paint
+                  // after hud's Close animation) it never finishes and the
+                  // title thread, which runs this hook inside VdSwap, stops
+                  // presenting. Cap the window at 0x4000 bytes.
+                  if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 8 (line 9654)", hook_paint_n, GuideHookMs()); }
+                  uint32_t lo = (start > 0x20000u) ? start - 0x20000u : before;
+                  bool geom_scan_ok = start && gs_log < 2;
+                  if (geom_scan_ok && (start - lo) > 0x4000u) {
+                    geom_scan_ok = false;
+                    ++gs_log;
+                    XELOGI("GeomScan: skipped, window {} bytes exceeds cap", start - lo);
+                  }
+                  if (geom_scan_ok && gs_log++ < 2) {
+                    if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 9 (line 9660)", hook_paint_n, GuideHookMs()); }
                     uint32_t best = 0;
-                    uint32_t lo = (start > 0x20000u) ? start - 0x20000u : before;
                     for (uint32_t c = lo; c < start; c += 4) {
                       uint32_t a = c;
                       bool ok = true;
                       while (a < start) {
                         auto* ch = pm2->LookupHeap(a);
-                        if (!ch || ch->QueryRangeAccess(a, a + 4u) ==
+                        if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 10 (line 9666)", hook_paint_n, GuideHookMs()); }
+                        if (!ch || ch->QueryRangeAccessUnlocked(a, a + 4u) ==
                                        xe::memory::PageAccess::kNoAccess) {
                           ok = false;
                           break;
@@ -8310,6 +14096,7 @@ void VdSwap_entry(
                             pm2->TranslateVirtual(a));
                         uint32_t ty = w >> 30;
                         uint32_t cn = ((w >> 16) & 0x3FFFu) + 1u;
+                        if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 11 (line 9675)", hook_paint_n, GuideHookMs()); }
                         if (ty == 2u) {
                           a += 4u;
                         } else if (ty == 0u || ty == 3u) {
@@ -8327,11 +14114,13 @@ void VdSwap_entry(
                     // What does that region contain?
                     uint32_t g3 = 0, gdraw = 0, gmode = 0, last_mode = 0xFFFFu;
                     std::map<uint32_t, uint32_t> ghist;
+                    if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 12 (line 9692)", hook_paint_n, GuideHookMs()); }
                     for (uint32_t a = best; best && a < start;) {
                       uint32_t w =
                           xe::load_and_swap<uint32_t>(pm2->TranslateVirtual(a));
                       uint32_t ty = w >> 30;
                       uint32_t cn = ((w >> 16) & 0x3FFFu) + 1u;
+                      if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 13 (line 9697)", hook_paint_n, GuideHookMs()); }
                       if (ty == 3u) {
                         ++g3;
                         uint32_t gop = (w >> 8) & 0x7Fu;
@@ -8340,6 +14129,7 @@ void VdSwap_entry(
                         a += (cn + 1u) * 4u;
                       } else if (ty == 0u) {
                         uint32_t base = w & 0x7FFFu;
+                        if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 14 (line 9705)", hook_paint_n, GuideHookMs()); }
                         if (base <= 0x2208u && 0x2208u < base + cn) {
                           ++gmode;
                           last_mode = xe::load_and_swap<uint32_t>(
@@ -8365,13 +14155,29 @@ void VdSwap_entry(
                     // buffers? Find a start in [before, best) whose walk lands
                     // exactly on best - the same landing test - then count
                     // type-0 packets covering the fetch constants at 0x4800+.
+                    if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 15 (line 9730)", hook_paint_n, GuideHookMs()); }
                     uint32_t hbest = 0;
-                    for (uint32_t c = before; best && c < best; c += 4) {
+                    // Phase 1046: this search is O(window * walk) with a heap
+                    // lookup per word. Once images load the paint head grows
+                    // to ~53K words and the scan no longer finishes inside a
+                    // 60 s run - the paint thread looked wedged after
+                    // GeomScan and the burst never happened. It is a phase
+                    // 896 diagnostic, so cap it rather than pay for it.
+                    // Phase 1052: 0x10000 bytes is 4096 candidates x 4096
+                    // steps of heap lookups - minutes per paint, which read as a
+                    // hang once XuiAnimRun made the first paints small. 0x1000.
+                    const bool head_ok = best && (best - before) <= 0x1000u;
+                    if (best && !head_ok) {
+                      XELOGI("HeadScan: skipped, window {} words exceeds cap",
+                             (best - before) / 4u);
+                    }
+                    for (uint32_t c = before; head_ok && c < best; c += 4) {
                       uint32_t a = c;
                       bool ok = true;
+                      if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 16 (line 9748)", hook_paint_n, GuideHookMs()); }
                       while (a < best) {
                         auto* hh = pm2->LookupHeap(a);
-                        if (!hh || hh->QueryRangeAccess(a, a + 4u) ==
+                        if (!hh || hh->QueryRangeAccessUnlocked(a, a + 4u) ==
                                        xe::memory::PageAccess::kNoAccess) {
                           ok = false;
                           break;
@@ -8379,6 +14185,7 @@ void VdSwap_entry(
                         uint32_t w = xe::load_and_swap<uint32_t>(
                             pm2->TranslateVirtual(a));
                         uint32_t ty = w >> 30;
+                        if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 17 (line 9758)", hook_paint_n, GuideHookMs()); }
                         uint32_t cn = ((w >> 16) & 0x3FFFu) + 1u;
                         if (ty == 2u) {
                           a += 4u;
@@ -8395,16 +14202,19 @@ void VdSwap_entry(
                       }
                     }
                     uint32_t hfetch = 0, h0 = 0, h3 = 0;
+                    if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 18 (line 9774)", hook_paint_n, GuideHookMs()); }
                     std::map<uint32_t, uint32_t> hhist;
                     std::string hf;
                     for (uint32_t a = hbest; hbest && a < best;) {
                       uint32_t w =
                           xe::load_and_swap<uint32_t>(pm2->TranslateVirtual(a));
+                      if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 19 (line 9779)", hook_paint_n, GuideHookMs()); }
                       uint32_t ty = w >> 30;
                       uint32_t cn = ((w >> 16) & 0x3FFFu) + 1u;
                       if (ty == 0u) {
                         ++h0;
                         uint32_t base = w & 0x7FFFu;
+                        if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 20 (line 9784)", hook_paint_n, GuideHookMs()); }
                         if (base + cn > 0x4800u && base < 0x4900u) {
                           ++hfetch;
                           if (hfetch <= 4) {
@@ -8437,22 +14247,106 @@ void VdSwap_entry(
                            hbest, best, h0, h3, hh2.empty() ? "none" : hh2);
                   }
                   // The search is O(window * walk); do it once and reuse it.
+                  if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 21 (line 9816)", hook_paint_n, GuideHookMs()); }
                   if (::cvars::guide_publish_geometry && geom_start) {
                     start = geom_start;
+                  }
+                  if (::cvars::guide_publish_whole_paint && before &&
+                      after > before) {
+                    start = before;
+                    // Phase 1052: after the first paint the arena head holds
+                    // the 0xDEADBEEF sentinel (the paint reserves more than it
+                    // writes); the tail walk read that as a 0x2EF0-word packet
+                    // and the burst executed junk (3 draws). Publish from the
+                    // first written word.
+                    uint32_t skipped = 0;
+                    while (start + 4u <= after && prd2(start) == 0xDEADBEEFu) {
+                      start += 4u;
+                      ++skipped;
+                    }
+                    if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 22 (line 9832)", hook_paint_n, GuideHookMs()); }
+                    if (skipped && ::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) {
+                      XELOGI("GuidePublish: paint {} skipped {} sentinel words, start {:08X}",
+                             hook_paint_n, skipped, start);
+                    }
+                  }
+                  // Phase 1047: once text paints, the paint block opens with
+                  // ~900 words of xam's register/value display list that are
+                  // not PM4 (a float 285.0 reads as a type-1 header), and the
+                  // burst desynced by its third draw (prim_type 13) and then
+                  // wrecked the title's resolve for the rest of the run. The
+                  // icon-only stream had only 8 such words, which happened to
+                  // parse. Skip forward to the first word from which the
+                  // packets parse cleanly all the way to the end of the paint.
+                  if (::cvars::guide_publish_skip_head && start && after > start) {
+                    const uint32_t win_end =
+                        std::min(after, start + 0x4000u * 4u);
+                    uint32_t chosen = 0, chosen_draws = 0;
+                    if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 23 (line 9849)", hook_paint_n, GuideHookMs()); }
+                    for (uint32_t c = start; c < win_end; c += 4) {
+                      uint32_t a = c, draws = 0;
+                      bool ok = true;
+                      while (a + 4u <= after) {
+                        uint32_t w = xe::load_and_swap<uint32_t>(
+                            pm2->TranslateVirtual(a));
+                        if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 24 (line 9855)", hook_paint_n, GuideHookMs()); }
+                        uint32_t ty = w >> 30;
+                        uint32_t cn = ((w >> 16) & 0x3FFFu) + 1u;
+                        if (ty == 2u) {
+                          a += 4u;
+                        } else if (ty == 0u) {
+                          if (cn > 128u || (w & 0x7FFFu) >= 0x6000u) {
+                            ok = false;
+                            break;
+                          }
+                          a += (cn + 1u) * 4u;
+                        } else if (ty == 3u) {
+                          uint32_t op = (w >> 8) & 0x7Fu;
+                          if (cn > 4096u || op == 0u) {
+                            ok = false;
+                            break;
+                          }
+                          if (op == 0x22u || op == 0x36u) ++draws;
+                          a += (cn + 1u) * 4u;
+                        } else {
+                          ok = false;
+                          break;
+                        }
+                      }
+                      if (ok && draws >= 8u) {
+                        chosen = c;
+                        chosen_draws = draws;
+                        break;
+                      }
+                    }
+                    if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 25 (line 9884)", hook_paint_n, GuideHookMs()); }
+                    static uint32_t shl = 0;
+                    if (shl++ < 6) {
+                      XELOGI("GuideSkipHead: paint {:08X}->{:08X}: first clean "
+                             "start {:08X} (skipped {} words, {} draws from it)",
+                             start, after, chosen,
+                             chosen ? (chosen - start) / 4u : 0u, chosen_draws);
+                    }
+                    if (chosen) {
+                      start = chosen;
+                    }
                   }
                 }
                 // Phase 935: N=2 damages nothing and N=3 damages 9299
                 // pixels, so packet #3 of the published range is the first
                 // that does anything. Name the first few packets.
+                if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 26 (line 9899)", hook_paint_n, GuideHookMs()); }
                 {
                   static uint32_t pk_log = 0;
                   if (start && pk_log++ < 2) {
                     std::string pl;
+                    if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 27 (line 9903)", hook_paint_n, GuideHookMs()); }
                     uint32_t a = start;
                     for (uint32_t k = 0; k < 6 && a + 4u <= after; ++k) {
                       uint32_t w =
                           xe::load_and_swap<uint32_t>(pm2->TranslateVirtual(a));
                       uint32_t ty = w >> 30;
+                      if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 28 (line 9908)", hook_paint_n, GuideHookMs()); }
                       uint32_t cn = ((w >> 16) & 0x3FFFu) + 1u;
                       pl += fmt::format("#{}@{:08X} type{} ", k + 1, a, ty);
                       if (ty == 3u) {
@@ -8472,6 +14366,7 @@ void VdSwap_entry(
                 // Truncate the tail to the first N packets when asked. A
                 // type-3 or type-0 header carries (count-1) in bits 16..29, so
                 // a packet spans count+1 words.
+                if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 29 (line 9927)", hook_paint_n, GuideHookMs()); }
                 uint32_t tail_end = after;
                 if (start && ::cvars::guide_tail_packets) {
                   uint32_t a = start, n = 0;
@@ -8483,7 +14378,8 @@ void VdSwap_entry(
                     // the harness. That would make a loop that "only reads"
                     // invalidate whatever the watch protects.
                     auto* wh = pm2->LookupHeap(a);
-                    if (!wh || wh->QueryRangeAccess(a, a + 4u) ==
+                    if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 30 (line 9938)", hook_paint_n, GuideHookMs()); }
+                    if (!wh || wh->QueryRangeAccessUnlocked(a, a + 4u) ==
                                    xe::memory::PageAccess::kNoAccess) {
                       break;
                     }
@@ -8502,6 +14398,625 @@ void VdSwap_entry(
                 if (::cvars::guide_tail_packets == 0xFFFFFFFFu) {
                   tail_end = start;
                 }
+                if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 31 (line 9957)", hook_paint_n, GuideHookMs()); }
+                if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) {
+                  XELOGI("GuideGate: paint {} before {:08X} after {:08X} start {:08X} tail_end {:08X}",
+                         hook_paint_n, before, after, start, tail_end);
+                }
+                if (start && tail_end <= start && ::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) {
+                  XELOGI("GuidePublish: paint {} gate failed: start {:08X} tail_end {:08X} after {:08X} words@start {:08X} {:08X} {:08X} {:08X}",
+                         hook_paint_n, start, tail_end, after, prd2(start), prd2(start + 4u), prd2(start + 8u), prd2(start + 12u));
+                }
+                // Phase 1052: XUI re-renders only what is dirty, so most paints
+                // after the first hold just the EmitFrame state block (no draw
+                // packets) or a constant upload. The burst replays whatever was
+                // published last; keep the last paint that drew something.
+                uint32_t pre_dr = 0xFFFFFFFFu;  // phase 1054: the validation walk's draw count
+                if (::cvars::guide_publish_from_root && start && tail_end > start) {
+                  // Phase 1054: the arena head is constant data (a matrix), not
+                  // packets, and a walk from it resyncs only by luck. Walk the
+                  // candidates - head, the block cursor and the reserve cursor
+                  // before the first element's render - with the parser's own
+                  // packet sizes, and publish from the first that reaches the
+                  // tail with a draw in it.
+                  auto walk_ok = [&](uint32_t c, uint32_t& draws, uint32_t& end_at) -> bool {
+                    draws = 0;
+                    uint32_t a = c, n = 0;
+                    while (a + 4u <= tail_end && n < 40000u) {
+                      uint32_t w = prd2(a);
+                      uint32_t ty = w >> 30, cn = ((w >> 16) & 0x3FFFu) + 1u;
+                      if (ty == 3u) {
+                        uint32_t op = (w >> 8) & 0x7Fu;
+                        if (op == 0x22u || op == 0x36u) ++draws;
+                        a += (cn + 1u) * 4u;
+                      } else if (ty == 0u) {
+                        a += (cn + 1u) * 4u;
+                      } else if (ty == 2u) {
+                        a += 4u;
+                      } else {
+                        a += 12u;
+                      }
+                      ++n;
+                    }
+                    end_at = a;
+                    return a >= tail_end && a <= tail_end + 64u && draws > 0;
+                  };
+                  // The head is a constants block ({0, 0x57E, 0x10003, 0x2F4000}
+                  // then a matrix); the packets begin somewhere after it. Try
+                  // the last good word offset first, then scan forward.
+                  static uint32_t pub_off = 0;   // words from the head
+                  uint32_t chosen = 0, cd = 0, cend = 0, tried = 0;
+                  auto try_off = [&](uint32_t off) -> bool {
+                    uint32_t c = start + off * 4u;
+                    if (c >= tail_end) return false;
+                    ++tried;
+                    uint32_t d = 0, e = 0;
+                    if (walk_ok(c, d, e)) { chosen = c; cd = d; cend = e; return true; }
+                    return false;
+                  };
+                  if (pub_off && try_off(pub_off)) {
+                  } else {
+                    for (uint32_t off = 0; off < 6144u && !chosen; ++off) {
+                      if (off == pub_off) continue;
+                      try_off(off);
+                    }
+                    if (chosen) pub_off = (chosen - start) / 4u;
+                  }
+                  static uint32_t pfr_logs = 0;
+                  if (pfr_logs++ < 24 || !chosen) {
+                    XELOGI("GuidePublish: paint {} head {:08X} tail {:08X} -> start {:08X} (+{} words, {} draws, walk end {:08X}, {} offsets tried)",
+                           hook_paint_n, start, tail_end, chosen, chosen ? (chosen - start) / 4u : 0u, cd, cend, tried);
+                  }
+                  if (chosen) { start = chosen; pre_dr = cd; }
+                  if (!chosen) {
+                    // Phase 1065: no offset walked the arena cleanly to the
+                    // cursor with a draw in it, so this range is NOT packet
+                    // aligned. Publishing it anyway hands the GPU a stream that
+                    // ends mid-packet, and the parser reports
+                    // "ExecutePacketType3 overflow" -> "GUIDE BUFFER: failed to
+                    // execute packet" one frame later (measured: hosted runs,
+                    // paint 20's failed gate, the overflow logged against the
+                    // GPU thread while paint 21 was still publishing). The GPU
+                    // replays the last published stream every frame, so skipping
+                    // this paint costs one frame of staleness and keeps the
+                    // standing rule that streams are cut on packet boundaries.
+                    static uint32_t skip_logs = 0;
+                    if (skip_logs++ < 8) {
+                      XELOGW("GuidePublish: paint {} not packet-aligned from any offset "
+                             "(head {:08X} tail {:08X}); skipping the publish",
+                             hook_paint_n, start, tail_end);
+                    }
+                    tail_end = start;
+                  }
+                  if (chosen && ::cvars::guide_publish_whole_packet && cend > tail_end && cend <= tail_end + 64u) {
+                    // Phase 1054 marker: XUI's cursor stops one word short of
+                    // the frame's last packet (every logged paint: the last
+                    // packet ends 4 bytes past it), so a publish cut at the
+                    // cursor drops the frame's final draw - on Home the list's
+                    // last draw, the Open Tray row's disc icon, which composed
+                    // frames (whole stored packets) kept and spread rounds lost.
+                    static uint32_t ext_logs = 0;
+                    if (ext_logs++ < 6) {
+                      XELOGI("GuidePublish: paint {} last packet ends {:08X}, {} bytes past the cursor {:08X}: published whole",
+                             hook_paint_n, cend, cend - tail_end, tail_end);
+                    }
+                    tail_end = cend;
+                  }
+                  // Phase 1054 tabs: a spread round stores every handle it rendered
+                  // (their bytes are all still in the arena at the round's end)
+                  auto& segs_src = g_guide_spread_now ? g_guide_segs_round : g_guide_segs_paint;
+                  if (chosen && (::cvars::guide_paint_interleave || ::cvars::guide_hot_compose) && !segs_src.empty()) {
+                    // Phase 1054 fps: keep the latest stream bytes of every
+                    // rendered handle (the arena is reset each paint).
+                    static uint32_t seg_logs = 0;
+                    bool seg_log = g_guide_interleave_now && seg_logs < 16;
+                    std::string sl;
+                    // Phase 1054 tabs: the elements' streams form one packet
+                    // sequence from the publish start (the publish walks it),
+                    // but an element's first register writes are merged into
+                    // the previous element's last type-0 packet, so its start
+                    // cursor lies inside that packet and a walk from the cursor
+                    // derails. Cut on the packet starts of the whole paint's
+                    // walk, and give an element that starts inside a spanning
+                    // type-0 packet a synthesized packet with its own share of
+                    // the registers, so every stored segment is self-contained.
+                    static std::vector<uint32_t> pk;
+                    pk.clear();
+                    {
+                      uint32_t a = chosen;
+                      while (a + 4u <= tail_end && pk.size() < 60000u) {
+                        pk.push_back(a);
+                        uint32_t w = prd2(a);
+                        uint32_t ty = w >> 30, cn = ((w >> 16) & 0x3FFFu) + 1u;
+                        a = (ty == 2u) ? a + 4u : (ty == 1u ? a + 12u : a + (cn + 1u) * 4u);
+                      }
+                      pk.push_back(a);
+                    }
+                    auto pk_from = [&](uint32_t x) -> size_t {
+                      return size_t(std::lower_bound(pk.begin(), pk.end(), x) - pk.begin());
+                    };
+                    for (auto& sp : segs_src) {
+                      if (seg_log) sl += fmt::format("{:08X}:[{:08X},{:08X}) ", sp.h, sp.e0, sp.e1);
+                      // The first rendered element of a paint starts at the
+                      // arena head (its stream carries the frame setup block);
+                      // the segment begins at the publish start, past the pad word.
+                      uint32_t s0 = std::max(sp.e0, chosen);
+                      if (sp.e1 <= s0 || sp.e1 - s0 > 0x100000u || sp.e1 > tail_end + 64u) {
+                        if (seg_log) sl += "(rejected) ";
+                        continue;
+                      }
+                      size_t i0 = pk_from(s0), i1 = pk_from(std::min(sp.e1, tail_end));
+                      if (i0 >= pk.size() || i1 >= pk.size() || i1 <= i0) {
+                        if (seg_log) sl += "(no packets) ";
+                        continue;
+                      }
+                      uint32_t ps = pk[i0], pe = pk[i1];
+                      if (i0 > 0 && pk[i0 - 1] < s0 && ps > s0) {
+                        // The packet the device extended across the boundary
+                        // (a type-3 constants block: the element's leading
+                        // constants sit in its tail) is stored at the start of
+                        // this element's segment as well as at the end of the
+                        // previous one. Re-executing it is harmless: the
+                        // previous element's draws are already issued, and this
+                        // element's own values are what its draws then use.
+                        // Without it, composed frames drew one quad of the
+                        // page with stale constants (run tab_c: an icon at
+                        // "Open Tray" that spread frames never show).
+                        uint32_t ph = pk[i0 - 1], hw = prd2(ph);
+                        if (seg_log) sl += fmt::format("(starts inside type{} op {:02X} @{:08X}: included) ", hw >> 30, (hw >> 8) & 0x7Fu, ph);
+                        ps = ph;
+                      }
+                      if (seg_log && (ps != s0 || pe != sp.e1)) sl += fmt::format("(packets [{:08X},{:08X})) ", ps, pe);
+                      sp.e0 = ps;
+                      sp.e1 = pe;
+                      auto& seg = g_guide_segs[sp.h];
+                      seg.resize(size_t(pe - ps));
+                      std::memcpy(seg.data(), pm2->TranslateVirtual(ps), pe - ps);
+                      bool dump_this = false;
+                      if (!::cvars::guide_seg_dump.empty()) {
+                        std::string cur;
+                        for (char ch : ::cvars::guide_seg_dump + ",") {
+                          if (ch == ',') {
+                            if (!cur.empty() && (sp.h & 0xFFFFu) == (std::strtoul(cur.c_str(), nullptr, 16) & 0xFFFFu)) dump_this = true;
+                            cur.clear();
+                          } else if (ch != ' ') {
+                            cur += ch;
+                          }
+                        }
+                      }
+                      if (dump_this) {
+                        // Phase 1054 marker: this handle's packets and the
+                        // vertex data its render allocated, from hot paint #4
+                        // and from the first spread paint after a hot window,
+                        // so the two renders that draw the "Open Tray" disc
+                        // differently can be diffed word by word.
+                        bool& last_hot = g_guide_segdump_last_hot[sp.h];
+                        const bool want = (g_guide_hot_now && g_guide_hot_seq == 4u) || (!g_guide_hot_now && last_hot);
+                        last_hot = g_guide_hot_now;
+                        if (want && g_guide_segdump_done < ::cvars::guide_seg_dump_n) {
+                          ++g_guide_segdump_done;
+                          auto hex = [](const uint8_t* p, size_t n) {
+                            static const char* d = "0123456789abcdef";
+                            std::string o;
+                            o.resize(n * 2);
+                            for (size_t i = 0; i < n; ++i) { o[i * 2] = d[p[i] >> 4]; o[i * 2 + 1] = d[p[i] & 15]; }
+                            return o;
+                          };
+                          auto rs = g_guide_ring_span.find(sp.h);
+                          uint32_t r0 = rs != g_guide_ring_span.end() ? rs->second.first : 0u;
+                          uint32_t r1 = rs != g_guide_ring_span.end() ? rs->second.second : 0u;
+                          const size_t part = 1024;
+                          size_t nparts = (seg.size() + part - 1) / part;
+                          for (size_t k = 0; k < nparts; ++k) {
+                            size_t o = k * part, n = std::min(part, seg.size() - o);
+                            XELOGI("GuideSegDump: paint {} h {:08X} {} seq {} words {} at {:08X} ring {:08X}-{:08X} part {}/{} | {}",
+                                   hook_paint_n, sp.h, g_guide_hot_now ? "hot" : "spread", g_guide_hot_seq, seg.size() / 4, ps, r0, r1,
+                                   k + 1, nparts, hex(seg.data() + o, n));
+                          }
+                          if (r1 > r0 && r1 - r0 <= 262144u && r0 >= guide_alloc_arena_ && r1 <= guide_alloc_end_) {
+                            const uint8_t* rp = reinterpret_cast<const uint8_t*>(pm2->TranslateVirtual(r0));
+                            size_t rn = r1 - r0, rparts = (rn + part - 1) / part;
+                            for (size_t k = 0; k < rparts; ++k) {
+                              size_t o = k * part, n = std::min(part, rn - o);
+                              XELOGI("GuideRingDump: paint {} h {:08X} {} at {:08X} part {}/{} | {}", hook_paint_n, sp.h,
+                                     g_guide_hot_now ? "hot" : "spread", r0 + uint32_t(o), k + 1, rparts, hex(rp + o, n));
+                            }
+                          }
+                          if (!::cvars::guide_seg_dump_tex.empty()) {
+                            // Phase 1054 marker: a texture's memory at the same
+                            // moment (the row icon's 32x32 k_8_8_8_8 at BD1FB080)
+                            uint32_t ta = uint32_t(std::strtoul(::cvars::guide_seg_dump_tex.c_str(), nullptr, 16));
+                            size_t tn = size_t(std::max(16, ::cvars::guide_seg_dump_tex_n));
+                            if (ta >= 0x10000u && pm2->TranslateVirtual(ta)) {
+                              const uint8_t* tp = reinterpret_cast<const uint8_t*>(pm2->TranslateVirtual(ta));
+                              size_t tparts = (tn + part - 1) / part;
+                              for (size_t k = 0; k < tparts; ++k) {
+                                size_t o = k * part, n = std::min(part, tn - o);
+                                XELOGI("GuideTexDump: paint {} h {:08X} {} at {:08X} part {}/{} | {}", hook_paint_n, sp.h,
+                                       g_guide_hot_now ? "hot" : "spread", ta + uint32_t(o), k + 1, tparts, hex(tp + o, n));
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                    if (seg_log) {
+                      ++seg_logs;
+                      XELOGI("GuideSeg: paint {} chosen {:08X} tail_end {:08X} after {:08X} | {} | store {} handles",
+                             hook_paint_n, chosen, tail_end, after, sl, g_guide_segs.size());
+                    }
+                    const bool hot_full = g_guide_hot_now && ::cvars::guide_hot_raw_when_full &&
+                                          g_guide_hot_skipped == 0 && g_guide_segs_paint.size() >= g_guide_plan.size();
+                    static uint32_t raw_logs = 0;
+                    if (hot_full && raw_logs++ < 6) {
+                      XELOGI("GuideCompose: paint {} hot paint rendered all {} plan handles: publishing its own stream",
+                             hook_paint_n, g_guide_plan.size());
+                    }
+                    if (g_guide_interleave_now && !hot_full) {
+                      // compose [head][every plan handle's latest segment][tail]
+                      uint32_t first_e0 = std::max(g_guide_segs_paint.front().e0, chosen);
+                      uint32_t last_e1 = std::min(g_guide_segs_paint.back().e1, tail_end);
+                      bool ok = first_e0 <= last_e1;
+                      size_t total = ok ? size_t(first_e0 - chosen) + size_t(tail_end - last_e1) : 0u;
+                      for (uint32_t h : g_guide_plan) {
+                        auto it = g_guide_segs.find(h);
+                        if (it == g_guide_segs.end() || it->second.empty()) { ok = false; break; }
+                        total += it->second.size();
+                      }
+                      static uint32_t comp_addr = 0, comp_cap = 0;
+                      if (ok && total > comp_cap) {
+                        uint32_t want = uint32_t(std::max<size_t>(total * 2u, 512u * 1024u));
+                        uint32_t na = pm2->SystemHeapAlloc(want, 4096);
+                        if (na) { comp_addr = na; comp_cap = want; }
+                        else XELOGW("GuideCompose: SystemHeapAlloc({}) failed", want);
+                      }
+                      if (seg_log) {
+                        XELOGI("GuideCompose: paint {} ok={} first_e0 {:08X} last_e1 {:08X} total {} comp {:08X}/{}",
+                               hook_paint_n, ok ? 1 : 0, first_e0, last_e1, total, comp_addr, comp_cap);
+                      }
+                      if (ok && comp_addr && total <= comp_cap) {
+                        uint8_t* dst = pm2->TranslateVirtual<uint8_t*>(comp_addr);
+                        size_t off = 0;
+                        std::memcpy(dst, pm2->TranslateVirtual(chosen), first_e0 - chosen);
+                        off += first_e0 - chosen;
+                        for (uint32_t h : g_guide_plan) {
+                          auto& seg = g_guide_segs[h];
+                          std::memcpy(dst + off, seg.data(), seg.size());
+                          off += seg.size();
+                        }
+                        std::memcpy(dst + off, pm2->TranslateVirtual(last_e1), tail_end - last_e1);
+                        off += tail_end - last_e1;
+                        uint32_t save_tail = tail_end, d2 = 0, e2 = 0;
+                        tail_end = comp_addr + uint32_t(off);
+                        static uint32_t comp_logs = 0, comp_fail = 0;
+                        if (walk_ok(comp_addr, d2, e2)) {
+                          chosen = comp_addr; start = comp_addr; pre_dr = d2; cd = d2;
+                          if (comp_logs++ < 6 || (comp_logs % 300u) == 0u) {
+                            XELOGI("GuideCompose: paint {} rendered {:08X} (plan {}/{}), composed {} words, {} draws from {} segments",
+                                   hook_paint_n, g_guide_segs_paint.front().h, g_guide_interleave_idx, g_guide_plan.size(),
+                                   off / 4u, d2, g_guide_plan.size());
+                          }
+                        } else {
+                          tail_end = save_tail;
+                          if (comp_fail++ < 6) {
+                            XELOGI("GuideCompose: paint {} composed stream failed to parse ({} words, walk end {:08X}); publishing the partial paint",
+                                   hook_paint_n, off / 4u, e2);
+                          }
+                        }
+                      }
+                    }
+                  }
+                  // Phase 1054: the textures this paint samples, from its fetch
+                  // constants (SET_CONSTANT type 1), and a raw dump of the first
+                  // 8bpp one - the glyph atlas - to see what the letters look
+                  // like in memory when the display shows gaps.
+                  {
+                    // Phase 1054 transitions: what each segment of a multi-handle
+                    // stream draws, and the raster/blend state at its first draw.
+                    static uint32_t rd_logs = 0;
+                    if (g_guide_hosted && g_guide_segs_round.size() > 1 && rd_logs < 10 && chosen) {
+                      ++rd_logs;
+                      std::map<uint32_t, uint32_t> regs;
+                      uint32_t fsh_rd[0x100] = {};
+                      std::vector<uint32_t> segdraws(g_guide_segs_round.size(), 0u);
+                      std::vector<std::string> segfirst(g_guide_segs_round.size());
+                      uint32_t outside = 0;
+                      for (uint32_t a = chosen, n2 = 0; a + 4u <= tail_end && n2 < 400000u; ++n2) {
+                        uint32_t w = prd2(a);
+                        uint32_t ty = w >> 30, cn = ((w >> 16) & 0x3FFFu) + 1u;
+                        if (ty == 0u) {
+                          uint32_t reg = w & 0x7FFFu;
+                          for (uint32_t k = 0; k < cn; ++k) {
+                            uint32_t r = (w & 0x8000u) ? reg : reg + k;
+                            if (r >= 0x2000u && r < 0x2300u) regs[r] = prd2(a + 4u + k * 4u);
+                            if (r >= 0x4800u && r < 0x4900u) fsh_rd[r - 0x4800u] = prd2(a + 4u + k * 4u);
+                          }
+                          a += (cn + 1u) * 4u;
+                        } else if (ty == 3u) {
+                          uint32_t op = (w >> 8) & 0x7Fu;
+                          if (op == 0x22u || op == 0x36u) {
+                            int si = -1;
+                            for (size_t s2 = 0; s2 < g_guide_segs_round.size(); ++s2) {
+                              if (a >= g_guide_segs_round[s2].e0 && a < g_guide_segs_round[s2].e1) { si = int(s2); break; }
+                            }
+                            if (si < 0) { ++outside; }
+                            else {
+                              if (segdraws[si] == 0 && size_t(si) + 1 == g_guide_segs_round.size() && !g_guide_vb_addr) {
+                                // snapshot the last segment's first draw vertex data
+                                for (uint32_t k = 0; k < 0x100u;) {
+                                  uint32_t ft = fsh_rd[k] & 3u;
+                                  if (ft == 2u) { k += 6; continue; }
+                                  if (ft == 3u) {
+                                    uint32_t va = fsh_rd[k] & ~3u;
+                                    uint32_t vb = va | 0xA0000000u;
+                                    if (va && pm2->LookupHeap(vb)) {
+                                      for (uint32_t q = 0; q < 32; ++q) g_guide_vb_snap[q] = prd2(vb + q * 4u);
+                                      g_guide_vb_addr = vb; g_guide_vb_seg = uint32_t(si); g_guide_vb_paint = g_guide_idle_paints + g_guide_full_paints;
+                                    }
+                                    break;
+                                  }
+                                  k += 2;
+                                }
+                              }
+                              if (segdraws[si]++ == 0) {
+                                std::string rs;
+                                for (uint32_t r : {0x2000u, 0x2001u, 0x200Eu, 0x200Fu, 0x2080u, 0x2200u, 0x2201u, 0x2202u, 0x2205u, 0x2206u, 0x2208u, 0x210Fu, 0x2110u, 0x2111u, 0x2112u}) {
+                                  auto it = regs.find(r);
+                                  rs += fmt::format("{:04X}={} ", r, it == regs.end() ? std::string("-") : fmt::format("{:08X}", it->second));
+                                }
+                                segfirst[si] = rs;
+                              }
+                            }
+                          }
+                          a += (cn + 1u) * 4u;
+                        } else if (ty == 2u) {
+                          a += 4u;
+                        } else {
+                          a += 12u;
+                        }
+                      }
+                      for (size_t s2 = 0; s2 < g_guide_segs_round.size(); ++s2) {
+                        XELOGI("GuideRoundDiag: paint {} seg {} h {:08X} [{:08X},{:08X}) {} draws | first-draw {}",
+                               hook_paint_n, s2, g_guide_segs_round[s2].h, g_guide_segs_round[s2].e0, g_guide_segs_round[s2].e1,
+                               segdraws[s2], segfirst[s2].empty() ? "(no draws)" : segfirst[s2]);
+                      }
+                      if (outside) XELOGI("GuideRoundDiag: paint {} {} draws outside every segment", hook_paint_n, outside);
+                    }
+                  }
+                  if (chosen && (::cvars::guide_atlas_invalidate || ::cvars::guide_walk_verbose ||
+                                 hook_paint_n == 20 || hook_paint_n == 60)) {
+                    const bool atlas_verbose = (hook_paint_n == 20 || hook_paint_n == 60);
+                    uint32_t a = chosen, seen = 0;
+                    std::string tl;
+                    bool dumped = !atlas_verbose;
+                    uint32_t tex_n = 0;
+                    auto* cp_tx = gso2->command_processor();
+                    while (a + 4u <= tail_end && seen < 400000u) {
+                      uint32_t w = prd2(a);
+                      uint32_t ty = w >> 30, cn = ((w >> 16) & 0x3FFFu) + 1u;
+                      // fetch constants arrive as type-0 register writes to
+                      // 0x4800.. (6 dwords per texture fetch) or as SET_CONSTANT
+                      // type 1; handle both.
+                      uint32_t fidx = 0xFFFFFFFFu, fcount = 0, fdata = 0;
+                      if (ty == 0u) {
+                        uint32_t reg = w & 0x7FFFu;
+                        if (reg >= 0x4800u && reg < 0x5000u && !(w & 0x8000u)) {
+                          fidx = reg - 0x4800u; fcount = cn; fdata = a + 4u;
+                        }
+                      } else if (ty == 3u && ((w >> 8) & 0x7Fu) == 0x2Du && cn >= 7u) {
+                        uint32_t ot = prd2(a + 4u);
+                        if (((ot >> 16) & 0xFFu) == 1u) { fidx = ot & 0x7FFu; fcount = cn - 1u; fdata = a + 8u; }
+                      }
+                      if (fidx != 0xFFFFFFFFu) {
+                        {
+                          for (uint32_t k = 0; k + 6u <= fcount; k += 6u) {
+                            uint32_t base_idx = fidx + k;
+                            if (base_idx % 6u) break;
+                            uint32_t d[6];
+                            for (uint32_t j = 0; j < 6; ++j) d[j] = prd2(fdata + (k + j) * 4u);
+                            xe::gpu::xenos::xe_gpu_texture_fetch_t tf;
+                            std::memcpy(&tf, d, sizeof(tf));
+                            if (tf.type != xe::gpu::xenos::FetchConstantType::kTexture) continue;
+                            uint32_t base = tf.base_address << 12;
+                            uint32_t wdt = tf.size_2d.width + 1u, hgt = tf.size_2d.height + 1u;
+                            if (atlas_verbose) {
+                              tl += fmt::format("[fc{} base {:08X} {}x{} fmt {} tiled {} dim {} pitch {}] ",
+                                                base_idx / 6u, base, wdt, hgt, uint32_t(tf.format), uint32_t(tf.tiled),
+                                                uint32_t(tf.dimension), uint32_t(tf.pitch) << 5);
+                            }
+                            if (tf.format == xe::gpu::xenos::TextureFormat::k_8 && tex_n < 8u) {
+                              bool dup = false;
+                              for (uint32_t q = 0; q < tex_n; ++q) if (cp_tx->guide_tex_base_[q] == base) dup = true;
+                              if (!dup) {
+                                uint32_t pp = std::max<uint32_t>(uint32_t(tf.pitch) << 5, wdt);
+                                cp_tx->guide_tex_base_[tex_n] = base;
+                                cp_tx->guide_tex_size_[tex_n] = pp * hgt;
+                                ++tex_n;
+                              }
+                            }
+                            if (!dumped && tf.format == xe::gpu::xenos::TextureFormat::k_8 &&
+                                tf.dimension == xe::gpu::xenos::DataDimension::k2DOrStacked && wdt <= 1024u && hgt <= 1024u) {
+                              uint32_t pitch_px = (uint32_t(tf.pitch) << 5);
+                              if (pitch_px < wdt) pitch_px = wdt;
+                              // fetch bases are physical (GPU) addresses; the
+                              // pages are watched (protected), so do not ask
+                              // for access, just that the heap exists.
+                              uint32_t vbase = base | 0xA0000000u;
+                              auto* mh = pm2->LookupHeap(vbase);
+                              if (mh) {
+                                auto path = xe::filesystem::GetExecutableFolder() /
+                                            fmt::format("guide_atlas_{}.raw", hook_paint_n);
+                                FILE* f = xe::filesystem::OpenFile(path, "wb");
+                                if (f) {
+                                  uint32_t hdr[4] = {wdt, hgt, pitch_px, uint32_t(tf.tiled)};
+                                  fwrite(hdr, sizeof(hdr), 1, f);
+                                  fwrite(pm2->TranslateVirtual(vbase), 1, size_t(pitch_px) * hgt, f);
+                                  fclose(f);
+                                  dumped = true;
+                                  XELOGI("GuideAtlas: paint {} dumped {}x{} pitch {} tiled {} from {:08X} to {}",
+                                         hook_paint_n, wdt, hgt, pitch_px, uint32_t(tf.tiled), base, xe::path_to_utf8(path));
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                      if (ty == 3u || ty == 0u) a += (cn + 1u) * 4u;
+                      else if (ty == 2u) a += 4u;
+                      else a += 12u;
+                      ++seen;
+                    }
+                    cp_tx->guide_tex_count_ = tex_n;
+                    if (atlas_verbose) {
+                      XELOGI("GuideAtlas: paint {} textures {}", hook_paint_n, tl.empty() ? "(none)" : tl);
+                    }
+                    if (atlas_verbose) {
+                      // Phase 1054: the draws themselves. Shadow the fetch
+                      // constants and the blend registers along the stream;
+                      // at each DRAW_INDX decide whether it samples a k_8
+                      // texture (text) and dump the first few of each kind.
+                      uint32_t fsh[0x100] = {};
+                      uint32_t blend0 = 0, colorctl = 0, colormask = 0, draws = 0, text_dumps = 0, other_dumps = 0;
+                      for (uint32_t b = chosen, n2 = 0; b + 4u <= tail_end && n2 < 400000u; ++n2) {
+                        uint32_t w = prd2(b);
+                        uint32_t ty = w >> 30, cn = ((w >> 16) & 0x3FFFu) + 1u;
+                        if (ty == 0u) {
+                          uint32_t reg = w & 0x7FFFu;
+                          for (uint32_t k = 0; k < cn; ++k) {
+                            uint32_t r = (w & 0x8000u) ? reg : reg + k;
+                            uint32_t v = prd2(b + 4u + k * 4u);
+                            if (r >= 0x4800u && r < 0x4900u) fsh[r - 0x4800u] = v;
+                            if (r == 0x2201u) blend0 = v;
+                            if (r == 0x2202u) colorctl = v;
+                            if (r == 0x2200u) colormask = v;
+                          }
+                          b += (cn + 1u) * 4u;
+                        } else if (ty == 3u) {
+                          uint32_t op = (w >> 8) & 0x7Fu;
+                          if (op == 0x22u) {
+                            ++draws;
+                            uint32_t init = prd2(b + 8u);
+                            xe::gpu::xenos::xe_gpu_texture_fetch_t t0;
+                            std::memcpy(&t0, fsh, sizeof(t0));
+                            bool text = t0.type == xe::gpu::xenos::FetchConstantType::kTexture &&
+                                        t0.format == xe::gpu::xenos::TextureFormat::k_8;
+                            bool want = (text && text_dumps < 3) || (!text && other_dumps < 3);
+                            if (want) {
+                              if (text) ++text_dumps; else ++other_dumps;
+                              // the vertex fetch: the first fetch dword pair typed kVertex
+                              uint32_t vaddr = 0, vsize = 0, vslot = 0xFFFFu;
+                              for (uint32_t k = 0; k < 0x100u;) {
+                                uint32_t ft = fsh[k] & 3u;
+                                if (ft == 2u) { k += 6; continue; }  // a texture fetch: 6 dwords
+                                if (ft == 3u) { vaddr = fsh[k] & ~3u; vsize = (fsh[k + 1] >> 2) & 0xFFFFFFu; vslot = k; break; }
+                                k += 2;
+                              }
+                              std::string vs;
+                              uint32_t vb = vaddr | 0xA0000000u;
+                              if (vaddr && pm2->LookupHeap(vb)) {
+                                for (uint32_t i = 0; i < 64 && i < vsize; ++i) {
+                                  uint32_t v = prd2(vb + i * 4u);
+                                  float f; std::memcpy(&f, &v, 4);
+                                  vs += (std::isfinite(f) && std::fabs(f) < 100000.0f && (f == 0.0f || std::fabs(f) >= 0.0005f))
+                                            ? fmt::format("{:.3f} ", f) : fmt::format("{:08X} ", v);
+                                }
+                              }
+                              XELOGI("GuideDrawDump: paint {} draw {} {} @{:08X} init {:08X} (prim {} count {}) blend0 {:08X} colorctl {:08X} mask {:08X} tex0 {:08X} fmt {} {}x{} | vfetch slot {:X} {:08X} +{} dwords | {}",
+                                     hook_paint_n, draws, text ? "TEXT" : "other", b, init, init & 0x3Fu, init >> 16,
+                                     blend0, colorctl, colormask, uint32_t(t0.base_address) << 12, uint32_t(t0.format),
+                                     t0.size_2d.width + 1u, t0.size_2d.height + 1u, vslot, vaddr, vsize, vs);
+                            }
+                          }
+                          b += (cn + 1u) * 4u;
+                        } else if (ty == 2u) {
+                          b += 4u;
+                        } else {
+                          b += 12u;
+                        }
+                      }
+                    }
+                  }
+                }
+                if (start && tail_end > start && ::cvars::guide_publish_whole_paint) {
+                  uint32_t dr = 0, a = start;
+                  if (pre_dr != 0xFFFFFFFFu) { dr = pre_dr; a = tail_end; }  // phase 1054: already counted
+                  while (a + 4u <= tail_end) {
+                    uint32_t w = prd2(a);
+                    uint32_t ty = w >> 30, cn = ((w >> 16) & 0x3FFFu) + 1u;
+                    if (ty == 3u) {
+                      uint32_t op = (w >> 8) & 0x7Fu;
+                      if (op == 0x22u || op == 0x36u) ++dr;
+                      a += (cn + 1u) * 4u;
+                    } else if (ty == 0u) {
+                      a += (cn + 1u) * 4u;
+                    } else if (ty == 2u) {
+                      a += 4u;
+                    } else {
+                      a += 12u;  // type 1: header + two registers (ExecutePacketType1)
+                    }
+                  }
+                  static bool published_once = false;
+                  if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) {
+                    XELOGI("GuidePublish: paint {} range {:08X}..{:08X} draw packets {}", hook_paint_n, start, tail_end, dr);
+                  }
+                  if (dr == 0 && (tail_end - start) > 80000u) {
+                    // Phase 1054: p1054a (512-pixel font atlas) counted zero
+                    // draws in every settled paint although the walk painted
+                    // 15 elements. Dump the packet sequence once, to see where
+                    // the walk above falls out of step.
+                    static bool desync_once = false;
+                    if (!desync_once) {
+                      desync_once = true;
+                      uint32_t a = start, idx = 0, logged = 0;
+                      while (a + 4u <= tail_end && logged < 60) {
+                        uint32_t w = prd2(a);
+                        uint32_t ty = w >> 30, cn = ((w >> 16) & 0x3FFFu) + 1u, op = (w >> 8) & 0x7Fu;
+                        bool odd = (ty == 1u) || (cn > 1024u) || (ty == 3u && op != 0x2Du && op != 0x45u && op != 0x22u && op != 0x10u);
+                        if (idx < 24 || odd) {
+                          XELOGI("GuideDesync: paint {} pkt {} @{:08X} word {:08X} type {} op {:02X} count {} next {:08X} {:08X}",
+                                 hook_paint_n, idx, a, w, ty, op, cn, prd2(a + 4u), prd2(a + 8u));
+                          ++logged;
+                        }
+                        ++idx;
+                        if (ty == 3u || ty == 0u) a += (cn + 1u) * 4u;
+                        else if (ty == 2u) a += 4u;
+                        else a += 12u;
+                      }
+                      XELOGI("GuideDesync: paint {} walked {} packets to {:08X} of {:08X}; first element at {:08X}", hook_paint_n, idx, a, tail_end, g_guide_first_e0);
+                      if (g_guide_first_e0 > start && g_guide_first_e0 < tail_end) {
+                        uint32_t b = g_guide_first_e0;
+                        for (uint32_t k = 0; k < 12 && b + 4u <= tail_end; ++k) {
+                          uint32_t w = prd2(b);
+                          uint32_t ty = w >> 30, cn = ((w >> 16) & 0x3FFFu) + 1u, op = (w >> 8) & 0x7Fu;
+                          XELOGI("GuideDesync: from first element pkt {} @{:08X} word {:08X} type {} op {:02X} count {}", k, b, w, ty, op, cn);
+                          if (ty == 3u || ty == 0u) b += (cn + 1u) * 4u;
+                          else if (ty == 2u) b += 4u;
+                          else b += 12u;
+                        }
+                      }
+                    }
+                  }
+                  if (dr == 0 && published_once) {
+                    if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) {
+                      XELOGI("GuidePublish: paint {} has no draw packets; keeping the last published paint", hook_paint_n);
+                    }
+                    if (std::chrono::steady_clock::now() < g_guide_anim_hold) {
+                      // Phase 1054: while the open animation plays, an empty
+                      // paint means nothing is visible yet; keeping the last
+                      // resting paint would pop the panel in early.
+                      gso2->command_processor()->guide_overlay_ptr_ = 0;
+                      GuideSyncOverlayPair(gso2->command_processor());
+                      static uint32_t hold_logs = 0;
+                      if (hold_logs++ < 6) {
+                        XELOGI("GuidePublish: paint {} empty during the open animation; overlay cleared", hook_paint_n);
+                      }
+                    }
+                    tail_end = start;  // fall through the gate below
+                  } else if (dr) {
+                    published_once = true;
+                  }
+                  g_guide_last_dr = dr;
+                }
                 if (start && tail_end > start) {
                   if (::cvars::guide_execute_command_stream) {
                     // Inline, on the title thread, mid-frame. Phase 945: set
@@ -8518,9 +15033,115 @@ void VdSwap_entry(
                     // swap handler executes guide_overlay_ptr_ just before the
                     // swap, which is after the title's own frame - the point
                     // the inline path was clobbering.
+                    if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 32 (line 9981)", hook_paint_n, GuideHookMs()); }
+                    uint32_t pub_start = start;
+                    {
+                      uint32_t ow = (tail_end - start) / 4;
+                      uint32_t osum = 0;
+                      const uint8_t* op =
+                          kernel_state()->memory()->TranslateVirtual(start);
+                      if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 33 (line 9987)", hook_paint_n, GuideHookMs()); }
+                      for (uint32_t i = 0; i < ow; ++i) {
+                        osum += xe::load_and_swap<uint32_t>(op + i * 4);
+                      }
+                      gso2->command_processor()->guide_overlay_sum_ = osum;
+                      // Phase 1054 black: pin the pages this stream reads so
+                      // the page cache does not recycle them under the replay.
+                      // Phase 1055 bugs: pinned after the copy below (the tag
+                      // is the pair the GPU will see), and the stream the GPU
+                      // is replaying at this moment stays pinned however old
+                      // it is - at a publish every paint the 16-publish window
+                      // is 0.27 s and a shader compile stalls a replay longer.
+                      std::vector<uint32_t> pin;
+                      bool do_pin = false;
+                      if (::cvars::guide_page_cache) {
+                        GuidePinTally pt;
+                        GuideCollectStreamPages(op, ow, pin, pt, 0);
+                        do_pin = true;
+                        static uint32_t pin_logs = 0;
+                        if (pin_logs < 8 || (pin_logs % 300u) == 0u) {
+                          XELOGI("GuidePin: {} pages read by the {}-word stream: vertex {} texture {} shader {} index {} alu {} ib {} | shaders at {:08X} {:08X} {:08X} {:08X} {:08X} {:08X} | allocations refused a pinned page so far: {}",
+                                 pin.size(), ow, pt.vertex, pt.texture, pt.shader, pt.index, pt.alu, pt.ib,
+                                 pt.shader_addr[0], pt.shader_addr[1], pt.shader_addr[2], pt.shader_addr[3], pt.shader_addr[4], pt.shader_addr[5],
+                                 xe::kernel::xboxkrnl::GuidePageCachePinSkips());
+                        }
+                        ++pin_logs;
+                      }
+                      // Phase 1012: publish a stable copy, so the consumer can
+                      // re-run it every frame after the arena moves on.
+                      if (::cvars::guide_overlay_copy_stream) {
+                        // Phase 1055 bugs: a ring of copies, not one buffer.
+                        // The GPU thread replays the published copy on every
+                        // swap and can be inside it when the next paint
+                        // publishes: with one buffer the memcpy rewrote the
+                        // stream under the replay and the GPU parsed a torn
+                        // mix of two streams ("ExecutePacketType0 overflow",
+                        // "GUIDE BUFFER: failed to execute packet" - 7 frames
+                        // a run, at the hot-to-spread edges where the layout
+                        // changes most). Each publish goes to the next slot;
+                        // a slot is rewritten 8 publishes (>= 8 paints) later,
+                        // long after any replay of it has ended.
+                        constexpr uint32_t kCopySlots = 8u;
+                        static uint32_t copy_addr[kCopySlots] = {}, copy_cap[kCopySlots] = {};
+                        static uint32_t copy_slot = 0;
+                        static uint32_t copy_logs = 0;
+                        if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 34 (line 9996)", hook_paint_n, GuideHookMs()); }
+                        uint32_t need = ow * 4u;
+                        uint32_t slot = copy_slot++ % kCopySlots;
+                        if (copy_addr[slot] && copy_cap[slot] < need) {
+                          copy_addr[slot] = 0;  // leak the small one
+                        }
+                        if (!copy_addr[slot]) {
+                          copy_cap[slot] = std::max(need, 256u * 1024u);
+                          copy_addr[slot] = kernel_state()->memory()->SystemHeapAlloc(
+                              copy_cap[slot], 4096);
+                        }
+                        if (copy_addr[slot]) {
+                          std::memcpy(
+                              kernel_state()->memory()->TranslateVirtual(
+                                  copy_addr[slot]),
+                              op, need);
+                          pub_start = copy_addr[slot];
+                          if (copy_logs++ < 4) {
+                            XELOGI("GuideStreamCopy: {} words {:08X} -> copy "
+                                   "at {:08X} (slot {} of {}, cap {} bytes)",
+                                   ow, start, copy_addr[slot], slot, kCopySlots, copy_cap[slot]);
+                          }
+                        }
+                      }
+                      if (do_pin) {
+                        const uint64_t tag = (uint64_t(pub_start) << 32) | uint64_t(ow);
+                        const uint64_t keep = gso2->command_processor()->guide_overlay_replaying_.load(std::memory_order_acquire);
+                        xe::kernel::xboxkrnl::GuidePageCachePin(pin, tag, keep);
+                      }
+                    }
                     gso2->command_processor()->guide_overlay_words_ =
                         (tail_end - start) / 4;
-                    gso2->command_processor()->guide_overlay_ptr_ = start;
+                    if (!g_guide_warmup) {  // phase 1054: the warm-up paints are not shown
+                      gso2->command_processor()->guide_overlay_ptr_ = pub_start;
+                      g_guide_last_pub = pub_start;
+                      g_guide_last_words = (tail_end - start) / 4;
+                    }
+                    GuideSyncOverlayPair(gso2->command_processor());
+                    if (!g_guide_opened && g_guide_last_words >= 20000u) {
+                      // Phase 1053: a system app with input focus blocks the
+                      // title's XamInputGetState/GetKeystroke; xenia has that
+                      // gate for its own dialogs, so raise it while the Guide
+                      // shows.
+                      kernel_state()->xam_state()->is_xam_dialog_present_.store(true);
+                      // Phase 1053: the slide timer started on paint 1 (nearly
+                      // empty) and was over before the panel appeared; restart
+                      // it when the first stream with real draws is published.
+                      g_guide_opened = true;
+                      gso2->command_processor()->guide_slide_rearm_ = true;
+                      g_guide_want_redraw = true;
+                      XELOGI("GuideSlide: re-armed at paint {} ({} draw packets, {} words); title input captured", hook_paint_n, g_guide_last_dr, g_guide_last_words);
+                    }
+                    if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms deep mark 35 (line 10022)", hook_paint_n, GuideHookMs()); }
+                    if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) {
+                      XELOGI("GuidePublished: paint {} ptr {:08X} words {} (start {:08X} tail_end {:08X})",
+                             hook_paint_n, pub_start, (tail_end - start) / 4, start, tail_end);
+                    }
                   }
                 }
                 static uint32_t blk_logs = 0;
@@ -8532,6 +15153,7 @@ void VdSwap_entry(
                          gso2->command_processor()->guide_draw_count_ - d1);
                 }
               }
+              if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms sub3 mark 15 (line 9979)", hook_paint_n, GuideHookMs()); }
               if (parse_bad) {
                 static uint32_t skip_logs = 0;
                 if (skip_logs++ < 2) {
@@ -8546,10 +15168,13 @@ void VdSwap_entry(
               // lines, so frames where the parse happened to succeed were
               // publishing all 42539 words with nothing in the log to say so.
               // The paint publishes its own tail; do not fight it.
+              if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms sub3 mark 16 (line 9993)", hook_paint_n, GuideHookMs()); }
               if (!::cvars::guide_paint_frame) {
                 gso2->command_processor()->guide_overlay_words_ = words;
                 gso2->command_processor()->guide_overlay_ptr_ = before;
+                GuideSyncOverlayPair(gso2->command_processor());
               }
+              if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms sub3 mark 17 (line 9997)", hook_paint_n, GuideHookMs()); }
               if (::cvars::guide_execute_command_stream) {
                 uint32_t d0 = gso2->command_processor()->guide_draw_count_;
                 gso2->command_processor()->ExecuteGuestBufferVirtualUnsafe(
@@ -8565,6 +15190,9 @@ void VdSwap_entry(
               }
             }
           }
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 4 (line 10009)", hook_paint_n, GuideHookMs()); }
+          g_guide_t_tail1 = std::chrono::steady_clock::now();
+          g_guide_stage = 10;
           static uint32_t pf_logs = 0;
           if (pf_logs++ < 4) {
             XELOGI("GuidePaintFrame: painted {} elements; present={:08X}; "
@@ -8592,7 +15220,7 @@ void VdSwap_entry(
       // Widening at the last possible moment leaves nothing in between to
       // undo it.
       if (::cvars::guide_widen_at_draw && guide_resv_dev_ &&
-          guide_cmdbuf_base_ && guide_cmdbuf_size_) {
+          guide_cmdbuf_base_ && guide_cmdbuf_size_ && g_guide_round_done) {  // phase 1054 fps: not mid-round
         auto* ww = kernel_state()->memory();
         xe::store_and_swap<uint32_t>(
             ww->TranslateVirtual(guide_resv_dev_ + 0x30u), guide_cmdbuf_base_);
@@ -8619,6 +15247,7 @@ void VdSwap_entry(
         // this build - phase 273 - so supply an equivalent zeroed block.
         // Diagnostic: this is a guess at the structure, not a reconstruction.
         {
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 5 (line 10063)", hook_paint_n, GuideHookMs()); }
           uint32_t rb = xe::load_and_swap<uint32_t>(
               ww->TranslateVirtual(guide_resv_dev_ + 11024u));
           if (!rb) {
@@ -8633,6 +15262,7 @@ void VdSwap_entry(
         }
         {
           uint8_t* fp = ww->TranslateVirtual<uint8_t*>(guide_resv_dev_ + 11069u);
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 6 (line 10077)", hook_paint_n, GuideHookMs()); }
           if (fp && (*fp & 0x20u)) {
             *fp = static_cast<uint8_t>(*fp & ~0x20u);
             static uint32_t cleared = 0;
@@ -8650,8 +15280,10 @@ void VdSwap_entry(
           auto w3 = [wm3](uint32_t a) {
             return xe::load_and_swap<uint32_t>(wm3->TranslateVirtual(a));
           };
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 7 (line 10094)", hook_paint_n, GuideHookMs()); }
           if (win_logs <= 4) {
           uint32_t c30 = w3(guide_resv_dev_ + 0x30u);
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 8 (line 10096)", hook_paint_n, GuideHookMs()); }
           uint32_t e34 = w3(guide_resv_dev_ + 0x34u);
           XELOGI("WindowAtDraw #{}: dev={:08X} cur[30]={:08X} end[34]={:08X} "
                  "= {} bytes (need 9236) cursor[2B4C]={:08X}",
@@ -9143,6 +15775,7 @@ void VdSwap_entry(
           // Phase 372: the overflow check at 81A00774 computes
           // ((cursor - [dev+16344]) + 4) >> 2 and trips when it exceeds
           // 0x100000. Log both terms and the computed count.
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 9 (line 10587)", hook_paint_n, GuideHookMs()); }
           {
             uint32_t cur = w3(guide_resv_dev_ + 0x30u);
             uint32_t cbase = w3(guide_resv_dev_ + 16344u);
@@ -9205,12 +15838,13 @@ void VdSwap_entry(
         // address that is not mapped is worse than the alias.
         if (::cvars::guide_split_reserve_buf) {
           static uint32_t rsv3 = 0xFFFFFFFFu;
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 10 (line 10649)", hook_paint_n, GuideHookMs()); }
           if (rsv3 == 0xFFFFFFFFu) {
             auto* am = kernel_state()->memory();
             uint32_t sz = 512u * 1024u;
             uint32_t got = am->SystemHeapAlloc(sz, 4096, kSystemHeapPhysical);
             auto* h = got ? am->LookupHeap(got) : nullptr;
-            bool ok = h && h->QueryRangeAccess(got, got + sz) !=
+            bool ok = h && h->QueryRangeAccessUnlocked(got, got + sz) !=
                                xe::memory::PageAccess::kNoAccess;
             XELOGI("GuideSplitAlloc: got={:08X} mapped={} (cmd base={:08X})",
                    got, ok ? "yes" : "NO", q(qdv + 0x2B48u));
@@ -9231,6 +15865,7 @@ void VdSwap_entry(
         // outside the buffer entirely - which is what 808 read as an empty
         // stream.
         {
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 11 (line 10675)", hook_paint_n, GuideHookMs()); }
           uint32_t cb = q(qdv + 0x2B48u);
           auto* mq = kernel_state()->memory();
           if (cb) {
@@ -9238,7 +15873,7 @@ void VdSwap_entry(
             uint32_t t3 = 0, dr = 0, sc = 0, waits = 0;
             for (uint32_t a = cb; a < cb + 0x8000u; a += 4) {
               auto* hp = mq->LookupHeap(a);
-              if (!hp || hp->QueryRangeAccess(a, a + 4u) ==
+              if (!hp || hp->QueryRangeAccessUnlocked(a, a + 4u) ==
                              xe::memory::PageAccess::kNoAccess) {
                 continue;
               }
@@ -9262,7 +15897,7 @@ void VdSwap_entry(
                 for (uint32_t k = 0; k <= cnt && k < 8u; ++k) {
                   uint32_t pa = a + k * 4u;
                   auto* hpp = mq->LookupHeap(pa);
-                  if (!hpp || hpp->QueryRangeAccess(pa, pa + 4u) ==
+                  if (!hpp || hpp->QueryRangeAccessUnlocked(pa, pa + 4u) ==
                                   xe::memory::PageAccess::kNoAccess) {
                     break;
                   }
@@ -9286,7 +15921,7 @@ void VdSwap_entry(
               uint32_t first = 0;
               for (uint32_t a = cb; a < cb + 0x8000u; a += 4) {
                 auto* hp = mq->LookupHeap(a);
-                if (!hp || hp->QueryRangeAccess(a, a + 4u) ==
+                if (!hp || hp->QueryRangeAccessUnlocked(a, a + 4u) ==
                                xe::memory::PageAccess::kNoAccess) {
                   continue;
                 }
@@ -9299,7 +15934,7 @@ void VdSwap_entry(
                 for (uint32_t k = 0; k < 48u; ++k) {
                   uint32_t a = first + k * 4u;
                   auto* hp = mq->LookupHeap(a);
-                  if (!hp || hp->QueryRangeAccess(a, a + 4u) ==
+                  if (!hp || hp->QueryRangeAccessUnlocked(a, a + 4u) ==
                                  xe::memory::PageAccess::kNoAccess) {
                     break;
                   }
@@ -9319,6 +15954,7 @@ void VdSwap_entry(
         // so far was applied at the paint site, which this path never reaches.
         // Widen here, on the device this draw actually uses.
         if (qdv && guide_cmdbuf_base_ && guide_cmdbuf_size_) {
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 12 (line 10763)", hook_paint_n, GuideHookMs()); }
           uint32_t dc0 = q(qdv + 0x30u), de0 = q(qdv + 0x34u);
           if (de0 <= dc0 || (de0 - dc0) < 0x905u * 4u) {
             auto* dm = kernel_state()->memory();
@@ -9565,8 +16201,18 @@ void VdSwap_entry(
         gs_scope->command_processor()->guide_in_draw_scope_ = true;
         xe::gpu::g_guide_in_draw_scope = true;
       }
-      uint64_t gr = kernel_state()->processor()->Execute(
-          gth->thread_state(), guide_draw_fn_, gargs, xe::countof(gargs));
+      // Phase 1054 fps: this is hud's own render entry (the composite draw of
+      // the pre-1053 design). It re-renders the whole tree into xam's buffer
+      // every swap - 19 ms - and nothing reads that output since the paint
+      // walk publishes its own stream. 0 = never, 1 = only on swaps that
+      // paint, 2 = every swap (the old behaviour).
+      uint64_t gr = 0;
+      bool composite = ::cvars::guide_composite_draw == 2 ||
+                       (::cvars::guide_composite_draw == 1 && !g_guide_idle);
+      if (composite) {
+        gr = kernel_state()->processor()->Execute(
+            gth->thread_state(), guide_draw_fn_, gargs, xe::countof(gargs));
+      }
       if (gs_scope && gs_scope->command_processor()) {
         gs_scope->command_processor()->guide_in_draw_scope_ = false;
         xe::gpu::g_guide_in_draw_scope = false;
@@ -9576,6 +16222,7 @@ void VdSwap_entry(
         uint32_t cd_r1 = cq(cd_dev + 0x30u), cd_b1 = cq(cd_dev + 0x2B4Cu);
         static uint32_t cdlog = 0;
         if (cdlog++ < 4) {
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 13 (line 11020)", hook_paint_n, GuideHookMs()); }
           uint32_t pre = g_draw_entry_reserve;
         XELOGI("CompositeEmit #{}: entry[30]={:08X} -> {:08X} ({} words in "
                "xam's buffer)",
@@ -9587,6 +16234,7 @@ void VdSwap_entry(
                  (cd_r1 > cd_r0) ? (cd_r1 - cd_r0) / 4 : 0, cd_b0, cd_b1,
                  (cd_b1 > cd_b0) ? (cd_b1 - cd_b0) / 4 : 0);
           uint32_t ws = 0, we2 = 0;
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 14 (line 11031)", hook_paint_n, GuideHookMs()); }
           if (cd_r1 > cd_r0) { ws = cd_r0; we2 = cd_r1; }
           else if (cd_b1 > cd_b0) { ws = cd_b0; we2 = cd_b1; }
           if (ws && (we2 - ws) < 0x40000u) {
@@ -9771,6 +16419,7 @@ void VdSwap_entry(
         };
         size_t k = 0;
         for (uint32_t a : objdiff_addr) {
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 15 (line 11215)", hook_paint_n, GuideHookMs()); }
           std::string diff;
           for (uint32_t i = 0; i < kOdWords; ++i, ++k) {
             uint32_t now = ord3(a + i * 4);
@@ -9809,6 +16458,7 @@ void VdSwap_entry(
                             : 40u;
         uint32_t words = 0;
         if (xbuf) {
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 16 (line 11253)", hook_paint_n, GuideHookMs()); }
           for (uint32_t w = 0; w < span; ++w) {
             if (sd(xbuf + w * 4)) words = w + 1;
           }
@@ -9822,6 +16472,7 @@ void VdSwap_entry(
             xbuf > guide_cmdbuf_base_ &&
             xbuf - guide_cmdbuf_base_ < guide_cmdbuf_size_) {
           uint32_t base_words = (xbuf - guide_cmdbuf_base_) / 4u;
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 17 (line 11266)", hook_paint_n, GuideHookMs()); }
           static uint32_t sb = 0;
           if (++sb <= 3) {
             XELOGI("GuideSubmitBase #{}: {:08X}+{} words (was {:08X}+{})", sb,
@@ -9833,8 +16484,10 @@ void VdSwap_entry(
           // write of one register at index 0 - it swallows the real header
           // behind it and misaligns every packet after. Start at the first
           // non-zero word instead.
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 18 (line 11277)", hook_paint_n, GuideHookMs()); }
           uint32_t skip = 0;
           while (skip < words && sd(xbuf + skip * 4) == 0) ++skip;
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 19 (line 11279)", hook_paint_n, GuideHookMs()); }
           if (skip && skip < words) {
             xbuf += skip * 4;
             words -= skip;
@@ -9852,6 +16505,7 @@ void VdSwap_entry(
         // 0x1000-0x1FFF block; the Guide's own state writes never do.
         if (::cvars::guide_truncate_at_ramp && xbuf && words) {
           uint32_t cut = 0;
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 20 (line 11296)", hook_paint_n, GuideHookMs()); }
           for (uint32_t i = 0; i < words;) {
             uint32_t hd = sd(xbuf + i * 4);
             uint32_t ty = hd >> 30;
@@ -9905,6 +16559,7 @@ void VdSwap_entry(
                      sn, cut, pc_before, pc_after, im_before, im_after);
             }
           }
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 21 (line 11349)", hook_paint_n, GuideHookMs()); }
           if (cut) {
             static uint32_t tn = 0;
             if (++tn <= 3) {
@@ -9920,6 +16575,7 @@ void VdSwap_entry(
         if (::cvars::guide_ctx2_kick_ptr) {
           auto* km = kernel_state()->memory();
           uint32_t kdevs[2] = {sc_dev, sd(0x801E6FC4u)};
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 22 (line 11364)", hook_paint_n, GuideHookMs()); }
           for (uint32_t kd : kdevs) {
             if (!kd) continue;
             uint32_t cur = sd(kd + 0x2B14u);
@@ -9963,6 +16619,7 @@ void VdSwap_entry(
                      kResolveSize / 1024);
             }
           }
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 23 (line 11407)", hook_paint_n, GuideHookMs()); }
           if (resolve_buf || ::cvars::guide_nop_waits ||
               ::cvars::guide_nop_draws || ::cvars::guide_nop_regs ||
               ::cvars::guide_keep_surface_regs ||
@@ -10155,6 +16812,7 @@ void VdSwap_entry(
             if (::cvars::guide_arm_overlay) {
               gs3->command_processor()->guide_overlay_ptr_ = xbuf;
               gs3->command_processor()->guide_overlay_words_ = words;
+              GuideSyncOverlayPair(gs3->command_processor());
               static uint32_t armn = 0;
               if (++armn <= 3) {
                 XELOGI("GuideArmOverlay #{}: {:08X} +{} words", armn, xbuf,
@@ -10246,6 +16904,7 @@ void VdSwap_entry(
         auto* mmv = kernel_state()->memory();
         uint32_t changed = 0, idx = 0, shown = 0;
         for (auto& r : kRanges) for (uint32_t a = r.lo; a < r.hi; a += kBlk, ++idx) {
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 24 (line 11690)", hook_paint_n, GuideHookMs()); }
           uint32_t sum = 0, pm4 = 0;
           auto* hp = mmv->TranslateVirtual(a);
           if (hp) {
@@ -10256,6 +16915,7 @@ void VdSwap_entry(
               if ((v & 0xC0000000u) == 0xC0000000u) ++pm4;
             }
           }
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 25 (line 11700)", hook_paint_n, GuideHookMs()); }
           if (sum != pre_sums[idx]) {
             ++changed;
             if (shown < 16) {
@@ -10290,6 +16950,7 @@ void VdSwap_entry(
         if (!ctrl_done && gsc && gsc->command_processor()) {
           ctrl_done = true;
           uint32_t z = kernel_state()->memory()->SystemHeapAlloc(4096, 4096);
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 26 (line 11734)", hook_paint_n, GuideHookMs()); }
           if (z) {
             std::memset(kernel_state()->memory()->TranslateVirtual(z), 0, 4096);
             uint32_t b0 = gsc->command_processor()->guide_draw_count_;
@@ -10305,8 +16966,10 @@ void VdSwap_entry(
         while (i < wd_pre.size()) {
           uint32_t now = xe::load_and_swap<uint32_t>(
               wm3->TranslateVirtual(kWdLo + i * 4));
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 27 (line 11749)", hook_paint_n, GuideHookMs()); }
           if (now == wd_pre[i]) { ++i; continue; }
           uint32_t start = i, gap = 0;
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 28 (line 11751)", hook_paint_n, GuideHookMs()); }
           while (i < wd_pre.size() && gap < 16) {
             uint32_t v = xe::load_and_swap<uint32_t>(
                 wm3->TranslateVirtual(kWdLo + i * 4));
@@ -10326,6 +16989,7 @@ void VdSwap_entry(
           // a DRAW_INDX header, and the walk lost sync immediately. Only a
           // walker that skips payload can say what the frame actually
           // contains.
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 29 (line 11770)", hook_paint_n, GuideHookMs()); }
           if (::cvars::guide_word_diff && len >= 32) {
             auto* mmw = kernel_state()->memory();
             uint32_t total_words = start + len;
@@ -10393,8 +17057,10 @@ void VdSwap_entry(
             if (gso && gso->command_processor()) {
               gso->command_processor()->guide_overlay_words_ = start + len;
               gso->command_processor()->guide_overlay_ptr_ = kWdLo;
+              GuideSyncOverlayPair(gso->command_processor());
             }
           }
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 30 (line 11839)", hook_paint_n, GuideHookMs()); }
           if (::cvars::guide_execute_command_stream && len >= 32) {
             auto* gs2 = kernel_state()->emulator()->graphics_system();
             if (gs2 && gs2->command_processor()) {
@@ -10471,6 +17137,7 @@ void VdSwap_entry(
         if (!ran) {
           ran = true;
           auto* em = kernel_state()->memory();
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 31 (line 11915)", hook_paint_n, GuideHookMs()); }
           auto rdc = [em](uint32_t a) {
             return xe::load_and_swap<uint32_t>(em->TranslateVirtual(a));
           };
@@ -10534,6 +17201,7 @@ void VdSwap_entry(
       {
         auto* gsx = kernel_state()->emulator()->graphics_system();
         if (gsx && gsx->command_processor()) {
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 32 (line 11978)", hook_paint_n, GuideHookMs()); }
           uint32_t gd_after = gsx->command_processor()->guide_draw_count_;
           // Phase 520: this cap meant the GPU-draw counter sampled 5 of 2700+
           // composite draws. "15 draws on #2, zero on #1 and #3-#5" was that
@@ -10541,6 +17209,7 @@ void VdSwap_entry(
           // verbose walk stays capped.
           static uint32_t reported = 0;
           ++reported;
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 33 (line 11985)", hook_paint_n, GuideHookMs()); }
           {
             ++reported;
             if (reported <= 5 && guide_resv_dev_ && guide_resv_pre_) {
@@ -10665,7 +17334,9 @@ void VdSwap_entry(
       EmitGuideCoverageOnce();
       static std::atomic<uint32_t> gdraws{0};
       uint32_t gn = ++gdraws;
-      if (gn <= 3 || (gn % 300) == 0) {
+      // Phase 1054 tabs: the ring scan and packet walk below take ~5 s every
+      // 300th call (GuideHookTime: paint 300/600 took 5000+ ms); verbose only.
+      if (::cvars::guide_walk_verbose && (gn <= 3 || (gn % 300) == 0)) {
         // hud's draw (913EAB28) ends with "li r3,0" AFTER the call to
         // XuiRenderPresent, so it discards Present's HRESULT - this return
         // value is 0 whether or not anything was presented. The DC the draw
@@ -10687,6 +17358,7 @@ void VdSwap_entry(
         // the same intervention that worked for [dc+0x134].
         if (::cvars::guide_force_46d0 && ddc) {
           uint32_t wr = rdw(ddc + 0x1CCu);
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 34 (line 12131)", hook_paint_n, GuideHookMs()); }
           uint32_t dv46 = wr ? rdw(wr + 0x0Cu) : 0u;
           if (dv46) {
             static uint32_t c46 = 0;
@@ -10701,6 +17373,7 @@ void VdSwap_entry(
           }
         }
         if (::cvars::guide_clear_dc_134 && ddc) {
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 35 (line 12145)", hook_paint_n, GuideHookMs()); }
           uint32_t prev134 = rdw(ddc + 0x134u);
           if (prev134 != 0u) {
             xe::store_and_swap<uint32_t>(
@@ -10716,6 +17389,7 @@ void VdSwap_entry(
         // type-3 packets start 0xC0......, so their presence is checkable
         // rather than a matter of opinion.
         if (guide_syscmdbuf_ptr_) {
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 36 (line 12160)", hook_paint_n, GuideHookMs()); }
           uint32_t nonzero = 0, pm4 = 0, first = 0;
           for (uint32_t i = 0; i < guide_syscmdbuf_size_ / 4 && i < 4096; ++i) {
             uint32_t v = rdw(guide_syscmdbuf_ptr_ + i * 4);
@@ -10744,6 +17418,7 @@ void VdSwap_entry(
         // object being the wrapper (vtable 81640680). One runtime read settles
         // it; static reading cannot (phase 341).
         {
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 37 (line 12188)", hook_paint_n, GuideHookMs()); }
           static bool probed = false;
           // 818FB2B8 is a dashroot address (one of the 22 in phase 440);
           // on retail it is a different function and executing it faults.
@@ -10808,6 +17483,7 @@ void VdSwap_entry(
         // from "advances during the draw and is reset by the submit". Sample
         // it again here, immediately after the composite returns.
         {
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 38 (line 12252)", hook_paint_n, GuideHookMs()); }
           uint32_t pdev = dev ? rdw(dev + 0x0Cu) : 0u;
           if (pdev) {
             // Phase 829: [dev+0x46D0] is the word the draw gate reads
@@ -10830,7 +17506,7 @@ void VdSwap_entry(
                   for (uint32_t k = 0; k < 8u; ++k) {
                     uint32_t a2 = p59 + k * 4u;
                     auto* hp = dm2->LookupHeap(a2);
-                    if (!hp || hp->QueryRangeAccess(a2, a2 + 4u) ==
+                    if (!hp || hp->QueryRangeAccessUnlocked(a2, a2 + 4u) ==
                                    xe::memory::PageAccess::kNoAccess) {
                       break;
                     }
@@ -10928,7 +17604,7 @@ void VdSwap_entry(
               std::map<uint32_t, uint32_t> t3ops;
               while (a + 4 <= wend) {
                 auto* hp = wm2->LookupHeap(a);
-                if (!hp || hp->QueryRangeAccess(a, a + 4u) ==
+                if (!hp || hp->QueryRangeAccessUnlocked(a, a + 4u) ==
                                xe::memory::PageAccess::kNoAccess) {
                   break;
                 }
@@ -10976,7 +17652,7 @@ void VdSwap_entry(
                   bool ok = true;
                   while (a2 < wend) {
                     auto* hp2 = wm2->LookupHeap(a2);
-                    if (!hp2 || hp2->QueryRangeAccess(a2, a2 + 4u) ==
+                    if (!hp2 || hp2->QueryRangeAccessUnlocked(a2, a2 + 4u) ==
                                     xe::memory::PageAccess::kNoAccess) {
                       ok = false;
                       break;
@@ -11019,6 +17695,7 @@ void VdSwap_entry(
         // question a 00000000 composite-draw return does not answer: whether
         // geometry ever marks the device dirty.
         if (dev) {
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 39 (line 12463)", hook_paint_n, GuideHookMs()); }
           uint32_t rdev = rdw(dev + 0x0Cu);
           if (rdev) {
             if (::cvars::guide_force_drawgate) {
@@ -11046,6 +17723,7 @@ void VdSwap_entry(
           // 4088B7A0, the first already carrying a valid RT0 and the second
           // holding 00000060. Bind the same surface here, where the present's
           // own device is in hand.
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 40 (line 12490)", hook_paint_n, GuideHookMs()); }
           {
             static uint32_t dbg = 0;
             if (dbg++ < 3) {
@@ -11097,6 +17775,7 @@ void VdSwap_entry(
           // The Guide's device 40870D00 has the tables xam set up but no
           // front buffer; the title's has the buffer but not the tables.
           // Copy across only the one field that is missing.
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 41 (line 12541)", hook_paint_n, GuideHookMs()); }
           if (::cvars::guide_borrow_front_buffer && dev) {
             static bool lent = false;
             uint32_t tdev = rdw(0x801E6FC4u);
@@ -11152,6 +17831,7 @@ void VdSwap_entry(
                      rdw(dev + 0x0Cu), rdw(rdw(dev + 0x0Cu) + 0x3F74u));
             }
           }
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 42 (line 12596)", hook_paint_n, GuideHookMs()); }
           {
             // Unconditional one-shot probe: the force block below silently did
             // nothing across several runs and each of its three conditions is
@@ -11248,6 +17928,7 @@ void VdSwap_entry(
               }
             }
           }
+          if (::cvars::guide_anim_run && hook_paint_n < (::cvars::guide_walk_verbose ? 150u : 16u)) { XELOGI("GuideStage: hook paint {} +{:.1f}ms tail mark 43 (line 12692)", hook_paint_n, GuideHookMs()); }
           if (std::getenv("XENIA_PRESENT_RT") &&
               ::cvars::guide_bind_title_rt && guide_title_surface_ && real_dev) {
             static bool present_rt_done = false;
@@ -11255,7 +17936,7 @@ void VdSwap_entry(
             bool plausible = false;
             if (cur >= 0x10000u) {
               auto* ph = kernel_state()->memory()->LookupHeap(cur);
-              plausible = ph && ph->QueryRangeAccess(cur, cur + 0x27u) !=
+              plausible = ph && ph->QueryRangeAccessUnlocked(cur, cur + 0x27u) !=
                                     xe::memory::PageAccess::kNoAccess;
             }
             if (!present_rt_done && !plausible) {
@@ -11300,6 +17981,314 @@ void VdSwap_entry(
       }
     }
   }
+}
+
+namespace {
+std::mutex g_guide_pt_mu;
+std::condition_variable g_guide_pt_cv;
+uint64_t g_guide_pt_swaps = 0;      // swaps handed to the paint thread
+std::atomic<bool> g_guide_pt_stop{false}, g_guide_pt_done{false};  // phase 1055 bugs: a clean stop at shutdown
+xe::kernel::object_ref<xe::kernel::XHostThread> g_guide_pt_thread;  // phase 1055 bugs: waited for at the stop
+uint32_t g_guide_pt_fetch_ga = 0;   // the latest swap's fetch_ptr
+bool g_guide_pt_started = false, g_guide_pt_failed = false;
+thread_local bool g_guide_pt_is_paint_thread = false;
+}  // namespace
+
+// Phase 1054 fps: a sampling profiler of the paint thread. Every
+// guide_paint_sampler_ms, while a paint is in progress, suspend the paint
+// thread, read its RIP and the guest link register (the JIT keeps the PPC
+// context in rsi), resume it; every 5 s resolve the samples through the code
+// cache into guest functions and log the top ones with their callers and the
+// host share. Nothing is resolved or logged while the thread is suspended.
+// A guarded 8-byte read (a plain function: __try cannot share a function
+// with objects that need unwinding).
+static uint64_t GuideSamplerReadLr(uint64_t host_addr) {
+  __try {
+    return *reinterpret_cast<const uint64_t*>(host_addr);
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    return 0;
+  }
+}
+
+static void GuidePaintSamplerMain() {
+  struct Sample { uint64_t rip, lr; uint64_t pcs[10]; size_t npc; int stage; };
+  std::vector<Sample> samples;
+  samples.reserve(100000);
+  auto* walker = kernel_state()->processor()->stack_walker();
+  auto last = std::chrono::steady_clock::now();
+  uint64_t idle_skips = 0;
+  for (;;) {
+    xe::threading::Sleep(std::chrono::milliseconds(std::max(1, ::cvars::guide_paint_sampler_ms)));
+    HANDLE h = reinterpret_cast<HANDLE>(g_guide_pt_native.load());
+    if (!h || !g_guide_pt_in_paint.load()) { ++idle_skips; continue; }
+    if (SuspendThread(h) == DWORD(-1)) continue;
+    CONTEXT ctx = {};
+    ctx.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
+    uint64_t rip = 0, lr = 0;
+    if (GetThreadContext(h, &ctx)) {
+      rip = ctx.Rip;
+      // the guest context lives in rsi inside JIT code; read its lr only when
+      // rsi looks like a host pointer into our address space
+      uint64_t rsi = ctx.Rsi;
+      if (rsi > 0x10000ull && rsi < 0x7FFFFFFFFFFFull) {
+        lr = GuideSamplerReadLr(rsi + offsetof(xe::cpu::ppc::PPCContext, lr));
+      }
+    }
+    Sample smp = {rip, lr, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 0, g_guide_stage.load()};
+    if (rip && walker) {
+      // the host stack of the suspended thread (dbghelp's StackWalk64 from
+      // its context), 6 frames: names the host code the time goes to
+      smp.npc = walker->CaptureStackTrace(h, smp.pcs, 0, 10, nullptr, nullptr, nullptr);
+    }
+    ResumeThread(h);
+    if (rip) samples.push_back(smp);
+    auto now = std::chrono::steady_clock::now();
+    if (now - last >= std::chrono::seconds(5) && !samples.empty()) {
+      auto* cc = kernel_state()->processor()->backend()->code_cache();
+      std::map<uint64_t, uint32_t> by_fn;      // guest function address (or host bucket) -> count
+      std::map<uint64_t, std::map<uint32_t, uint32_t>> callers;  // fn -> lr -> count
+      uint32_t host = 0;
+      uint64_t exe_base = reinterpret_cast<uint64_t>(GetModuleHandleW(nullptr));
+      std::map<uint64_t, uint32_t> host_by_off;
+      for (const auto& sm : samples) {
+        auto* gf = cc ? cc->LookupFunction(sm.rip) : nullptr;
+        if (gf) {
+          uint64_t key = gf->address();
+          ++by_fn[key];
+          ++callers[key][uint32_t(sm.lr)];
+        } else {
+          ++host;
+          ++host_by_off[(sm.rip >= exe_base && sm.rip < exe_base + 0x4000000ull) ? (sm.rip - exe_base) & ~0xFFull : 0xFFFFFFFFull];
+        }
+      }
+      std::vector<std::pair<uint64_t, uint32_t>> top(by_fn.begin(), by_fn.end());
+      std::sort(top.begin(), top.end(), [](auto& a, auto& b) { return a.second > b.second; });
+      std::string line;
+      size_t n = std::min<size_t>(top.size(), size_t(std::max(1, ::cvars::guide_paint_sampler_top)));
+      for (size_t i = 0; i < n; ++i) {
+        uint32_t best_lr = 0, best_n = 0;
+        for (auto& c : callers[top[i].first]) if (c.second > best_n) { best_n = c.second; best_lr = c.first; }
+        line += fmt::format("{:08X} {:.1f}% (lr {:08X}) | ", uint32_t(top[i].first), 100.0 * top[i].second / samples.size(), best_lr);
+      }
+      // host symbols: the innermost host frame of each sample, by name, and
+      // the commonest 3-frame stacks
+      std::map<std::string, uint32_t> by_sym;
+      std::map<std::string, uint32_t> by_stack;
+      std::map<std::string, uint32_t> by_export;  // "first xenia frame < first guest frame"
+      std::map<std::string, uint32_t> by_host;    // samples with no guest frame: 3 innermost frames
+      uint32_t pure_host = 0;
+      if (walker) {
+        for (const auto& sm : samples) {
+          if (!sm.npc) continue;
+          xe::cpu::StackFrame frames[10] = {};
+          uint64_t pcs[10];
+          std::memcpy(pcs, sm.pcs, sizeof(pcs));
+          size_t nf = std::min<size_t>(sm.npc, 10);
+          if (!walker->ResolveStack(pcs, frames, nf)) continue;
+          std::string stack, first_xe, first_guest, host3;
+          bool named = false, any_guest = false;
+          for (size_t k = 0; k < nf; ++k) {
+            std::string nm;
+            if (frames[k].type == xe::cpu::StackFrame::Type::kGuest) {
+              nm = fmt::format("guest:{:08X}", frames[k].guest_symbol.function ? frames[k].guest_symbol.function->address() : 0u);
+              if (first_guest.empty()) first_guest = nm;
+              any_guest = true;
+            } else {
+              nm = frames[k].host_symbol.name[0] ? std::string(frames[k].host_symbol.name) : fmt::format("host:{:X}", frames[k].host_pc);
+              if (first_xe.empty() && nm.rfind("xe::", 0) == 0) first_xe = nm;
+            }
+            if (!named) { ++by_sym[nm]; named = true; }
+            if (k < 6) stack += (k ? " < " : "") + nm;
+            if (k < 4) host3 += (k ? " < " : "") + nm.substr(0, 60);
+          }
+          ++by_stack[stack];
+          ++by_export[(first_xe.empty() ? "?" : first_xe) + " <- " + (first_guest.empty() ? "?" : first_guest)];
+          if (!any_guest) { ++pure_host; ++by_host[host3]; }
+        }
+      }
+      auto topn = [&](std::map<std::string, uint32_t>& m, size_t n) {
+        std::vector<std::pair<std::string, uint32_t>> v(m.begin(), m.end());
+        std::sort(v.begin(), v.end(), [](auto& a, auto& b) { return a.second > b.second; });
+        std::string o;
+        for (size_t i = 0; i < std::min(n, v.size()); ++i) o += fmt::format("{} {:.1f}% | ", v[i].first, 100.0 * v[i].second / samples.size());
+        return o;
+      };
+      XELOGI("GuideSamplerSym: {} samples: innermost {}", samples.size(), topn(by_sym, 12));
+      XELOGI("GuideSamplerStack: {}", topn(by_stack, 10));
+      XELOGI("GuideSamplerExport: {}", topn(by_export, 14));
+      XELOGI("GuideSamplerHost: {} of {} samples have no guest frame: {}", pure_host, samples.size(), topn(by_host, 16));
+      {
+        std::map<int, uint32_t> by_stage;
+        std::map<int, std::map<std::string, uint32_t>> stage_top;
+        for (const auto& sm : samples) {
+          ++by_stage[sm.stage];
+          auto* gf = cc ? cc->LookupFunction(sm.rip) : nullptr;
+          std::string nm = gf ? fmt::format("guest:{:08X}", gf->address()) : "host";
+          ++stage_top[sm.stage][nm];
+        }
+        std::string line;
+        for (auto& st : by_stage) {
+          int idx = st.first;
+          const char* nm = (idx >= 0 && idx < int(sizeof(kGuideStageNames) / sizeof(kGuideStageNames[0]))) ? kGuideStageNames[idx] : "?";
+          std::vector<std::pair<std::string, uint32_t>> v(stage_top[idx].begin(), stage_top[idx].end());
+          std::sort(v.begin(), v.end(), [](auto& a, auto& b) { return a.second > b.second; });
+          std::string tops;
+          for (size_t i = 0; i < std::min<size_t>(v.size(), 3); ++i) tops += fmt::format("{} {:.0f}% ", v[i].first, 100.0 * v[i].second / st.second);
+          line += fmt::format("{} {:.1f}% [{}] | ", nm, 100.0 * st.second / samples.size(), tops);
+        }
+        XELOGI("GuideSamplerStage: {}", line);
+      }
+      std::vector<std::pair<uint64_t, uint32_t>> htop(host_by_off.begin(), host_by_off.end());
+      std::sort(htop.begin(), htop.end(), [](auto& a, auto& b) { return a.second > b.second; });
+      std::string hline;
+      for (size_t i = 0; i < std::min<size_t>(htop.size(), 6); ++i) {
+        hline += fmt::format("exe+{:X} {:.1f}% | ", htop[i].first, 100.0 * htop[i].second / samples.size());
+      }
+      XELOGI("GuideSampler: {} samples over {:.1f} s ({} idle ticks), host {:.1f}%: {}| guest top: {}",
+             samples.size(), std::chrono::duration<double>(now - last).count(), idle_skips,
+             100.0 * host / samples.size(), hline, line);
+      samples.clear();
+      idle_skips = 0;
+      last = now;
+    }
+  }
+}
+
+// Phase 1054 fps: hand the swap to the "Guide Paint" thread and return to the
+// title's swap at once. The paint thread is an XHostThread in the title's
+// process with its own guest thread state and stack, so the hook's guest calls
+// (XuiAnimRun, layout, renders) run there; XThread::GetCurrentThread() inside
+// it is that thread. It paints once per burst of swaps it was woken for, so it
+// never paints more often than the title swaps, and the GPU thread keeps
+// executing the last published stream at every swap as before.
+// Phase 1055 menus: the paint thread is xam's UI thread while it paints. xam's
+// UI requests (XamShowMessageBox: 81778BB8 compares [r13+0x100] with the slot
+// at 81D42520) assert that the caller is the thread recorded at init; the
+// bootstrap spoofed it for its own calls (guide_spoof_ui_thread), the paint
+// thread never did, so a press's request from hud's handler failed.
+static void GuidePaintClaimUiThread() {
+  auto* self = XThread::GetCurrentThread();
+  if (!self || !self->thread_state() || !self->thread_state()->context()) return;
+  auto* mem = kernel_state()->memory();
+  uint32_t r13 = uint32_t(self->thread_state()->context()->r[13]);
+  if (!r13) return;
+  uint32_t cur = xe::load_and_swap<uint32_t>(mem->TranslateVirtual(r13 + 256u));
+  uint32_t slot = XamUiThreadSlot();
+  if (!cur || !slot || !XamAddrInImage(slot, 4)) return;
+  uint32_t rec = xe::load_and_swap<uint32_t>(mem->TranslateVirtual(slot));
+  if (rec == cur) return;
+  xe::store_and_swap<uint32_t>(mem->TranslateVirtual(slot), cur);
+  static uint32_t claim_logs = 0;
+  if (claim_logs++ < 6) {
+    XELOGI("GuidePaintThread: xam's UI thread slot {:08X}: {:08X} -> {:08X} (the paint thread)", slot, rec, cur);
+  }
+}
+
+static void GuideSwapDispatch(uint32_t fetch_ptr_ga) {
+  ++g_guide_swap_total;
+  if (g_guide_pt_is_paint_thread) return;  // XUI's own present re-entering VdSwap from the paint
+  if (g_guide_pt_stop.load()) return;  // phase 1055 bugs: shutting down - no paint, on any thread
+  if (!::cvars::guide_paint_thread || g_guide_pt_failed) {
+    GuideSwapWork(fetch_ptr_ga);
+    return;
+  }
+  if (!g_guide_pt_started) {
+    g_guide_pt_started = true;
+    auto* ks = kernel_state();
+    auto thread = object_ref<XHostThread>(new XHostThread(ks, 1024 * 1024, 0, []() -> int {
+      g_guide_pt_is_paint_thread = true;
+      if (auto* self = XThread::GetCurrentThread()) {
+        self->set_can_debugger_suspend(true);
+        if (self->thread()) {
+          HANDLE dup = nullptr;
+          DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &dup, 0, FALSE, DUPLICATE_SAME_ACCESS);
+          g_guide_pt_native = dup;
+        }
+      }
+      if (::cvars::guide_paint_sampler_ms > 0) {
+        std::thread(GuidePaintSamplerMain).detach();
+        XELOGI("GuideSampler: sampling the paint thread every {} ms during paints", ::cvars::guide_paint_sampler_ms);
+      }
+      uint64_t seen = 0;
+      for (;;) {
+        uint32_t ga;
+        {
+          std::unique_lock<std::mutex> lk(g_guide_pt_mu);
+          g_guide_pt_cv.wait(lk, [&] { return g_guide_pt_swaps > seen || g_guide_pt_stop.load(); });
+          if (g_guide_pt_stop.load()) break;
+          seen = g_guide_pt_swaps;
+          ga = g_guide_pt_fetch_ga;
+        }
+        if (::cvars::guide_paint_ui_thread) GuidePaintClaimUiThread();
+        GuideSwapWork(ga);
+      }
+      // Phase 1055 bugs: the thread used to block here until the process
+      // exit ended it - mid-teardown when a paint was in flight.
+      g_guide_pt_done = true;
+      XELOGI("GuidePaintThread: stopped");
+      return 0;
+    }, ::cvars::guide_system_process ? ks->GetSystemProcess() : 0u));  // phase 1055 menus: a system-process thread
+    thread->set_name("Guide Paint");
+    g_guide_pt_thread = thread;
+    X_STATUS st = thread->Create();
+    if (XFAILED(st)) {
+      XELOGE("GuidePaintThread: Create failed ({:08X}); the hook stays on the title thread", uint32_t(st));
+      g_guide_pt_failed = true;
+      GuideSwapWork(fetch_ptr_ga);
+      return;
+    }
+    XELOGI("GuidePaintThread: created (thread {:08X}, 1 MB guest stack); the title's swap no longer waits for a paint",
+           thread->handle());
+  }
+  {
+    std::lock_guard<std::mutex> lk(g_guide_pt_mu);
+    g_guide_pt_fetch_ga = fetch_ptr_ga;
+    ++g_guide_pt_swaps;
+  }
+  g_guide_pt_cv.notify_one();
+}
+
+// Phase 1055 bugs: stop the paint thread before the emulator tears down. It
+// runs guest code (XUI renders, keystroke queries) through the processor,
+// the input system and the kernel, all of which the shutdown deletes; before
+// this it was never told to stop and the process exit ended it wherever it
+// was. Signals the loop, waits for the paint in flight (a paint is ~1 ms;
+// 3 s cap), then for the thread object itself.
+void GuidePaintThreadStop() {
+  if (!g_guide_pt_started || g_guide_pt_failed) return;
+  if (!g_guide_pt_done.load()) {
+    {
+      std::lock_guard<std::mutex> lk(g_guide_pt_mu);
+      g_guide_pt_stop = true;
+    }
+    g_guide_pt_cv.notify_all();
+    auto t0 = std::chrono::steady_clock::now();
+    while (!g_guide_pt_done.load() &&
+           std::chrono::steady_clock::now() - t0 < std::chrono::milliseconds(3000)) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
+  bool exited = g_guide_pt_done.load();
+  if (exited && g_guide_pt_thread) {
+    uint64_t timeout = uint64_t(int64_t(-20000000LL));  // 2 s, relative
+    g_guide_pt_thread->Wait(0, 0, 0, &timeout);
+  }
+  g_guide_pt_thread = nullptr;
+  XELOGI("GuidePaintThread: stop requested; {}",
+         exited ? "the paint thread has exited" : "still inside a paint after 3 s; going on");
+}
+
+
+void VdSwap_entry(
+    lpvoid_t buffer_ptr,        // ptr into primary ringbuffer
+    lpvoid_t fetch_ptr,         // frontbuffer Direct3D 9 texture header fetch
+    lpunknown_t unk2,           // system writeback ptr
+    lpunknown_t unk3,           // buffer from VdGetSystemCommandBuffer
+    lpunknown_t unk4,           // from VdGetSystemCommandBuffer (0xBEEF0001)
+    lpdword_t frontbuffer_ptr,  // ptr to frontbuffer address
+    lpdword_t texture_format_ptr, lpdword_t color_space_ptr, lpdword_t width,
+    lpdword_t height) {
+  GuideSwapDispatch(fetch_ptr.guest_address());
   // All of these parameters are REQUIRED.
   assert(buffer_ptr);
   assert(fetch_ptr);

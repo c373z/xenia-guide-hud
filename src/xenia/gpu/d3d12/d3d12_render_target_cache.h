@@ -47,6 +47,21 @@ class D3D12RenderTargetCache final : public RenderTargetCache {
   // can be asked without depending on any per-fragment state.
   bool GuideClearColor0(const float color[4]);
   void GuideLogHostRTCensus();
+  // Phase 1010: the colour target of the last binding, for a readback taken
+  // inside the command list rather than from the presented frame. The render
+  // target classes are private, so hand out only what the copy needs.
+  ID3D12Resource* GuideBoundColor0Resource() const {
+    return guide_bound_color0_
+               ? static_cast<const D3D12RenderTarget*>(guide_bound_color0_)
+                     ->resource()
+               : nullptr;
+  }
+  D3D12_RESOURCE_STATES GuideSetBoundColor0State(
+      D3D12_RESOURCE_STATES new_state) {
+    return const_cast<D3D12RenderTarget*>(
+               static_cast<const D3D12RenderTarget*>(guide_bound_color0_))
+        ->SetResourceState(new_state);
+  }
 
   D3D12RenderTargetCache(const RegisterFile& register_file,
                          const Memory& memory, TraceWriter& trace_writer,

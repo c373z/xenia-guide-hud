@@ -263,6 +263,7 @@ class EmulatorWindow {
   void FileDrop(const std::filesystem::path& filename);
   void OnMouseUp(const ui::MouseEvent& e);
   void FileOpen();
+  void ChangeTrayDisc();
   void FileClose();
   void InstallContent();
   void ExtractZarchive();
@@ -304,6 +305,7 @@ class EmulatorWindow {
   ui::WindowedAppContext& app_context_;
   EmulatorWindowListener window_listener_;
   std::unique_ptr<ui::Window> window_;
+  ui::MenuItem* disc_menu_ = nullptr;  // owned by the window's main menu
   std::unique_ptr<ui::ImGuiDrawer> imgui_drawer_;
   std::unique_ptr<DisplayConfigGameConfigLoadCallback>
       display_config_game_config_load_callback_;

@@ -83,10 +83,18 @@ class ObjectTable {
   std::vector<object_ref<XObject>> GetAllObjects();
   void PurgeAllObjects();  // Purges the object table of all guest objects
 
+  // Phase 1099z47: close every guest handle created by a thread of the given
+  // process type (1 title, 2 system) - the real ExTerminateTitleProcess Ob
+  // slot (17003 kernel 80075528) empties the TITLE handle table. Returns the
+  // number of handles closed.
+  uint32_t CloseHandlesOwnedBy(uint8_t owner);
+
  private:
   struct ObjectTableEntry {
     int handle_ref_count = 0;
     XObject* object = nullptr;
+    // X_PROCTYPE of the thread that created the handle; 0 = host/unknown.
+    uint8_t owner = 0;
   };
   ObjectTableEntry* LookupTableInLock(X_HANDLE handle);
   ObjectTableEntry* LookupTable(X_HANDLE handle);

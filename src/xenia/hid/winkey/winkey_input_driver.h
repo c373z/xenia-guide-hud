@@ -43,6 +43,7 @@ class WinKeyInputDriver final : public InputDriver {
     int repeat_count = 0;
     bool transition = false;  // going up(false) or going down(true)
     bool prev_state = false;  // down(true) or up(false)
+    bool capital = false;     // Shift held / Caps on when the event happened (phase 1054 tabs)
   };
 
   struct KeyBinding {

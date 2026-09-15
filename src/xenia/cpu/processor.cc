@@ -164,7 +164,13 @@ bool Processor::Setup(std::unique_ptr<backend::Backend> backend) {
   functions_trace_path_ = cvars::trace_function_data_path;
   if (!functions_trace_path_.empty()) {
     functions_trace_file_ =
-        ChunkedMappedMemoryWriter::Open(functions_trace_path_, 32_MiB, true);
+        // Phase 1054 fps: a chunk must map in low address space (the JIT
+        // addresses the counters with 32-bit displacements); when a further
+        // chunk fails to map, translation gets null trace blocks and the
+        // instrumented code faults at address 0 - keep the traced range small
+        // (trace_function_lo/hi) rather than the chunk large: a 768 MiB chunk
+        // never mapped, and every translation then re-created the file.
+        ChunkedMappedMemoryWriter::Open(functions_trace_path_, 64_MiB, true);
   }
 
   return true;
@@ -195,6 +201,30 @@ void Processor::RemoveModule(const std::string_view name) {
       std::as_const(modules_),
       [name](std::unique_ptr<xe::cpu::Module> const& module) {
         return module->name() == name;
+      });
+
+  if (itr != modules_.cend()) {
+    const std::vector<uint32_t> addressed_functions =
+        (*itr)->GetAddressedFunctions();
+
+    modules_.erase(itr);
+
+    for (const uint32_t entry : addressed_functions) {
+      RemoveFunctionByAddress(entry);
+    }
+  }
+}
+
+// Phase 1099x: remove one specific module. Removing by name is wrong once a
+// title switch reloads an executable with the same name ("dash") - a late
+// unload of the old instance would erase the new one's registration.
+void Processor::RemoveModule(Module* target) {
+  auto global_lock = global_critical_region_.Acquire();
+
+  auto itr = std::ranges::find_if(
+      std::as_const(modules_),
+      [target](std::unique_ptr<xe::cpu::Module> const& module) {
+        return module.get() == target;
       });
 
   if (itr != modules_.cend()) {
@@ -244,6 +274,25 @@ Function* Processor::DefineBuiltin(const std::string_view name,
 
   function->set_status(Symbol::Status::kDeclared);
   return function;
+}
+
+static void GuestHookThunk(ppc::PPCContext* ctx, void* arg0, void*) {
+  (*static_cast<Processor::GuestHook*>(arg0))(ctx);
+}
+
+void Processor::AddGuestHook(uint32_t address, GuestHook hook) {
+  std::lock_guard<std::mutex> lock(guest_hooks_mutex_);
+  auto holder = std::make_unique<GuestHook>(std::move(hook));
+  auto* fn = DefineBuiltin(fmt::format("GuestHook_{:08X}", address),
+                           GuestHookThunk, holder.get(), nullptr);
+  guest_hooks_[address] = {fn, std::move(holder)};
+}
+
+Function* Processor::LookupGuestHook(uint32_t address) {
+  std::lock_guard<std::mutex> lock(guest_hooks_mutex_);
+  if (guest_hooks_.empty()) return nullptr;
+  auto it = guest_hooks_.find(address);
+  return it == guest_hooks_.end() ? nullptr : it->second.first;
 }
 
 Function* Processor::QueryFunction(uint32_t address) {

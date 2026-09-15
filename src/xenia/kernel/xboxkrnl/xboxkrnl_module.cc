@@ -169,6 +169,43 @@ XboxkrnlModule::XboxkrnlModule(Emulator* emulator, KernelState* kernel_state)
       "xboxkrnl.exe", ordinals::ExConsoleGameRegion, ExConsoleGameRegion);
   xe::store<uint16_t>(lpExConsoleGameRegion, 0xFFFF);
 
+  // StfsDeviceErrorEvent (X_DISPATCH_HEADER*)
+  // Phase 1096gd: xboxkrnl ordinal 0x2DC is declared kVariable in
+  // xboxkrnl_table.inc and was never implemented, so xex_module.cc filled
+  // xam's import slot with the placeholder
+  //   0xD000BEEF | (ordinal << 16)  ==  0xD2DCBEEF
+  // xam copies that into [task+0xC], registers it as a pool wait object (its
+  // guard at 8177A658 only rejects NULL), and KeWaitForMultipleObjects then
+  // cannot resolve it and returns INVALID_PARAMETER WITHOUT waiting - so the
+  // caller retries at full speed. Measured at 41 million retries in one
+  // dashboard run; it is why every configuration except the PvZ harness hangs
+  // early. See research/FINDINGS.md 1096fz-1096gc.
+  //
+  // Give it a real dispatch header. It must start UNSIGNALLED: xam waits on
+  // this to learn that an STFS device error occurred, so a signalled object
+  // would report a fault that never happened.
+  // Phase 1096gd(2): a FIXED address does not work here. 0x80207A80 sits in
+  // the same page as the other kernel variables but QueryRangeAccess reports
+  // it unreadable, so KeWaitForMultipleObjects logged "dispatch type 255" -
+  // its marker for an unreadable header - and still refused to wait. Allocate
+  // real committed memory instead.
+  const uint32_t StfsDeviceErrorEvent = memory_->SystemHeapAlloc(0x18);
+  auto lpStfsDeviceErrorEvent = memory_->TranslateVirtual(StfsDeviceErrorEvent);
+  export_resolver_->SetVariableMapping(
+      "xboxkrnl.exe", ordinals::StfsDeviceErrorEvent, StfsDeviceErrorEvent);
+  std::memset(lpStfsDeviceErrorEvent, 0, 0x18);
+  xe::store_and_swap<uint8_t>(lpStfsDeviceErrorEvent + 0, 0);  // NotificationEvent
+  xe::store_and_swap<uint32_t>(lpStfsDeviceErrorEvent + 4, 0);  // not signalled
+  // Empty wait list: both links point at the list head itself.
+  xe::store_and_swap<uint32_t>(lpStfsDeviceErrorEvent + 8,
+                               StfsDeviceErrorEvent + 8);
+  xe::store_and_swap<uint32_t>(lpStfsDeviceErrorEvent + 12,
+                               StfsDeviceErrorEvent + 8);
+  XELOGI("StfsDeviceErrorEvent mapped at {:08X} (type {}, signal {})",
+         StfsDeviceErrorEvent,
+         xe::load_and_swap<uint8_t>(lpStfsDeviceErrorEvent + 0),
+         xe::load_and_swap<uint32_t>(lpStfsDeviceErrorEvent + 4));
+
   // XexExecutableModuleHandle (?**)
   // Games try to dereference this to get a pointer to some module struct.
   // So far it seems like it's just in loader code, and only used to look up
@@ -239,6 +276,7 @@ XboxkrnlModule::XboxkrnlModule(Emulator* emulator, KernelState* kernel_state)
   EXPORT_KVAR(ObDirectoryObjectType);
   EXPORT_KVAR(ObSymbolicLinkObjectType);
   EXPORT_KVAR(UsbdBootEnumerationDoneEvent);
+  EXPORT_KVAR(UsbdDriverLoadRequiredEvent);
 #undef EXPORT_KVAR
 }
 

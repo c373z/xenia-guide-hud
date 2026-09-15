@@ -7,11 +7,20 @@
 ******************************************************************************
 */
 
+#include <random>
 #include <algorithm>
+#include <array>
+#include <mutex>
 
+#include "xenia/base/filesystem.h"
 #include "xenia/base/logging.h"
+#include "xenia/base/string.h"
+#include "xenia/emulator.h"
 #include "xenia/base/platform.h"
 #include "xenia/kernel/kernel_state.h"
+#include "xenia/kernel/util/crypto_utils.h"
+#include "xenia/kernel/util/xex2_info.h"
+#include "xenia/vfs/virtual_file_system.h"
 #include "xenia/kernel/util/shim_utils.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_private.h"
 
@@ -758,9 +767,41 @@ dword_result_t XeCryptBnDwLePkcs1Verify_entry(lpvoid_t hash, lpvoid_t sig,
 DECLARE_XBOXKRNL_EXPORT1(XeCryptBnDwLePkcs1Verify, kNone, kStub);
 
 void XeCryptRandom_entry(lpvoid_t buf, dword_t buf_size) {
-  std::memset(buf, 0xFD, buf_size);
+  // Phase 1096w: this used to `memset(buf, 0xFD, buf_size)` - a HOST-INVENTED
+  // CONSTANT standing in for the console's hardware RNG. It is not random, and
+  // guest code that generates-tests-retries never terminates, because every
+  // draw is byte-identical.
+  //
+  // Measured consequence: xam's app-table walk (8177FC88) stalls on entry 3,
+  // musicplayer.xex, inside the Janus/WMDRM OEM layer (its own assert strings
+  // name drm\janus\src\oemimpl.c). An LR sampler over two windows of one run
+  // showed the SAME EIGHT call sites (81A7BFE4, 81A82180, 81A81FE0, 81A7BFD8,
+  // 81A820A0, 81A74188, 81A7BFB4, 81A7BF78) with the same counts in both - a
+  // tight retry loop, not progress - and a 103-second run advanced no further
+  // than a 30-second one. That stall strands the rest of xam's initialisation:
+  // the app-table registrar, the 0xFF sysapp, and the HUD-manager loop that
+  // calls ShowHud.
+  //
+  // Return real random bytes. This REMOVES a fabricated host value rather than
+  // adding one - the guest gets the varying data the hardware RNG would give it,
+  // so its own retry loop can terminate.
+  static std::mutex mu;
+  static std::mt19937_64 rng(std::random_device{}());
+  auto* out = reinterpret_cast<uint8_t*>(static_cast<void*>(buf));
+  const uint32_t n = static_cast<uint32_t>(buf_size);
+  std::lock_guard<std::mutex> lk(mu);
+  uint32_t i = 0;
+  while (i + 8u <= n) {
+    const uint64_t v = rng();
+    std::memcpy(out + i, &v, 8);
+    i += 8u;
+  }
+  if (i < n) {
+    const uint64_t v = rng();
+    std::memcpy(out + i, &v, n - i);
+  }
 }
-DECLARE_XBOXKRNL_EXPORT1(XeCryptRandom, kNone, kStub);
+DECLARE_XBOXKRNL_EXPORT1(XeCryptRandom, kNone, kImplemented);
 
 void XeCryptDesKey_entry(pointer_t<XECRYPT_DES_STATE> state_ptr,
                          lpqword_t key) {
@@ -955,6 +996,89 @@ void XeCryptAesCbc_entry(pointer_t<XECRYPT_AES_STATE> state_ptr,
 }
 DECLARE_XBOXKRNL_EXPORT1(XeCryptAesCbc, kNone, kImplemented);
 
+// Phase 1099z98: the variable-key AES API the dash's disc reader uses
+// (dash 92267508: XeCryptAesCreateKeySchedule(key, 0x10, sched) then
+// XeCryptAesCbcDecrypt(sched, in, len, out, iv) over the disc's default.xex).
+// The schedule is an opaque caller buffer (dash reserves 0x1D8 bytes); the
+// real kernel stores cb/4+5 at +0x1D0. Only 16-byte keys are implemented here
+// (every caller measured passes 0x10); others are logged and left untouched.
+void XeCryptAesCreateKeySchedule_entry(lpvoid_t key, dword_t key_size,
+                                       lpvoid_t schedule) {
+  if (key_size != 16) {
+    XELOGE("XeCryptAesCreateKeySchedule: {}-byte keys not implemented",
+           uint32_t(key_size));
+    return;
+  }
+  aes_key_schedule_128(key.as<const uint8_t*>(), schedule.as<uint8_t*>());
+  xe::store_and_swap<uint32_t>(schedule.as<uint8_t*>() + 0x1D0,
+                               uint32_t(key_size) / 4 + 5);
+}
+DECLARE_XBOXKRNL_EXPORT1(XeCryptAesCreateKeySchedule, kNone, kImplemented);
+
+void XeCryptAesCbcDecrypt_entry(lpvoid_t schedule, lpvoid_t inp_ptr,
+                                dword_t inp_size, lpvoid_t out_ptr,
+                                lpvoid_t feed_ptr) {
+  const uint8_t* keytab = schedule.as<const uint8_t*>();
+  const uint8_t* inp = inp_ptr.as<const uint8_t*>();
+  uint8_t* out = out_ptr.as<uint8_t*>();
+  uint8_t* feed = feed_ptr.as<uint8_t*>();
+  for (uint32_t i = 0; i + 16 <= inp_size; i += 16) {
+    uint8_t tmp[16];
+    std::memcpy(tmp, inp, 16);
+    aes_decrypt_128(keytab, inp, out);
+    for (uint32_t j = 0; j < 16; ++j) {
+      out[j] ^= feed[j];
+    }
+    std::memcpy(feed, tmp, 16);
+    inp += 16;
+    out += 16;
+  }
+}
+DECLARE_XBOXKRNL_EXPORT1(XeCryptAesCbcDecrypt, kNone, kImplemented);
+
+void XeCryptAesCbcEncrypt_entry(lpvoid_t schedule, lpvoid_t inp_ptr,
+                                dword_t inp_size, lpvoid_t out_ptr,
+                                lpvoid_t feed_ptr) {
+  const uint8_t* keytab = schedule.as<const uint8_t*>();
+  const uint8_t* inp = inp_ptr.as<const uint8_t*>();
+  uint8_t* out = out_ptr.as<uint8_t*>();
+  uint8_t* feed = feed_ptr.as<uint8_t*>();
+  for (uint32_t i = 0; i + 16 <= inp_size; i += 16) {
+    for (uint32_t j = 0; j < 16; ++j) {
+      feed[j] ^= inp[j];
+    }
+    aes_encrypt_128(keytab, feed, feed);
+    std::memcpy(out, feed, 16);
+    inp += 16;
+    out += 16;
+  }
+}
+DECLARE_XBOXKRNL_EXPORT1(XeCryptAesCbcEncrypt, kNone, kImplemented);
+
+// XexTransformImageKey(signed_block, size) - real 17489 kernel 800A21C8 hands
+// the buffer to the hypervisor (syscall 0x5F), which RSA-verifies the 0x174
+// signed block and decrypts the 16-byte image key at +0x148 in place with the
+// retail XEX2 key. DECLARED BYPASS: there is no hypervisor, so the RSA check
+// is skipped; the caller's own SHA-1 page-hash check (dash 92267180) still
+// rejects a wrong key.
+dword_result_t XexTransformImageKey_entry(lpvoid_t buffer, dword_t size) {
+  static constexpr uint8_t kXex2RetailKey[16] = {
+      0x20, 0xB1, 0x85, 0xA5, 0x9D, 0x28, 0xFD, 0xC3,
+      0x40, 0x58, 0x3F, 0xBB, 0x08, 0x96, 0xBF, 0x91};
+  if (!buffer || size != 0x174) {
+    XELOGW("XexTransformImageKey: size {:X} not handled", uint32_t(size));
+    return 0xC0000156;
+  }
+  uint8_t roundkeys[176];
+  aes_key_schedule_128(kXex2RetailKey, roundkeys);
+  uint8_t* key = buffer.as<uint8_t*>() + 0x148;
+  uint8_t tmp[16];
+  std::memcpy(tmp, key, 16);
+  aes_decrypt_128(roundkeys, tmp, key);
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XBOXKRNL_EXPORT1(XexTransformImageKey, kNone, kImplemented);
+
 void XeCryptHmacSha_entry(lpvoid_t key, dword_t key_size_in, lpvoid_t inp_1,
                           dword_t inp_1_size, lpvoid_t inp_2,
                           dword_t inp_2_size, lpvoid_t inp_3,
@@ -1022,6 +1146,86 @@ dword_result_t XeKeysGetKeyProperties_entry(dword_t key) {
 }
 DECLARE_XBOXKRNL_EXPORT1(XeKeysGetKeyProperties, kNone, kImplemented);
 
+// Phase 1099z38: XeKeysGetMediaID(out16, flag) - real kernel 8014BDF0 asks
+// the hypervisor (syscall 0x64) for the 16-byte media ID of the disc in the
+// drive, returning 0 on success. The dash's Install gate (922BFC10) and the
+// installed package name (92316360, 32 hex digits) use it; xam's disc loader
+// (8175D370) too. It was undeclared - an undefined extern that "succeeded"
+// over whatever was in the buffer. DECLARED SOURCE: a disc image has no
+// drive security data, so the ID comes from the disc's default.xex security
+// info (xgd2_media_id, the ID the executable is bound to).
+dword_result_t XeKeysGetMediaID_entry(lpvoid_t out_media_id, dword_t flag) {
+  auto* fs = kernel_state()->file_system();
+  auto* entry = fs->ResolvePath("\\Device\\CdRom0\\default.xex");
+  if (!entry) {
+    XELOGI("XeKeysGetMediaID: no disc");
+    return X_STATUS(0xC0052000);
+  }
+  vfs::File* file = nullptr;
+  if (XFAILED(entry->Open(vfs::FileAccess::kFileReadData, &file)) || !file) {
+    return X_STATUS(0xC0052000);
+  }
+  std::vector<uint8_t> header(0x20);
+  size_t read = 0;
+  X_STATUS status = file->ReadSync(header, 0, &read);
+  uint32_t security_offset =
+      read >= 0x14 ? xe::load_and_swap<uint32_t>(header.data() + 0x10) : 0;
+  std::vector<uint8_t> media_id(0x10);
+  if (XSUCCEEDED(status) && security_offset) {
+    status = file->ReadSync(
+        media_id,
+        security_offset + offsetof(xex2_security_info, xgd2_media_id), &read);
+  } else {
+    status = X_STATUS(0xC0052000);
+  }
+  file->Destroy();
+  if (XFAILED(status) || read != 0x10) {
+    return X_STATUS(0xC0052000);
+  }
+  if (out_media_id) {
+    std::memcpy(out_media_id, media_id.data(), 0x10);
+  }
+  static std::atomic<uint32_t> logged{0};
+  if (++logged <= 10) {
+    XELOGI("XeKeysGetMediaID(flag {}) -> {:02X}{:02X}{:02X}{:02X}...",
+           uint32_t(flag), media_id[0], media_id[1], media_id[2], media_id[3]);
+  }
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XBOXKRNL_EXPORT1(XeKeysGetMediaID, kNone, kImplemented);
+
+// Phase 1099z17: protected flags - hypervisor-held bits (kernel 8007EAD0 /
+// 8007EB28 go through HV syscalls 0x5A / 0x5B), not keyvault data, so they
+// live for the whole session. xam's launcher sets flag 0 after each title
+// load (8175C56C) to "survives a tray open" (the dashboard's NoForceReboot
+// privilege sets it); the tray handler (8176DCB0) reads it and, when 0,
+// returns to the dashboard. Both exports were undefined externs, so the get
+// returned a stale 0 and opening the tray tore the dashboard down. Not
+// modelled: the title-process restriction on indexes 0 and 2.
+static std::atomic<uint32_t> xekeys_protected_flags{0};
+
+dword_result_t XeKeysGetProtectedFlag_entry(dword_t index) {
+  const uint32_t value =
+      index < 3 ? (xekeys_protected_flags.load() >> index) & 1 : 0;
+  XELOGI("XeKeysGetProtectedFlag({}) -> {}", uint32_t(index), value);
+  return value;
+}
+DECLARE_XBOXKRNL_EXPORT1(XeKeysGetProtectedFlag, kNone, kImplemented);
+
+dword_result_t XeKeysSetProtectedFlag_entry(dword_t index, dword_t value) {
+  XELOGI("XeKeysSetProtectedFlag({}, {})", uint32_t(index), uint32_t(value));
+  if (index >= 3) {
+    return X_STATUS_INVALID_PARAMETER;
+  }
+  if (value) {
+    xekeys_protected_flags |= (1u << index);
+  } else {
+    xekeys_protected_flags &= ~(1u << index);
+  }
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XBOXKRNL_EXPORT1(XeKeysSetProtectedFlag, kNone, kImplemented);
+
 dword_result_t XeKeysGetKey_entry(word_t key, lpvoid_t key_buffer,
                                   lpdword_t key_length) {
   if (key_vault.contains(key)) {
@@ -1035,6 +1239,56 @@ dword_result_t XeKeysGetKey_entry(word_t key, lpvoid_t key_buffer,
 }
 DECLARE_XBOXKRNL_EXPORT1(XeKeysGetKey, kNone, kSketchy);
 
+// Phase 1099z76: keyvault key 0x17 (CONSOLE_OBFUSCATION_KEY, keyvault offset
+// 0xC0, 16 bytes). The real kernel never holds it: XeKeysHmacSha (801495A0)
+// asks the hypervisor (syscall 0x3A) to HMAC with it. xam keys its XConfig
+// XNet records with it (XnSaveConfigSector 81897B10). There is no real
+// keyvault here, so this is a SYNTHETIC per-install key, generated once and
+// kept in storage_root/keyvault_synthetic.bin in the keyvault layout. It
+// never leaves the console on hardware (only this console's own config uses
+// it), so a stable random key gives the same behaviour; a real decrypted
+// keyvault dropped in as keyvault.bin (0x4000 bytes) is used instead.
+static const uint8_t* ConsoleObfuscationKey() {
+  static std::array<uint8_t, 16> key{};
+  static std::once_flag once;
+  static bool ok = false;
+  std::call_once(once, []() {
+    const auto root = kernel_state()->emulator()->storage_root();
+    const auto real_kv = root / "keyvault.bin";
+    const auto synth_kv = root / "keyvault_synthetic.bin";
+    std::array<uint8_t, 0x4000> kv{};
+    auto load = [&kv](const std::filesystem::path& p) {
+      FILE* f = xe::filesystem::OpenFile(p, "rb");
+      if (!f) return false;
+      const size_t n = fread(kv.data(), 1, kv.size(), f);
+      fclose(f);
+      return n == kv.size();
+    };
+    if (load(real_kv)) {
+      XELOGI("XeKeys: key 0x17 from real keyvault {}", xe::path_to_utf8(real_kv));
+    } else if (load(synth_kv)) {
+      XELOGI("XeKeys: key 0x17 from SYNTHETIC keyvault {} (not a real "
+             "console keyvault)",
+             xe::path_to_utf8(synth_kv));
+    } else {
+      std::random_device rd;
+      for (size_t i = 0xC0; i < 0xD0; ++i) {
+        kv[i] = static_cast<uint8_t>(rd());
+      }
+      if (FILE* f = xe::filesystem::OpenFile(synth_kv, "wb")) {
+        fwrite(kv.data(), 1, kv.size(), f);
+        fclose(f);
+      }
+      XELOGW("XeKeys: generated SYNTHETIC keyvault key 0x17 in {} (not a real "
+             "console keyvault)",
+             xe::path_to_utf8(synth_kv));
+    }
+    std::memcpy(key.data(), kv.data() + 0xC0, key.size());
+    ok = true;
+  });
+  return ok ? key.data() : nullptr;
+}
+
 dword_result_t XeKeysHmacSha_entry(dword_t key_num, lpvoid_t inp_1,
                                    dword_t inp_1_size, lpvoid_t inp_2,
                                    dword_t inp_2_size, lpvoid_t inp_3,
@@ -1043,6 +1297,8 @@ dword_result_t XeKeysHmacSha_entry(dword_t key_num, lpvoid_t inp_1,
   const uint8_t* key = nullptr;
   if (key_num == 0x19) {
     key = key19;
+  } else if (key_num == 0x17) {
+    key = ConsoleObfuscationKey();
   }
 
   if (key) {
@@ -1055,6 +1311,66 @@ dword_result_t XeKeysHmacSha_entry(dword_t key_num, lpvoid_t inp_1,
   return X_STATUS_UNSUCCESSFUL;
 }
 DECLARE_XBOXKRNL_EXPORT1(XeKeysHmacSha, kNone, kImplemented);
+
+// Phase 1099z76: console security settings (17489 kernel 8014AC88-8014C4E8;
+// each is a hypervisor call on the block at [r2+0x16548]: detected mask +0x28,
+// activated mask +0x30, five u32 stats +0x38). On hardware the block is the
+// per-console encrypted \Device\Flash\secdata.bin, loaded once at boot. A clean
+// retail console has both masks 0 - xam's XamGetActiveCounterMeasures
+// (8177D138, called by signin.xex) tests all 64 bits. Kept in memory: the
+// only writers are violation/counter-measure paths a clean console never takes.
+static std::atomic<uint64_t> xekeys_security_detected{0};
+static std::atomic<uint64_t> xekeys_security_activated{0};
+static std::array<std::atomic<uint32_t>, 5> xekeys_security_stats{};
+
+dword_result_t XeKeysSecurityInitialize_entry() {
+  xekeys_security_detected = 0;
+  xekeys_security_activated = 0;
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XBOXKRNL_EXPORT1(XeKeysSecurityInitialize, kNone, kImplemented);
+
+void XeKeysSecurityLoadSettings_entry() {}
+DECLARE_XBOXKRNL_EXPORT1(XeKeysSecurityLoadSettings, kNone, kImplemented);
+
+dword_result_t XeKeysSecuritySaveSettings_entry() { return X_STATUS_SUCCESS; }
+DECLARE_XBOXKRNL_EXPORT1(XeKeysSecuritySaveSettings, kNone, kImplemented);
+
+dword_result_t XeKeysSecuritySetDetected_entry(dword_t bit) {
+  if (bit >= 64) {
+    return X_STATUS_INVALID_PARAMETER;
+  }
+  xekeys_security_detected |= (1ull << uint32_t(bit));
+  XELOGW("XeKeysSecuritySetDetected({})", uint32_t(bit));
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XBOXKRNL_EXPORT1(XeKeysSecuritySetDetected, kNone, kImplemented);
+
+qword_result_t XeKeysSecurityGetDetected_entry() {
+  return xekeys_security_detected.load();
+}
+DECLARE_XBOXKRNL_EXPORT1(XeKeysSecurityGetDetected, kNone, kImplemented);
+
+dword_result_t XeKeysSecuritySetActivated_entry(qword_t mask) {
+  xekeys_security_activated = uint64_t(mask);
+  XELOGW("XeKeysSecuritySetActivated({:016X})", uint64_t(mask));
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XBOXKRNL_EXPORT1(XeKeysSecuritySetActivated, kNone, kImplemented);
+
+qword_result_t XeKeysSecurityGetActivated_entry() {
+  return xekeys_security_activated.load();
+}
+DECLARE_XBOXKRNL_EXPORT1(XeKeysSecurityGetActivated, kNone, kImplemented);
+
+dword_result_t XeKeysSecuritySetStat_entry(dword_t index, dword_t unused1,
+                                           dword_t unused2) {
+  if (index < xekeys_security_stats.size()) {
+    ++xekeys_security_stats[index];
+  }
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XBOXKRNL_EXPORT1(XeKeysSecuritySetStat, kNone, kImplemented);
 
 void XeCryptRotSumSha_entry(lpvoid_t inp_1, dword_t inp_1_size, lpvoid_t inp_2,
                             dword_t inp_2_size, lpvoid_t out,
@@ -1115,6 +1431,77 @@ dword_result_t XeKeysHmacShaUsingKey_entry(lpvoid_t obscured_key,
   return X_STATUS_SUCCESS;
 }
 DECLARE_XBOXKRNL_EXPORT1(XeKeysHmacShaUsingKey, kNone, kImplemented);
+
+// Phase 1099o: XeKeysObfuscate / XeKeysUnObfuscate were undefined externs, so
+// xam's new profile Account (0x17C bytes) was "obfuscated" into an untouched
+// buffer and written as 404 garbage bytes, and read back the same way. This is
+// the console's Account format, the same algorithm Xenia's own
+// ProfileManager::Encrypt/DecryptAccountFile uses:
+//   out = HMAC-SHA1(key, confounder||data)[0:16] ||
+//         RC4(HMAC-SHA1(key, that hash)[0:16], confounder||data)
+// with an 8-byte random confounder, so out = in + 0x18. The roaming flag picks
+// the console key vs the retail key 0x19 on a real console; this build has no
+// per-console key, so both use key 0x19 (what Xenia's profiles already use).
+dword_result_t XeKeysObfuscate_entry(dword_t roaming, lpvoid_t input,
+                                     dword_t input_size, lpvoid_t output,
+                                     lpdword_t output_size) {
+  const uint8_t* key = util::GetXeKey(0x19);
+  if (!key || !input || !output || !output_size) {
+    return 0;
+  }
+  const uint32_t in_size = input_size;
+  std::vector<uint8_t> plain(8 + in_size);
+  std::random_device rd;
+  for (int i = 0; i < 8; ++i) plain[i] = uint8_t(rd());
+  std::memcpy(plain.data() + 8, input.as<uint8_t*>(), in_size);
+  uint8_t hash[0x14];
+  util::HmacSha(key, 0x10, plain.data(), uint32_t(plain.size()), nullptr, 0,
+                nullptr, 0, hash, 0x14);
+  uint8_t rc4_key[0x14];
+  util::HmacSha(key, 0x10, hash, 0x10, nullptr, 0, nullptr, 0, rc4_key, 0x14);
+  auto* out = output.as<uint8_t*>();
+  std::memcpy(out, hash, 0x10);
+  util::RC4(rc4_key, 0x10, plain.data(), uint32_t(plain.size()), out + 0x10,
+            uint32_t(plain.size()));
+  *output_size = in_size + 0x18;
+  // Phase 1099q: an NTSTATUS, not a BOOL. The real kernel returns the HMAC
+  // status (8007D374) and xam tests for zero (81BE61E0 `beq ok`, 817AB138
+  // `bne` -> E_FAIL, 817837AC), so returning 1 silently failed those writes.
+  // (XeKeysUnObfuscate really is a BOOL, 8007D49C.)
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XBOXKRNL_EXPORT1(XeKeysObfuscate, kNone, kImplemented);
+
+dword_result_t XeKeysUnObfuscate_entry(dword_t roaming, lpvoid_t input,
+                                       dword_t input_size, lpvoid_t output,
+                                       lpdword_t output_size) {
+  const uint8_t* key = util::GetXeKey(0x19);
+  const uint32_t in_size = input_size;
+  if (!key || !input || !output || !output_size || in_size < 0x18) {
+    return 0;
+  }
+  const auto* in = input.as<const uint8_t*>();
+  uint8_t rc4_key[0x14];
+  util::HmacSha(key, 0x10, in, 0x10, nullptr, 0, nullptr, 0, rc4_key, 0x14);
+  std::vector<uint8_t> plain(in_size - 0x10);
+  util::RC4(rc4_key, 0x10, in + 0x10, uint32_t(plain.size()), plain.data(),
+            uint32_t(plain.size()));
+  uint8_t hash[0x14];
+  util::HmacSha(key, 0x10, plain.data(), uint32_t(plain.size()), nullptr, 0,
+                nullptr, 0, hash, 0x14);
+  if (std::memcmp(hash, in, 0x10) != 0) {
+    // Phase 1099q: a normal FALSE, not a fault. The per-boot case is xam's
+    // OfflineTimer (81BE6498) unobfuscating XConfig CONSOLE setting 0x14, which
+    // Xenia does not store, so it reads 26 zero bytes; on failure xam zeroes
+    // the value (81BE64A4) - the same result a successful decode of zero gives.
+    XELOGD("XeKeysUnObfuscate: hash mismatch ({} bytes)", in_size);
+    return 0;
+  }
+  std::memcpy(output.as<uint8_t*>(), plain.data() + 8, in_size - 0x18);
+  *output_size = in_size - 0x18;
+  return 1;
+}
+DECLARE_XBOXKRNL_EXPORT1(XeKeysUnObfuscate, kNone, kImplemented);
 
 dword_result_t XeKeysGetConsoleType_entry(lpdword_t type_out) {
   *type_out = Retail;

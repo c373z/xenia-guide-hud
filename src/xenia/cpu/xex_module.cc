@@ -653,7 +653,8 @@ int XexModule::ReadImageBasicCompressed(const void* xex_addr,
   }
 
   // Allocate in-place the XEX memory.
-  bool alloc_result = heap->AllocFixed(
+  bool alloc_result =
+      heap->AllocFixed(
       base_address_, total_size, 4096,
       xe::kMemoryAllocationReserve | xe::kMemoryAllocationCommit,
       xe::kMemoryProtectRead | xe::kMemoryProtectWrite);
@@ -1093,6 +1094,21 @@ bool XexModule::LoadContinue() {
     page += desc.page_count;
   }
 
+  // Phase 1099x: a previous module in this range (title switch reloading the
+  // same executable) leaves entry table entries behind. Lookups that FAILED
+  // while the range was unmapped stay cached, so this image's functions there
+  // would never resolve.
+  if (low_address_ < high_address_) {
+    size_t stale_failed = 0;
+    const size_t stale =
+        processor_->PurgeEntries(low_address_, high_address_, &stale_failed);
+    if (stale) {
+      XELOGI("{}: purged {} stale entry table entries ({} failed) in "
+             "{:08X}-{:08X}",
+             name_, stale, stale_failed, low_address_, high_address_);
+    }
+  }
+
   // Notify backend that we have an executable range.
   processor_->backend()->CommitExecutableRange(low_address_, high_address_);
 
@@ -1223,6 +1239,24 @@ bool XexModule::Unload() {
   }
   loaded_ = false;
 
+  // Phase 1099y: forget compiled code for the image. Indirection slots would
+  // otherwise keep jumping to the old host code over released guest memory,
+  // and entry table entries (including cached failures) would outlive it.
+  if (!is_patch() && low_address_ < high_address_) {
+    size_t stale_failed = 0;
+    const size_t stale =
+        processor_->PurgeEntries(low_address_, high_address_, &stale_failed);
+    // CommitExecutableRange (re)writes every slot in the range to the
+    // resolve-on-call default.
+    if (processor_->backend()) {
+      processor_->backend()->CommitExecutableRange(low_address_,
+                                                   high_address_);
+    }
+    XELOGI("{}: unload dropped {} entry table entries ({} failed) and reset "
+           "indirection {:08X}-{:08X}",
+           name_, stale, stale_failed, low_address_, high_address_);
+  }
+
   // If this isn't a patch, just deallocate the memory occupied by the exe
   if (!is_patch()) {
     assert_not_zero(base_address_);
@@ -1249,11 +1283,36 @@ bool XexModule::SetupLibraryImports(const std::string_view name,
   // Guide modules are the ones that need the real thing, for XUI.
   // Module names arrive without the extension ("hud", not "hud.xex"), so
   // compare base names on both sides.
-  const bool importer_wants_real_xam =
-      cvars::lle_xam_scope.empty() ||
-      utf8::equal_case(
-          utf8::find_base_name_from_guest_path(name_),
-          utf8::find_base_name_from_guest_path(cvars::lle_xam_scope));
+  // Phase 1086: the scope is a comma-separated LIST, not one name. A system
+  // app loaded by xam - createprofile.xex - binds its imports here too, and
+  // with a single-name scope it got Xenia's HLE xam, so its XamRegisterSysApp
+  // reached a stub and the real xam never recorded it ("ERR[HUD]:
+  // createprofile.xex must call XamRegisterSysApp"). Blank still means every
+  // importer.
+  const bool importer_wants_real_xam = [&]() {
+    if (cvars::lle_xam_scope.empty()) {
+      return true;
+    }
+    const auto self = utf8::find_base_name_from_guest_path(name_);
+    const std::string& spec = cvars::lle_xam_scope;
+    size_t pos = 0;
+    while (pos <= spec.size()) {
+      size_t comma = spec.find(',', pos);
+      std::string tok =
+          spec.substr(pos, comma == std::string::npos ? std::string::npos
+                                                      : comma - pos);
+      pos = (comma == std::string::npos) ? spec.size() + 1 : comma + 1;
+      while (!tok.empty() && tok.front() == ' ') tok.erase(tok.begin());
+      while (!tok.empty() && tok.back() == ' ') tok.pop_back();
+      if (tok.empty()) {
+        continue;
+      }
+      if (utf8::equal_case(self, utf8::find_base_name_from_guest_path(tok))) {
+        return true;
+      }
+    }
+    return false;
+  }();
   const bool lle_xam_override =
       !cvars::lle_xam.empty() && importer_wants_real_xam &&
       utf8::equal_case(utf8::find_name_from_guest_path(name), "xam.xex") &&

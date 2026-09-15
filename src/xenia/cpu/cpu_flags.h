@@ -21,6 +21,10 @@ DECLARE_bool(trace_functions);
 DECLARE_bool(trace_function_coverage);
 DECLARE_uint32(trace_coverage_only_fn);
 DECLARE_bool(trace_function_references);
+DECLARE_uint64(trace_function_lo);
+DECLARE_uint64(trace_function_hi);
+DECLARE_uint64(trace_function_lo2);
+DECLARE_uint64(trace_function_hi2);
 DECLARE_bool(trace_function_data);
 
 DECLARE_bool(validate_hir);

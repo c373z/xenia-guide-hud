@@ -12,7 +12,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -47,6 +49,9 @@ namespace hid {
 class InputDriver;
 class InputSystem;
 }  // namespace hid
+namespace kernel {
+class UserModule;  // phase 1055 menus: GuideInstallXamImportTrace
+}  // namespace kernel
 namespace ui {
 class ImGuiDrawer;
 class Window;
@@ -157,6 +162,9 @@ class Emulator {
   // Human-interface Device (HID) adapters for controllers.
   hid::InputSystem* input_system() const { return input_system_.get(); }
 
+  // Phase 1099d: stops the XAutomation input pump at shutdown.
+  std::atomic<bool> guide_input_stop_{false};
+
   // Kernel function export table used to resolve exports when JITing code.
   cpu::ExportResolver* export_resolver() const {
     return export_resolver_.get();
@@ -193,6 +201,9 @@ class Emulator {
 
   // Terminates the currently running title.
   X_STATUS TerminateTitle();
+  // Phase 1055 menus: a logging trampoline on hud's xam imports
+  // (guide_trace_xam_imports).
+  void GuideInstallXamImportTrace(kernel::UserModule* hud);
 
   const std::unique_ptr<vfs::Device> CreateVfsDevice(
       const std::filesystem::path& path, const std::string_view mount_path);
@@ -300,6 +311,10 @@ class Emulator {
   // Invoked when the Guide (Xbox) button is pressed. Xenia previously had no
   // handler wired for this at all.
   void on_guide_button_pressed(uint8_t user_index);
+  // Phase 1099z138: a Guide press while no title is open (the console is
+  // "off"), consumed by the power-on wait in xenia_main.
+  bool ConsumeGuidePowerPress() { return guide_power_press_.exchange(false); }
+  std::atomic<bool> guide_power_press_{false};
 
   // Set once hud.xex is loaded: its registered message-handler address and
   // the guest buffers used to dispatch to it. Lets the Guide button drive the
@@ -319,6 +334,14 @@ class Emulator {
 
   // The game can request another title to be loaded.
   const std::filesystem::path GetNewDiscPath(std::string window_message = "");
+
+  // Phase 1099z105: host "Change Disc" for the virtual DVD tray. The disc in
+  // the tray is loaded when the guest closes it (SMC tray hook); changing it is
+  // only allowed while the tray is open, like swapping a real disc.
+  bool IsTrayOpen() const;
+  bool SetTrayDisc(const std::filesystem::path& path);
+  std::filesystem::path GetTrayDisc() const;
+  xe::Delegate<bool> on_tray_state_changed;  // true = tray open
 
   void WaitUntilExit();
 
@@ -345,6 +368,8 @@ class Emulator {
                           const std::string_view module_path);
 
   std::filesystem::path command_line_;
+  mutable std::mutex tray_disc_mutex_;
+  std::filesystem::path tray_disc_path_;
   std::filesystem::path storage_root_;
   std::filesystem::path content_root_;
   std::filesystem::path cache_root_;

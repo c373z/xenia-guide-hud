@@ -9,6 +9,9 @@
 
 #include "xenia/memory.h"
 
+#include <atomic>
+#include <chrono>
+
 #include <cstring>
 #include <random>
 
@@ -18,6 +21,7 @@
 #include "xenia/base/clock.h"
 #include "xenia/base/cvar.h"
 #include "xenia/base/logging.h"
+#include "xenia/kernel/kernel_flags.h"
 #include "xenia/base/math.h"
 #include "xenia/base/threading.h"
 
@@ -319,10 +323,25 @@ static const struct {
         0x0000000080000000ull,
     },
     //  (256mb) - xex 4k pages
+    // Phase 1096hc: this used to target 0x80000000, the same section offset as
+    // the view above, which made guest 0x81680000 and guest 0x91680000 the
+    // same bytes. Measured consequence: with LLE xam at 815F0000+8C0000, the
+    // dashboard's ximecore.xex loads at its header base 91680000 and its
+    // post-allocation memset destroys xam's RODATA at 81680000 - xam's vtable
+    // at 81687324 went 81AB1980 -> 00000000 -> 00020010 while the host page
+    // stayed PAGE_READONLY, and several guest crashes followed.
+    //
+    // Those two modules are the same retail build (both 2.0.17489.0, from one
+    // dashroot) and they coexist on a real console every time the IME loads,
+    // which they could not do if the ranges aliased. On hardware
+    // 0x80000000-0x9FFFFFFF is one LINEAR 512mb window - 64k page granularity
+    // in the low half, 4k in the high half - so 815F0000 and 91680000 are
+    // 0x015F0000 and 0x11680000 into it and do not overlap. Give the high half
+    // its own section offset so the window is linear here too.
     {
         0x90000000,
         0x9FFFFFFF,
-        0x0000000080000000ull,
+        0x0000000090000000ull,
     },
     //  (512mb) - physical 64k pages
     {
@@ -706,6 +725,17 @@ uint32_t Memory::SystemHeapAlloc(uint32_t size, uint32_t alignment,
     return 0;
   }
   Zero(address, size);
+  // Phase 1091l: the HUD manager's page (30052000) did NOT come from
+  // NtAllocateVirtualMemory - the watch there never fired - so check the other
+  // page-granular route. This one is the HOST's: if the page the Guide's HUD
+  // task slot points at is allocated here, the allocator is the harness, not
+  // xam, and that changes the whole reading of [81D43C50+0x28].
+  if (cvars::guide_watch_alloc && address &&
+      address == uint32_t(cvars::guide_watch_alloc)) {
+    XELOGI("GuideWatchAlloc: Memory::SystemHeapAlloc (HOST) -> {:08X} size {:08X} "
+           "align {:08X} flags {:08X}",
+           address, size, alignment, system_heap_flags);
+  }
   return address;
 }
 
@@ -895,6 +925,19 @@ void BaseHeap::DumpMap() {
            heap_base_ + (heap_size_ - 1),
            page_table_.size() - empty_span_start);
   }
+}
+
+uint32_t BaseHeap::LargestFreeRun(uint32_t* out_base) {
+  auto global_lock = global_critical_region_.Acquire();
+  uint32_t best = 0, best_start = 0;
+  for (auto& kv : free_blocks_) {
+    if (kv.second > best) {
+      best = kv.second;
+      best_start = kv.first;
+    }
+  }
+  if (out_base) *out_base = heap_base_ + best_start * page_size_;
+  return best * page_size_;
 }
 
 bool BaseHeap::Save(ByteStream* stream) {
@@ -1151,6 +1194,13 @@ bool BaseHeap::AllocFixed(uint32_t base_address, uint32_t size,
 
   // Set page state.
   bool had_free_pages = false;
+  // Phase 1054 dbg: the runs of pages that were free, so the free-block
+  // tracker is updated for exactly those instead of rebuilt from the whole
+  // page table (a 4 KB physical heap has ~128k entries; xam's debug D3D makes
+  // dozens of tiny physical allocations a second and each rebuild cost the
+  // Guide's paint thread ~0.3 ms).
+  uint32_t free_run_start = UINT32_MAX;
+  std::vector<std::pair<uint32_t, uint32_t>> free_runs;
   for (uint32_t page_number = start_page_number; page_number <= end_page_number;
        ++page_number) {
     auto& page_entry = page_table_[page_number];
@@ -1164,8 +1214,15 @@ bool BaseHeap::AllocFixed(uint32_t base_address, uint32_t size,
     if (!(page_entry.state & kMemoryAllocationReserve)) {
       had_free_pages = true;
       unreserved_page_count_--;
+      if (free_run_start == UINT32_MAX) free_run_start = page_number;
+    } else if (free_run_start != UINT32_MAX) {
+      free_runs.push_back({free_run_start, page_number - free_run_start});
+      free_run_start = UINT32_MAX;
     }
     page_entry.state = kMemoryAllocationReserve | allocation_type;
+  }
+  if (free_run_start != UINT32_MAX) {
+    free_runs.push_back({free_run_start, end_page_number + 1 - free_run_start});
   }
 
   // Update free block tracker if any pages transitioned from free.
@@ -1175,9 +1232,11 @@ bool BaseHeap::AllocFixed(uint32_t base_address, uint32_t size,
       // is within a single coalesced free block.
       RemoveFreeBlock(start_page_number, page_count);
     } else {
-      // Mixed state (commit upgraded to reserve+commit): pages may span
-      // multiple free blocks, rebuild from page_table_.
-      RebuildFreeBlocks();
+      // Mixed state: remove each run of formerly free pages; every run lies
+      // inside one coalesced free block by construction.
+      for (const auto& run : free_runs) {
+        RemoveFreeBlock(run.first, run.second);
+      }
     }
   }
 
@@ -1692,6 +1751,19 @@ bool BaseHeap::QuerySize(uint32_t address, uint32_t* out_size) {
   return true;
 }
 
+// Phase 1054 dbg: QuerySize without the global lock (a racy read of one page
+// entry; MmQueryAllocationSize is asked by xam's debug D3D per allocation).
+bool BaseHeap::QuerySizeUnlocked(uint32_t address, uint32_t* out_size) {
+  uint32_t page_number = (address - heap_base_) >> page_size_shift_;
+  if (page_number >= page_table_.size()) {
+    *out_size = 0;
+    return false;
+  }
+  auto page_entry = page_table_[page_number];
+  *out_size = (page_entry.region_page_count << page_size_shift_);
+  return true;
+}
+
 bool BaseHeap::QueryBaseAndSize(uint32_t* in_out_address, uint32_t* out_size) {
   uint32_t page_number = (*in_out_address - heap_base_) >> page_size_shift_;
   if (page_number > page_table_.size()) {
@@ -1719,6 +1791,40 @@ bool BaseHeap::QueryProtect(uint32_t address, uint32_t* out_protect) {
   return true;
 }
 
+// Phase 1054 dbg: QueryProtect without the global lock (a heuristic read).
+bool BaseHeap::QueryProtectUnlocked(uint32_t address, uint32_t* out_protect) {
+  uint32_t page_number = (address - heap_base_) >> page_size_shift_;
+  if (page_number > page_table_.size()) {
+    XELOGE("BaseHeap::QueryProtect base page out of range");
+    *out_protect = 0;
+    return false;
+  }
+  auto page_entry = page_table_[page_number];
+  *out_protect = page_entry.current_protect;
+  return true;
+}
+
+bool BaseHeap::QueryPageEntry(uint32_t address, uint32_t* out_state,
+                              uint32_t* out_alloc_protect,
+                              uint32_t* out_current_protect,
+                              uint32_t* out_base_address,
+                              uint32_t* out_region_pages) const {
+  if (address < heap_base_ || (address - heap_base_) >= heap_size_) {
+    return false;
+  }
+  uint32_t page_number = (address - heap_base_) >> page_size_shift_;
+  if (page_number >= page_table_.size()) {
+    return false;
+  }
+  auto e = page_table_[page_number];   // racy read, a heuristic by design
+  if (out_state) *out_state = e.state;
+  if (out_alloc_protect) *out_alloc_protect = e.allocation_protect;
+  if (out_current_protect) *out_current_protect = e.current_protect;
+  if (out_base_address) *out_base_address = e.base_address << 12;
+  if (out_region_pages) *out_region_pages = e.region_page_count;
+  return true;
+}
+
 xe::memory::PageAccess BaseHeap::QueryRangeAccess(uint32_t low_address,
                                                   uint32_t high_address) {
   if (low_address > high_address || low_address < heap_base_ ||
@@ -1741,6 +1847,40 @@ xe::memory::PageAccess BaseHeap::QueryRangeAccess(uint32_t low_address,
           !(page_protect & kMemoryProtectWriteCombine)) {
         all_writable = false;
       }
+    }
+  }
+  if (all_readable && all_writable) {
+    return xe::memory::PageAccess::kReadWrite;
+  } else if (all_readable) {
+    return xe::memory::PageAccess::kReadOnly;
+  } else {
+    return xe::memory::PageAccess::kNoAccess;
+  }
+}
+
+// Phase 1054 dbg: the same query without the global memory lock. The page
+// table has a fixed size and a racy read of a page's protection is a benign
+// heuristic for "is this readable right now"; the Guide's paint thread spent a
+// quarter of every paint waiting for that lock in read-only queries (its own
+// mapped-object checks and xam's MmQueryAddressProtect calls).
+xe::memory::PageAccess BaseHeap::QueryRangeAccessUnlocked(
+    uint32_t low_address, uint32_t high_address) {
+  if (low_address > high_address || low_address < heap_base_ ||
+      (high_address - heap_base_) >= heap_size_) {
+    return xe::memory::PageAccess::kNoAccess;
+  }
+  uint32_t low_page_number = (low_address - heap_base_) >> page_size_shift_;
+  uint32_t high_page_number = (high_address - heap_base_) >> page_size_shift_;
+  bool all_readable = true;
+  bool all_writable = true;
+  for (uint32_t i = low_page_number; i <= high_page_number; ++i) {
+    uint32_t page_protect = page_table_[i].current_protect;
+    if (!(page_protect & kMemoryProtectRead)) {
+      all_readable = false;
+    }
+    if (!(page_protect & kMemoryProtectWrite) &&
+        !(page_protect & kMemoryProtectWriteCombine)) {
+      all_writable = false;
     }
   }
   if (all_readable && all_writable) {
@@ -1923,6 +2063,28 @@ bool PhysicalHeap::AllocRange(uint32_t low_address, uint32_t high_address,
         "heap (requested {} bytes, parent free {}/{} pages)",
         size, parent_heap_->unreserved_page_count(),
         parent_heap_->total_page_count());
+    // Phase 1099z147: a large allocation failing with most pages free is
+    // fragmentation or an untracked holder - say which. Largest free run in
+    // the requested range, then (once per run) the parent heap's whole map.
+    {
+      uint32_t best = 0, best_start = 0;
+      for (auto& kv : parent_heap_->free_blocks_) {
+        const uint32_t lo = std::max(kv.first * parent_heap_->page_size_,
+                                     parent_low_address);
+        const uint32_t hi =
+            std::min((kv.first + kv.second) * parent_heap_->page_size_,
+                     parent_high_address + 1);
+        if (hi > lo && hi - lo > best) {
+          best = hi - lo;
+          best_start = lo;
+        }
+      }
+      XELOGE("PhysicalHeap::AllocRange: range {:08X}-{:08X}, largest free run "
+             "{:08X} bytes at {:08X}",
+             parent_low_address, parent_high_address, best, best_start);
+      static std::atomic<bool> dumped{false};
+      if (!dumped.exchange(true)) parent_heap_->DumpMap();
+    }
     return false;
   }
   // Given the address we've reserved in the parent heap, pin that here.

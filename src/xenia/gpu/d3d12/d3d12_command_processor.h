@@ -152,6 +152,26 @@ class D3D12CommandProcessor final : public CommandProcessor {
   // work on Nvidia Fermi (root signature creation will fail)!
   bool RequestOneUseSingleViewDescriptors(
       uint32_t count, ui::d3d12::util::DescriptorCpuGpuHandlePair* handles_out);
+
+  // Phase 1098ze: composite the Guide's own resolved surface OVER the title's
+  // frame instead of replacing it - what the console's display hardware does.
+  // Returns the composited texture, or nullptr to fall back to replacement.
+  // The host contributes no geometry and no position: one full-surface quad,
+  // textured with the guest's own pixels, alpha-blended using the guest's own
+  // alpha channel.
+  ID3D12Resource* GuideCompositeOverTitle(
+      ID3D12Resource* title_resource,
+      const D3D12_SHADER_RESOURCE_VIEW_DESC& guide_srv_desc,
+      ID3D12Resource* guide_resource,
+      D3D12_SHADER_RESOURCE_VIEW_DESC& srv_desc_out);
+  bool GuideBlendEnsureObjects(DXGI_FORMAT rt_format);
+
+  Microsoft::WRL::ComPtr<ID3D12RootSignature> guide_blend_root_signature_;
+  Microsoft::WRL::ComPtr<ID3D12PipelineState> guide_blend_pipeline_;
+  Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> guide_blend_rtv_heap_;
+  Microsoft::WRL::ComPtr<ID3D12Resource> guide_composite_texture_;
+  DXGI_FORMAT guide_blend_rt_format_ = DXGI_FORMAT_UNKNOWN;
+  bool guide_blend_failed_ = false;
   // These are needed often, so they are always allocated.
   enum class SystemBindlessView : uint32_t {
     // Both may be bound as one root parameter.
@@ -433,6 +453,50 @@ class D3D12CommandProcessor final : public CommandProcessor {
   void GuideClearRenderTarget(bool green = false) override;
   void GuideDrainDebugMessages(const char* when) override;
   void GuideRebindRenderTargets() override;
+  // Phase 1010: copy the bound colour target to a readback buffer in the
+  // current command list, wait for the GPU, count marker pixels, dump rows.
+  void GuideReadbackColor0(const char* tag);
+  // Phase 1099g: read back the Guide's own texture and log its alpha.
+  void GuideAlphaReadback(ID3D12Resource* res);
+  // Phase 1099j: run every queued Guide system command buffer.
+  void GuideDrainSystemCommands();
+  // Phase 1099z97: xam's HUD tick only runs while VdQuerySystemCommandBuffer
+  // reports a free slot, and the slots were only drained at a title's swap or
+  // resolve. Once a title switch kills the presenting title, the Guide's close
+  // timeline never advances and xam's terminate notification spins forever.
+  // The console's GPU consumes the system command buffer on its own; do the
+  // same when no swap/resolve drain has happened for a while.
+  bool GuideIdleDrainPending() override;
+  void GuideIdleDrain() override;
+  std::atomic<uint64_t> guide_last_drain_ms_{0};
+  // Phase 1099z114: Guide refresh at display rate, independent of the title.
+  // HOST-SIDE FIX - not present in real hardware (see GuideRefreshDue).
+  bool GuideRefreshDue() override;
+  void GuideRefresh() override;
+  uint32_t guide_title_fetch0_[6] = {};
+  bool guide_title_fetch0_valid_ = false;
+  uint32_t guide_title_fb_ptr_ = 0;
+  uint32_t guide_title_fb_w_ = 0;
+  uint32_t guide_title_fb_h_ = 0;
+  uint64_t guide_last_present_ms_ = 0;
+  uint64_t guide_last_refresh_ms_ = 0;
+  uint64_t guide_last_title_swap_ms_ = 0;
+  double guide_title_period_ms_ = 0.0;
+  bool guide_refreshing_ = false;
+  uint32_t guide_lag_same_[2] = {};  // bound == title's last resolve | not
+  uint32_t guide_at_draw_idx_ = 0;
+  uint32_t guide_at_resolves_ = 0;
+  // Phase 1099h: the fetch VdSwap would write to fetch 15, from the last swap.
+  uint32_t guide_tf15_[6] = {};
+  bool guide_tf15_valid_ = false;
+  // Phase 1099i: frame-lag census. At the drain: the outer resolve's
+  // destination and the fetch-15 base bound; at the next swap: which of them
+  // the game actually presents.
+  uint32_t guide_lag_dest_ = 0;
+  uint32_t guide_lag_bound_ = 0;
+  uint32_t guide_lag_n_[3] = {};  // presented == dest | == bound | other
+  ID3D12Resource* guide_rb_buffer_ = nullptr;
+  uint64_t guide_rb_size_ = 0;
   ID3D12QueryHeap* guide_oq_heap_ = nullptr;
   ID3D12Resource* guide_oq_readback_ = nullptr;
   bool guide_oq_open_ = false;

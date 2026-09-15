@@ -52,6 +52,8 @@ class EntryTable {
   void MarkReady(Entry* entry, Function* function, uint32_t end_address);
   void MarkFailed(Entry* entry);
   void Delete(uint32_t address);
+  // Drops every non-compiling entry in [low, high). Returns how many.
+  size_t DeleteRange(uint32_t low, uint32_t high, size_t* out_failed);
 
   std::vector<Function*> FindWithAddress(uint32_t address);
 

@@ -107,6 +107,14 @@ class Exception {
     kInvalidException = 0,
     kAccessViolation,
     kIllegalInstruction,
+    // Phase 1097zj: a single-step trap. Needed so a handler can re-arm a page
+    // protection exactly one instruction after the store that tripped it -
+    // the timed re-arm it replaces was measured blind for ~3 s of a 90 s run
+    // on a busy page (research/FINDINGS.md 1097zi). Nothing raised this before,
+    // and the Windows dispatcher returned CONTINUE_SEARCH for it, so adding
+    // the case cannot change behaviour for any existing handler: they all
+    // return false for a code they do not recognise.
+    kSingleStep,
   };
 
   enum class AccessViolationOperation {
@@ -125,6 +133,10 @@ class Exception {
   }
   void InitializeIllegalInstruction(HostThreadContext* thread_context) {
     code_ = Code::kIllegalInstruction;
+    thread_context_ = thread_context;
+  }
+  void InitializeSingleStep(HostThreadContext* thread_context) {
+    code_ = Code::kSingleStep;
     thread_context_ = thread_context;
   }
 
@@ -215,6 +227,9 @@ class Exception {
   AccessViolationOperation access_violation_operation_ =
       AccessViolationOperation::kUnknown;
 };
+
+// Phase 1054 fps: vectored exceptions taken by the process so far.
+uint64_t ExceptionCount();
 
 class ExceptionHandler {
  public:

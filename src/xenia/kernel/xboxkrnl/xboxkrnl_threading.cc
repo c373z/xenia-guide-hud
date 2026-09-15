@@ -7,12 +7,16 @@
  ******************************************************************************
  */
 
+#include <set>
+
 #include "xenia/kernel/xboxkrnl/xboxkrnl_threading.h"
 #include "xenia/base/atomic.h"
 #include "xenia/base/clock.h"
 #include "xenia/base/platform.h"
 #include "xenia/cpu/processor.h"
 #include "xenia/kernel/util/shim_utils.h"
+#include "xenia/kernel/kernel_flags.h"
+#include "xenia/kernel/user_module.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_private.h"
 #include "xenia/kernel/xsemaphore.h"
 #include "xenia/kernel/xtimer.h"
@@ -192,6 +196,26 @@ dword_result_t ExCreateThread_entry(lpdword_t handle_ptr, dword_t stack_size,
                                     lpvoid_t start_address,
                                     lpvoid_t start_context,
                                     dword_t creation_flags) {
+  // Phase 1096dm: log every guest thread's ENTRY POINT. Phase 1096 spent many
+  // segments asking "why does xam never observe the Guide button", and one
+  // answer it could never test was "because the thread that would watch for it
+  // is never started". Nothing logged thread entry points, so that could not be
+  // checked. One line here makes the whole set visible, and it is a probe, not
+  // a behaviour change.
+  {
+    static std::mutex tl_mu;
+    static uint32_t tl_n = 0;
+    uint32_t n = 0;
+    {
+      std::lock_guard<std::mutex> lk(tl_mu);
+      n = ++tl_n;
+    }
+    if (n <= 64u) {
+      XELOGI("GuideThreadStart #{}: entry {:08X} context {:08X} flags {:08X}",
+             n, uint32_t(start_address), uint32_t(start_context),
+             uint32_t(creation_flags));
+    }
+  }
   return ExCreateThread(handle_ptr, stack_size, thread_id_ptr,
                         xapi_thread_startup, start_address, start_context,
                         creation_flags);
@@ -516,10 +540,36 @@ void KeQuerySystemTime_entry(lpqword_t time_ptr, const ppc_context_t& ctx) {
 DECLARE_XBOXKRNL_EXPORT1(KeQuerySystemTime, kThreading, kImplemented);
 
 // https://msdn.microsoft.com/en-us/library/ms686801
+// Phase 1095: xam's per-thread block. Both 81778D38 (install) and 81779618 /
+// 817795EC (set/get slot) assert KeTlsGetValue([81D227F0]) != 0, and the
+// getter's assert does not stop Xenia (the guest's `twui` falls through), so a
+// null block reads on as a null base and faults at 81779604. Report who
+// allocates the index and every set/get a task-pool worker (start 8177AD80)
+// makes on it, so the null is attributed to a thread rather than guessed at.
+static void GuideTlsTrace(const char* what, uint32_t slot, uint32_t value,
+                          bool ok) {
+  if (!cvars::guide_bkgnd_watch) return;
+  auto* th = XThread::GetCurrentThread();
+  if (!th) return;
+  if (th->start_address() != 0x8177AD80u) return;
+  static std::atomic<uint32_t> n{0};
+  const uint32_t i = ++n;
+  if (i > 48u) return;
+  XELOGI("GuideTls #{}: {} slot {} value {:08X} ok {} | tid {:08X} tls_size {}",
+         i, what, slot, value, ok ? 1 : 0, th->thread_id(),
+         th->tls_total_size());
+}
+
 dword_result_t KeTlsAlloc_entry(const ppc_context_t& context) {
   uint32_t slot = kernel_state()->AllocateTLS(context);
   XThread::GetCurrentThread()->SetTLSValue(slot, 0);
-
+  if (cvars::guide_bkgnd_watch) {
+    auto* th = XThread::GetCurrentThread();
+    XELOGI(
+        "GuideTls: KeTlsAlloc -> slot {} on tid {:08X} start {:08X} tls_size {}",
+        slot, th ? th->thread_id() : 0u, th ? th->start_address() : 0u,
+        th ? th->tls_total_size() : 0u);
+  }
   return slot;
 }
 DECLARE_XBOXKRNL_EXPORT1(KeTlsAlloc, kThreading, kImplemented);
@@ -537,11 +587,63 @@ dword_result_t KeTlsFree_entry(dword_t tls_index,
 DECLARE_XBOXKRNL_EXPORT1(KeTlsFree, kThreading, kImplemented);
 
 // https://msdn.microsoft.com/en-us/library/ms686812
+// Phase 1095bf: CORRECTED. The earlier version of this watch hardcoded
+// 401EA360, and the record MOVES between runs - it was 401EA380 the very next
+// run. Two polls reported nothing and I nearly read that as "no writer exists";
+// they were simply watching the wrong address. Resolve the record from the pool
+// every time instead: pool+0x1D4 is the parallel record array and pool+0x234 the
+// count, both established in 1095ap/at.
+void GuidePoisonWatch() {
+  if (!cvars::guide_bkgnd_watch) return;
+  auto* m = kernel_memory();
+  auto rd = [&](uint32_t a) {
+    return xe::load_and_swap<uint32_t>(m->TranslateVirtual(a));
+  };
+  auto readable = [&](uint32_t a) {
+    auto* h = m->LookupHeap(a);
+    return h && h->QueryRangeAccess(a, a + 0xF) !=
+                    xe::memory::PageAccess::kNoAccess;
+  };
+  // Phase 1095bh: do NOT gate the pool read on QueryRangeAccess. The pool
+  // lives in xam's IMAGE (81D423C0), and QueryRangeAccess reports
+  // kNoAccess for those pages - that is the guard-0 problem this project
+  // has hit since 1056, and it silently disabled this watch on every
+  // call. It also produced the useless 'hdr 00000000' column in
+  // GuideWait8. The image is always mapped; only the heap records need a
+  // guard.
+  const uint32_t pool = 0x81D423C0u;
+  const uint32_t cnt = rd(pool + 0x234u);
+  if (!cnt || cnt > 24u) return;
+  static std::atomic<uint32_t> lines{0};
+  for (uint32_t k = 0; k < cnt && k < 8u; ++k) {
+    const uint32_t rec = rd(pool + 0x1D4u + k * 4u);
+    if (!rec || !readable(rec)) continue;
+    const uint32_t v = rd(rec + 0xCu);
+    static uint32_t last[8] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
+                               0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu,
+                               0xFFFFFFFFu, 0xFFFFFFFFu};
+    if (last[k] == v) continue;
+    const uint32_t prev = last[k];
+    last[k] = v;
+    if (lines.load() >= 12u) continue;
+    ++lines;
+    auto* th = XThread::GetCurrentThread();
+    auto* ctx = (th && th->thread_state()) ? th->thread_state()->context()
+                                           : nullptr;
+    XELOGI("GuidePoisonWatch: rec[{}]={:08X} +0xC {:08X} -> {:08X} | flags "
+           "{:08X} | tid {:08X} lr {:08X}",
+           k, rec, prev, v, rd(rec + 8u), th ? th->thread_id() : 0u,
+           ctx ? static_cast<uint32_t>(ctx->lr) : 0u);
+  }
+}
+
 dword_result_t KeTlsGetValue_entry(dword_t tls_index) {
   // xboxkrnl doesn't actually have an error branch - it always succeeds, even
   // if it overflows the TLS.
   uint32_t value = 0;
-  if (XThread::GetCurrentThread()->GetTLSValue(tls_index, &value)) {
+  const bool ok = XThread::GetCurrentThread()->GetTLSValue(tls_index, &value);
+  GuideTlsTrace("get", tls_index, ok ? value : 0u, ok);
+  if (ok) {
     return value;
   }
 
@@ -554,7 +656,10 @@ DECLARE_XBOXKRNL_EXPORT2(KeTlsGetValue, kThreading, kImplemented,
 dword_result_t KeTlsSetValue_entry(dword_t tls_index, dword_t tls_value) {
   // xboxkrnl doesn't actually have an error branch - it always succeeds, even
   // if it overflows the TLS.
-  if (XThread::GetCurrentThread()->SetTLSValue(tls_index, tls_value)) {
+  const bool ok =
+      XThread::GetCurrentThread()->SetTLSValue(tls_index, tls_value);
+  GuideTlsTrace("set", tls_index, tls_value, ok);
+  if (ok) {
     return 1;
   }
 
@@ -570,8 +675,41 @@ void KeInitializeEvent_entry(pointer_t<X_KEVENT> event_ptr, dword_t event_type,
   auto ev = XObject::GetNativeObject<XEvent>(kernel_state(), event_ptr,
                                              event_ptr->header.type);
   if (!ev) {
+    // Phase 1096hn: assert_always() is a NO-OP in Release, so this path
+    // returns leaving the header exactly as Zero() left it - all sixteen
+    // bytes, including the wait_list fields where StashHandle would have put
+    // its signature. A guest event that failed here is indistinguishable
+    // afterwards from one that was never initialised at all, which is what
+    // nine of dash's events looked like when a wait on them was inspected.
+    // Say so instead of failing silently.
+    // Phase 1096hn2: a pointer_t built from a HOST pointer - as the internal
+    // callers here do, e.g. KeInitializeEvent_entry(&lock_ptr->writer_event,
+    // 1, 0) - leaves value_ at 0, so guest_address() is 0 for those. The first
+    // pass of this probe logged only those and said nothing about the guest's
+    // own events. Tag them instead of conflating them.
+    static std::atomic<uint32_t> init_fail_n{0};
+    const uint32_t n = ++init_fail_n;
+    if (n <= 24u) {
+      XELOGE(
+          "KeInitializeEvent: GetNativeObject FAILED for {:08X} ({}) type {} "
+          "state {} - header left all-zero, every later wait on it will not "
+          "resolve. Failure #{}",
+          event_ptr.guest_address(),
+          event_ptr.guest_address() ? "GUEST CALL" : "internal host call",
+          uint32_t(event_type), uint32_t(initial_state), n);
+    }
     assert_always();
     return;
+  }
+  static std::atomic<uint32_t> init_ok_n{0}, init_ok_guest_n{0};
+  const uint32_t ok = ++init_ok_n;
+  const bool from_guest = event_ptr.guest_address() != 0;
+  const uint32_t okg = from_guest ? ++init_ok_guest_n : 0u;
+  if (ok <= 3u || (from_guest && okg <= 12u)) {
+    XELOGI("KeInitializeEvent: OK for {:08X} ({}) type {} - Success #{}",
+           event_ptr.guest_address(),
+           from_guest ? "GUEST CALL" : "internal host call",
+           uint32_t(event_type), ok);
   }
 }
 DECLARE_XBOXKRNL_EXPORT1(KeInitializeEvent, kThreading, kImplemented);
@@ -587,14 +725,55 @@ uint32_t xeKeSetEvent(X_KEVENT* event_ptr, uint32_t increment, uint32_t wait) {
   return ev->Set(increment, !!wait);
 }
 
+// Phase 1056: is anything signalling xam's task pool?
+static void GuidePoolSyncLog(const char* what, uint32_t guest_ptr, uint32_t a, uint32_t b) {
+  if (!cvars::guide_log_pool_sync) return;
+  if (guest_ptr < 0x81D42400u || guest_ptr > 0x81D42540u) return;
+  uint32_t lr = 0;
+  auto* t = XThread::GetCurrentThread();
+  if (t && t->thread_state() && t->thread_state()->context()) {
+    lr = uint32_t(t->thread_state()->context()->lr);
+  }
+  XELOGI("GuidePoolSync: {} {:08X} ({:08X}, {:08X}) from lr {:08X} on thread {:08X}",
+         what, guest_ptr, a, b, lr, t ? t->handle() : 0);
+}
+
+// Phase 1096do: see guide_event_census.
+static void GuideEventCensus(const char* what, uint32_t guest_ptr) {
+  if (!cvars::guide_event_census) return;
+  static std::mutex ec_mu;
+  static std::set<uint32_t> ec_seen;
+  bool fresh = false;
+  size_t n = 0;
+  {
+    std::lock_guard<std::mutex> lk(ec_mu);
+    if (ec_seen.size() < 64u) {
+      fresh = ec_seen.insert(guest_ptr).second;
+      n = ec_seen.size();
+    }
+  }
+  if (fresh) {
+    uint32_t lr = 0;
+    auto* t = XThread::GetCurrentThread();
+    if (t && t->thread_state() && t->thread_state()->context()) {
+      lr = uint32_t(t->thread_state()->context()->lr);
+    }
+    XELOGI("GuideEventCensus #{}: {} obj {:08X} from lr {:08X}", n, what,
+           guest_ptr, lr);
+  }
+}
+
 dword_result_t KeSetEvent_entry(pointer_t<X_KEVENT> event_ptr,
                                 dword_t increment, dword_t wait) {
+  GuideEventCensus("KeSetEvent", event_ptr.guest_address());
+  GuidePoolSyncLog("KeSetEvent", event_ptr.guest_address(), increment, wait);
   return xeKeSetEvent(event_ptr, increment, wait);
 }
 DECLARE_XBOXKRNL_EXPORT2(KeSetEvent, kThreading, kImplemented, kHighFrequency);
 
 dword_result_t KePulseEvent_entry(pointer_t<X_KEVENT> event_ptr,
                                   dword_t increment, dword_t wait) {
+  GuideEventCensus("KePulseEvent", event_ptr.guest_address());
   auto ev = XObject::GetNativeObject<XEvent>(kernel_state(), event_ptr,
                                              event_ptr->header.type);
   if (!ev) {
@@ -769,6 +948,7 @@ uint32_t xeKeReleaseSemaphore(X_KSEMAPHORE* semaphore_ptr, uint32_t increment,
 dword_result_t KeReleaseSemaphore_entry(pointer_t<X_KSEMAPHORE> semaphore_ptr,
                                         dword_t increment, dword_t adjustment,
                                         dword_t wait) {
+  GuidePoolSyncLog("KeReleaseSemaphore", semaphore_ptr.guest_address(), increment, adjustment);
   return xeKeReleaseSemaphore(semaphore_ptr, increment, adjustment, wait);
 }
 DECLARE_XBOXKRNL_EXPORT1(KeReleaseSemaphore, kThreading, kImplemented);
@@ -959,6 +1139,27 @@ static object_ref<XTimer> GetGuestTimer(uint32_t timer_guest_ptr) {
 // the DPC's routine through gives the callback a thread with a valid KPCR.
 // This is looser than real DPC semantics - a DPC runs at DISPATCH_IRQL, not as
 // a thread APC - but it is the same approximation Xenia already makes.
+// Phase 1095bn: the pool's 8-object WaitAny is now all-valid and all-unsignalled
+// (1095bm), so it blocks correctly and waits for someone to wake it. Slot 0 is a
+// TimerSynchronizationObject at 81D424A8, and an ARMED timer would fire by
+// itself. Report every timer arm - address, due time, period, and the guest lr -
+// so it is a fact rather than an assumption whether 81D424A8 is ever armed.
+static void GuideTimerArm(const char* what, uint32_t timer_guest, int64_t due,
+                          uint32_t period) {
+  if (!cvars::guide_bkgnd_watch) return;
+  static std::atomic<uint32_t> n{0};
+  const uint32_t i = ++n;
+  if (i > 24u) return;
+  auto* th = XThread::GetCurrentThread();
+  auto* ctx = (th && th->thread_state()) ? th->thread_state()->context() : nullptr;
+  XELOGI("GuideTimerArm #{}: {} timer {:08X}{} due {} period {} | tid {:08X} "
+         "lr {:08X}",
+         i, what, timer_guest,
+         timer_guest == 0x81D424A8u ? "  <== THE POOL'S TIMER" : "", due, period,
+         th ? th->thread_id() : 0u,
+         ctx ? static_cast<uint32_t>(ctx->lr) : 0u);
+}
+
 static void ReadDpc(uint32_t dpc_guest_ptr, uint32_t* out_routine,
                     uint32_t* out_context) {
   *out_routine = 0;
@@ -979,7 +1180,10 @@ dword_result_t KeSetTimer_entry(lpvoid_t timer_ptr, qword_t due_time,
   }
   uint32_t routine, context;
   ReadDpc(dpc_ptr.guest_address(), &routine, &context);
-  timer->SetTimer(due_time, 0, routine, context, false);
+  GuideTimerArm("KeSetTimer", timer_ptr.guest_address(),
+                static_cast<int64_t>(due_time), 0);
+  timer->SetTimer(due_time, 0, routine, context, false,
+                  routine ? dpc_ptr.guest_address() : 0);
   return 0;
 }
 DECLARE_XBOXKRNL_EXPORT1(KeSetTimer, kThreading, kImplemented);
@@ -992,7 +1196,10 @@ dword_result_t KeSetTimerEx_entry(lpvoid_t timer_ptr, qword_t due_time,
   }
   uint32_t routine, context;
   ReadDpc(dpc_ptr.guest_address(), &routine, &context);
-  timer->SetTimer(due_time, period_ms, routine, context, false);
+  GuideTimerArm("KeSetTimerEx", timer_ptr.guest_address(),
+                static_cast<int64_t>(due_time), period_ms);
+  timer->SetTimer(due_time, period_ms, routine, context, false,
+                  routine ? dpc_ptr.guest_address() : 0);
   return 0;
 }
 DECLARE_XBOXKRNL_EXPORT1(KeSetTimerEx, kThreading, kImplemented);
@@ -1062,8 +1269,92 @@ uint32_t xeKeWaitForSingleObject(void* object_ptr, uint32_t wait_reason,
   auto object = XObject::GetNativeObject<XObject>(kernel_state(), object_ptr);
 
   if (!object) {
-    // The only kind-of failure code (though this should never happen)
-    assert_always();
+    // Phase 1096gx: "this should never happen" happens, and in a Release build
+    // assert_always() is a no-op, so a wait on an object Xenia cannot resolve
+    // returns INSTANTLY and claims the wait completed. Measured consequence:
+    // dash.xex's loop at 92262334..92262378 asks for a 500 ms wait on
+    // [ctx+0x14] each iteration and runs 335,000 iterations a second instead
+    // of two, which is the 33.5M-per-100s HdDvdRom poll. Report the object and
+    // its dispatch header, once per distinct call site, so the thing Xenia is
+    // failing to model names itself rather than being guessed at. Behaviour is
+    // deliberately left unchanged here - returning early is wrong, but so is
+    // sleeping to paper over an object that should have existed.
+    static std::mutex unresolved_mu;
+    static std::unordered_map<uint32_t, uint32_t> unresolved_seen;
+    auto* th = XThread::GetCurrentThread();
+    const uint32_t lr =
+        (th && th->thread_state() && th->thread_state()->context())
+            ? static_cast<uint32_t>(th->thread_state()->context()->lr)
+            : 0u;
+    bool first = false;
+    {
+      std::lock_guard<std::mutex> lk(unresolved_mu);
+      if (unresolved_seen.size() < 24u &&
+          unresolved_seen.find(lr) == unresolved_seen.end()) {
+        unresolved_seen[lr] = 1;
+        first = true;
+      }
+    }
+    if (first) {
+      const uint32_t guest =
+          static_cast<uint32_t>(reinterpret_cast<uint8_t*>(object_ptr) -
+                                kernel_memory()->virtual_membase());
+      // Phase 1096gy: the first word alone is not enough to tell an
+      // uninitialised object from an initialised one. KeInitializeEvent zeroes
+      // the whole header and then writes type and signal_state, so a
+      // NotificationEvent created unsignalled has an all-zero first word -
+      // indistinguishable from never having been touched. What separates them
+      // is the stash XObject::StashHandle leaves in the wait_list fields at +8
+      // and +12, so print the whole 16-byte dispatch header.
+      // Phase 1096hw: this used QueryRangeAccess alone, and that query returns
+      // kNoAccess for readable IMAGE addresses (the same trap that made
+      // XamTextWatch blind to dash). When it said no, hdr stayed {0,0,0,0} and
+      // printed as four zero words - indistinguishable from a genuinely blank
+      // header, which is exactly the reading that was drawn from it. Fall back
+      // to the region's COMMIT state, and say explicitly when nothing was read.
+      uint32_t hdr[4] = {0, 0, 0, 0};
+      bool hdr_read = false;
+      auto* hp = kernel_memory()->LookupHeap(guest);
+      if (hp) {
+        bool ok = hp->QueryRangeAccess(guest, guest + 15) !=
+                  xe::memory::PageAccess::kNoAccess;
+        if (!ok) {
+          HeapAllocationInfo info = {};
+          if (hp->QueryRegionInfo(guest & ~0xFFFu, &info)) {
+            ok = (info.state & kMemoryAllocationCommit) != 0;
+          }
+        }
+        // Phase 1096hw2: both queries still say no for dash's data pages, yet
+        // the guest demonstrably reads and writes them - the XEX loader commits
+        // only the page-descriptor total, so the bookkeeping disagrees with the
+        // mapping. The comment on the heap-descriptor scan in emulator.cc
+        // already settled what the right bound is: "staying inside
+        // [base, base+size) is the correct and sufficient bound". Use it.
+        if (!ok) {
+          auto mod = kernel_state()->GetExecutableModule();
+          if (mod && mod->xex_module()) {
+            const uint32_t lo = mod->xex_module()->base_address();
+            const uint32_t hi = lo + mod->xex_module()->image_size();
+            if (guest >= lo && guest + 16 <= hi) {
+              ok = true;
+            }
+          }
+        }
+        if (ok) {
+          hdr_read = true;
+          for (int w = 0; w < 4; ++w) {
+            hdr[w] = xe::load_and_swap<uint32_t>(
+                kernel_memory()->TranslateVirtual(guest + w * 4));
+          }
+        }
+      }
+      XELOGW(
+          "KeWaitForSingleObject: {:08X} will not resolve (header {} {:08X} "
+          "{:08X} {:08X} {:08X}, type {}), timeout {} - returning "
+          "ABANDONED_WAIT_0 WITHOUT waiting | lr {:08X}",
+          guest, hdr_read ? "READ" : "NOT-READABLE", hdr[0], hdr[1], hdr[2],
+          hdr[3], hdr[0] & 0xFF, timeout_ptr ? "finite" : "INFINITE", lr);
+    }
     return X_STATUS_ABANDONED_WAIT_0;
   }
 
@@ -1083,6 +1374,70 @@ dword_result_t KeWaitForSingleObject_entry(lpvoid_t object_ptr,
                                            dword_t alertable,
                                            lpqword_t timeout_ptr) {
   uint64_t timeout = timeout_ptr ? static_cast<uint64_t>(*timeout_ptr) : 0u;
+  // Phase 1095m: 81750FA8's init task blocks forever at 817BC0C8, an infinite
+  // KeWaitForSingleObject inside 817BBC20 (coverage: 140/467, furthest
+  // 817BC0C8; the next instruction never executes). Name the object and its
+  // dispatch header for that one call site - the return address of that bl is
+  // 817BC0CC - so the thing nothing signals is identified rather than guessed.
+  {
+    auto* th = XThread::GetCurrentThread();
+    const uint32_t lr =
+        (th && th->thread_state() && th->thread_state()->context())
+            ? static_cast<uint32_t>(th->thread_state()->context()->lr)
+            : 0u;
+    // Phase 1096k: 8172E1DC is the second, UPSTREAM infinite wait -
+    // 81750ED8 reaches `bl 8172E190` at 81750F7C and never returns, so its
+    // KeSetEvent(81D3FBAC) at 81750F90 never runs, which is why the wait at
+    // 817BC0C8 can never be satisfied. Name both objects, not just the
+    // downstream one.
+    // Phase 1096r: the app-table walk stalls inside musicplayer's initialiser
+    // (entry 3): 817D23C4 `bl 81AA9FB8` is the furthest instruction reached and
+    // 817D23C8 never executes, and 81AA9FB8 tail-dispatches through vtable slot
+    // +0x28 at 81AAA0BC. Rather than guess the virtual target, catch EVERY
+    // infinite wait and report each DISTINCT caller once - the blocking call in
+    // that chain names itself. Bounded to 16 distinct sites.
+    if (!timeout_ptr) {
+      static std::mutex lr_mu;
+      static std::unordered_map<uint32_t, uint32_t> lr_seen;
+      bool first = false;
+      {
+        std::lock_guard<std::mutex> lk(lr_mu);
+        if (lr_seen.size() < 16u && lr_seen.find(lr) == lr_seen.end()) {
+          lr_seen[lr] = 1;
+          first = true;
+        }
+      }
+      if (first) {
+        const uint32_t o = object_ptr.guest_address();
+        uint32_t h = 0;
+        if (o) {
+          h = xe::load_and_swap<uint32_t>(kernel_memory()->TranslateVirtual(o));
+        }
+        XELOGI("GuideInfWait: lr={:08X} obj={:08X} header={:08X} (INFINITE "
+               "KeWaitForSingleObject, first time from this caller)",
+               lr, o, h);
+        XELOGI("GuideInfWait: chain {}", kernel_state()->GuestBackChain());
+      }
+    }
+    if (lr == 0x817BC0CCu || lr == 0x8172E1DCu) {
+      static std::atomic<uint32_t> n{0};
+      const uint32_t i = ++n;
+      if (i <= 8u) {
+        const uint32_t obj = object_ptr.guest_address();
+        uint32_t hdr = 0;
+        if (obj) {
+          hdr = xe::load_and_swap<uint32_t>(
+              kernel_memory()->TranslateVirtual(obj));
+        }
+        XELOGI("GuideInitWait #{}: {} waits on {:08X} header {:08X} "
+               "(type {}) timeout {} | tid {:08X}",
+               i, lr == 0x8172E1DCu ? "8172E1D8 (UPSTREAM)" : "817BC0C8",
+               obj, hdr, hdr & 0xFF,
+               timeout_ptr ? "finite" : "INFINITE",
+               th ? th->thread_id() : 0u);
+      }
+    }
+  }
   return xeKeWaitForSingleObject(object_ptr, wait_reason, processor_mode,
                                  alertable, timeout_ptr ? &timeout : nullptr);
 }
@@ -1126,8 +1481,174 @@ dword_result_t KeWaitForMultipleObjects_entry(
     dword_t count, lpdword_t objects_ptr, dword_t wait_type,
     dword_t wait_reason, dword_t processor_mode, dword_t alertable,
     lpqword_t timeout_ptr, pointer_t<X_KWAIT_BLOCK> wait_block_array_ptr) {
+  if (cvars::guide_log_pool_sync && objects_ptr) {
+    for (uint32_t i = 0; i < count && i < 8; ++i) {
+      GuidePoolSyncLog("wait-begin", objects_ptr[i], count, i);
+    }
+  }
   assert_true(wait_type <= X_KWAIT_REASON::WaitAny);
 
+  // Phase 1096s: same deduplicated infinite-wait census as in
+  // KeWaitForSingleObject, but for the MULTIPLE-object form. 1096s showed the
+  // musicplayer stall (app-table entry 3) is not a single-object wait, so the
+  // blocking call in 817D2xxx / 81AAAxxx has to be one of these instead.
+  {
+    auto* mth = XThread::GetCurrentThread();
+    const uint32_t mlr =
+        (mth && mth->thread_state() && mth->thread_state()->context())
+            ? static_cast<uint32_t>(mth->thread_state()->context()->lr)
+            : 0u;
+    if (!timeout_ptr) {
+      static std::mutex m_mu;
+      static std::unordered_map<uint32_t, uint32_t> m_seen;
+      bool mfirst = false;
+      {
+        std::lock_guard<std::mutex> lk(m_mu);
+        if (m_seen.size() < 16u && m_seen.find(mlr) == m_seen.end()) {
+          m_seen[mlr] = 1;
+          mfirst = true;
+        }
+      }
+      if (mfirst) {
+        XELOGI("GuideInfWaitMulti: lr={:08X} count={} type={} (INFINITE "
+               "KeWaitForMultipleObjects, first time from this caller)",
+               mlr, uint32_t(count), uint32_t(wait_type));
+      }
+    }
+  }
+
+  // Phase 1096m: the pool worker loop at 8177AC50 waits here and then does
+  //   8177AC78  cmplwi r3, 2 / blt 8177ACE8      <- DEQUEUE the pool+0xB4 queue
+  //   8177AC84  r11 = r3 - 2
+  //   8177AC88  cmplw r11, [r31+0x234] / bge 8177ACE0   <- `twui` ASSERT
+  // Coverage says the dequeue span is never executed and the trap branch IS, so
+  // this call returns a value that is neither a low index nor a valid extra
+  // index. Xenia does not honour twui, so xam's own assert is silent and the
+  // worker just loops - which is why task 817318F0 never runs and xam's init is
+  // stranded. Log the arguments for this one call site (return address
+  // 8177AC78) so the bad value is named rather than inferred.
+  {
+    auto* gth = XThread::GetCurrentThread();
+    const uint32_t glr =
+        (gth && gth->thread_state() && gth->thread_state()->context())
+            ? static_cast<uint32_t>(gth->thread_state()->context()->lr)
+            : 0u;
+    if (glr == 0x8177AC78u) {
+      static std::atomic<uint32_t> gn{0};
+      const uint32_t gi = ++gn;
+      if (gi <= 6u) {
+        std::string objs;
+        for (uint32_t i = 0; i < count && i < 8; ++i) {
+          const uint32_t o = objects_ptr[i];
+          uint32_t hdr = 0;
+          if (o) {
+            hdr = xe::load_and_swap<uint32_t>(
+                kernel_memory()->TranslateVirtual(o));
+          }
+          objs += fmt::format("[{}]={:08X}(hdr {:08X}) ", i, o, hdr);
+        }
+        XELOGI("GuidePoolWait #{}: count={} type={} timeout={} | {}", gi,
+               uint32_t(count), uint32_t(wait_type),
+               timeout_ptr ? "finite" : "INFINITE", objs);
+      }
+    }
+  }
+
+
+  // Phase 1095bc: nothing found so far WRITES D2F1BEEF into [401EA360+0xC] -
+  // not the record constructor (817785C8 zeroes it), not the USB teardown
+  // (817472A8 zeroes it), and the value appears nowhere in xam, hud or the dash
+  // as code or data. Catch the transition: poll the field on every wait and
+  // report the FIRST time it is non-zero, with the thread that was running.
+  if (cvars::guide_bkgnd_watch) {
+    static std::atomic<uint32_t> seen{0};
+    if (!seen.load(std::memory_order_relaxed)) {
+      auto rdq = [&](uint32_t a) {
+        return xe::load_and_swap<uint32_t>(kernel_memory()->TranslateVirtual(a));
+      };
+      const uint32_t v = rdq(0x401EA360u + 0xCu);
+      if (v && seen.exchange(1) == 0) {
+        auto* pth = XThread::GetCurrentThread();
+        auto* pctx = (pth && pth->thread_state()) ? pth->thread_state()->context()
+                                                  : nullptr;
+        XELOGI("GuideRecPoison: [401EA360+0xC] first seen as {:08X} | flags {:08X}"
+               " | tid {:08X} lr {:08X}",
+               v, rdq(0x401EA360u + 8u), pth ? pth->thread_id() : 0u,
+               pctx ? static_cast<uint32_t>(pctx->lr) : 0u);
+      }
+    }
+  }
+
+  // Phase 1095ap: the pool spins millions of times because slot 7 of an
+  // EIGHT-object wait holds D2F1BEEF, which is not an object. Dump the whole
+  // array once so the seven good entries name the subsystem and the bad one
+  // can be attributed. Bounded and gated.
+  if (cvars::guide_bkgnd_watch && count == 8 && objects_ptr) {
+    static std::atomic<uint32_t> w8{0};
+    const uint32_t wi = ++w8;
+    if (wi <= 4u) {
+      auto* wth = XThread::GetCurrentThread();
+      auto* wctx = (wth && wth->thread_state()) ? wth->thread_state()->context()
+                                                : nullptr;
+      std::string ents;
+      for (uint32_t k = 0; k < 8u; ++k) {
+        const uint32_t g = static_cast<uint32_t>(objects_ptr[k]);
+        // Phase 1095bm: do NOT gate this on QueryRangeAccess - most of these
+        // objects live in xam's IMAGE, whose pages that check reports as
+        // kNoAccess, which is why this column read 00000000 for everything up
+        // to now (1095f flagged it, 1095bh proved it). Read the dispatch
+        // header directly: word 0 is type/size, word 1 is SIGNAL STATE - the
+        // thing that decides whether this wait can ever complete.
+        uint32_t hdr0 = 0, sig = 0;
+        if (g && kernel_memory()->LookupHeap(g)) {
+          auto* hb = kernel_memory()->TranslateVirtual(g);
+          hdr0 = xe::load_and_swap<uint32_t>(hb);
+          sig = xe::load_and_swap<uint32_t>(hb + 4);
+        }
+        ents += fmt::format("[{}]={:08X}(t{} sig{}) ", k, g,
+                            (hdr0 >> 24) & 0xFF, sig);
+      }
+      XELOGI("GuideWait8 #{}: wait_type {} ({}) from guest lr {:08X} "
+             "tid {:08X} | {}", wi, static_cast<uint32_t>(wait_type),
+             static_cast<uint32_t>(wait_type) == 0 ? "WaitAll" : "WaitAny",
+             wctx ? static_cast<uint32_t>(wctx->lr) : 0u,
+             wth ? wth->thread_id() : 0u, ents);
+      // Phase 1095at: the append at 8177A670 writes the wait object from
+      // [record+0xC], and at 8177A67C the RECORD ITSELF into the parallel array
+      // pool+0x1D4 at the same index. So the record that supplied the poison is
+      // recoverable. The wait array has two FIXED leading slots
+      // (count = [pool+0x234] + 2), so wait slot k maps to parallel index k-2.
+      {
+        auto rdp = [&](uint32_t a) {
+          return xe::load_and_swap<uint32_t>(kernel_memory()->TranslateVirtual(a));
+        };
+        std::string recs;
+        const uint32_t cnt = rdp(0x81D423C0u + 0x234u);
+        for (uint32_t k = 0; k < 8u && k < cnt; ++k) {
+          const uint32_t rec = rdp(0x81D423C0u + 0x1D4u + k * 4u);
+          uint32_t f8 = 0, fc = 0;
+          auto* rh = rec ? kernel_memory()->LookupHeap(rec) : nullptr;
+          if (rh && rh->QueryRangeAccess(rec, rec + 0xF) !=
+                        xe::memory::PageAccess::kNoAccess) {
+            f8 = rdp(rec + 8);
+            fc = rdp(rec + 0xC);
+          }
+          // Phase 1095av: dump the whole record head - +0 is usually a
+          // vtable or tag and should identify what kind of thing this
+          // is, without needing to find its allocator.
+          std::string w;
+          if (f8 || fc) {
+            for (uint32_t q = 0; q < 16u; ++q) {
+              w += fmt::format("{:08X} ", rdp(rec + q * 4u));
+            }
+          }
+          recs += fmt::format("<{}>rec={:08X} [{}] ", k, rec, w);
+        }
+        XELOGI("GuideWait8Rec #{}: [pool+234]={} arraybase={:08X} | {}", wi, cnt,
+               rdp(0x81D423C0u + 0x1D0u), recs);
+      }
+    }
+  }
   assert_true(count <= 64);
   object_ref<XObject> objects[64];
   {
@@ -1160,13 +1681,36 @@ dword_result_t KeWaitForMultipleObjects_entry(
                               xe::memory::PageAccess::kNoAccess;
           auto* hdr =
               obj_readable ? reinterpret_cast<uint8_t*>(object_ptr) : nullptr;
+          // Phase 1096fz: log the CALLER. The existing message names the
+          // object but not who is waiting on it, and D2DCBEEF now blocks BOTH
+          // the dashboard and Fable III - so which guest code builds that
+          // array decides whether this is an LLE-xam bug (in scope) or a
+          // title bug (not).
+          uint32_t bad_lr = 0;
+          if (auto* bt = XThread::GetCurrentThread()) {
+            if (bt->thread_state() && bt->thread_state()->context()) {
+              bad_lr = uint32_t(bt->thread_state()->context()->lr);
+            }
+          }
+          // Phase 1096gf: dump the header bytes. Type 129 (0x81) is not in
+          // X_OBJECT_TYPES (0x0-0xE), and the two candidate readings - a real
+          // type 0x01 with an unmasked high-bit flag, versus an uninitialised
+          // header - are told apart by whether the REST of the header looks
+          // like a live dispatch object (plausible signal_state, wait-list
+          // links pointing at themselves) or like garbage.
+          std::string hx;
+          if (hdr) {
+            for (int hb = 0; hb < 16; ++hb) {
+              hx += fmt::format("{:02X} ", hdr[hb]);
+            }
+          }
           XELOGW(
               "KeWaitForMultipleObjects #{}: object {} of {} at {:08X} will "
               "not resolve; dispatch type {} -> returning INVALID_PARAMETER "
-              "without waiting",
+              "without waiting | lr {:08X} | hdr {}",
               bn, n, static_cast<uint32_t>(count),
               static_cast<uint32_t>(objects_ptr[n]),
-              hdr ? hdr[0] : 0xFF);
+              hdr ? hdr[0] : 0xFF, bad_lr, hx.empty() ? "(unreadable)" : hx);
         }
         return X_STATUS_INVALID_PARAMETER;
       }
@@ -1189,6 +1733,29 @@ dword_result_t KeWaitForMultipleObjects_entry(
           m->TranslateVirtual(objects_ptr[1]));
       uint8_t t2 = *reinterpret_cast<uint8_t*>(
           m->TranslateVirtual(objects_ptr[2]));
+      // Phase 1095i: 81D3CA08 is .bss (zero in xam.bin, checked statically)
+      // and is self-linked by 81727500, which only 81750FA8's pool task
+      // reaches. If it is still 0 by the time the pool is waiting, that task
+      // has not run and the fault at 817286C0 is a MISSING DISPATCH, not a
+      // race between two tasks.
+      {
+        auto* m = kernel_memory();
+        // 1099z17559-4: these are 17489 xam addresses; on another build the
+        // page can be unmapped and the read faulted (x17559n). Read only
+        // committed pages - the log line itself is unchanged.
+        auto rd = [&](uint32_t a) -> uint32_t {
+          auto* h = m->LookupHeap(a);
+          if (!h || h->QueryRangeAccess(a, a + 3) ==
+                        xe::memory::PageAccess::kNoAccess) {
+            return 0;
+          }
+          return xe::load_and_swap<uint32_t>(m->TranslateVirtual(a));
+        };
+        XELOGI("GuideUiGlobals@Wait3 #{}: [81D3C8E8]={:08X} [81D3CA08]={:08X} "
+               "self-linked? {}",
+               wn, rd(0x81D3C8E8u), rd(0x81D3CA08u),
+               rd(0x81D3CA08u) == 0x81D3CA08u ? "yes" : "no");
+      }
       XELOGI("Wait3 #{}: {:08X}(type {}) {:08X}(type {}) {:08X}(type {})", wn,
              static_cast<uint32_t>(objects_ptr[0]), t0,
              static_cast<uint32_t>(objects_ptr[1]), t1,
@@ -1202,6 +1769,30 @@ dword_result_t KeWaitForMultipleObjects_entry(
   if (alertable) {
     if (result == X_STATUS_USER_APC) {
       xeProcessUserApcs(nullptr);
+    }
+  }
+
+  // Phase 1096m: report the RESULT for the pool worker's wait (return address
+  // 8177AC78). xam does `cmplwi r3,2 / blt` to the dequeue, then
+  // `r11 = r3-2 / cmplw r11,[pool+0x234] / bge` to a `twui` assert. With
+  // count==2 and [pool+0x234]==0, ONLY 0 or 1 are legal - anything else is the
+  // assert path, which Xenia silently ignores because it does not honour twui.
+  {
+    auto* rth = XThread::GetCurrentThread();
+    const uint32_t rlr =
+        (rth && rth->thread_state() && rth->thread_state()->context())
+            ? static_cast<uint32_t>(rth->thread_state()->context()->lr)
+            : 0u;
+    if (rlr == 0x8177AC78u) {
+      static std::atomic<uint32_t> rn{0};
+      const uint32_t ri = ++rn;
+      if (ri <= 6u) {
+        XELOGI("GuidePoolWait #{} RESULT = {:08X} (count={}; legal indices are "
+               "0..{}; anything else takes xam's twui assert at 8177ACE0 and "
+               "the pool+0xB4 queue is never drained)",
+               ri, uint32_t(result), uint32_t(count),
+               count ? uint32_t(count - 1) : 0u);
+      }
     }
   }
   return result;
@@ -1239,7 +1830,6 @@ uint32_t xeNtWaitForMultipleObjectsEx(uint32_t count, xe::be<uint32_t>* handles,
       objects[n] = std::move(object);
     }
   }
-
   auto result =
       XObject::WaitMultiple(count, reinterpret_cast<XObject**>(&objects[0]),
                             wait_type, 6, wait_mode, alertable, timeout_ptr);
@@ -1929,6 +2519,17 @@ void ExReleaseReadWriteLock_entry(pointer_t<X_ERWLOCK> lock_ptr,
     return;
   }
 
+  // Phase 1099q: a WRITER releasing has readers_entry_count == 0. The old code
+  // decremented it anyway when no reader was waiting, so it wrapped to
+  // 0xFFFFFFFF, read as "readers still inside", and returned WITHOUT waking
+  // the waiting writer - and left the counters corrupt for every later user.
+  // Two threads taking the lock exclusively in turn deadlocked: measured,
+  // signin.xex's thread parked forever in ExAcquireReadWriteLockExclusive
+  // (return 90115010, lock 404E1140) after a profile was picked on the
+  // dashboard's sign-in screen, the sign-in UI never tore down, xam's UI gate
+  // [81D43CF8] stayed 1 with HUD state 0x10 pending, and every later Guide
+  // press was refused. Only a READER release decrements the reader count
+  // (same as the Xbox kernel logic in Cxbx-Reloaded's ExReleaseReadWriteLock).
   if (!lock_ptr->readers_entry_count) {
     auto readers_waiting_count = lock_ptr->readers_waiting_count;
     if (readers_waiting_count) {
@@ -1939,12 +2540,12 @@ void ExReleaseReadWriteLock_entry(pointer_t<X_ERWLOCK> lock_ptr,
                            readers_waiting_count, 0);
       return;
     }
-  }
-
-  auto readers_entry_count = --lock_ptr->readers_entry_count;
-  if (readers_entry_count) {
-    xeKeKfReleaseSpinLock(ppc_context, &lock_ptr->spin_lock, old_irql);
-    return;
+  } else {
+    auto readers_entry_count = --lock_ptr->readers_entry_count;
+    if (readers_entry_count) {
+      xeKeKfReleaseSpinLock(ppc_context, &lock_ptr->spin_lock, old_irql);
+      return;
+    }
   }
 
   lock_ptr->writers_waiting_count--;
@@ -2089,6 +2690,17 @@ DECLARE_XBOXKRNL_EXPORT1(KeInitializeTimerEx, kThreading, kImplemented);
 // who calls it. Xenon MSVC stores the saved LR 8 bytes below the caller's SP.
 void ExTerminateTitleProcess_entry(dword_t exit_code, dword_t unk,
                                    const ppc_context_t& ctx) {
+  XELOGI("ExTerminateTitleProcess({:08X}, {:08X}) chain {}",
+         uint32_t(exit_code), uint32_t(unk), kernel_state()->GuestBackChain());
+  // Phase 1099v: this was a research stub that only logged, so xam's title
+  // teardown did nothing. Do what the real kernel does (80056800): run the
+  // title-terminate notification chain, tearing down only the title process,
+  // and RETURN to the caller (a xam system worker). The old stack dump below is
+  // kept behind guide_bkgnd_watch.
+  kernel_state()->TerminateTitleProcessSelective();
+  if (!cvars::guide_bkgnd_watch) {
+    return;
+  }
   XELOGE("ExTerminateTitleProcess(code={:08X}, unk={:08X}) - guest stack:",
          static_cast<uint32_t>(exit_code), static_cast<uint32_t>(unk));
   auto* mem = ctx->kernel_state->memory();

@@ -424,7 +424,11 @@ X_RESULT WinKeyInputDriver::GetKeystroke(uint32_t user_index, uint32_t flags,
   uint16_t keystroke_flags = 0;
   uint8_t hid_code = 0;
 
-  bool capital = IsKeyToggled(VK_CAPITAL) || IsKeyDown(VK_SHIFT);
+  // Phase 1054 tabs: the Shift state at the time of the event, not at the
+  // time the event is popped (a release popped after Shift went up resolved
+  // to the unshifted binding: a dpad key's release came out as a thumbstick
+  // key; a press popped late became a thumbstick nav).
+  bool capital = evt.capital;
 
   if (!IsPassthroughEnabled()) {
     if (IsKeyboardForUserEnabled(user_index)) {
@@ -509,6 +513,12 @@ void WinKeyInputDriver::OnKey(ui::KeyEvent& e, bool is_down) {
   key.transition = is_down;
   key.prev_state = e.prev_state();
   key.repeat_count = e.repeat_count();
+  key.capital = IsKeyToggled(VK_CAPITAL) || IsKeyDown(VK_SHIFT);
+  static uint32_t raw_logs = 0;
+  if (raw_logs++ < 200) {
+    XELOGI("WinKey: raw {} vk {:02X} prev {} repeat {} shift {}", is_down ? "down" : "up",
+           uint32_t(e.virtual_key()), e.prev_state() ? 1 : 0, e.repeat_count(), key.capital ? 1 : 0);
+  }
 
   auto global_lock = global_critical_region_.Acquire();
   key_events_.push(key);

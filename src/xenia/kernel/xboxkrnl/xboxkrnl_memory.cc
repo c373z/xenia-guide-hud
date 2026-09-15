@@ -7,8 +7,18 @@
  ******************************************************************************
  */
 
+#include <map>
+#include <vector>
+#include <string>
+#include <deque>
+#include <mutex>
+#include <unordered_set>
+#include <chrono>
+#include <algorithm>
 #include "xenia/kernel/xboxkrnl/xboxkrnl_memory.h"
 #include "xenia/base/logging.h"
+#include "xenia/kernel/kernel_flags.h"
+#include "xenia/kernel/xthread.h"
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/util/shim_utils.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_private.h"
@@ -175,8 +185,14 @@ dword_result_t NtAllocateVirtualMemory_entry(lpdword_t base_addr_ptr,
   } else {
     bool top_down = !!(alloc_type & X_MEM_TOP_DOWN);
     heap = kernel_memory()->LookupHeapByType(false, page_size);
-    heap->Alloc(adjusted_size, page_size, allocation_type, protect, top_down,
-                &address);
+    // Phase 1099z131: a base-less allocation starts on the 64 KB allocation
+    // granularity, as its size above is already rounded to it. Aligning only
+    // to the page size put bootanim's 0x300000 top-down heap segment at
+    // 3FCFF000..3FFFF000; its heap decommits in 64 KB steps assuming the
+    // segment ends on that boundary, and wrote the trailing entry header at
+    // 3FFFF002, past the allocation (guest crash at 98046CE8).
+    heap->Alloc(adjusted_size, std::max<uint32_t>(page_size, 64 * 1024),
+                allocation_type, protect, top_down, &address);
   }
   if (!address) {
     // Failed - assume no memory available.
@@ -201,6 +217,61 @@ dword_result_t NtAllocateVirtualMemory_entry(lpdword_t base_addr_ptr,
 
   XELOGD("NtAllocateVirtualMemory = {:08X}", address);
 
+  // Phase 1099z47: record title-owned regions for the ExTerminateTitleProcess
+  // Mm slot. The real kernel (8006E3B0) picks the title or system address
+  // space from its 5th argument (1 title, 2 system, 0 = the calling thread's
+  // process type), which Xenia names debug_memory.
+  if (address && (alloc_type & X_MEM_RESERVE)) {
+    uint32_t owner = uint32_t(debug_memory);
+    if (owner != 1 && owner != 2) {
+      owner = 0;
+      if (auto* th = XThread::GetCurrentThread()) {
+        if (auto* kt = th->guest_object<X_KTHREAD>()) {
+          owner = kt->process_type;
+        }
+      }
+    }
+    if (owner == X_PROCTYPE_TITLE) {
+      kernel_state()->RecordTitleAllocation(address);
+    }
+  }
+
+  // Phase 1091l: NAME THE ALLOCATOR OF THE HUD MANAGER'S PAGE. [81D43C50+0x28]
+  // ends up holding 30052000, a single committed 4 KB page whose allocation
+  // base IS that pointer (1091i), written between xam's DllMain returning and
+  // the Guide press (1091j). A thread census could not name the writer (1091k)
+  // because it may run under a host extern handler, which no census sees.
+  // Catching it here is cheaper and exact: log the guest LR - the caller - of
+  // any allocation that lands on the page. Gated; the default path logs nothing.
+  if (cvars::guide_watch_alloc && address &&
+      address == uint32_t(cvars::guide_watch_alloc)) {
+    auto* wth = XThread::GetCurrentThread();
+    XELOGI("GuideWatchAlloc: NtAllocateVirtualMemory -> {:08X} size {:08X} "
+           "type {:08X} protect {:08X} | guest lr {:08X} | thread {:08X} start {:08X}",
+           address, adjusted_size, uint32_t(alloc_type), uint32_t(protect_bits),
+           wth ? uint32_t(wth->thread_state()->context()->lr) : 0u,
+           wth ? wth->thread_id() : 0u, wth ? wth->start_address() : 0u);
+  }
+
+  // Phase 1099v: who owns the low 0x40000000 region? xam's title-terminate
+  // callback releases 40000000+1F0000 as TITLE memory, and system threads
+  // crash on it afterwards. Log the first allocations there with the calling
+  // thread's process type.
+  if (address >= 0x40000000u && address < 0x40400000u) {
+    static std::atomic<uint32_t> alog{0};
+    if (alog.fetch_add(1) < 24) {
+      auto* cth = XThread::GetCurrentThread();
+      auto* kt = (cth && cth->is_guest_thread())
+                     ? cth->guest_object<X_KTHREAD>()
+                     : nullptr;
+      XELOGI("TitleSwitch: NtAllocateVirtualMemory {:08X} size {:08X} type {:X} "
+             "by thread '{}' process_type {} lr {:08X}",
+             address, adjusted_size, uint32_t(alloc_type),
+             cth ? cth->thread_name() : std::string("?"),
+             kt ? uint32_t(kt->process_type) : 0xFFu,
+             cth ? uint32_t(cth->thread_state()->context()->lr) : 0u);
+    }
+  }
   // Stash back.
   // Maybe set X_STATUS_ALREADY_COMMITTED if MEM_COMMIT?
   *base_addr_ptr = address;
@@ -262,9 +333,18 @@ DECLARE_XBOXKRNL_EXPORT1(NtProtectVirtualMemory, kMemory, kImplemented);
 dword_result_t NtFreeVirtualMemory_entry(lpdword_t base_addr_ptr,
                                          lpdword_t region_size_ptr,
                                          dword_t free_type,
-                                         dword_t debug_memory) {
+                                         dword_t debug_memory,
+                                         const ppc_context_t& ctx) {
   uint32_t base_addr_value = *base_addr_ptr;
   uint32_t region_size_value = *region_size_ptr;
+  // Phase 1099v: log frees while a title switch runs (who freed system pages).
+  if (kernel_state()->title_switch_log_budget.load() > 0) {
+    kernel_state()->title_switch_log_budget.fetch_sub(1);
+    XELOGI("TitleSwitch: NtFreeVirtualMemory base {:08X} size {:08X} type {:X} "
+           "lr {:08X}",
+           base_addr_value, region_size_value, uint32_t(free_type),
+           uint32_t(ctx->lr));
+  }
   // X_MEM_DECOMMIT | X_MEM_RELEASE
 
   // NTSTATUS
@@ -293,6 +373,9 @@ dword_result_t NtFreeVirtualMemory_entry(lpdword_t base_addr_ptr,
     result = heap->Decommit(base_addr_value, region_size_value);
   } else {
     result = heap->Release(base_addr_value, &region_size_value);
+    if (result) {
+      kernel_state()->ForgetTitleAllocation(base_addr_value);
+    }
   }
   if (!result) {
     return X_STATUS_UNSUCCESSFUL;
@@ -486,24 +569,227 @@ uint32_t xeMmAllocatePhysicalMemoryEx(uint32_t flags, uint32_t region_size,
   return base_address;
 }
 
+// Phase 1054 dbg: who allocates physical memory, how often and how much -
+// the Guide's paint thread spent ~12% of a paint in the heap's free-block
+// rebuild under this export. Tallied by the caller's return address and size,
+// reported every 5 s while calls keep coming (guide_alloc_tally).
+static void GuideAllocTally(const char* what, uint32_t lr, uint32_t size) {
+  if (!cvars::guide_alloc_tally) return;
+  static std::mutex mu;
+  // one table per export (they used to share one and the label lied)
+  static std::map<std::string, std::map<std::pair<uint32_t, uint32_t>, uint32_t>> tables;
+  static std::map<std::string, std::map<uint32_t, uint32_t>> lrs;
+  static std::map<std::string, uint64_t> totals;
+  static std::chrono::steady_clock::time_point t0{};
+  std::lock_guard<std::mutex> lk(mu);
+  auto& counts = tables[what];
+  auto& by_lr = lrs[what];
+  auto& total = totals[what];
+  ++counts[{lr, size}];
+  ++by_lr[lr];
+  ++total;
+  auto now = std::chrono::steady_clock::now();
+  if (!t0.time_since_epoch().count()) t0 = now;
+  if (now - t0 >= std::chrono::seconds(5)) {
+    for (auto& tb : tables) {
+      auto& c = tb.second;
+      if (c.empty()) continue;
+      std::vector<std::pair<std::pair<uint32_t, uint32_t>, uint32_t>> v(c.begin(), c.end());
+      std::sort(v.begin(), v.end(), [](auto& a, auto& b) { return a.second > b.second; });
+      std::string line;
+      for (size_t i = 0; i < std::min<size_t>(v.size(), 10); ++i) {
+        line += fmt::format("lr {:08X} arg {:X} x{} | ", v[i].first.first, v[i].first.second, v[i].second);
+      }
+      XELOGI("GuideAllocTally: {} {} calls in {:.1f} s from {} sites: {}", tb.first, totals[tb.first],
+             std::chrono::duration<double>(now - t0).count(), lrs[tb.first].size(), line);
+      c.clear();
+      lrs[tb.first].clear();
+      totals[tb.first] = 0;
+    }
+    t0 = now;
+  }
+}
+
+// Phase 1054 alloc: a cache of freed single 4 KB physical pages. xam's debug
+// D3D allocates and frees 36-292 byte blocks through MmAllocatePhysicalMemoryEx
+// 120-290 times a second (lr 817B27C0 / 817B5218: read-write, 32-byte aligned,
+// unrestricted range, freed within the paint); each went through the heap's
+// range search under the global memory lock and a VirtualAlloc commit, ~6% of
+// a Guide paint. A freed single page whose heap entry is read-write stays
+// allocated in the heap and waits here; a single-page request with the same
+// converted protection takes it back without touching the heap or the host.
+// The heap's own reuse would hand out the same page just as quickly, so the
+// guest sees nothing new: the page keeps its size, protection and contents.
+namespace {
+struct GuidePageCache {
+  std::mutex mu;
+  std::vector<std::pair<uint32_t, uint32_t>> pages;  // address, heap protect
+  // Phase 1054 black: physical page numbers the published stream references.
+  // The stream is replayed by the GPU every frame while the Guide is idle, and
+  // xam frees the single pages its vertex data lives in within the paint; a
+  // page handed straight back to the next allocation was overwritten under
+  // the replay (the Guide vanished or went black on alternate frames).
+  std::unordered_set<uint32_t> pinned;
+  // The GPU thread replays a stream inside the title's resolve and can be a
+  // few frames behind the paint that published the next one, so the pins are
+  // the union of the last kPinHistory publishes, not the latest alone.
+  static constexpr size_t kPinHistory = 16;
+  // Phase 1055 bugs: entries carry the publish's pair as a tag; the history
+  // is deeper than the pinned window so the stream the GPU is replaying can
+  // be found and kept when a stalled replay outlives the window.
+  static constexpr size_t kPinHistoryMax = 128;
+  std::deque<std::pair<uint64_t, std::vector<uint32_t>>> pin_history;
+  uint64_t hits = 0, misses = 0, kept = 0, pin_skips = 0, pin_kept = 0;
+};
+GuidePageCache g_guide_page_cache;
+constexpr uint32_t GuidePhysPage(uint32_t address) {
+  return (address & 0x1FFFFFFFu) >> 12;
+}
+}  // namespace
+
+void GuidePageCachePin(const std::vector<uint32_t>& phys_pages, uint64_t tag,
+                       uint64_t keep_tag) {
+  auto& c = g_guide_page_cache;
+  std::lock_guard<std::mutex> lk(c.mu);
+  c.pin_history.emplace_back(tag, phys_pages);
+  while (c.pin_history.size() > GuidePageCache::kPinHistoryMax) {
+    c.pin_history.pop_front();
+  }
+  c.pinned.clear();
+  const size_t n = c.pin_history.size();
+  const size_t from = n > GuidePageCache::kPinHistory ? n - GuidePageCache::kPinHistory : 0;
+  for (size_t i = 0; i < n; ++i) {
+    const auto& e = c.pin_history[i];
+    if (i >= from || (keep_tag && e.first == keep_tag)) {
+      c.pinned.insert(e.second.begin(), e.second.end());
+    }
+  }
+}
+
+uint64_t GuidePageCachePinSkips() {
+  auto& c = g_guide_page_cache;
+  std::lock_guard<std::mutex> lk(c.mu);
+  return c.pin_skips;
+}
+
+static uint32_t GuidePageCacheTake(uint32_t protect_bits, uint32_t region_size,
+                                   uint32_t min_addr_range, uint32_t max_addr_range,
+                                   uint32_t alignment) {
+  if (!cvars::guide_page_cache) return 0;
+  if (region_size == 0 || region_size > 4096u || alignment > 4096u) return 0;
+  if (protect_bits & (X_MEM_LARGE_PAGES | X_MEM_16MB_PAGES)) return 0;
+  if (min_addr_range != 0 || max_addr_range != 0xFFFFFFFFu) return 0;
+  uint32_t want = FromXdkProtectFlags(protect_bits);
+  auto& c = g_guide_page_cache;
+  std::lock_guard<std::mutex> lk(c.mu);
+  // Lowest address first, like the heap's own first fit: the same sequence of
+  // requests gets the same pages every paint, so a shader or a vertex buffer
+  // keeps its address across paints (last-freed-first rotated them).
+  bool skipped = false;
+  size_t best = c.pages.size();
+  for (size_t i = 0; i < c.pages.size(); ++i) {
+    if (c.pages[i].second != want) continue;
+    uint32_t a = c.pages[i].first;
+    if (!c.pinned.empty() && c.pinned.count(GuidePhysPage(a))) {
+      skipped = true;  // the live stream reads this page: leave it
+      continue;
+    }
+    if (best == c.pages.size() || a < c.pages[best].first) best = i;
+  }
+  if (best != c.pages.size()) {
+    uint32_t a = c.pages[best].first;
+    c.pages.erase(c.pages.begin() + best);
+    ++c.hits;
+    return a;
+  }
+  if (skipped) ++c.pin_skips;
+  ++c.misses;
+  return 0;
+}
+
+static bool GuidePageCacheKeep(uint32_t base_address) {
+  if (!cvars::guide_page_cache || !base_address) return false;
+  auto heap = kernel_state()->memory()->LookupHeap(base_address);
+  if (!heap || heap->heap_type() != HeapType::kGuestPhysical || heap->page_size() != 4096u) return false;
+  uint32_t size = 0, protect = 0;
+  if (!heap->QuerySizeUnlocked(base_address, &size) || size != 4096u) return false;
+  if (!heap->QueryProtectUnlocked(base_address, &protect)) return false;
+  auto& c = g_guide_page_cache;
+  std::lock_guard<std::mutex> lk(c.mu);
+  // A page the live stream reads is kept whatever its protection and beyond
+  // the cache's usual size, so the heap cannot hand it out either.
+  bool pinned =
+      !c.pinned.empty() && c.pinned.count(GuidePhysPage(base_address)) != 0;
+  if (pinned) {
+    if (c.pages.size() >= 4096) return false;
+    c.pages.push_back({base_address, protect});
+    ++c.kept;
+    ++c.pin_kept;
+    return true;
+  }
+  if (!(protect & kMemoryProtectRead) || !(protect & kMemoryProtectWrite)) return false;
+  if (c.pages.size() >= 64 + c.pinned.size()) return false;
+  c.pages.push_back({base_address, protect});
+  ++c.kept;
+  return true;
+}
+
 dword_result_t MmAllocatePhysicalMemoryEx_entry(
     dword_t flags, dword_t region_size, dword_t protect_bits,
-    dword_t min_addr_range, dword_t max_addr_range, dword_t alignment) {
-  return xeMmAllocatePhysicalMemoryEx(flags, region_size, protect_bits,
-                                      min_addr_range, max_addr_range,
-                                      alignment);
+    dword_t min_addr_range, dword_t max_addr_range, dword_t alignment,
+    const ppc_context_t& ctx) {
+  GuideAllocTally("MmAllocatePhysicalMemoryEx", uint32_t(ctx->lr), region_size.value());
+  if (uint32_t cached = GuidePageCacheTake(protect_bits.value(), region_size.value(), min_addr_range.value(),
+                                          max_addr_range.value(), alignment.value())) {
+    GuideAllocTally("MmAllocatePhysicalMemoryEx.cached", uint32_t(ctx->lr), region_size.value());
+    return cached;
+  }
+  // the other arguments, for the shape of these allocations
+  GuideAllocTally("MmAllocatePhysicalMemoryEx.protect", protect_bits.value(), alignment.value());
+  GuideAllocTally("MmAllocatePhysicalMemoryEx.range", min_addr_range.value(), max_addr_range.value());
+  uint32_t r = xeMmAllocatePhysicalMemoryEx(flags, region_size, protect_bits,
+                                            min_addr_range, max_addr_range,
+                                            alignment);
+  GuideAllocTally("MmAllocatePhysicalMemoryEx.result", r & 0xFFF00000u, uint32_t(ctx->lr));
+  if (r) {
+    kernel_state()->RecordPhysicalAllocation(r, region_size, flags,
+                                             uint32_t(ctx->lr));
+  }
+  return r;
 }
 DECLARE_XBOXKRNL_EXPORT1(MmAllocatePhysicalMemoryEx, kMemory, kImplemented);
 
 dword_result_t MmAllocatePhysicalMemory_entry(dword_t flags,
                                               dword_t region_size,
-                                              dword_t protect_bits) {
-  return xeMmAllocatePhysicalMemoryEx(flags, region_size, protect_bits, 0,
-                                      0xFFFFFFFFu, 0);
+                                              dword_t protect_bits,
+                                              const ppc_context_t& ctx) {
+  GuideAllocTally("MmAllocatePhysicalMemory", uint32_t(ctx->lr), region_size.value());
+  if (uint32_t cached = GuidePageCacheTake(protect_bits.value(), region_size.value(), 0u, 0xFFFFFFFFu, 0u)) {
+    return cached;
+  }
+  const uint32_t r = xeMmAllocatePhysicalMemoryEx(flags, region_size,
+                                                  protect_bits, 0, 0xFFFFFFFFu,
+                                                  0);
+  if (r) {
+    kernel_state()->RecordPhysicalAllocation(r, region_size, flags,
+                                             uint32_t(ctx->lr));
+  }
+  return r;
 }
 DECLARE_XBOXKRNL_EXPORT1(MmAllocatePhysicalMemory, kMemory, kImplemented);
 
-void MmFreePhysicalMemory_entry(dword_t type, dword_t base_address) {
+void MmFreePhysicalMemory_entry(dword_t type, dword_t base_address,
+                                const ppc_context_t& ctx) {
+  if (kernel_state()->title_switch_log_budget.load() > 0) {
+    kernel_state()->title_switch_log_budget.fetch_sub(1);
+    XELOGI("TitleSwitch: MmFreePhysicalMemory base {:08X} type {:X} lr {:08X}",
+           uint32_t(base_address), uint32_t(type), uint32_t(ctx->lr));
+  }
+  GuideAllocTally("MmFreePhysicalMemory", uint32_t(ctx->lr), base_address.value() & 0xFFF00000u);
+  kernel_state()->ForgetPhysicalAllocation(base_address);
+  if (GuidePageCacheKeep(base_address.value())) {
+    return;
+  }
   // base_address = result of MmAllocatePhysicalMemory.
 
   assert_true((base_address & 0x1F) == 0);
@@ -513,10 +799,15 @@ void MmFreePhysicalMemory_entry(dword_t type, dword_t base_address) {
 }
 DECLARE_XBOXKRNL_EXPORT1(MmFreePhysicalMemory, kMemory, kImplemented);
 
-dword_result_t MmQueryAddressProtect_entry(dword_t base_address) {
+dword_result_t MmQueryAddressProtect_entry(dword_t base_address,
+                                           const ppc_context_t& ctx) {
+  GuideAllocTally("MmQueryAddressProtect", uint32_t(ctx->lr), base_address.value() & 0xFFFF0000u);
   auto heap = kernel_state()->memory()->LookupHeap(base_address);
   uint32_t access;
-  if (!heap->QueryProtect(base_address, &access)) {
+  // Phase 1054 dbg: xam's debug D3D asks this dozens of times a second and
+  // the locked query waited on the memory lock for ~0.3 ms each; a racy read
+  // of one page's protection is what the caller wants anyway.
+  if (!heap->QueryProtectUnlocked(base_address, &access)) {
     access = 0;
   }
   access = !access ? 0 : ToXdkProtectFlags(access);
@@ -553,10 +844,12 @@ void MmSetAddressProtect_entry(lpvoid_t base_address, dword_t region_size,
 }
 DECLARE_XBOXKRNL_EXPORT1(MmSetAddressProtect, kMemory, kImplemented);
 
-dword_result_t MmQueryAllocationSize_entry(lpvoid_t base_address) {
+dword_result_t MmQueryAllocationSize_entry(lpvoid_t base_address,
+                                           const ppc_context_t& ctx) {
+  GuideAllocTally("MmQueryAllocationSize", uint32_t(ctx->lr), base_address.guest_address() & 0xFFF00000u);
   auto heap = kernel_state()->memory()->LookupHeap(base_address);
   uint32_t size;
-  if (!heap->QuerySize(base_address, &size)) {
+  if (!heap->QuerySizeUnlocked(base_address, &size)) {
     size = 0;
   }
 

@@ -60,6 +60,9 @@ bool GuidePatchWord(uint32_t addr, uint32_t expect, uint32_t value,
 uint32_t GuideNopFn();
 void* GuideStallThread();
 void GuidePublishStallThread(void* h);
+// Phase 1055 bugs: stop the "Guide Paint" thread (waits for the paint in
+// flight). Called by the emulator before the title and the kernel tear down.
+void GuidePaintThreadStop();
 
 // Queue the whole XUI bootstrap to run on the title's render thread. The
 // title's D3D device is thread-affine, so every XUI call that touches it -
@@ -67,6 +70,26 @@ void GuidePublishStallThread(void* h);
 // True once the title-thread bootstrap has finished its device-touching
 // work. Scene creation waits for this and then runs off the render thread.
 bool GuideBootstrapReady();
+
+// Phase 1097 (implemented in xboxkrnl_misc.cc, declared here with the rest of
+// the Guide helpers). The Xenon/Guide button as the console delivers it: xam
+// hands the kernel a callback through DrvSetSysReqCallback and the kernel
+// calls it when the button is pressed. GuideSysReqCallback is the pointer xam
+// registered (0 if it has not), GuideDeliverXenonButton calls it on a guest
+// thread with the same three arguments the real kernel's HID dispatch passes.
+uint32_t GuideSysReqCallback();
+uint32_t GuideDeliverXenonButton(uint32_t device, uint32_t cls, uint32_t kind);
+
+// Phase 1054 tabs: scripted input (guide_script). Keystrokes queued here are
+// popped by the Guide's input poll before the input system's, as if a
+// controller had sent them. GuideShowCount: shows so far (the first open
+// counts); the script thread waits for the first.
+void GuideScriptPushKey(uint16_t virtual_key, uint16_t flags);
+uint32_t GuideShowCount();
+// The Guide button as the swap-time toggle sees it (works while hidden too).
+void GuideScriptGuideButton();
+void GuideScriptDump();  // phase 1055 menus: log the tree under hud's root at the next paint
+void GuideScriptWatch();  // phase 1055 menus: log xam's frame elements for the next 150 paints
 
 // The bootstrap's own device context - the only one whose [+0x1C8]/[+0x1CC]
 // are populated. hud's DC is constructed but never gets the vtable dispatch

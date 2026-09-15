@@ -446,6 +446,10 @@ enum X_AUDIO_FLAGS : uint32_t {
 
 // XCONFIG_USER_RETAIL_FLAGS
 enum X_RETAIL_FLAGS : uint32_t {
+  // Xbox Live privacy/updates statement accepted (signin.xex 9011B5F0 reads
+  // 0x4; accepting sets both bits - meaning of 0x10000000 unknown).
+  LiveConsentAccepted = 0x00000004,
+  LiveConsentAccepted2 = 0x10000000,
   // Clock
   DSTOff = 0x00000002,
   TwentyFourHourClock = 0x00000008,
@@ -1033,6 +1037,16 @@ class XConfig {
       //              XCONFIG_CONSOLE_PC_TITLE_EXEMPTIONS,
       //              Console, keyboard_layout),
 
+      // -- XCONFIG_XNET_MACHINE_ACCOUNT (0x4) / XNET_PARAMETERS (0x5) -------
+      // Phase 1099z76: real kernel category table 80040E98 - both are 0x1F0:
+      // setting 0 = the whole category, setting 1 = the 0x1EC record after
+      // the big-endian version word (xam XnLoadConfigSector 81897720 checks
+      // size 0x1EC). Category 5 lives in a side record (see CategoryBase).
+      {XCONFIG_XNET_MACHINE_ACCOUNT_CATEGORY, 0, 0x1F0, 0},
+      {XCONFIG_XNET_MACHINE_ACCOUNT_CATEGORY, 1, 0x1EC, 4},
+      {XCONFIG_XNET_PARAMETERS_CATEGORY, 0, 0x1F0, 0},
+      {XCONFIG_XNET_PARAMETERS_CATEGORY, 1, 0x1EC, 4},
+
       // -- XCONFIG_IPTV (0x7) --------------------------------------------
       XCONFIG_FIELD(XCONFIG_IPTV_CATEGORY, XCONFIG_IPTV_SERVICE_PROVIDER_NAME,
                     Iptv, service_provider_name),
@@ -1051,6 +1065,16 @@ class XConfig {
   std::filesystem::path storage_path_;
   std::filesystem::path file_path_;
   XConfigData xconfig_data_{};
+  // Phase 1099z76: category 5 (XNET_PARAMETERS) is 0x1F0 on the console
+  // (version + 0x1EC record, \Device\FlashFs\MobileB.dat block 2), but
+  // XConfigData::XnetParameters is a 13-byte struct and XConfigData is
+  // persisted as a raw dump - growing it would shift every later category in
+  // existing xconfig.settings files. So the real record is kept beside it in
+  // xconfig_xnet_parameters.bin.
+  std::array<uint8_t, 0x1F0> xnet_parameters_record_{};
+  // Real kernel 80087AC0: a category whose version word isn't 1 is zeroed and
+  // given version 1 when its block loads.
+  void ResetXnetCategoryIfStale(X_CONFIG_CATEGORY category);
 };
 
 }  // namespace kernel

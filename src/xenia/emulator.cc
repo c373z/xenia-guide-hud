@@ -11,12 +11,14 @@
 
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <mutex>
 #include <thread>
 
 #include "xenia/base/mutex.h"
 
 #include "xenia/emulator.h"
+#include "xenia/hid/input.h"
 
 // For naming OS threads in the Guide thread probe (Windows-only file paths
 // already: this translation unit uses CONTEXT/SuspendThread directly).
@@ -56,9 +58,17 @@
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/title_id_utils.h"
 #include "xenia/kernel/user_module.h"
+#include <array>
+#include <utility>
+#include "xenia/cpu/export_resolver.h"  // phase 1055 menus: the import trace
+#include "xenia/cpu/function.h"
+#include "xenia/cpu/symbol.h"
+#include "xenia/cpu/ppc/ppc_context.h"
+#include "xenia/cpu/xex_module.h"
 #include "xenia/kernel/xthread.h"
 #include "xenia/kernel/xam/achievement_manager.h"
 #include "xenia/kernel/xam/xam_module.h"
+#include "xenia/kernel/xboxkrnl/xboxkrnl_ani.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_video.h"
 
 #include <dbghelp.h>
@@ -121,6 +131,10 @@ DEFINE_int32(priority_class, 0,
 DECLARE_int32(console_type);
 
 namespace xe {
+// Phase 1096: EXTERNAL linkage on purpose - the per-paint probe in
+// xboxkrnl_video.cc reads it. The other g_guide_* globals here live in
+// the anonymous namespace below and cannot be referenced across TUs.
+uint32_t g_guide_msgbox_parent = 0;
 using namespace xe::literals;
 
 Emulator::GameConfigLoadCallback::GameConfigLoadCallback(Emulator& emulator)
@@ -192,6 +206,9 @@ Emulator::Emulator(const std::filesystem::path& command_line,
 }
 
 Emulator::~Emulator() {
+  // Phase 1055 bugs: the Guide's paint thread runs guest code through the
+  // systems deleted below; stop it first.
+  kernel::xboxkrnl::GuidePaintThreadStop();
   // Note that we delete things in the reverse order they were initialized.
 
   // Give the systems time to shutdown before we delete them.
@@ -286,6 +303,35 @@ X_STATUS Emulator::Setup(
     XELOGE("{}: Cannot initalize processor!", __func__);
     return X_STATUS_UNSUCCESSFUL;
   }
+  if (!cvars::trace_guest_pcs.empty()) {
+    // 1099z17559-3: diagnostic PC trace, addresses from the command line.
+    const std::string& tp = cvars::trace_guest_pcs;
+    size_t i = 0;
+    while (i < tp.size()) {
+      size_t comma = tp.find(',', i);
+      if (comma == std::string::npos) comma = tp.size();
+      const uint32_t addr = uint32_t(
+          std::strtoul(tp.substr(i, comma - i).c_str(), nullptr, 16));
+      i = comma + 1;
+      if (!addr) continue;
+      auto hits = std::make_shared<std::atomic<uint32_t>>(0);
+      processor_->AddGuestHook(
+          addr, [addr, hits](cpu::ppc::PPCContext* c) {
+            const uint32_t n = ++*hits;
+            if (n > 8) return;
+            auto* th = kernel::XThread::GetCurrentThread();
+            auto* ks = th ? th->kernel_state() : nullptr;
+            XELOGI("TracePC {:08X} #{}: r3 {:08X} r4 {:08X} r5 {:08X} r6 "
+                   "{:08X} r10 {:08X} r11 {:08X} r31 {:08X} lr {:08X} tid "
+                   "{:08X} | {}",
+                   addr, n, uint32_t(c->r[3]), uint32_t(c->r[4]),
+                   uint32_t(c->r[5]), uint32_t(c->r[6]), uint32_t(c->r[10]),
+                   uint32_t(c->r[11]), uint32_t(c->r[31]), uint32_t(c->lr),
+                   th ? th->thread_id() : 0u,
+                   ks ? ks->GuestBackChain(8) : std::string());
+          });
+    }
+  }
 
   XELOGI("{}: Initializing Audio...", __func__);
   // Initialize the APU.
@@ -379,11 +425,259 @@ X_STATUS Emulator::Setup(
   return result;
 }
 
+// Phase 1055 menus: a logging trampoline on hud's xam imports. The import
+// thunk reads its target from the import address table; the entry is pointed
+// at a host builtin that logs the call and runs the real (LLE) function with
+// the same registers, so nothing changes for hud but the log.
+namespace {
+struct GuideXamTraceRec {
+  std::string name;
+  uint32_t real = 0;
+  uint32_t ordinal = 0;
+  std::atomic<uint32_t> count{0};
+};
+constexpr size_t kGuideXamTraceSlots = 192;
+GuideXamTraceRec g_guide_xam_trace[kGuideXamTraceSlots];
+size_t g_guide_xam_trace_used = 0;
+void GuideXamTraceCall(xe::cpu::ppc::PPCContext* ctx, kernel::KernelState* ks, GuideXamTraceRec* rec) {
+  const uint32_t n = ++rec->count;
+  const bool log = n <= 24 || (n % 2000) == 0;
+  const uint32_t a3 = uint32_t(ctx->r[3]), a4 = uint32_t(ctx->r[4]), a5 = uint32_t(ctx->r[5]),
+                 a6 = uint32_t(ctx->r[6]), a7 = uint32_t(ctx->r[7]), a8 = uint32_t(ctx->r[8]);
+  const uint32_t lr = uint32_t(ctx->lr);
+  if (log) {
+    XELOGI("GuideXamCall: {} #{} ({:08X} {:08X} {:08X} {:08X} {:08X} {:08X}) from {:08X}",
+           rec->name, n, a3, a4, a5, a6, a7, a8, lr);
+  }
+  if (ks && ks->processor() && rec->real) ks->processor()->Execute(ctx->thread_state, rec->real);
+  if (log) XELOGI("GuideXamCall: {} #{} -> {:08X}", rec->name, n, uint32_t(ctx->r[3]));
+}
+template <size_t I>
+void GuideXamTraceThunk(xe::cpu::ppc::PPCContext* ctx, kernel::KernelState* ks) {
+  GuideXamTraceCall(ctx, ks, &g_guide_xam_trace[I]);
+}
+template <size_t... I>
+constexpr std::array<xe::cpu::GuestFunction::ExternHandler, sizeof...(I)> GuideXamTraceTable(std::index_sequence<I...>) {
+  return {{&GuideXamTraceThunk<I>...}};
+}
+const auto g_guide_xam_trace_handlers = GuideXamTraceTable(std::make_index_sequence<kGuideXamTraceSlots>{});
+// Phase 1055 menus: hud's scene teardown (913F75B0) waits on a task it
+// scheduled (XamTaskSchedule) after cancelling it; xam's task pool workers are
+// created by xam's own boot and never run here, so the wait never returned
+// and the paint thread froze (Quick Launch's B). hud ignores the wait's
+// result and closes the handle right after: return at once while pending.
+uint32_t g_guide_xam_task_getstatus = 0, g_guide_xam_task_wait_real = 0;
+uint32_t g_guide_xam_app_load_real = 0;
+// Phase 1096: hud shows exactly ONE message box (XamShowMessageBox, coverage
+// 51/79 calls=1, from 913E7370) and passes a parent handle. xam posts the
+// button result 0x7EC back to that handle via 8194A4E0, which DROPS the message
+// and returns 0x8030000A if the handle does not resolve (8194A568..8194A58C).
+// Capture the handle here so the per-paint probe can say whether it still
+// resolves. Read-only: the real export still runs and its arguments are
+// untouched.
+uint32_t g_guide_xam_show_msgbox_real = 0;
+// Phase 1056: XamAppLoad stores through the app manager's task at
+// [81D43C50+4]. When that slot is null (xam's boot never ran and the
+// bootstrap's own creation failed) the store faults the calling thread, so
+// refuse the load instead and say so.
+void GuideXamShowMessageBoxExtern(xe::cpu::ppc::PPCContext* ctx,
+                                  kernel::KernelState* ks) {
+  g_guide_msgbox_parent = uint32_t(ctx->r[3]);
+  XELOGI("GuideMsgBox: XamShowMessageBox parent handle {:08X} buttons {} from "
+         "{:08X} - watching whether it still resolves when the button result "
+         "0x7EC is posted back to it",
+         g_guide_msgbox_parent, uint32_t(ctx->r[6]), uint32_t(ctx->lr));
+  if (g_guide_xam_show_msgbox_real && ks && ks->processor()) {
+    ks->processor()->Execute(ctx->thread_state, g_guide_xam_show_msgbox_real);
+  }
+}
+void GuideXamAppLoadExtern(xe::cpu::ppc::PPCContext* ctx, kernel::KernelState* ks) {
+  const uint32_t task = ks ? xe::load_and_swap<uint32_t>(
+                                 ks->memory()->TranslateVirtual(0x81D43C54u))
+                           : 0;
+  if (!task) {
+    static uint32_t logs = 0;
+    if (logs++ < 8) {
+      XELOGW("GuideAppLoad: the app manager has no task at [81D43C50+4]; refusing the load (would fault at 8177B2F0)");
+    }
+    ctx->r[3] = 0x80004005u;
+    return;
+  }
+  // Phase 1079: log here rather than relying on guide_trace_xam_imports. The
+  // trace installs its own extern on the same thunk, and SetupExtern REPLACES
+  // the handler, so tracing XamAppLoad used to silently disable this very
+  // guard - the fault at 8177B2F0 it exists to prevent would have come back
+  // whenever the trace was on and the app manager had no task.
+  static uint32_t app_load_n = 0;
+  const uint32_t n = ++app_load_n;
+  if (n <= 24) {
+    // Phase 1081: print the state BEFORE the real call too - a once-a-paint
+    // sampler cannot say whether XamAppLoad FOUND state 2 or SET it.
+    auto rdb = [&](uint32_t a) {
+      return ks ? xe::load_and_swap<uint32_t>(ks->memory()->TranslateVirtual(a)) : 0u;
+    };
+    XELOGI("GuideXamCall: XamAppLoad #{} ({:08X} {:08X} {:08X}) from {:08X} | "
+           "BEFORE [81D43C50]={:08X} (81793AA0 asserts == 1)", n,
+           uint32_t(ctx->r[3]), uint32_t(ctx->r[4]), uint32_t(ctx->r[5]),
+           uint32_t(ctx->lr), rdb(0x81D43C50u));
+  }
+  if (g_guide_xam_app_load_real && ks && ks->processor()) {
+    ks->processor()->Execute(ctx->thread_state, g_guide_xam_app_load_real);
+  }
+  if (n <= 24) {
+    // Phase 1080: 81793AA0 asserts [81D43C50] == 1 (a silent twui here) and
+    // then bails to 81793D10 unless BOTH [81D43C50+0xB4] and [+0xB8] are
+    // non-null - which is how it can return S_OK and load nothing. Print the
+    // fields with the result so the early-out is visible.
+    auto rdf = [&](uint32_t a) {
+      return ks ? xe::load_and_swap<uint32_t>(ks->memory()->TranslateVirtual(a)) : 0u;
+    };
+    XELOGI("GuideXamCall: XamAppLoad #{} -> {:08X} (real {:08X} executed) | "
+           "[81D43C50]={:08X} [+B4]={:08X} [+B8]={:08X} [+E0]={:08X} [+4 task]={:08X}",
+           n, uint32_t(ctx->r[3]), g_guide_xam_app_load_real, rdf(0x81D43C50u),
+           rdf(0x81D43D04u), rdf(0x81D43D08u), rdf(0x81D43D30u), rdf(0x81D43C54u));
+  }
+}
+void GuideXamTaskWaitExtern(xe::cpu::ppc::PPCContext* ctx, kernel::KernelState* ks) {
+  const uint32_t task = uint32_t(ctx->r[3]);
+  uint32_t status = 0;
+  if (g_guide_xam_task_getstatus && ks && ks->processor()) {
+    ks->processor()->Execute(ctx->thread_state, g_guide_xam_task_getstatus);
+    status = uint32_t(ctx->r[3]);
+    ctx->r[3] = task;
+  }
+  if (status == 0x8000000Au) {
+    static uint32_t logs = 0;
+    if (logs++ < 8) {
+      XELOGI("GuideTask: XamTaskWaitOnCompletion({:08X}) on a pending task: xam's task workers never run here, not waiting", task);
+    }
+    ctx->r[3] = 0x8000000Au;
+    return;
+  }
+  if (g_guide_xam_task_wait_real && ks && ks->processor()) {
+    ks->processor()->Execute(ctx->thread_state, g_guide_xam_task_wait_real);
+  }
+}
+}  // namespace
+
+void Emulator::GuideInstallXamImportTrace(kernel::UserModule* hud) {
+  // Phase 1055 menus: (1) the fix hooks, always; (2) the trace hooks, with
+  // guide_trace_xam_imports. Both replace an import thunk's lis/ori with the
+  // extern-call pattern and give the declared thunk Function a handler.
+  auto* xm = hud->xex_module();
+  auto* er = export_resolver();
+  auto* mem = memory();
+  if (!xm || !er || !mem) return;
+  static const char* const kSkip[] = {"XamInput", "XamUserGet", "XamUserCheck", "XamUserRead",
+                                      "XamGetSystemVersion", "XamGetLocale", "XamLoaderGetMediaInfo",
+                                      "XamIsCurrentTitleDash", "XamGetOverlappedResult",
+                                      "XamContentGetLicenseMask", "XamGetExecutionId", "XamUserIsOnlineEnabled"};
+  static const char* const kXui[] = {"XuiSendMessage", "XuiBubbleMessage", "XuiBroadcastMessage", "XuiSceneNavigate",
+                                     "XuiSceneCreate", "XuiSetFocus", "XuiElementSetFocus", "XuiElementSetShow",
+                                     "XuiElementPlayTimeline", "XuiDestroyObject", "XuiElementDiscardResources",
+                                     "XuiScenePlay", "XuiSceneInterrupt", "XuiElementBeginShow", "XuiElementEndShow",
+                                     "XuiSceneSetInputHandled", "XuiElementSetInput", "XuiControlSetEnable",
+                                     "XuiSceneClose", "XuiSceneGetNavigator", "XuiSetTimer", "XuiKillTimer",
+                                     "XuiElementAddChild", "XuiElementRemoveChild", "XuiCreateObject", "XuiElementSetVisual"};
+  // The LLE resolver rewrote each thunk to `lis r11,hi; ori r11,r11,lo; mtctr
+  // r11; bctr` (xex_module.cc) and the import record's page is not readable
+  // after the load, so the target comes from the thunk's two words. Read them
+  // all first: a hook overwrites them.
+  struct Imp { std::string name; uint32_t thunk, real, ordinal; };
+  std::vector<Imp> imps;
+  for (const auto& lib : *xm->import_libraries()) {
+    if (lib.name.find("xam") == std::string::npos) continue;
+    for (const auto& fn : lib.imports) {
+      if (!fn.thunk_address || !fn.value_address) continue;
+      auto* ex = er->GetExportByOrdinal(lib.name, fn.ordinal);
+      std::string n = (ex && ex->name) ? std::string(ex->name) : fmt::format("xam_{:03X}", fn.ordinal);
+      const uint32_t w0 = xe::load_and_swap<uint32_t>(mem->TranslateVirtual(fn.thunk_address));
+      const uint32_t w1 = xe::load_and_swap<uint32_t>(mem->TranslateVirtual(fn.thunk_address + 4u));
+      if ((w0 & 0xFFFF0000u) != 0x3D600000u || (w1 & 0xFFFF0000u) != 0x616B0000u) continue;
+      imps.push_back({n, fn.thunk_address, ((w0 & 0xFFFFu) << 16) | (w1 & 0xFFFFu), fn.ordinal});
+    }
+  }
+  auto hook = [&](const Imp& im, xe::cpu::GuestFunction::ExternHandler h, const char* why) -> bool {
+    auto* sym = xm->LookupSymbol(im.thunk, false);
+    auto* gf = (sym && sym->type() == xe::cpu::Symbol::Type::kFunction)
+                   ? static_cast<xe::cpu::GuestFunction*>(sym)
+                   : nullptr;
+    if (!gf) {
+      XELOGI("GuideXamHook: {} thunk {:08X}: no declared function: skipped", im.name, im.thunk);
+      return false;
+    }
+    const uint32_t w0 = xe::load_and_swap<uint32_t>(mem->TranslateVirtual(im.thunk));
+    const uint32_t w1 = xe::load_and_swap<uint32_t>(mem->TranslateVirtual(im.thunk + 4u));
+    // the pattern the loader writes for HLE exports (xex_module.cc): the
+    // extern-call instruction and a blr; the JIT calls the handler for a bl
+    // to this address and for the instruction itself
+    if (!kernel::xboxkrnl::GuidePatchWord(im.thunk, w0, 0x44000042u, "GuideXamHook") ||
+        !kernel::xboxkrnl::GuidePatchWord(im.thunk + 4u, w1, 0x4E800020u, "GuideXamHook")) {
+      return false;
+    }
+    gf->SetupExtern(h, nullptr);
+    XELOGI("GuideXamHook: {} ord {:03X}: thunk {:08X} -> real {:08X} ({})", im.name, im.ordinal, im.thunk, im.real, why);
+    return true;
+  };
+  // (1) the fixes
+  for (const auto& im : imps) {
+    if (im.name == "XamTaskGetStatus") g_guide_xam_task_getstatus = im.real;
+    if (im.name == "XamAppLoad") g_guide_xam_app_load_real = im.real;
+    if (im.name == "XamShowMessageBox") g_guide_xam_show_msgbox_real = im.real;
+  }
+  for (const auto& im : imps) {
+    if (im.name == "XamAppLoad") {
+      hook(im, GuideXamAppLoadExtern, "refuse the load when the app manager has no task");
+    }
+    if (im.name == "XamShowMessageBox") {
+      hook(im, GuideXamShowMessageBoxExtern, "record the dialog's parent handle");
+    }
+  }
+  for (const auto& im : imps) {
+    if (im.name == "XamTaskWaitOnCompletion") {
+      g_guide_xam_task_wait_real = im.real;
+      hook(im, GuideXamTaskWaitExtern, "no wait on a pending task: xam's task workers never run here");
+    }
+  }
+  // (2) the trace
+  if (!cvars::guide_trace_xam_imports) return;
+  int installed = 0;
+  for (const auto& im : imps) {
+    const std::string& n = im.name;
+    // Phase 1079: never let the trace overwrite a FIX hook - SetupExtern
+    // replaces the handler, it does not chain. Both of these log their own
+    // calls, so nothing is lost by skipping them here.
+    if (n == "XamTaskWaitOnCompletion") continue;  // hooked above
+    if (n == "XamAppLoad") continue;               // hooked above
+    bool xui_ok = false;
+    for (const char* s : kXui) {
+      if (n.rfind(s, 0) == 0) xui_ok = true;
+    }
+    if (!(n.rfind("Xam", 0) == 0 || n.rfind("XNotify", 0) == 0 || n.rfind("XMsg", 0) == 0 || xui_ok)) continue;
+    bool skip = false;
+    for (const char* s : kSkip) {
+      if (n.rfind(s, 0) == 0) skip = true;
+    }
+    if (skip) continue;
+    if (g_guide_xam_trace_used >= kGuideXamTraceSlots) break;
+    const size_t slot = g_guide_xam_trace_used;
+    auto& rec = g_guide_xam_trace[slot];
+    rec.name = n;
+    rec.real = im.real;
+    rec.ordinal = im.ordinal;
+    if (!hook(im, g_guide_xam_trace_handlers[slot], "trace")) continue;
+    ++g_guide_xam_trace_used;
+    ++installed;
+  }
+  XELOGI("GuideXamTrace: {} of {} xam imports traced", installed, imps.size());
+}
+
 X_STATUS Emulator::TerminateTitle() {
   if (!is_title_open()) {
     return X_STATUS_UNSUCCESSFUL;
   }
 
+  kernel::xboxkrnl::GuidePaintThreadStop();  // phase 1055 bugs: before the threads go
   kernel_state_->TerminateTitle();
   title_id_ = std::nullopt;
   title_name_ = "";
@@ -582,6 +876,28 @@ Emulator::FileSignatureType Emulator::GetFileSignature(
 X_STATUS Emulator::LaunchPath(const std::filesystem::path& path) {
   X_STATUS mount_result = X_STATUS_SUCCESS;
 
+  // Phase 1099n: a VIRTUAL HARD DRIVE. xam registers \Device\Harddisk0\
+  // Partition1 as a Hard Drive (with XboxHardwareInfo bit 0x20) and needs it
+  // WRITABLE - its cache setup creates Partition1\Cache (measured C0000022
+  // against the read-only title folder) and profiles are written there. Mount
+  // a dedicated host folder there for every title type, and move an .xex
+  // title's own folder to a separate read-only device so it is never written.
+  const bool virtual_hdd = !cvars::guide_hdd_path.empty();
+  if (virtual_hdd) {
+    std::filesystem::path hdd = cvars::guide_hdd_path;
+    std::error_code ec;
+    std::filesystem::create_directories(hdd, ec);
+    auto hdd_device = std::make_unique<vfs::HostPathDevice>(
+        "\\Device\\Harddisk0\\Partition1", hdd, false);
+    if (hdd_device->Initialize() &&
+        file_system_->RegisterDevice(std::move(hdd_device))) {
+      XELOGI("VirtualHDD: \\Device\\Harddisk0\\Partition1 -> {} (writable)",
+             xe::path_to_utf8(hdd));
+    } else {
+      XELOGE("VirtualHDD: could not mount {}", xe::path_to_utf8(hdd));
+    }
+  }
+
   switch (GetFileSignature(path)) {
     case FileSignatureType::XEX0:
     case FileSignatureType::XEXQ:
@@ -590,7 +906,9 @@ X_STATUS Emulator::LaunchPath(const std::filesystem::path& path) {
     case FileSignatureType::XEX1:
     case FileSignatureType::XEX2:
     case FileSignatureType::ELF: {
-      mount_result = MountPath(path, "\\Device\\Harddisk0\\Partition1");
+      mount_result = MountPath(path, virtual_hdd
+                                         ? "\\Device\\TitleXex"
+                                         : "\\Device\\Harddisk0\\Partition1");
       return mount_result ? mount_result : LaunchXexFile(path);
     } break;
     case FileSignatureType::LIVE:
@@ -1171,14 +1489,405 @@ static bool XamConstOk(uint32_t a, uint32_t len) {
 }
 
 static void InstallGuideStoreTraces(xe::kernel::KernelState* ks);
+static void ArmGuideWriteWatch(xe::kernel::KernelState* ks, uint32_t addr);
 static void ArmGuideThreadProbe(xe::kernel::KernelState* ks, int pdelay);
 static void TagEFailSites(Memory* memory, const char* spec, const char* what);
 static void ReportXamTextPopulation(Memory* memory, const char* when);
 
+// Phase 1091h: BRACKET THE WRITE OF [81D43C50+0x28]. The slot holds the object
+// 81795924 registers xam's HUD show loop 81794BC8 onto; it is statically zero in
+// xam.bin, reads 30052000 at runtime, and 8177BFB0's own assert says that value
+// is wrong (it requires the tag bit, which 30052000 has clear - a twui
+// ignore_trap_instructions swallows every run). No `stw` with a tracked base
+// targets the slot, its address is never formed as a constant, and it is already
+// 30052000 by the time guide_xam_app_task runs - so the writer is one of the
+// bootstrap steps before that, holding the manager base in a register it was
+// handed. Sample the slot at each step and log only on CHANGE: the first line
+// names the step that wrote it.
+static void GuideHudSlotMark(xe::kernel::KernelState* ks, const char* where) {
+  // Gated like every other probe here: the default path logs nothing.
+  if (!cvars::guide_bkgnd_watch) return;
+  if (!ks || !ks->memory()) return;
+  uint32_t v =
+      xe::load_and_swap<uint32_t>(ks->memory()->TranslateVirtual(0x81D43C78u));
+  static uint32_t prev = 0xFFFFFFFFu;
+  if (v == prev) return;
+  XELOGI("GuideHudSlotMark: [81D43C50+0x28] {:08X} -> {:08X} at \"{}\" | tag bit {}",
+         prev, v, where, (v & 1u) ? "SET" : "CLEAR (8177BFB0 asserts it SET)");
+  prev = v;
+  // Phase 1091i: WHAT IS THE OBJECT? The slot's occupant is mapped and entirely
+  // zero, so "is it a real allocation" has never been asked. Ask the heap: its
+  // allocation base, region size and state say whether something allocated it
+  // (and how big) or whether the pointer just happens to land in committed
+  // memory belonging to something else. Report every field, and say plainly
+  // when the query fails rather than printing zeros.
+  uint32_t obj = v & ~1u;
+  if (!obj) return;
+  auto* heap = ks->memory()->LookupHeap(obj);
+  if (!heap) {
+    XELOGW("GuideHudSlotMark: {:08X} is in NO HEAP - not queried", obj);
+    return;
+  }
+  uint32_t st = 0, ap = 0, cp = 0, ba = 0, rp = 0;
+  if (!heap->QueryPageEntry(obj, &st, &ap, &cp, &ba, &rp)) {
+    XELOGW("GuideHudSlotMark: QueryPageEntry({:08X}) FAILED - the object's "
+           "allocation is unknown, nothing below was read", obj);
+    return;
+  }
+  XELOGI("GuideHudSlotMark: object {:08X} | heap base {:08X} page size {} | "
+         "alloc base {:08X} region {} pages ({} bytes) | state {:08X} "
+         "alloc-protect {:08X} cur-protect {:08X} | offset into region {:08X}",
+         obj, heap->heap_base(), heap->page_size(), ba, rp,
+         rp * heap->page_size(), st, ap, cp, obj - ba);
+  // Phase 1091k: WHO COULD HAVE WRITTEN IT. The write lands after xam's DllMain
+  // returns and before the Guide press (1091j), on a guest thread, so name the
+  // threads that exist at this point and where they start. A start address
+  // inside the loaded xam image is a candidate for the writer; the title's own
+  // threads (0x82xxxxxx) are not. Report EVERY thread, and the image extent
+  // used to classify them, so "no candidate" would be a statement about a
+  // known set rather than an empty one.
+  static bool threads_dumped = false;
+  if (threads_dumped) return;
+  threads_dumped = true;
+  auto threads = ks->object_table()->GetObjectsByType<xe::kernel::XThread>(
+      xe::kernel::XObject::Type::Thread);
+  std::string in_xam, others;
+  uint32_t n_xam = 0, n_other = 0;
+  for (auto& th : threads) {
+    if (!th) continue;
+    uint32_t sa = th->start_address();
+    if (sa >= g_xam_img_lo && sa < g_xam_img_hi) {
+      ++n_xam;
+      in_xam += fmt::format("tid {:08X} start {:08X}; ", th->thread_id(), sa);
+    } else {
+      ++n_other;
+      others += fmt::format("{:08X} ", sa);
+    }
+  }
+  XELOGI("GuideHudSlotMark: {} thread(s) live; {} start inside the xam image "
+         "[{:08X}..{:08X}) -> {} | {} start elsewhere: {}",
+         threads.size(), n_xam, g_xam_img_lo, g_xam_img_hi,
+         n_xam ? in_xam : std::string("(none)"), n_other, others);
+}
+
+// Phase 1099p: INPUT RECORDER. Every press delivered to xam while the user
+// plays is appended to guide_input_record_path in guide_input_script format
+// ("delay_ms:name,..."), delay measured on the real clock from the previous
+// press (the first from the input pump starting), so a session can be replayed
+// press for press with --guide_input_script=<file contents>.
+namespace {
+std::mutex g_guide_rec_lock;
+FILE* g_guide_rec_file = nullptr;
+std::chrono::steady_clock::time_point g_guide_rec_last;
+bool g_guide_rec_first = true;
+}  // namespace
+
+// XInput VK_PAD codes <-> script names. Anything unnamed is written/read as hex.
+static const std::pair<const char*, uint16_t> kGuideVkNames[] = {
+    {"a", 0x5800},         {"b", 0x5801},          {"x", 0x5802},
+    {"y", 0x5803},         {"rb", 0x5804},         {"lb", 0x5805},
+    {"lt", 0x5806},        {"rt", 0x5807},         {"up", 0x5810},
+    {"down", 0x5811},      {"left", 0x5812},       {"right", 0x5813},
+    {"start", 0x5814},     {"back", 0x5815},       {"ls", 0x5816},
+    {"rs", 0x5817},        {"ls_up", 0x5820},      {"ls_down", 0x5821},
+    {"ls_right", 0x5822},  {"ls_left", 0x5823},    {"ls_upleft", 0x5824},
+    {"ls_upright", 0x5825}, {"ls_downright", 0x5826}, {"ls_downleft", 0x5827},
+    {"rs_up", 0x5830},     {"rs_down", 0x5831},    {"rs_right", 0x5832},
+    {"rs_left", 0x5833},   {"rs_upleft", 0x5834},  {"rs_upright", 0x5835},
+    {"rs_downright", 0x5836}, {"rs_downleft", 0x5837},
+    {"guide", 0xFFFF},     {"hostguide", 0xFFFE}};
+
+static std::string GuideVkName(uint16_t vk) {
+  for (auto& kv : kGuideVkNames) {
+    if (kv.second == vk) return kv.first;
+  }
+  return fmt::format("0x{:04X}", vk);
+}
+
+static uint16_t GuideVkFromName(const std::string& name) {
+  for (auto& kv : kGuideVkNames) {
+    if (name == kv.first) return kv.second;
+  }
+  if (name.size() > 2 && name[0] == '0' && (name[1] == 'x' || name[1] == 'X')) {
+    return uint16_t(std::strtoul(name.c_str() + 2, nullptr, 16));
+  }
+  return 0;
+}
+
+static void GuideRecordStart() {
+  if (cvars::guide_input_record_path.empty()) return;
+  std::lock_guard<std::mutex> lock(g_guide_rec_lock);
+  if (g_guide_rec_file) return;
+  g_guide_rec_file =
+      xe::filesystem::OpenFile(cvars::guide_input_record_path, "wb");
+  g_guide_rec_last = std::chrono::steady_clock::now();
+  g_guide_rec_first = true;
+  XELOGI("GuideInputRec: recording to {} (timing from pump start)",
+         xe::path_to_utf8(cvars::guide_input_record_path));
+}
+
+static void GuideRecordPress(uint16_t vk) {
+  std::lock_guard<std::mutex> lock(g_guide_rec_lock);
+  if (!g_guide_rec_file) return;
+  const auto now = std::chrono::steady_clock::now();
+  const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                      now - g_guide_rec_last)
+                      .count();
+  g_guide_rec_last = now;
+  const std::string item =
+      fmt::format("{}{}:{}", g_guide_rec_first ? "" : ",", ms, GuideVkName(vk));
+  g_guide_rec_first = false;
+  fwrite(item.data(), 1, item.size(), g_guide_rec_file);
+  fflush(g_guide_rec_file);
+  XELOGI("GuideInputRec: +{} ms {}", ms, GuideVkName(vk));
+}
+
 void Emulator::on_guide_button_pressed(uint8_t user_index) {
+  if (cvars::guide_power_on_with_guide_button && !is_title_open()) {
+    // Phase 1099z138: nothing running - this press is the power button.
+    guide_power_press_ = true;
+    XELOGI("Guide button: pressed with no title open (power on)");
+    return;
+  }
+  // Phase 1099p: every Guide press (pad, keyboard key, ImGui) comes through
+  // here; replay uses the same host path ("hostguide").
+  GuideRecordPress(0xFFFE);
   XELOGI("Guide button: pressed (user {}), handler={:08X} buf={:08X} "
          "out_sz={:08X}",
          user_index, guide_handler_, guide_buf_, guide_out_sz_);
+  // Phase 1091h: the earliest mark inside the device block already read
+  // 30052000, so sample before ANY of this handler runs. If it is already set
+  // here, the write predates the Guide press entirely and belongs to xam code
+  // that runs during the title's own boot, not to the bootstrap.
+  GuideHudSlotMark(kernel_state(), "top of on_guide_button_pressed");
+  // Phase 1097: THE HARDWARE PATH. xam asks the kernel to tell it when the
+  // Xenon button is pressed (DrvSetSysReqCallback, xboxkrnl ordinal 0x20C);
+  // the kernel calls that callback (DrvXenonButtonPressed, ordinal 0x278).
+  // Both were declared in xboxkrnl_table.inc and never implemented, so xam's
+  // registration was an "undefined extern call" and its callback pointer was
+  // discarded - which is why no press has ever reached xam and why the UI gate
+  // [81D43C50+0xA8] has never opened. Nothing below draws, places or decides
+  // anything: it hands the press to the callback xam itself registered.
+  if (!cvars::guide_sysreq_button.empty()) {
+    unsigned dev = 0, cls = 0, kind = 1;
+    if (std::sscanf(cvars::guide_sysreq_button.c_str(), "%u,%u,%u", &dev, &cls,
+                    &kind) != 3) {
+      XELOGW("GuideSysReq: could not parse guide_sysreq_button=\"{}\" "
+             "(want \"device,class,kind\")",
+             cvars::guide_sysreq_button);
+    } else {
+      auto* ks = kernel_state();
+      auto rdx = [&](uint32_t a) -> uint32_t {
+        // xam-image addresses first: QueryRangeAccess is the known-wrong guard
+        // for those (phase 416). The button context is a HEAP allocation
+        // (817B5688), so fall back to a heap-committed check for the rest -
+        // without it every ctx field read back as the FFFFFFFF sentinel.
+        if (XamConstOk(a, 4)) {
+          return xe::load_and_swap<uint32_t>(ks->memory()->TranslateVirtual(a));
+        }
+        auto* hp = ks->memory()->LookupHeap(a);
+        if (!hp) return 0xFFFFFFFFu;
+        // Same pair of tests XamTextWatch settled on in 1096hr: the access
+        // query alone refuses readable pages, and reading anyway host-faults
+        // on an uncommitted one.
+        bool committed = false;
+        HeapAllocationInfo info = {};
+        if (hp->QueryRegionInfo(a & ~0xFFFu, &info)) {
+          committed = (info.state & kMemoryAllocationCommit) != 0;
+        }
+        if (hp->QueryRangeAccess(a, a + 3) ==
+                xe::memory::PageAccess::kNoAccess &&
+            !committed) {
+          return 0xFFFFFFFFu;
+        }
+        return xe::load_and_swap<uint32_t>(ks->memory()->TranslateVirtual(a));
+      };
+      // Phase 1097za: the store-trace breakpoints are installed from deep
+      // inside the hud block below, which this path returns before ever
+      // reaching - so guide_trace_stores measured nothing in this arm and the
+      // run produced no StoreTrace line at all (caught by its own missing
+      // "installed N breakpoints" marker). Install them here, BEFORE the press
+      // is delivered, because the state transitions this is meant to catch
+      // happen as a consequence of the press.
+      InstallGuideStoreTraces(ks);
+      if (cvars::guide_watch_write_addr) {
+        ArmGuideWriteWatch(ks, cvars::guide_watch_write_addr);
+      }
+      const uint32_t cb = kernel::xboxkrnl::GuideSysReqCallback();
+      const uint32_t ctx = rdx(0x81D4F610u);
+      // 817C23A8 refuses to post unless [81D4F614] is non-zero, and the worker
+      // rejects a slot that is not the 0xFE "free" sentinel; log both so a
+      // press that does nothing says which gate stopped it.
+      XELOGI("GuideSysReq: before | cb={:08X} ctx={:08X} enable={:08X} "
+             "slot={:08X} gate={:08X}",
+             cb, ctx, rdx(0x81D4F614u),
+             ctx ? rdx(ctx + 0x10u) : 0xFFFFFFFFu, rdx(0x81D43CF8u));
+      // Phase 1097zq: THE DIAGNOSTIC, and it is labelled as one. 1097zo
+      // concluded that of the three paths that create the Guide app record at
+      // [81D426C8], two are behind a HUD state (0x10/0x20) this xam can never
+      // reach, leaving xam's sys-app pass 8177F588 - which runs, but three
+      // times inside the 293 ms window before hud registers, reading zero
+      // every time (1097x). Re-running it AFTER registration tests exactly
+      // that claim.
+      //
+      // The argument is MEASURED, not invented: r3 at the live call site
+      // 817800B8 reads 81D42FD0, a static xam .data address, and the other
+      // three arguments are li 0 there.
+      //
+      // THIS IS NOT A FIX. The host calling the pass is the host driving guest
+      // code, which is what this phase's best result came from REMOVING. It
+      // exists to make the synthesis falsifiable in one run: if the record
+      // appears and the tail unlocks, the console-side question is what
+      // re-invokes the pass (1096hl); if it does not, 1097zo is wrong.
+      if (cvars::guide_rerun_sysapp_pass) {
+        auto rdp = [&](uint32_t a) -> uint32_t {
+          return XamConstOk(a, 4) ? xe::load_and_swap<uint32_t>(
+                                        ks->memory()->TranslateVirtual(a))
+                                  : 0xFFFFFFFFu;
+        };
+        XELOGI("SysAppPassRerun: before | [81D426C8]={:08X} [81D42688]={:08X}",
+               rdp(0x81D426C8u), rdp(0x81D42688u));
+        auto t = kernel::object_ref<kernel::XHostThread>(
+            new kernel::XHostThread(ks, 256 * 1024, 0, [ks]() -> int {
+              auto* ts = kernel::XThread::GetCurrentThread()->thread_state();
+              uint64_t a[] = {0x81D42FD0ull, 0, 0, 0};
+              uint64_t r = ks->processor()->Execute(ts, 0x8177F588u, a,
+                                                    xe::countof(a));
+              XELOGI("SysAppPassRerun: 8177F588(81D42FD0,0,0,0) -> {:08X}",
+                     static_cast<uint32_t>(r));
+              return 0;
+            }));
+        t->set_name("SysAppPassRerun");
+        if (XSUCCEEDED(t->Create())) {
+          t->Wait(0, 0, 0, nullptr);
+        }
+        XELOGI("SysAppPassRerun: after  | [81D426C8]={:08X} [81D42688]={:08X}",
+               rdp(0x81D426C8u), rdp(0x81D42688u));
+      }
+      // Phase 1099g: PREFER xam's OWN Xenon button over the host's synthesised
+      // one. XAutomationpInputPress (ordinal 0x3D8) with the sentinel 0xFFFF
+      // routes to XAutomationpInputXenonButton (81723E08) - the door xam
+      // already has for this.
+      //
+      // MEASURED, one script step apart, everything else identical:
+      //   close via xam's automation button  -> the Guide tears down and THE
+      //     DASHBOARD COMES BACK (frames 0-5 Guide, 6-17 dashboard), 0 crashes
+      //   close via GuideDeliverXenonButton  -> GUEST CRASH at 817A6174
+      //     (fault_addr 100000018) and the screen is left with an empty grey
+      //     panel and the clock over black, dashboard never restored
+      // The second is the "background never goes away after closing" report.
+      // It is the host driving guest code, which this project has repeatedly
+      // found to be the bug; xam's own entry point does it properly.
+      // Phase 1099i: the two doors do DIFFERENT jobs, and 1099g used one for
+      // both.
+      //
+      // XAutomationpInputXenonButton dispatches through a handler pointer at
+      // [81D4F610] that only exists while the Guide is UP - 817C2BC8 sets it
+      // when the Guide is created and 817C1FD8 clears it on teardown. So it
+      // automates the button INSIDE a running Guide; with the Guide closed it
+      // finds null and returns 1 having done nothing. That is why 1099g fixed
+      // the close and left the reopen dead: measured, the dispatch 817C2090
+      // ran calls=1 across three presses, and the Guide-open function
+      // 817935B8 likewise calls=1.
+      //
+      // Opening from closed is the other door - the kernel callback, which
+      // reaches xam's worker and XamAppRequestLoadEx.
+      //
+      // Pick by asking the GUEST which state it is in: xam resolves the Guide's
+      // surface every frame it is up and stops when it closes, which the
+      // command processor already tracks for presentation. No address is read
+      // and no state is kept here.
+      bool guide_is_up = false;
+      {
+        auto* gsys = graphics_system();
+        auto* cproc = gsys ? gsys->command_processor() : nullptr;
+        if (cproc) guide_is_up = cproc->GuideSurfaceIsLive();
+      }
+      XELOGI("GuideButton: guide is {} - using {}",
+             guide_is_up ? "UP" : "CLOSED",
+             guide_is_up ? "xam's automation button" : "the kernel callback");
+      bool guide_button_done = false;
+      if (guide_is_up && cvars::guide_button_via_automation) {
+        auto xm2 = ks->GetModule("xam.xex", true);
+        const uint32_t ip = xm2 ? xm2->GetProcAddressByOrdinal(0x3D8) : 0u;
+        if (ip) {
+          auto t2 = kernel::object_ref<kernel::XHostThread>(
+              new kernel::XHostThread(ks, 256 * 1024, 0, [ks, ip]() -> int {
+                auto* ts = kernel::XThread::GetCurrentThread()->thread_state();
+                uint64_t a2[] = {0, 0xFFFF};
+                uint64_t r2 =
+                    ks->processor()->Execute(ts, ip, a2, xe::countof(a2));
+                XELOGI("GuideButton: XAutomationpInputPress(0,FFFF) -> {:08X}",
+                       static_cast<uint32_t>(r2));
+                return 0;
+              }));
+          t2->set_name("GuideButtonAutomation");
+          if (XSUCCEEDED(t2->Create())) {
+            t2->Wait(0, 0, 0, nullptr);
+            guide_button_done = true;
+          }
+        } else {
+          XELOGW("GuideButton: xam does not export ordinal 0x3D8");
+        }
+      }
+      if (!guide_button_done) {
+        kernel::xboxkrnl::GuideDeliverXenonButton(dev, cls, kind);
+      }
+      // The second door, tried in the same place so the before/after fields
+      // are comparable: xam EXPORTS a Xenon button press as ordinal 0x506,
+      // and that entry goes straight to the poster without 817C23A8's gates.
+      //
+      // Phase 1099g: but NOT when xam's own Xenon button already handled the
+      // press. Ringing both doors for one button crashes the guest at 817A6174
+      // on the CLOSE and leaves the Guide half torn down - measured, one flag
+      // apart, with everything else identical:
+      //     automation + 0x506  -> GUEST CRASH, dashboard never returns
+      //     automation alone    -> clean close, dashboard restored, 0 crashes
+      // Two doors were useful while it was unknown which one worked; now that
+      // one does, the other is a second press the guest never asked for.
+      if (!guide_button_done && cvars::guide_xenon_press >= 0) {
+        auto xm = ks->GetModule("xam.xex", true);
+        const uint32_t ord506 =
+            xm ? xm->GetProcAddressByOrdinal(0x506) : 0u;
+        if (!ord506) {
+          XELOGW("GuideXenonPress: xam does not export ordinal 0x506");
+        } else {
+          const uint32_t v = uint32_t(cvars::guide_xenon_press);
+          auto t = kernel::object_ref<kernel::XHostThread>(
+              new kernel::XHostThread(ks, 256 * 1024, 0,
+                                      [ks, ord506, v]() -> int {
+                auto* ts = kernel::XThread::GetCurrentThread()->thread_state();
+                uint64_t a[] = {v};
+                uint64_t r = ks->processor()->Execute(ts, ord506, a,
+                                                      xe::countof(a));
+                XELOGI("GuideXenonPress: 0x506 {:08X}({:X}) -> {:08X}", ord506,
+                       v, static_cast<uint32_t>(r));
+                return 0;
+              }));
+          t->set_name("GuideXenonPress");
+          if (XSUCCEEDED(t->Create())) {
+            t->Wait(0, 0, 0, nullptr);
+          } else {
+            XELOGE("GuideXenonPress: could not create the delivery thread");
+          }
+        }
+      }
+      const uint32_t ctx2 = rdx(0x81D4F610u);
+      XELOGI("GuideSysReq: after  | ctx={:08X} slot={:08X} kindslot={:08X} "
+             "devslot={:08X} gate={:08X}",
+             ctx2, ctx2 ? rdx(ctx2 + 0x10u) : 0xFFFFFFFFu,
+             ctx2 ? rdx(ctx2 + 0x14u) : 0xFFFFFFFFu,
+             ctx2 ? rdx(ctx2 + 0x18u) : 0xFFFFFFFFu, rdx(0x81D43CF8u));
+      return;
+    }
+  }
+  // Phase 1054: once the Guide is up, a press toggles it (the swap hook owns
+  // that); re-dispatching the open request built a whole new scene tree per
+  // press (p1054b/c: three trees, three arenas, the re-shown Guide a stub).
+  if (kernel::xboxkrnl::GuideBootstrapReady()) {
+    XELOGI("Guide button: Guide already up; the press is a toggle");
+    return;
+  }
   // Drive the Guide open sequence if hud.xex is loaded and registered. This
   // runs the message dispatch on a guest thread - hud's handler must not be
   // called from the host UI thread. It does not yet produce a visible Guide
@@ -2114,6 +2823,7 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                                                    "ClassRegPatch(early)");
                 }
                 XELOGI("Guide button: queueing bootstrap BEFORE device creation");
+                GuideHudSlotMark(ks, "after QueueGuideBootstrap is queued");
                 kernel::xboxkrnl::QueueGuideBootstrap(
                     hud_base, obj, cvars::guide_use_title_device, skin_mod);
               }
@@ -2153,6 +2863,7 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                 XELOGI("Guide button: device gate [815F048C]={:08X} "
                        "[*]={:08X} bit200={}",
                        gate_ptr, gate, (gate & 0x200) ? "set" : "clear");
+                GuideHudSlotMark(ks, "device block, before the creator args");
                 uint64_t ca[] = {0};
                 // 8178F748 asks 819F4D28 for a mode-2 device, which skips the
                 // ring buffer bring-up by design. 8178E9F0 asks for mode 1,
@@ -2216,6 +2927,46 @@ void Emulator::on_guide_button_pressed(uint8_t user_index) {
                 }
                 if (cvars::guide_restore_title_ring) {
                   kernel::xboxkrnl::GuideSaveTitleRing();
+                }
+                if (cvars::guide_xam_task_init) {
+                  // Phase 1056: xam's task pool, in xam's own boot order (its
+                  // init sits immediately before this device creator in
+                  // 81751718). No arguments: 8177B970 finds the pool at
+                  // 81D423C0 itself.
+                  auto rdw = [&](uint32_t a) {
+                    return xe::load_and_swap<uint32_t>(ks->memory()->TranslateVirtual(a));
+                  };
+                  XELOGI("GuideTaskInit: before: [81D42450]={:08X} [81D424A8]={:08X} [81D424E4]={:08X} [81D42514]={:08X}",
+                         rdw(0x81D42450u), rdw(0x81D424A8u), rdw(0x81D424E4u), rdw(0x81D42514u));
+                  uint64_t ta[] = {0};
+                  uint64_t tr = ks->processor()->Execute(ts, kernel::xboxkrnl::GuideConst(0x8177BF80u), ta, 1);
+                GuideHudSlotMark(ks, "after xam pool init 8177BF80");
+                  XELOGI("GuideTaskInit: 8177BF80 -> {:08X}; after: [81D42450]={:08X} [81D424A8]={:08X} [81D424E4]={:08X} [81D42514]={:08X}",
+                         uint32_t(tr), rdw(0x81D42450u), rdw(0x81D424A8u), rdw(0x81D424E4u), rdw(0x81D42514u));
+                }
+                GuideHudSlotMark(ks, "before guide_xam_app_task");
+                if (cvars::guide_xam_app_task) {
+                  // Phase 1056: the app manager's task slot.
+                  auto* m = ks->memory();
+                  auto rdw = [&](uint32_t a) { return xe::load_and_swap<uint32_t>(m->TranslateVirtual(a)); };
+                  uint32_t cur_task = rdw(0x81D43C54u);
+                  if (!cur_task) {
+                    uint32_t out = m->SystemHeapAlloc(16, 16);
+                    if (out) {
+                      xe::store_and_swap<uint32_t>(m->TranslateVirtual(out), 0);
+                      uint64_t aa[] = {0ull, out};
+                      uint64_t ar = ks->processor()->Execute(
+                          ts, kernel::xboxkrnl::GuideConst(0x8177C408u), aa, 2);
+                      uint32_t task = rdw(out);
+                      if (task) {
+                        xe::store_and_swap<uint32_t>(m->TranslateVirtual(0x81D43C54u), task);
+                      }
+                      XELOGI("GuideAppTask: 8177C408 -> {:08X}, task {:08X}; [81D43C50+4] now {:08X} (+0 state {:08X}, +28 {:08X})",
+                             uint32_t(ar), task, rdw(0x81D43C54u), rdw(0x81D43C50u), rdw(0x81D43C78u));
+                    }
+                  } else {
+                    XELOGI("GuideAppTask: [81D43C50+4] already {:08X}", cur_task);
+                  }
                 }
                 XELOGI("Guide button: calling device creator {:08X}", create_fn);
                 {
@@ -3375,8 +4126,83 @@ const std::filesystem::path Emulator::GetNewDiscPath(
   return path;
 }
 
+bool Emulator::IsTrayOpen() const {
+  if (!kernel_state_ || !kernel_state_->smc()) {
+    return false;
+  }
+  return kernel_state_->smc()->GetTrayState() == X_DVD_TRAY_STATE::OPEN;
+}
+
+bool Emulator::SetTrayDisc(const std::filesystem::path& path) {
+  if (!IsTrayOpen()) {
+    XELOGW("Change Disc: the tray is not open");
+    return false;
+  }
+  {
+    std::lock_guard<std::mutex> lock(tray_disc_mutex_);
+    tray_disc_path_ = path;
+  }
+  XELOGI("Change Disc: {} is in the open tray (loads when the tray closes)",
+         xe::path_to_utf8(path));
+  return true;
+}
+
+std::filesystem::path Emulator::GetTrayDisc() const {
+  std::lock_guard<std::mutex> lock(tray_disc_mutex_);
+  return tray_disc_path_;
+}
+
 bool Emulator::ExceptionCallbackThunk(Exception* ex, void* data) {
   return reinterpret_cast<Emulator*>(data)->ExceptionCallback(ex);
+}
+
+// Phase 1097zd: a ONE-SHOT write-watch on a guest word, built because three
+// static searches for the writer of [81D43C50] all failed (1097zc) and the
+// writer holds its base in a register loaded from memory, which no scan of the
+// image can see. Protect the page read-only, let the guest's own store fault,
+// resolve the faulting host RIP to a guest PC with the same two lines the crash
+// reporter already uses, then unprotect and let the store retry. Reads are
+// unaffected - read-only faults on writes only - so the polling of this word
+// that goes on constantly costs nothing.
+static std::atomic<uint32_t> g_ww_page{0};
+static uint32_t g_ww_addr = 0;
+static void* g_ww_host = nullptr;
+// Phase 1097zh: RE-ARMABLE. One shot answered "is there a write" and then
+// spent itself on whichever store happened to be first - which for
+// [81D43C50] was the null branch storing 0, leaving the writes that actually
+// carry 1, 2 and 4 unseen. Re-arming after each catch turns one run into the
+// whole sequence. The re-protect is deferred to a helper thread with a short
+// sleep rather than done inline, because the faulting store has to retire
+// first; that leaves a small blind window, so the hit counter below is the
+// honest record of how many writes were SEEN, not how many happened.
+static std::atomic<uint32_t> g_ww_hits{0};
+static uint32_t g_ww_max = 0;
+// Phase 1097zj: set while the faulting store is being single-stepped over.
+// The page is unprotected for exactly that one instruction instead of the 2 ms
+// the timed re-arm needed, which on this page was ~1500 windows totalling
+// about three seconds of blindness in a 90 s run.
+static std::atomic<uint32_t> g_ww_stepping{0};
+
+static void ArmGuideWriteWatch(xe::kernel::KernelState* ks, uint32_t addr) {
+  if (!addr || g_ww_page.load()) return;
+  const uint32_t page = addr & ~0xFFFu;
+  auto* host = ks->memory()->TranslateVirtual(page);
+  if (!host) return;
+  xe::memory::PageAccess old = xe::memory::PageAccess::kNoAccess;
+  if (!xe::memory::Protect(host, 0x1000, xe::memory::PageAccess::kReadOnly,
+                           &old)) {
+    XELOGW("GuideWriteWatch: could not protect page {:08X}", page);
+    return;
+  }
+  g_ww_addr = addr;
+  g_ww_host = host;
+  g_ww_max = cvars::guide_watch_write_hits;
+  g_ww_hits.store(0);
+  g_ww_page.store(page);
+  XELOGI("GuideWriteWatch: armed on {:08X} (page {:08X}, host {:X}, was {}), "
+         "up to {} catches",
+         addr, page, reinterpret_cast<uint64_t>(host), static_cast<int>(old),
+         g_ww_max);
 }
 
 bool Emulator::ExceptionCallback(Exception* ex) {
@@ -3384,6 +4210,136 @@ bool Emulator::ExceptionCallback(Exception* ex) {
   auto code_cache = processor()->backend()->code_cache();
   auto code_base = code_cache->execute_base_address();
   auto code_end = code_base + code_cache->total_size();
+
+  // Re-arm one instruction after the store that tripped the watch.
+  if (ex->code() == Exception::Code::kSingleStep && g_ww_stepping.load()) {
+    auto* sctx = ex->thread_context();
+    if (sctx) sctx->eflags &= ~0x100u;  // clear TF
+    const uint32_t page = g_ww_stepping.exchange(0);
+    if (g_ww_hits.load() < g_ww_max) {
+      xe::memory::PageAccess o2 = xe::memory::PageAccess::kNoAccess;
+      if (xe::memory::Protect(g_ww_host, 0x1000,
+                              xe::memory::PageAccess::kReadOnly, &o2)) {
+        g_ww_page.store(page);
+      }
+    }
+    return true;
+  }
+
+  // The write-watch fires before anything else: this is an expected fault, not
+  // a crash, and it must not reach the crash reporter below.
+  {
+    const uint32_t wp = g_ww_page.load();
+    if (wp && ex->code() == Exception::Code::kAccessViolation) {
+      const uint64_t fa = ex->fault_address();
+      auto* wmem = memory();
+      const uint64_t hb = reinterpret_cast<uint64_t>(
+          wmem ? wmem->TranslateVirtual(wp) : nullptr);
+      if (hb && fa >= hb && fa < hb + 0x1000ull) {
+        auto* wfn = code_cache->LookupFunction(ex->pc());
+        const uint32_t wpc =
+            wfn ? wfn->MapMachineCodeToGuestAddress(ex->pc()) : 0;
+        auto* wth = kernel::XThread::GetCurrentThread();
+        // MapMachineCodeToGuestAddress returns 0 when the faulting RIP is in a
+        // JIT helper rather than a translated function body, which is what
+        // happened on the first run of this watch. The guest LR is the
+        // fallback that actually names the code: it is the return address of
+        // whatever called the writer.
+        auto* wctx = wth ? wth->thread_state()->context() : nullptr;
+        // Phase 1097ze: log WHICH WORD IN THE PAGE faulted. The first run of
+        // this watch omitted it and spent its single shot on a neighbour -
+        // the exact failure mode the flag's own doc warned about - and
+        // without the fault address that was indistinguishable from a hit on
+        // the watched word itself.
+        const uint32_t fault_guest = wp + uint32_t(fa - hb);
+        const bool on_watched =
+            fault_guest >= g_ww_addr && fault_guest < g_ww_addr + 4u;
+        // Phase 1097zs: rate-limit the neighbour line. This page faults
+        // millions of times a run - 4,102,375 in the 120 s run of 1097zr -
+        // and logging each one produced a 2 GB log. The watched word is
+        // always logged; neighbours get the first 16 and then a counter.
+        static std::atomic<uint32_t> nb_logged{0};
+        const bool log_this =
+            on_watched || (++nb_logged <= 16u) || (nb_logged % 1000000u == 0u);
+        if (log_this)
+        XELOGI("GuideWriteWatch {}#{}: page {:08X} fault at GUEST {:08X} "
+               "(watching {:08X}) from guest PC {:08X} (host {:X}) lr={:08X} "
+               "r3={:08X} r11={:08X} r31={:08X} by thread '{}' - watched value "
+               "before {:08X}",
+               (fault_guest >= g_ww_addr && fault_guest < g_ww_addr + 4u)
+                   ? "WATCHED " : "neighbour ",
+               g_ww_hits.load() + 1,
+               wp, fault_guest, g_ww_addr,
+               wpc, ex->pc(),
+               wctx ? uint32_t(wctx->lr) : 0,
+               wctx ? uint32_t(wctx->r[3]) : 0,
+               wctx ? uint32_t(wctx->r[11]) : 0,
+               wctx ? uint32_t(wctx->r[31]) : 0,
+               wth ? wth->name() : std::string("<none>"),
+               xe::load_and_swap<uint32_t>(
+                   wmem->TranslateVirtual(g_ww_addr)));
+        // Phase 1097zf: say WHOSE code did it. The guest PC came back 0, which
+        // has two very different causes - a guest tail branch into code the
+        // function lookup does not cover, or the emulator itself storing into
+        // guest memory on this thread. The discriminator is whether the
+        // faulting RIP lies in xenia's own image or in the JIT code cache, and
+        // the crash reporter already prints host frames this way.
+        if (log_this) {
+          const uint64_t exe_base =
+              reinterpret_cast<uint64_t>(GetModuleHandleW(nullptr));
+          const uint64_t cb = code_base, ce = code_end;
+          const char* whose =
+              (ex->pc() >= cb && ex->pc() < ce) ? "JIT code cache (GUEST)"
+              : (ex->pc() >= exe_base && ex->pc() < exe_base + 0x2000000ull)
+                  ? "xenia's own image (HOST)"
+                  : "neither";
+          std::string wbt;
+          void* wframes[24];
+          USHORT wn = RtlCaptureStackBackTrace(0, 24, wframes, nullptr);
+          for (USHORT i = 0; i < wn; ++i) {
+            const uint64_t fa2 = reinterpret_cast<uint64_t>(wframes[i]);
+            if (fa2 >= exe_base && fa2 < exe_base + 0x2000000ull) {
+              wbt += fmt::format("exe+{:X} ", fa2 - exe_base);
+            } else if (fa2 >= cb && fa2 < ce) {
+              wbt += fmt::format("jit+{:X} ", fa2 - cb);
+            } else {
+              wbt += fmt::format("{:X} ", fa2);
+            }
+          }
+          XELOGI("GuideWriteWatch: the store is in {} (rip {:X}, exe_base "
+                 "{:X}, jit {:X}..{:X})",
+                 whose, ex->pc(), exe_base, cb, ce);
+          XELOGI("GuideWriteWatch: host frames: {}", wbt);
+        }
+        // Restore write access so the faulting store retires, then re-arm
+        // from a helper thread once it has.
+        xe::memory::PageAccess prev = xe::memory::PageAccess::kNoAccess;
+        xe::memory::Protect(g_ww_host, 0x1000,
+                            xe::memory::PageAccess::kReadWrite, &prev);
+        g_ww_page.store(0);
+        // Phase 1097zi: only writes to the WATCHED WORD spend the budget. The
+        // page is 4 KB and its neighbours are written constantly - in the
+        // first re-armable run five of six catches were neighbours - so
+        // counting them exhausts the budget before the word's own writes are
+        // ever seen. Neighbours still have to be let through (the store must
+        // retire), so the blind window is unchanged; what changes is that a
+        // long run now keeps looking instead of giving up.
+        const uint32_t hits = on_watched ? ++g_ww_hits : g_ww_hits.load();
+        if (hits < g_ww_max) {
+          // Step over the store and re-protect in the single-step handler.
+          auto* actx = ex->thread_context();
+          if (actx) {
+            actx->eflags |= 0x100u;  // TF
+            g_ww_stepping.store(wp);
+          }
+        } else {
+          XELOGI("GuideWriteWatch: reached the {}-catch limit; disarmed",
+                 g_ww_max);
+        }
+        return true;
+      }
+    }
+  }
 
   if (!processor()->is_debugger_attached() && debugging::IsDebuggerAttached()) {
     // If Xenia's debugger isn't attached but another one is, pass it to that
@@ -3559,6 +4515,51 @@ bool Emulator::ExceptionCallback(Exception* ex) {
                static_cast<uint32_t>(ectx->r[base + 5]),
                static_cast<uint32_t>(ectx->r[base + 6]),
                static_cast<uint32_t>(ectx->r[base + 7]));
+      }
+      // Phase 1096gm: one dashboard run produced five distinct guest crashes
+      // that all reduce to "a field of an object held a value that is not a
+      // pointer" - a vtable slot reading 00000000, a field reading 000000E8,
+      // a slot holding an instruction word. Answering *which* field each time
+      // meant a rebuild per crash to aim XENIA_CRASH_PEEK. Dump it instead:
+      // for every GPR holding a plausible guest address, print the object it
+      // points at, and when its first word looks like a table of code
+      // pointers, print that table too.
+      {
+        auto* mmv = kernel_state() ? kernel_state()->memory() : nullptr;
+        auto ok = [&](uint32_t a, uint32_t len) {
+          if (!mmv || !a || !len) return false;
+          auto* hp = mmv->LookupHeap(a);
+          return hp && hp->QueryRangeAccess(a, a + len - 1) !=
+                           xe::memory::PageAccess::kNoAccess;
+        };
+        auto words = [&](uint32_t a, uint32_t n) {
+          std::string s2;
+          for (uint32_t i = 0; i < n; ++i) {
+            s2 += fmt::format("{:08X} ", xe::load_and_swap<uint32_t>(
+                                             mmv->TranslateVirtual(a + i * 4)));
+          }
+          return s2;
+        };
+        // Only registers that could be a guest pointer at all. Guest data
+        // lives well above zero and xam/hud end below 92000000; anything
+        // outside that range is a count, a flag or a handle, and dumping it
+        // would bury the fields that matter.
+        for (int r = 3; r < 32 && mmv; ++r) {
+          const uint32_t v = static_cast<uint32_t>(ectx->r[r]);
+          if (v < 0x00010000u || v >= 0x92000000u) continue;
+          if (!ok(v, 32)) continue;
+          XELOGE("GUEST CRASH: [r{}={:08X}] = {}", r, v, words(v, 8));
+          const uint32_t vt =
+              xe::load_and_swap<uint32_t>(mmv->TranslateVirtual(v));
+          if (vt >= 0x81000000u && vt < 0x92000000u && ok(vt, 64)) {
+            const uint32_t slot0 =
+                xe::load_and_swap<uint32_t>(mmv->TranslateVirtual(vt));
+            if (slot0 >= 0x81000000u && slot0 < 0x92000000u) {
+              XELOGE("GUEST CRASH:   vtable [r{}] -> {:08X}: {}", r, vt,
+                     words(vt, 16));
+            }
+          }
+        }
       }
       // Optional peek at a register-relative address, for when the interesting
       // value is a field of an object a register points at rather than the
@@ -3924,9 +4925,26 @@ static void ReportXamTextPopulation(Memory* memory, const char* when) {
 // key 6, which is what these two probes check. Note this is .rdata,
 // not .text: if it is also affected, the transient-zero phenomenon is
 // not confined to the code section.
+// Phase 1096gm adds four more. A guest crash dumped [81687324] as
+// "00020010 00100010 00100020 00000000..." where the image on disk has the
+// vtable "81AB1980 81AB8700 81AB00F0 817D5870...", and [8168C820] as PPC
+// instructions where the image has the string "LiveQosHistory". Both sit in
+// the RODATA page 81680000-81690000. 81E15B20 is the control: its runtime
+// contents matched the image exactly in the same dump, so if it also reads
+// wrong here the probe is at fault rather than the page.
 for (uint32_t probe_addr : {0x8186E528u, 0x818936B8u, 0x81747D70u,
                             0x81747A00u, 0x815FA1E0u, 0x815FA280u,
-                            0x81D3F8A0u}) {
+                            0x81D3F8A0u, 0x81680000u, 0x81687324u,
+                            0x8168C820u, 0x81E15B20u,
+                            // Phase 1096gw: dash.xex polls
+                            // ObReferenceObjectByName('\Device\HdDvdRom')
+                            // 33.5M times per 100 s run from lr 9226784C and
+                            // does not stop on NO_SUCH_DEVICE. There is no
+                            // dumped image of dash to disassemble, so read the
+                            // loop out of the loaded title instead - these six
+                            // cover 922677C0..92267880.
+                            0x922677C0u, 0x922677E0u, 0x92267800u,
+                            0x92267820u, 0x92267840u, 0x92267860u}) {
     auto* hp = memory->LookupHeap(probe_addr);
     if (!hp || hp->QueryRangeAccess(probe_addr, probe_addr + 31) ==
                    xe::memory::PageAccess::kNoAccess) {
@@ -4027,13 +5045,12 @@ static void ArmGuideThreadProbe(xe::kernel::KernelState* ks, int pdelay) {
   }).detach();
 
   auto* pproc = ks->processor();
-  std::thread([pdelay, pproc, shared]() {
+  std::thread([pdelay, pproc, shared, ks]() {
     xe::threading::set_name("GuideThreadProbe");
     std::this_thread::sleep_for(std::chrono::seconds(pdelay));
     // Compare against the same scan taken at load: a page populated then and
     // zero now means the image is being clobbered after loading, which is a
     // different bug from it never being loaded.
-    ReportXamTextPopulation(pproc->memory(), "at probe time");
     // Plain file, not XELOGI: if the logger were wedged these markers would
     // be the only evidence that the probe ran at all.
     FILE* pf = fopen("probe.txt", "w");
@@ -4174,12 +5191,14 @@ static void ArmGuideThreadProbe(xe::kernel::KernelState* ks, int pdelay) {
       uint64_t rip;
       uint32_t lr, r3;
       uint32_t tid;
+      uint32_t r1 = 0;
+      uint64_t rsp = 0;
     };
     std::vector<Row> rows;
     for (auto& th : ths) {
       void* nh2 = th->thread() ? th->thread()->native_handle() : nullptr;
       if (!nh2) continue;
-      uint64_t rip = 0;
+      uint64_t rip = 0, rsp = 0;
       uint32_t lr = 0, r3 = 0;
       CONTEXT c2 = {};
       c2.ContextFlags = CONTEXT_CONTROL | CONTEXT_INTEGER;
@@ -4187,6 +5206,7 @@ static void ArmGuideThreadProbe(xe::kernel::KernelState* ks, int pdelay) {
           static_cast<DWORD>(-1)) {
         if (GetThreadContext(reinterpret_cast<HANDLE>(nh2), &c2)) {
           rip = c2.Rip;
+          rsp = c2.Rsp;
         }
         ResumeThread(reinterpret_cast<HANDLE>(nh2));
       }
@@ -4196,13 +5216,40 @@ static void ArmGuideThreadProbe(xe::kernel::KernelState* ks, int pdelay) {
         r3 = static_cast<uint32_t>(tc->r[3]);
       }
       rows.push_back({th->handle(), th->thread_name(), rip, lr, r3,
-                      th->thread() ? th->thread()->system_id() : 0});
+                      th->thread() ? th->thread()->system_id() : 0,
+                      tc ? static_cast<uint32_t>(tc->r[1]) : 0u, rsp});
     }
     if (pf) {
       for (auto& r : rows) {
         fprintf(pf, "%08X %-26s tid=%-6u rip=%016llX lr=%08X r3=%08X\n",
                 r.h, r.nm.c_str(), r.tid,
                 static_cast<unsigned long long>(r.rip), r.lr, r.r3);
+        // Phase 1099z56: host return addresses inside the exe (symbolize
+        // with research/symbolize.py) - a freeze that wedges the logger is
+        // only visible from here. The stack is sampled after the thread
+        // resumed, so it is a hint, not an exact trace.
+        const uint64_t exe_lo =
+            reinterpret_cast<uint64_t>(GetModuleHandleW(nullptr));
+        const auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(exe_lo);
+        const auto* nt =
+            reinterpret_cast<IMAGE_NT_HEADERS*>(exe_lo + dos->e_lfanew);
+        const uint64_t exe_hi = exe_lo + nt->OptionalHeader.SizeOfImage;
+        int shown = 0;
+        for (int d = 0; r.rsp && d < 400 && shown < 14; ++d) {
+          uint64_t slot = 0;
+          SIZE_T got = 0;
+          if (!ReadProcessMemory(GetCurrentProcess(),
+                                 reinterpret_cast<LPCVOID>(r.rsp + d * 8),
+                                 &slot, sizeof(slot), &got) ||
+              got != sizeof(slot)) {
+            break;
+          }
+          if (slot >= exe_lo && slot < exe_hi) {
+            fprintf(pf, "   host+%llX\n",
+                    static_cast<unsigned long long>(slot - exe_lo));
+            ++shown;
+          }
+        }
       }
       fprintf(pf, "probe: sampled %zu threads\n", rows.size());
       fflush(pf);
@@ -4217,12 +5264,456 @@ static void ArmGuideThreadProbe(xe::kernel::KernelState* ks, int pdelay) {
         fprintf(pf, "resolved %08X guest %08X%s", r.h, g2, "\n");
         fflush(pf);
       }
-      XELOGI("ThreadProbe: {:08X} {:26} guest {:08X} lr={:08X} r3={:08X}{}",
+      // Phase 1099v: the guest back chain from r1, so a thread parked in a
+      // kernel call several guest frames deep says WHERE it is waiting.
+      std::string chain;
+      {
+        auto* mm = ks ? ks->memory() : nullptr;
+        uint32_t cur = r.r1;
+        for (int f = 0; mm && f < 10 && cur; ++f) {
+          auto* hp = mm->LookupHeap(cur);
+          if (!hp || hp->QueryRangeAccess(cur, cur + 3) ==
+                         xe::memory::PageAccess::kNoAccess) {
+            break;
+          }
+          uint32_t caller_sp =
+              xe::load_and_swap<uint32_t>(mm->TranslateVirtual(cur));
+          if (caller_sp <= cur || caller_sp - cur > 0x20000 || caller_sp < 8) {
+            break;
+          }
+          auto* hp2 = mm->LookupHeap(caller_sp - 8);
+          if (!hp2 || hp2->QueryRangeAccess(caller_sp - 8, caller_sp - 5) ==
+                          xe::memory::PageAccess::kNoAccess) {
+            break;
+          }
+          uint32_t ra =
+              xe::load_and_swap<uint32_t>(mm->TranslateVirtual(caller_sp - 8));
+          chain += fmt::format(" {:08X}", ra);
+          cur = caller_sp;
+        }
+      }
+      if (pf) {
+        fprintf(pf, "chain %08X%s\n", r.h, chain.c_str());
+        fflush(pf);
+      }
+      XELOGI("ThreadProbe: {:08X} {:26} guest {:08X} lr={:08X} r3={:08X}{} |"
+             " chain{}",
              r.h, r.nm, g2, r.lr, r.r3,
-             f2 ? "" : "  (host: in a kernel call)");
+             f2 ? "" : "  (host: in a kernel call)", chain);
     }
+    ReportXamTextPopulation(pproc->memory(), "at probe time");
   }).detach();
   XELOGI("ThreadProbe: armed for {}s", pdelay);
+}
+
+// Phase 1099z60: dash Lua diagnostics for the Game Details page that never
+// shows. Offsets are Lua 5.1 (32-bit big-endian) as embedded in dash.xex:
+// lua_State top +0x08, ci +0x14; CallInfo 0x18 bytes {base, func, top,
+// savedpc, ...}; LClosure p +0x10; Proto code +0x0C, lineinfo +0x14, source
+// +0x20; TString text +0x10; TValue 16 bytes, tt at +8 (4 = string).
+static bool GuideLuaRead(Memory* mm, uint32_t addr, uint32_t len) {
+  if (addr < 0x10000u) return false;
+  auto* hp = mm->LookupHeap(addr);
+  return hp && ((addr >= 0x80000000u && addr < 0xA0000000u) ||
+                hp->QueryRangeAccess(addr, addr + len - 1) !=
+                    xe::memory::PageAccess::kNoAccess);
+}
+static uint32_t GuideLuaU32(Memory* mm, uint32_t addr) {
+  return GuideLuaRead(mm, addr, 4)
+             ? xe::load_and_swap<uint32_t>(mm->TranslateVirtual(addr))
+             : 0;
+}
+static std::string GuideLuaTString(Memory* mm, uint32_t ts) {
+  std::string s;
+  if (!ts) return s;
+  uint32_t len = GuideLuaU32(mm, ts + 0xC);
+  if (len > 160) len = 160;
+  if (!GuideLuaRead(mm, ts + 0x10, len ? len : 1)) return s;
+  auto* p = mm->TranslateVirtual<const char*>(ts + 0x10);
+  for (uint32_t i = 0; i < len; ++i) {
+    s += (p[i] >= 0x20 && p[i] < 0x7F) ? p[i] : '?';
+  }
+  return s;
+}
+// "source:line" of the Lua function that called the C function running on L.
+static std::string GuideLuaCaller(Memory* mm, uint32_t L) {
+  const uint32_t ci = GuideLuaU32(mm, L + 0x14);
+  if (ci < 0x18) return "?";
+  const uint32_t caller = ci - 0x18;
+  const uint32_t func = GuideLuaU32(mm, caller + 4);
+  const uint32_t cl = GuideLuaU32(mm, func);
+  if (!cl || !GuideLuaRead(mm, cl + 6, 1) ||
+      *mm->TranslateVirtual<uint8_t*>(cl + 6)) {
+    return "?(C caller)";
+  }
+  const uint32_t proto = GuideLuaU32(mm, cl + 0x10);
+  const uint32_t code = GuideLuaU32(mm, proto + 0xC);
+  const uint32_t savedpc = GuideLuaU32(mm, caller + 0xC);
+  const uint32_t lineinfo = GuideLuaU32(mm, proto + 0x14);
+  uint32_t line = 0;
+  if (savedpc > code && lineinfo) {
+    line = GuideLuaU32(mm, lineinfo + ((savedpc - code) / 4 - 1) * 4);
+  }
+  return fmt::format("{}:{}", GuideLuaTString(mm, GuideLuaU32(mm, proto + 0x20)),
+                     line);
+}
+
+// Phase 1099z74: signin.xex status scene (status.xur) state machine with host
+// timestamps - which states the Guide's sign-in popup passes through and how
+// long each lasts. Addresses from the 1099z73 static RE of signin.xex.
+static void InstallGuideSigninTraces(xe::kernel::KernelState* ks) {
+  static const auto t0 = std::chrono::steady_clock::now();
+  auto ms = []() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now() - t0)
+        .count();
+  };
+  auto* proc = ks->processor();
+  // Update 9010CCD0, at the state switch: r31 = scene, [r31+0x30] = state.
+  proc->AddGuestHook(0x9010CD14, [ks, ms](cpu::ppc::PPCContext* c) {
+    static std::atomic<int32_t> last{-12345};
+    const uint32_t st = GuideLuaU32(ks->memory(), uint32_t(c->r[31]) + 0x30);
+    if (int32_t(st) != last.exchange(int32_t(st))) {
+      XELOGI("GuideSignin: t={}ms status scene {:08X} state {}", ms(),
+             uint32_t(c->r[31]), st);
+    }
+  });
+  // Message handler 9010D8E8(scene, msg, ...): [msg+4] = message id.
+  proc->AddGuestHook(0x9010D8E8, [ks, ms](cpu::ppc::PPCContext* c) {
+    static std::atomic<uint32_t> n{0};
+    if (++n > 400) return;
+    XELOGI("GuideSignin: t={}ms status msg {:08X} scene {:08X}", ms(),
+           GuideLuaU32(ks->memory(), uint32_t(c->r[4]) + 4), uint32_t(c->r[3]));
+  });
+  // Phase 1099z75: the sign-in flow end to end (addresses from the 1099z73/74
+  // static RE). kind: 0 = log registers, 1 = log [r3+0x110], 2 = counter
+  // (log first 3 and every 60th; f1 summed as dt ms).
+  struct Site {
+    uint32_t addr;
+    const char* name;
+    int kind;
+  };
+  static const Site sites[] = {
+      {0x81BED140, "xam XamUserLogonTaskProc entry", 0},
+      {0x81AB6E58, "xam LogonContinue entry", 0},
+      {0x81AB6F08, "xam logon hr stored (r10)", 0},
+      {0x81780598, "xam launcher dispatch", 0},
+      {0x8178C7FC, "xam XamAppLoad(signin.xex)", 0},
+      {0x81791138, "xam XamShowMessageBox entry", 0},
+      {0x901096C8, "signin mode dispatch", 1},
+      {0x901097D4, "signin request 2 posted", 0},
+      {0x90115540, "signin state 7 stored", 0},
+      {0x901150E0, "signin create status scene result", 0},
+      {0x9010D7E0, "signin StatusScene init", 0},
+      {0x901182D0, "signin logon task entry", 0},
+      {0x90118774, "signin logon call (r4 flags)", 0},
+      {0x90118778, "signin logon result (r3)", 0},
+      {0x90119798, "signin error box (r4 hr, r5 string)", 0},
+      {0x90115C58, "signin UI wait start", 0},
+      {0x90115C5C, "signin UI wait end", 0},
+      {0x90115748, "signin msgbox result", 0},
+      // Phase 1099z80: profile package open behind the xgirt link warning
+      // (xam 81B35168 builds "xgirt%08x"; 81739BA8 creates the link at
+      // 81739F98 only if 817366C0 succeeds; 81732CFC prints the warning).
+      {0x81B35168, "xam xgirt name builder entry", 3},
+      {0x81739BA8, "xam content create entry", 3},
+      {0x81739E5C, "xam package open+verify result (r3)", 0},
+      {0x817367F8, "xam post-mount check result (r3)", 0},
+      {0x81736408, "xam device-ID verdict -> PV03 cmd 2", 0},
+      {0x81739F98, "xam ObCreateSymbolicLink(new package)", 0},
+      {0x81739EA8, "xam create: after verify (r19 mode, r30 flags)", 4},
+      {0x8173A0D4, "xam create: r19 != 1 path", 0},
+      {0x8173A024, "xam create: flags 0x40 path", 0},
+      {0x8173A05C, "xam create: error path (r31)", 4},
+      {0x8173A00C, "xam create: skip-link path", 0},
+      {0x817ABBA0, "xam symbolic link helper entry", 5},
+      {0x81732CFC, "xam xgirt link warning", 3},
+      // Phase 1099z98: dash disc title-info reader (9225C9F8 "Get Title Info").
+      {0x922672AC, "dash disc NtOpenFile default.xex result (r3)", 0},
+      {0x922675A8, "dash disc XexTransformImageKey result (r3)", 0},
+      {0x92267614, "dash disc decrypt/decompress result (r3)", 0},
+      {0x92267648, "dash disc page-hash verify result (r3)", 0},
+      {0x9225C5C0, "dash disc resource lookup result (r3)", 0},
+      {0x9225C67C, "dash disc XMsg title info result (r3)", 0},
+      {0x9225C6D0, "dash disc XamLoaderSetGameInfo (r30)", 4},
+      {0x913E66C8, "hud XamLoaderGetGameInfo result (r3)", 0},
+      // Phase 1099z124: XNotify toast pipeline (agent RE, xam 17559).
+      {0x81792E44, "xnotify pump call (CNotifyApp fields)", 6},
+      {0x81769BD8, "xnotify XNotifyQueueUI (r3 type, r6 text)", 7},
+      {0x817A6C90, "xnotify sign-in change handler (r4 flags)", 0},
+      {0x817A70CC, "xnotify sign-in toast queue site", 0},
+      // Phase 1099z136: which caller issues each logon and which one changes
+      // the signed-in mask (agent RE of the 0x20 no-popup flag).
+      {0x81BEF8D0, "XamUserLogonEx entry (r3 xuids, r4 flags)", 3},
+      {0x817A6FF0, "xnotify sign-in masks", 10},
+      {0x817A7D08, "xam auto sign-in builder", 3},
+      // Phase 1099z139: xam's launch fade (graphics notification 5 thread).
+      {0x8179166C, "fade: notification 5 entry", 0},
+      {0x817917BC, "fade: notification 4 stop", 0},
+      {0x8178E9F0, "fade: thread entry", 0},
+      {0x8178EC74, "fade: gate passed", 0},
+      {0x8178EC6C, "fade: gate skipped", 0},
+      {0x8178EDC4, "fade: SetGammaRamp step (r29)", 11},
+      {0x8178EE14, "fade: stop, black present", 0},
+      {0x8176B194, "xnotify dropped by hardware flags", 0},
+      {0x8176B20C, "xnotify enqueue", 0},
+      {0x8176A4F4, "xnotify dequeue ([r30+8] type)", 9},
+      {0x8176A508, "xnotify filter result (r3)", 0},
+      {0x81769428, "xnotify scene create hresult (r3)", 0},
+      {0x817698C4, "xnotify show check (r3)", 0},
+      {0x8176995C, "xnotify NOT showing branch", 0},
+      {0x8176A53C, "xnotify now showing", 0},
+      {0x8176A588, "xnotify render call", 2},
+      {0x8176A808, "xnotify timer dismiss", 0},
+      {0x90106370, "signin XuiAnimRun", 2},
+      {0x90106468, "signin XuiRenderPresent", 2},
+  };
+  for (const auto& s : sites) {
+    proc->AddGuestHook(s.addr, [ks, ms, s](cpu::ppc::PPCContext* c) {
+      auto* th = kernel::XThread::GetCurrentThread();
+      const uint32_t tid = th ? th->handle() : 0;
+      if (s.kind == 6) {
+        static std::atomic<uint32_t> pn{0};
+        const uint32_t k = ++pn;
+        if (k > 3 && (k % 600) != 0) return;
+        auto* mm = ks->memory();
+        const uint32_t app = GuideLuaU32(mm, 0x81D42278);
+        XELOGI("GuideSignin: t={}ms {} #{} app={:08X} +A0={:08X} +A4={:08X} "
+               "+B0={:08X} +58(normal q)={:08X} +80(high q)={:08X} +E8={:08X} "
+               "+C4={:08X}",
+               ms(), s.name, k, app, GuideLuaU32(mm, app + 0xA0),
+               GuideLuaU32(mm, app + 0xA4), GuideLuaU32(mm, app + 0xB0),
+               GuideLuaU32(mm, app + 0x58), GuideLuaU32(mm, app + 0x80),
+               GuideLuaU32(mm, app + 0xE8), GuideLuaU32(mm, app + 0xC4));
+        return;
+      }
+      if (s.kind == 2) {
+        static std::mutex mu;
+        static std::map<uint32_t, std::pair<uint64_t, double>> acc;
+        std::lock_guard<std::mutex> lk(mu);
+        auto& a = acc[s.addr];
+        a.first++;
+        a.second += c->f[1];
+        if (a.first <= 3 || a.first % 60 == 0) {
+          XELOGI("GuideSignin: t={}ms {} #{} f1={:.2f} sumf1={:.1f} thread {:08X}",
+                 ms(), s.name, a.first, c->f[1], a.second, tid);
+        }
+        return;
+      }
+      static std::atomic<uint32_t> total{0};
+      if (++total > 2000) return;
+      std::string extra;
+      if (s.kind == 1) {
+        extra = fmt::format(" mode=[r3+110]={:08X}",
+                            GuideLuaU32(ks->memory(), uint32_t(c->r[3]) + 0x110));
+      } else if (s.kind == 7) {
+        std::string text;
+        auto* mm = ks->memory();
+        const uint32_t p = uint32_t(c->r[6]);
+        for (uint32_t i = 0; i < 80 && GuideLuaRead(mm, p + i * 2, 2); ++i) {
+          const uint16_t ch =
+              xe::load_and_swap<uint16_t>(mm->TranslateVirtual(p + i * 2));
+          if (!ch) break;
+          text += (ch >= 0x20 && ch < 0x7F) ? char(ch) : '?';
+        }
+        extra = fmt::format(" r6=\"{}\"", text);
+      } else if (s.kind == 9) {
+        extra = fmt::format(" [r30+8]={:08X}",
+                            GuideLuaU32(ks->memory(), uint32_t(c->r[30]) + 8));
+      } else if (s.kind == 11) {
+        extra = fmt::format(" r29={:08X}", uint32_t(c->r[29]));
+      } else if (s.kind == 10) {
+        const uint32_t sp = uint32_t(c->r[1]);
+        extra = fmt::format(
+            " offline-signin={:08X} online-signin={:08X} signout={:08X} "
+            "flags={:08X} show={:08X}",
+            GuideLuaU32(ks->memory(), sp + 0x50),
+            GuideLuaU32(ks->memory(), sp + 0x54), uint32_t(c->r[22]),
+            uint32_t(c->r[18]), GuideLuaU32(ks->memory(), sp + 0x5C));
+      } else if (s.kind == 3) {
+        extra = " chain " + ks->GuestBackChain(8);
+      } else if (s.kind == 4) {
+        extra = fmt::format(" r19={:08X} r30={:08X} r31={:08X}",
+                            uint32_t(c->r[19]), uint32_t(c->r[30]),
+                            uint32_t(c->r[31]));
+      } else if (s.kind == 5) {
+        // r3/r4 as guest ANSI_STRING pointers (length u16, max u16, buffer).
+        auto ansi = [ks](uint32_t p) {
+          std::string out;
+          auto* mm = ks->memory();
+          const uint32_t len =
+              GuideLuaRead(mm, p, 8)
+                  ? xe::load_and_swap<uint16_t>(mm->TranslateVirtual(p)) : 0;
+          const uint32_t buf = GuideLuaU32(mm, p + 4);
+          if (len && len < 260 && GuideLuaRead(mm, buf, len)) {
+            out.assign(mm->TranslateVirtual<const char*>(buf), len);
+          }
+          return out;
+        };
+        extra = fmt::format(" a=\"{}\" b=\"{}\" chain {}",
+                            ansi(uint32_t(c->r[3])), ansi(uint32_t(c->r[4])),
+                            ks->GuestBackChain(4));
+      }
+      XELOGI("GuideSignin: t={}ms {} {:08X} thread {:08X} r3={:08X} r4={:08X} "
+             "r5={:08X} r10={:08X} lr={:08X}{}",
+             ms(), s.name, s.addr, tid, uint32_t(c->r[3]), uint32_t(c->r[4]),
+             uint32_t(c->r[5]), uint32_t(c->r[10]), uint32_t(c->lr), extra);
+    });
+  }
+  XELOGI("GuideSignin: hooks added");
+}
+
+static void InstallGuideLuaTraces(xe::kernel::KernelState* ks) {
+  static bool installed = false;
+  if (installed) return;
+  installed = true;
+  auto* proc = ks->processor();
+  // luaD_throw(L, errcode)
+  proc->AddGuestHook(0x928E4838, [ks](cpu::ppc::PPCContext* c) {
+    static std::atomic<uint32_t> n{0};
+    const uint32_t k = ++n;
+    if (k > 200) return;
+    auto* mm = ks->memory();
+    const uint32_t L = uint32_t(c->r[3]);
+    const uint32_t top = GuideLuaU32(mm, L + 8);
+    std::string msg;
+    if (top >= 16 && GuideLuaU32(mm, top - 16 + 8) == 4) {
+      msg = GuideLuaTString(mm, GuideLuaU32(mm, top - 16));
+    }
+    XELOGI("GuideLua: throw #{} L={:08X} err={} lr={:08X} at {} msg \"{}\" "
+           "chain{}",
+           k, L, uint32_t(c->r[4]), uint32_t(c->lr), GuideLuaCaller(mm, L),
+           msg, ks->GuestBackChain(8));
+  });
+  // Lua Sleep: log each distinct Lua call site once, then every 20000 calls
+  // the counts, so a coroutine stuck in a wait shows up as a growing site.
+  proc->AddGuestHook(0x928F6C58, [ks](cpu::ppc::PPCContext* c) {
+    auto* mm = ks->memory();
+    const std::string site = GuideLuaCaller(mm, uint32_t(c->r[3]));
+    static std::mutex mu;
+    static std::map<std::string, uint64_t> counts;
+    static uint64_t total = 0;
+    std::lock_guard<std::mutex> lk(mu);
+    if (++counts[site] == 1) {
+      XELOGI("GuideLua: new Sleep site {}", site);
+    }
+    if (++total % 20000 == 0) {
+      std::string s;
+      for (auto& kv : counts) s += fmt::format(" {}={}", kv.first, kv.second);
+      XELOGI("GuideLua: Sleep counts after {}:{}", total, s);
+    }
+  });
+  // lua_yield(L, nresults): where coroutines park. Distinct (site, lr) once.
+  proc->AddGuestHook(0x928E4608, [ks](cpu::ppc::PPCContext* c) {
+    auto* mm = ks->memory();
+    const std::string key = fmt::format(
+        "{} lr={:08X}", GuideLuaCaller(mm, uint32_t(c->r[3])), uint32_t(c->lr));
+    static std::mutex mu;
+    static std::map<std::string, uint64_t> seen;
+    std::lock_guard<std::mutex> lk(mu);
+    if (++seen[key] == 1) {
+      XELOGI("GuideLua: new yield site {} L={:08X} chain{}", key,
+             uint32_t(c->r[3]), ks->GuestBackChain(6));
+    }
+  });
+  // Phase 1099z66: the LoadGameLibrary op's completion poll and the content
+  // manager (static 929695F8) that has to finish a scan first.
+  auto site_hook = [ks, proc](uint32_t addr, const char* what, bool cm_state) {
+    proc->AddGuestHook(addr, [ks, addr, what, cm_state](cpu::ppc::PPCContext* c) {
+      static std::mutex mu;
+      static std::map<uint32_t, uint64_t> hits;
+      uint64_t n;
+      {
+        std::lock_guard<std::mutex> lk(mu);
+        n = ++hits[addr];
+      }
+      auto* mm = ks->memory();
+      // The LoadGameLibrary op (vtable 921269FC) is always interesting.
+      bool lib_op = addr == 0x928F6BB0 &&
+                    GuideLuaU32(mm, GuideLuaU32(mm, uint32_t(c->r[31]) + 0x18)) ==
+                        0x921269FCu;
+      static std::atomic<uint32_t> lib_op_logs{0};
+      if (lib_op && ++lib_op_logs > 30) lib_op = false;
+      if (!lib_op && n > 6 && n % 500 != 0) return;
+      std::string extra;
+      if (addr == 0x928AB0B8) {
+        const uint32_t op = uint32_t(c->r[3]);
+        const uint32_t lib = GuideLuaU32(mm, 0x92A7B99C);
+        extra = fmt::format(
+            " lr={:08X} op={:08X} notified={:02X} cancelled={:08X} lib={:08X} "
+            "[lib+44]={:08X} [lib+4FC]={:08X}",
+            uint32_t(c->lr), op,
+            GuideLuaRead(mm, op + 0x10, 1)
+                ? *mm->TranslateVirtual<uint8_t*>(op + 0x10) : 0,
+            GuideLuaU32(mm, op + 0x14), lib, GuideLuaU32(mm, lib + 0x44),
+            GuideLuaU32(mm, lib + 0x4FC));
+      } else if (addr == 0x928F6BB0) {
+        const uint32_t sched = uint32_t(c->r[30]);
+        extra = fmt::format(
+            " IsComplete->{:08X} waiter={:08X} op={:08X} sched={:08X} "
+            "[sched+8]={:02X}",
+            uint32_t(c->r[3]), uint32_t(c->r[31]),
+            GuideLuaU32(mm, uint32_t(c->r[31]) + 0x18), sched,
+            GuideLuaRead(mm, sched + 8, 1)
+                ? *mm->TranslateVirtual<uint8_t*>(sched + 8) : 0);
+      } else if (addr == 0x922BED90) {
+        extra = fmt::format(" r3={:08X} [r3+4FC]={:08X}", uint32_t(c->r[3]),
+                            GuideLuaU32(mm, uint32_t(c->r[3]) + 0x4FC));
+      } else {
+        extra = fmt::format(" r3={:08X} r11={:08X}", uint32_t(c->r[3]),
+                            uint32_t(c->r[11]));
+      }
+      if (cm_state) {
+        extra += fmt::format(" CM+110={:08X} CM+4={:08X} CM+E8={:08X} "
+                             "CM+8/C/10={:08X}/{:08X}/{:08X}",
+                             GuideLuaU32(mm, 0x929695F8 + 0x110),
+                             GuideLuaU32(mm, 0x929695F8 + 0x4),
+                             GuideLuaU32(mm, 0x929695F8 + 0xE8),
+                             GuideLuaU32(mm, 0x929695F8 + 0x8),
+                             GuideLuaU32(mm, 0x929695F8 + 0xC),
+                             GuideLuaU32(mm, 0x929695F8 + 0x10));
+      }
+      XELOGI("GuideLib: {} {:08X} hit #{}{}", what, addr, n, extra);
+    });
+  };
+  // Follow the one LoadGameLibrary op through the resume path.
+  static std::atomic<uint32_t> g_lib_op{0};
+  proc->AddGuestHook(0x928ABFEC, [](cpu::ppc::PPCContext* c) {
+    g_lib_op = uint32_t(c->r[4]);  // 928F6A60(L, op)
+    XELOGI("GuideLib: LoadGameLibrary op {:08X}", g_lib_op.load());
+  });
+  auto op_hook = [ks, proc](uint32_t addr, const char* what, int waiter_reg) {
+    proc->AddGuestHook(addr, [ks, addr, what, waiter_reg](cpu::ppc::PPCContext* c) {
+      auto* mm = ks->memory();
+      const uint32_t waiter = uint32_t(c->r[waiter_reg]);
+      if (!g_lib_op || GuideLuaU32(mm, waiter + 0x18) != g_lib_op) return;
+      XELOGI("GuideLib: [op {:08X}] {} {:08X} waiter={:08X} r3={:08X} r4={:08X} "
+             "r5={:08X} co L={:08X}",
+             g_lib_op.load(), what, addr, waiter, uint32_t(c->r[3]),
+             uint32_t(c->r[4]), uint32_t(c->r[5]),
+             GuideLuaU32(mm, waiter + 0x14));
+    });
+  };
+  op_hook(0x928F6BB0, "scan: IsComplete returned", 31);
+  op_hook(0x928F6BF0, "scan: resume queued", 31);
+  op_hook(0x928F6674, "resume: GetResults returned", 30);
+  op_hook(0x928F66AC, "resume: pcall(results) returned", 30);
+  op_hook(0x928F6704, "resume: lua_resume(co, n)", 30);
+  op_hook(0x928F6708, "resume: lua_resume returned", 30);
+  site_hook(0x928AB0B8, "op IsComplete", true);
+  site_hook(0x922BED90, "library pump", false);
+  site_hook(0x92262F30, "CM RequestRescan", true);
+  site_hook(0x92264D2C, "CM scan begins", true);
+  site_hook(0x92264DC0, "CM state write", true);
+  site_hook(0x92264E68, "CM worker wait returned", true);
+  // Positive control: the dash worker's 45 ms poll loop (thread probe
+  // 1099z40), which runs constantly.
+  proc->AddGuestHook(0x922C0AC4, [](cpu::ppc::PPCContext*) {
+    static std::atomic<uint32_t> n{0};
+    const uint32_t k = ++n;
+    if (k <= 3) XELOGI("GuideLua: control hook hit #{}", k);
+  });
+  XELOGI("GuideLua: guest hooks added (luaD_throw, Sleep, control)");
 }
 
 static void InstallGuideStoreTraces(xe::kernel::KernelState* ks) {
@@ -4337,6 +5828,16 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
   if (null_device->Initialize()) {
     file_system_->RegisterDevice(std::move(null_device));
   }
+  if (cvars::kernel_device_auth) {
+    // 1099z17559-5: the kernel's accessory-authentication device. Opening it
+    // is all xam needs from the file system; NtDeviceIoControlFile handles its
+    // requests (xboxkrnl_io.cc).
+    auto auth = std::make_unique<vfs::NullDevice>(
+        "\\Device\\DeviceAuth", std::initializer_list<std::string>{});
+    if (auth->Initialize()) {
+      file_system_->RegisterDevice(std::move(auth));
+    }
+  }
 
   // Reset state.
   title_id_ = std::nullopt;
@@ -4375,6 +5876,119 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
     }
   }
 
+  // Phase 1095x: let the EMULATOR extract the system update. Xenia already
+  // recognises PIRS/CON/LIVE and builds an XContentContainerDevice for them
+  // (see the FileSignatureType switch above), so point it at the update
+  // directory and list what each package holds. The reason this matters:
+  // nothing in this environment imports xam ordinal 2798 - the export thunk
+  // 817BFB60 that tail-branches to xam's RegisterDevice at 81731818 - so the
+  // only device that ever registers is xam's internal HDD entry at 81731BE0
+  // (kind 1) and no kind-3 device exists, which is why 817319F4's use-path
+  // walks an unlinked list head and faults at 817286C0.
+  if (!cvars::guide_mount_update.empty()) {
+    const auto updir = xe::to_path(cvars::guide_mount_update);
+    std::vector<std::filesystem::path> pkgs;
+    std::error_code ec;
+    for (auto& de : std::filesystem::directory_iterator(updir, ec)) {
+      if (!de.is_regular_file(ec)) continue;
+      pkgs.push_back(de.path());
+    }
+    std::sort(pkgs.begin(), pkgs.end());
+    XELOGI("GuideUpdate: scanning {} ({} file(s))",
+           cvars::guide_mount_update, pkgs.size());
+    uint32_t idx = 0;
+    for (auto& pkg : pkgs) {
+      const auto sig = GetFileSignature(pkg);
+      if (sig != FileSignatureType::PIRS &&
+          sig != FileSignatureType::CON &&
+          sig != FileSignatureType::LIVE) {
+        continue;
+      }
+      const std::string mount = fmt::format("\UPD{}", idx);
+      auto dev = vfs::XContentContainerDevice::CreateContentDevice(mount, pkg);
+      if (!dev || !dev->Initialize()) {
+        XELOGE("GuideUpdate: {} - container device failed",
+               xe::path_to_utf8(pkg.filename()));
+        continue;
+      }
+      if (!file_system_->RegisterDevice(std::move(dev))) {
+        XELOGE("GuideUpdate: {} - RegisterDevice failed",
+               xe::path_to_utf8(pkg.filename()));
+        continue;
+      }
+      file_system_->RegisterSymbolicLink(fmt::format("UPD{}:", idx), mount);
+      size_t n_entries = 0;
+      if (auto* root = file_system_->ResolvePath(mount)) {
+        for (size_t i = 0; i < root->children().size(); ++i) {
+          auto* c = root->children()[i].get();
+          if (!c) continue;
+          ++n_entries;
+          if (n_entries <= 64) {
+            XELOGI("GuideUpdate:     {} ({} bytes)", c->name(), c->size());
+          }
+        }
+      }
+      XELOGI("GuideUpdate: {} mounted as {} - {} entr(ies)",
+             xe::path_to_utf8(pkg.filename()), mount, n_entries);
+      if (!cvars::guide_extract_update.empty()) {
+        const auto outdir = xe::to_path(cvars::guide_extract_update) /
+                            pkg.filename();
+        std::error_code oec;
+        std::filesystem::create_directories(outdir, oec);
+        size_t wrote = 0, failed = 0;
+        if (auto* root = file_system_->ResolvePath(mount)) {
+          for (size_t i = 0; i < root->children().size(); ++i) {
+            auto* c = root->children()[i].get();
+            if (!c || c->attributes() & vfs::kFileAttributeDirectory) continue;
+            vfs::File* f = nullptr;
+            if (c->Open(vfs::FileAccess::kGenericRead, &f) != X_STATUS_SUCCESS ||
+                !f) {
+              ++failed;
+              continue;
+            }
+            std::vector<uint8_t> buf(c->size());
+            size_t got = 0;
+            if (!buf.empty()) {
+              f->ReadSync(std::span<uint8_t>(buf.data(), buf.size()), 0, &got);
+            }
+            f->Destroy();
+            auto of = xe::filesystem::OpenFile(outdir / xe::to_path(c->name()),
+                                               "wb");
+            if (of) {
+              if (got) fwrite(buf.data(), 1, got, of);
+              fclose(of);
+              ++wrote;
+            } else {
+              ++failed;
+            }
+          }
+        }
+        XELOGI("GuideUpdate: extracted {} file(s) from {} to {} ({} failed)",
+               wrote, xe::path_to_utf8(pkg.filename()),
+               xe::path_to_utf8(outdir), failed);
+      }
+      ++idx;
+    }
+  }
+
+  // Phase 1095z: give xam a real \Device\Flash. The run log has always shown
+  // ResolvePath(\Device\Flash\xstudio.xex) failing "device not found", and a
+  // Guide item failing ResolvePath(createprofile.xex) since 1091w, because no
+  // Flash device existed. These are the guest's own modules, extracted from the
+  // user's system update by guide_extract_update.
+  if (!cvars::guide_flash_root.empty()) {
+    auto flash_dev = std::make_unique<vfs::HostPathDevice>(
+        "\\Device\\Flash", xe::to_path(cvars::guide_flash_root), true);
+    if (flash_dev->Initialize() &&
+        file_system_->RegisterDevice(std::move(flash_dev))) {
+      file_system_->RegisterSymbolicLink("flash:", "\\Device\\Flash");
+      XELOGI("Guide: mounted {} as the Flash device (and flash:)",
+             cvars::guide_flash_root);
+    } else {
+      XELOGE("Guide: failed to mount flash root {}", cvars::guide_flash_root);
+    }
+  }
+
   // LLE xam bootstrap: load the real xam.xex as a guest module before the main
   // module, so the main module's xam imports bind against xam's real export
   // table instead of Xenia's HLE xam. See XexModule::SetupLibraryImports.
@@ -4389,10 +6003,22 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
       file_system_->RegisterSymbolicLink("SYS:", "\\SYS");
       XELOGI("Guide: mounted system root {} as SYS:",
              cvars::guide_system_root);
+      if (cvars::guide_media_link) {
+        file_system_->RegisterSymbolicLink("media:", "\\SYS");
+        XELOGI("Guide: linked media: to the system root (xam's font files)");
+      }
     } else {
       XELOGE("Guide: failed to mount system root {}",
              cvars::guide_system_root);
     }
+  }
+  // Phase 1099z125 cold boot: the 17489 kernel's phase-1 init starts the boot
+  // animation (progress 0x72, AniStartBootAnimation(0) at 80081858) before it
+  // loads xam (0x79) and does not wait for it; xam waits in
+  // AniBlockOnAnimation.
+  if (cvars::guide_cold_boot && !cvars::lle_xam.empty()) {
+    const uint32_t ani = kernel::xboxkrnl::AniStartBootAnimationHost(false);
+    XELOGI("Cold boot: AniStartBootAnimation(0) = {:08X}", ani);
   }
   if (!cvars::lle_xam.empty()) {
     XELOGI("LLE xam: loading guest xam from {}", cvars::lle_xam);
@@ -4412,6 +6038,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
       return xam_result;
     }
     XELOGI("LLE xam: loaded at {:08X}", xam_module->hmodule_ptr());
+    GuideHudSlotMark(kernel_state_.get(), "xam loaded, before DllMain");
     if (xam_module->xex_module()) {
       g_xam_img_lo = xam_module->xex_module()->base_address();
       g_xam_img_hi = g_xam_img_lo + xam_module->xex_module()->image_size();
@@ -4491,6 +6118,25 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
       }
     }
     ReportXamTextPopulation(memory(), "after xam load");
+    // Phase 1097zs: arming at Guide-press time cannot see anything written
+    // during xam's own boot, which is exactly the window that matters for
+    // "is [81D426C8] ever written and then cleared, or never written at all"
+    // (1097zr). This arms it here instead, right after xam is loaded.
+    if (cvars::guide_watch_write_addr && cvars::guide_watch_write_early) {
+      ArmGuideWriteWatch(kernel_state_.get(), cvars::guide_watch_write_addr);
+    }
+    // Phase 1099z44: arm after a delay instead, for heap pages that are not
+    // committed yet at xam load.
+    if (cvars::guide_watch_write_addr &&
+        cvars::guide_watch_write_delay_seconds > 0) {
+      auto* ks_ww = kernel_state_.get();
+      std::thread([ks_ww]() {
+        for (int i = 0; i < cvars::guide_watch_write_delay_seconds; ++i) {
+          xe::threading::Sleep(std::chrono::seconds(1));
+        }
+        ArmGuideWriteWatch(ks_ww, cvars::guide_watch_write_addr);
+      }).detach();
+    }
     // These addresses hold correct code here and read back as zero later in
     // the run, then are correct again by 30s. Poll them so the transition is
     // timestamped against the surrounding log rather than inferred.
@@ -4527,19 +6173,264 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                                   // init off) distinguishes the two: if it
                                   // ever becomes non-null, the loader is
                                   // simply being called too early.
-                                  0x81D43C78u};
+                                  0x81D43C78u,
+                                  // Phase 1096gm: both read correct at the
+                                  // two load checkpoints and wrong inside a
+                                  // crash dump later in the same run -
+                                  // 81687324 is a real vtable on disk
+                                  // (81AB1980 81AB8700 ...) but reads
+                                  // "00020010 00100010 00100020 0..." at the
+                                  // faulting bctr that consumes it, and
+                                  // 8168C820 is the string "LiveQosHistory"
+                                  // on disk but reads as PPC instructions
+                                  // that appear nowhere in the image. Both
+                                  // sit in the 64k RODATA page 81680000. The
+                                  // protect= field logged on a change is the
+                                  // discriminator: still read-only means the
+                                  // mapping was replaced, writable means
+                                  // something stored through this view.
+                                  0x81687324u, 0x8168C820u,
+                                  // Phase 1096hb: 81D43CF8 is [81D43C50+0xA8],
+                                  // the single field measured to gate BOTH
+                                  // xam's sys-app launcher (via the accessor
+                                  // 8178D678) and the HUD-manager loop body at
+                                  // 81794C7C. It has been 0 in every run so
+                                  // far. Now that xam's image is no longer
+                                  // corrupted and the dashboard is
+                                  // deterministic, watch it directly rather
+                                  // than inferring its state from what does
+                                  // not happen.
+                                  0x81D43CF8u,
+                                  // Phase 1097zs: the Guide app record
+                                  // pointer. 1097zr proved nothing writes it
+                                  // after the Guide press (0 catches against
+                                  // 4.1 million on the same page), but the
+                                  // page-protect watch cannot cover xam's own
+                                  // boot without changing the timing of the
+                                  // thing it watches - it crashed the guest
+                                  // when tried. Polling costs nothing and
+                                  // answers the remaining half: is this word
+                                  // EVER non-zero, at any point in the run.
+                                  0x81D426C8u,
+                                  // Phase 1097zx: [81D43C50+0x40]. Ordinal
+                                  // 0x299 publishes the HUD state as
+                                  // [[block+0x40]+0x90] - an ARBITRARY value
+                                  // out of a sub-object - after checking
+                                  // [+0xB8], [+0xB4] and [+0xA8] (the gate
+                                  // this phase opened). So the state CAN be
+                                  // 0x10; the "setter has two callers passing
+                                  // 4 and 0x40" argument never covered this
+                                  // store. The one catch of it had r11 = 0
+                                  // after the +0x40 load, i.e. the chain was
+                                  // null. Poll it: if it is never non-null,
+                                  // that is the blocker; if it becomes
+                                  // non-null, read [+0x90].
+                                  0x81D43C90u,
+                                  // Phase 1097zz: [81D43C50+0x44], the SECOND
+                                  // and independent gate on writing +0x40.
+                                  // 81795030..8179504C requires it non-zero
+                                  // with bit 0 set (and not equal to 1) to
+                                  // reach 81795064, whose block writes +0x40
+                                  // at 8179510C - a path that does NOT depend
+                                  // on the HUD state, so it is the one way out
+                                  // of the 1097zx cycle. A static scan found no
+                                  // writer, but this phase's scans have missed
+                                  // writers three times where a watch then
+                                  // found them, so poll it rather than trust
+                                  // the scan.
+                                  0x81D43C94u,
+                                  // Phase 1098d: 401C09D0 is the object the
+                                  // HUD-manager loop polls through
+                                  // 8174FDA0 -> 8174F680 ([[81D43C50+0x80]+0x38],
+                                  // measured 34M times, always this pointer),
+                                  // and its outstanding-work count +0x14 is
+                                  // stuck at exactly 1 all run. Its VTABLE
+                                  // POINTER at +0 decides whose class it is:
+                                  // the constructor 8174E170 installs
+                                  // 815FAD34, while the "Guide Background
+                                  // transition" vtable whose slot 7 clears
+                                  // +0x14 is 815FAFBC. 1098d identified the
+                                  // class from the second one WITHOUT checking
+                                  // this word, and the ticker 8174C7C8 was
+                                  // measured to run only on 401EA240/401BF070/
+                                  // 408C4280 - never on this object - so the
+                                  // identification is unconfirmed. Read +0 and
+                                  // +0x10 and settle it.
+                                  0x401C09D0u,
+                                  0x401C09E0u,
+                                  // Phase 1098e: the completion test is
+                                  // 8174FFD0 (vtable slot 1 of CHUDBkgndScene,
+                                  // a LEAF function - the mflr backscan
+                                  // misfiled it under 8174FF38): it clears
+                                  // [obj+0x14] only when [obj+4] == [obj+8].
+                                  // So +4 is "loads finished" and +8 is "loads
+                                  // expected". The page watch already caught
+                                  // +4 being written (lr 8174C7AC x2, lr
+                                  // 8194A070 x2), so it moves - it just never
+                                  // reaches +8. Read both.
+                                  0x401C09D4u,
+                                  0x401C09D8u,
+                                  // Phase 1098h: the HUD state word itself, and
+                                  // the scene's pending flag. The page
+                                  // write-watch SAMPLES and missed the state-8
+                                  // write that [81D43C90] proved happened, so
+                                  // read these by poll instead - it is
+                                  // non-perturbing and reports every change it
+                                  // observes.
+                                  0x81D43C50u,
+                                  0x401C09E4u,
+                                  // Phase 1098h: the Guide app record that
+                                  // [81D426C8] now points at (401C2720), and
+                                  // its handler slot +0xC - the field
+                                  // XamRegisterSysApp (8177F240, at 8177F2CC)
+                                  // fills in. If the handler is non-null, xam
+                                  // can dispatch to hud; if it stays 0, that is
+                                  // the next blocker.
+                                  0x401C2720u,
+                                  0x401C272Cu,
+                                  // Phase 1097: [81D4F610] is xam's Xenon
+                                  // button context (the event 817C1FF8 sets)
+                                  // and [81D4F614] is the enable flag that
+                                  // 817C23A8 tests FIRST - measured 0 at the
+                                  // moment the registered SysReq callback was
+                                  // called, so the press was refused by xam
+                                  // itself. Three sites set it to 1
+                                  // (8174EC40, 8175005C, 8175DDE4), each
+                                  // guarded on bit 0x4000 of
+                                  // XboxHardwareInfo.flags being CLEAR, and
+                                  // one site inside the message dispatcher
+                                  // (817807BC) sets it back to 0. Watching it
+                                  // says which of "never set" and "set then
+                                  // cleared" is true.
+                                  // (left out of the live list: it has already
+                                  // answered - see 1097 - and every extra
+                                  // entry costs two heap queries per watch
+                                  // iteration on a 120000-iteration loop.)
+                                  // Phase 1096ho: dash has a 176-entry C++
+                                  // static-initializer table at
+                                  // 9293F414..9293F6D0. Each entry constructs
+                                  // one static object, and every constructor
+                                  // of this shape starts by writing the
+                                  // object's own address into [obj] as a
+                                  // self-linked list head. So [obj] != 0 means
+                                  // "its initializer ran". These are the
+                                  // objects of entries #1, #2, #40, #46 and
+                                  // #175 - spread across the whole table, so
+                                  // the pattern of which change says whether
+                                  // the walk never happened or stopped
+                                  // partway. Entry #46's object is 92A40C98,
+                                  // whose event at +0x14 is one of the nine
+                                  // that a wait cannot resolve.
+                                  0x9296D710u, 0x929695F8u, 0x929973C0u,
+                                  0x92A40C98u, 0x92A7BFB8u,
+                                  // Phase 1096hp: dash's _initterm at 92198760
+                                  // walks a 4-entry PRE-init table first
+                                  // (9293F6D8..9293F6E8) and returns
+                                  // immediately if any entry yields non-zero -
+                                  // which SKIPS the 176-entry C++ constructor
+                                  // table at 9293F410..9293F6D4 entirely. The
+                                  // only entry that can fail is 9219FD70, the
+                                  // CRT file-descriptor table init: it callocs
+                                  // via 9219BC28, stores the pointer at
+                                  // 92A7C0FC and the count at 92A7C100, and on
+                                  // a second failure returns 0x1A. So
+                                  // [92A7C0FC] non-zero means the allocation
+                                  // succeeded and the abort is elsewhere;
+                                  // staying zero means this is the root cause.
+                                  0x92A7C0FCu, 0x92A7C100u,
+                                  // Phase 1096hq: brackets dash's entry point.
+                                  // 92196660 stores -1 to both of these at
+                                  // 9219668C/90, before any of the calls it
+                                  // makes, so if they never read FFFFFFFF the
+                                  // entry itself never ran and main is being
+                                  // reached some other way; if they do, the
+                                  // failure is between there and the
+                                  // _initterm call at 921966C0.
+                                  0x92A7C224u, 0x92A7C228u,
+                                  // Phase 1096hr POSITIVE CONTROL for the
+                                  // watch itself: 92196660 is dash's entry
+                                  // point and its first word is the constant
+                                  // 7D8802A6 (mflr r12). If the watch reports
+                                  // 00000000 for this, the watch cannot read
+                                  // dash image memory and every dash result it
+                                  // has produced is an artefact.
+                                  0x92196660u,
+                                  // Control: measured correct in the same
+                                  // crash dump, so it must never change.
+                                  0x81E15B20u,
+                                  // Phase 1099z46: xam task object whose
+                                  // vtable word becomes 01003CB4 before the
+                                  // Guide-over-Sonic crash (81778558).
+                                  0x401AFFA0u, 0x401AFFA8u, 0x401AFFB0u};
         constexpr size_t kWatchCount = xe::countof(addrs);
         uint32_t last[kWatchCount] = {};
+        bool skip_reported[kWatchCount] = {};
+        bool first_reported[kWatchCount] = {};
         bool primed = false;
         for (int iter = 0; iter < 120000; ++iter) {
           for (size_t i = 0; i < kWatchCount; ++i) {
             auto* hp = wmem->LookupHeap(addrs[i]);
-            if (!hp || hp->QueryRangeAccess(addrs[i], addrs[i] + 3) ==
-                           xe::memory::PageAccess::kNoAccess) {
+            // Phase 1096hr: this guard silently skipped every dash address.
+            // The comment on the probe list in ReportXamTextPopulation already
+            // records that QueryRangeAccess "reports kNoAccess for readable
+            // image addresses", and that is exactly what happened here: the
+            // watch never read 92xxxxxx at all, so "no change was reported"
+            // meant "never looked", not "never changed". Report the skip
+            // instead of hiding it, and report the first value actually read
+            // for every address so the instrument proves itself.
+            if (!hp) {
+              if (!skip_reported[i]) {
+                skip_reported[i] = true;
+                XELOGW("XamTextWatch: {:08X} has NO HEAP - not watched",
+                       addrs[i]);
+              }
               continue;
+            }
+            const bool queryable =
+                hp->QueryRangeAccess(addrs[i], addrs[i] + 3) !=
+                xe::memory::PageAccess::kNoAccess;
+            // Reading regardless of the query cost 4 host faults - an
+            // uncommitted page still faults no matter how unreliable the
+            // access query is for image addresses. Ask for the region's
+            // COMMIT state instead, which is what the heap scan in
+            // GuideLauncherScan had to switch to for the same reason.
+            bool committed = false;
+            {
+              HeapAllocationInfo info = {};
+              if (hp->QueryRegionInfo(addrs[i] & ~0xFFFu, &info)) {
+                committed = (info.state & kMemoryAllocationCommit) != 0;
+              }
+            }
+            if (!queryable && !committed) {
+              if (!skip_reported[i]) {
+                skip_reported[i] = true;
+                XELOGW("XamTextWatch: {:08X} not readable yet (query says "
+                       "kNoAccess and the region is not committed) - skipping "
+                       "until it is",
+                       addrs[i]);
+              }
+              continue;
+            }
+            if (!queryable && committed && !skip_reported[i]) {
+              skip_reported[i] = true;
+              XELOGW("XamTextWatch: {:08X} QueryRangeAccess says kNoAccess but "
+                     "the region IS committed - reading it. That query is "
+                     "unreliable for image addresses, which is why every dash "
+                     "address was silently skipped before this.",
+                     addrs[i]);
             }
             uint32_t v = xe::load_and_swap<uint32_t>(
                 wmem->TranslateVirtual(addrs[i]));
+            if (!first_reported[i]) {
+              first_reported[i] = true;
+              // Phase 1096ht: without a timestamp, "first read = 00000000"
+              // cannot be ordered against the guest thread that would have
+              // written it, so it cannot distinguish "the store never ran"
+              // from "we looked before it ran". Stamp it.
+              XELOGI("XamTextWatch: first read of {:08X} = {:08X} @{}ms",
+                     addrs[i], v,
+                     xe::Clock::QueryHostUptimeMillis());
+            }
             if (primed && v != last[i]) {
               // Ask the OS what the page actually is at the moment it
               // changes. If the guard is still PAGE_READONLY then nothing
@@ -4549,10 +6440,11 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
               void* hostp = wmem->TranslateVirtual(addrs[i]);
               SIZE_T got = VirtualQuery(hostp, &mbi, sizeof(mbi));
               XELOGE(
-                  "XamTextWatch: {:08X} changed {:08X} -> {:08X} "
+                  "XamTextWatch: {:08X} changed {:08X} -> {:08X} @{}ms "
                   "(host={} protect={:X} state={:X} type={:X} allocbase={} "
                   "regionsize={:X})",
-                  addrs[i], last[i], v, hostp,
+                  addrs[i], last[i], v,
+                  xe::Clock::QueryHostUptimeMillis(), hostp,
                   got ? mbi.Protect : 0u, got ? mbi.State : 0u,
                   got ? mbi.Type : 0u, got ? mbi.AllocationBase : nullptr,
                   got ? static_cast<uint64_t>(mbi.RegionSize) : 0ull);
@@ -4560,6 +6452,22 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
             last[i] = v;
           }
           primed = true;
+          // Phase 1096ht: the watch had no liveness signal, so "no change was
+          // reported after time T" could not be told apart from "the thread
+          // ended at T". The last event in the previous run was 15 SECONDS
+          // before the title even launched, which makes that distinction the
+          // whole question. Emit a heartbeat with the iteration count and the
+          // current value of the two entry-point markers.
+          if ((iter % 2000) == 0) {
+            uint32_t m0 = 0, m1 = 0;
+            for (size_t k = 0; k < kWatchCount; ++k) {
+              if (addrs[k] == 0x92A7C224u) m0 = last[k];
+              if (addrs[k] == 0x92A7C228u) m1 = last[k];
+            }
+            XELOGI("XamTextWatch: alive, iter {} @{}ms | 92A7C224={:08X} "
+                   "92A7C228={:08X}",
+                   iter, xe::Clock::QueryHostUptimeMillis(), m0, m1);
+          }
           std::this_thread::sleep_for(std::chrono::microseconds(500));
         }
       }).detach();
@@ -4873,13 +6781,567 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
     XELOGI("GuideCapture: armed for {}s", cap_delay);
   }
 
+  if (!cvars::guide_script.empty()) {
+    // Phase 1054 tabs: the test plan runs inside the emulator - keystrokes go
+    // straight into the Guide's input poll and frames come from the presenter
+    // - so a run needs neither the window in the foreground nor the keyboard
+    // (research/guidetest.ps1 raised the window and typed with keybd_event,
+    // which typed into whatever the user had in front, and the user's typing
+    // landed in xenia).
+    std::thread([this]() {
+      xe::threading::set_name("GuideScript");
+      uint32_t waited = 0;
+      while (kernel::xboxkrnl::GuideShowCount() == 0 && waited < 600000) {
+        xe::threading::Sleep(std::chrono::milliseconds(5));
+        waited += 5;
+      }
+      if (kernel::xboxkrnl::GuideShowCount() == 0) {
+        XELOGW("GuideScript: no show in {} ms; plan skipped", waited);
+        return;
+      }
+      auto* gs = graphics_system();
+      auto* presenter = gs ? gs->presenter() : nullptr;
+      const auto t0 = std::chrono::steady_clock::now();
+      auto ms_since = [&]() {
+        return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+      };
+      XELOGI("GuideScript: first show after {} ms; plan: {}", waited, cvars::guide_script);
+      auto write_raw = [&](const std::string& name, const xe::ui::RawImage& image) {
+        auto path = xe::filesystem::GetExecutableFolder() /
+                    fmt::format("{}_{}.raw", cvars::guide_script_tag, name);
+        FILE* fp = xe::filesystem::OpenFile(path, "wb");
+        if (!fp) {
+          XELOGW("GuideScript: cannot open {}", xe::path_to_utf8(path));
+          return;
+        }
+        uint32_t hdr[3] = {image.width, image.height, static_cast<uint32_t>(image.stride)};
+        fwrite(hdr, sizeof(hdr), 1, fp);
+        fwrite(image.data.data(), 1, image.data.size(), fp);
+        fclose(fp);
+      };
+      auto shot = [&](const std::string& name) {
+        xe::ui::RawImage image;
+        if (!presenter || !presenter->CaptureGuestOutput(image)) {
+          XELOGW("GuideScript: capture failed for {}", name);
+          return;
+        }
+        write_raw(name, image);
+        XELOGI("GuideScript: shot {} at +{:.0f} ms", name, ms_since());
+      };
+      static const std::pair<const char*, uint16_t> kKeys[] = {
+          {"up", 0x5810}, {"down", 0x5811}, {"left", 0x5812}, {"right", 0x5813},
+          {"a", 0x5800},  {"b", 0x5801},    {"x", 0x5802},    {"y", 0x5803},
+          {"guide", 0x5838}, {"start", 0x5814}, {"back", 0x5815}, {"lb", 0x5805}, {"rb", 0x5804}};
+      std::vector<std::string> steps;
+      {
+        std::string cur;
+        for (char ch : cvars::guide_script) {
+          if (ch == ',') {
+            if (!cur.empty()) steps.push_back(cur);
+            cur.clear();
+          } else {
+            cur.push_back(ch);
+          }
+        }
+        if (!cur.empty()) steps.push_back(cur);
+      }
+      for (const auto& step : steps) {
+        std::vector<std::string> parts;
+        {
+          std::string cur;
+          for (char ch : step) {
+            if (ch == ':') {
+              parts.push_back(cur);
+              cur.clear();
+            } else {
+              cur.push_back(ch);
+            }
+          }
+          parts.push_back(cur);
+        }
+        const std::string& verb = parts[0];
+        auto num = [&](size_t i, int def) {
+          return (i < parts.size() && !parts[i].empty()) ? std::atoi(parts[i].c_str()) : def;
+        };
+        if (verb == "wait") {
+          xe::threading::Sleep(std::chrono::milliseconds(num(1, 0)));
+        } else if (verb == "key" && parts.size() >= 2) {
+          uint16_t vk = 0;
+          for (const auto& k : kKeys) {
+            if (parts[1] == k.first) vk = k.second;
+          }
+          if (!vk) {
+            XELOGW("GuideScript: unknown key {}", parts[1]);
+            continue;
+          }
+          int hold = num(2, 60);
+          XELOGI("GuideScript: key {} ({:04X}) at +{:.0f} ms", parts[1], vk, ms_since());
+          if (vk == 0x5838) {
+            // the Guide button: the swap-time toggle's edge (the keystroke
+            // poll only runs while the Guide is up, so a queued key could
+            // close it but never reopen it)
+            kernel::xboxkrnl::GuideScriptGuideButton();
+          } else {
+            kernel::xboxkrnl::GuideScriptPushKey(vk, 1);
+            xe::threading::Sleep(std::chrono::milliseconds(hold));
+            kernel::xboxkrnl::GuideScriptPushKey(vk, 2);
+          }
+        } else if (verb == "shot" && parts.size() >= 2) {
+          shot(parts[1]);
+        } else if (verb == "film" && parts.size() >= 4) {
+          int count = num(2, 10), interval = num(3, 33);
+          const auto f0 = std::chrono::steady_clock::now();
+          std::vector<std::pair<std::string, xe::ui::RawImage>> frames;
+          frames.reserve(size_t(std::max(count, 1)));
+          for (int i = 0; i < count; ++i) {
+            auto target = f0 + std::chrono::milliseconds(i * interval);
+            auto now = std::chrono::steady_clock::now();
+            if (target > now) {
+              xe::threading::Sleep(std::chrono::duration_cast<std::chrono::milliseconds>(target - now));
+            }
+            double el = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - f0).count();
+            xe::ui::RawImage image;
+            if (!presenter || !presenter->CaptureGuestOutput(image)) {
+              XELOGW("GuideScript: capture failed in film {}", parts[1]);
+              break;
+            }
+            frames.emplace_back(fmt::format("{}_{:02d}_{}ms", parts[1], i, int(el)), std::move(image));
+          }
+          for (auto& fr : frames) write_raw(fr.first, fr.second);
+          XELOGI("GuideScript: film {} {} frames at +{:.0f} ms", parts[1], frames.size(), ms_since());
+        } else if (verb == "watch") {
+          XELOGI("GuideScript: watch at +{:.0f} ms", ms_since());
+          kernel::xboxkrnl::GuideScriptWatch();
+        } else if (verb == "dump") {
+          XELOGI("GuideScript: dump at +{:.0f} ms", ms_since());
+          kernel::xboxkrnl::GuideScriptDump();
+        } else if (verb == "quit") {
+          // Phase 1055 bugs: a clean exit through the window (the runner
+          // otherwise kills the process), so the shutdown path is exercised.
+          XELOGI("GuideScript: quit at +{:.0f} ms", ms_since());
+          if (display_window_) {
+            display_window_->app_context().CallInUIThread([this]() { display_window_->RequestClose(); });
+          }
+          break;
+        } else {
+          XELOGW("GuideScript: unknown step {}", step);
+        }
+      }
+      XELOGI("GuideScript: plan done at +{:.0f} ms", ms_since());
+    }).detach();
+    XELOGI("GuideScript: armed");
+  }
+
+  // Phase 1099d: GIVE xam A CONTROLLER, THROUGH ITS OWN API.
+  //
+  // hud polls XamInputGetKeystrokeHud 1008 times a run and xam answers
+  // ERROR_DEVICE_NOT_CONNECTED (0x48F) to every one, because its input stack
+  // looks for a USB device at [81D3C728 + user*4] and Xenia emulates no USB for
+  // it to enumerate. The Guide therefore draws but cannot be navigated.
+  //
+  // xam already has the answer built in. XAutomationpBindController (ordinal
+  // 0x3D5) marks a user's slot present, and XAutomationpInputSetState (0x3D9)
+  // copies a 12-byte X_INPUT_GAMEPAD into xam's own table - the automation
+  // path the console's own test tooling uses. So the host hands over button
+  // state and xam does every other part itself: no device object is fabricated
+  // here, no address is hardcoded (both are resolved from xam's export table by
+  // ordinal), and nothing is written into guest memory except the gamepad
+  // struct the guest asked for.
+  if (cvars::guide_automation_input) {
+    std::thread([this]() {
+      xe::threading::set_name("GuideAutomationInput");
+      auto* ks = kernel_state_.get();
+      // Wait for xam to be loaded and for its exports to resolve.
+      uint32_t bind = 0, setstate = 0, press = 0;
+      for (int i = 0; i < 600 && !setstate; ++i) {
+        xe::threading::Sleep(std::chrono::milliseconds(100));
+        auto xm = ks->GetModule("xam.xex", true);
+        if (!xm) continue;
+        bind = xm->GetProcAddressByOrdinal(0x3D5);
+        setstate = xm->GetProcAddressByOrdinal(0x3D9);
+        press = xm->GetProcAddressByOrdinal(0x3D8);
+      }
+      if (!bind || !setstate) {
+        XELOGW("GuideInput: xam does not export XAutomationpBindController "
+               "(0x3D5)/XAutomationpInputSetState (0x3D9) - bind={:08X} "
+               "set={:08X}",
+               bind, setstate);
+        return;
+      }
+      XELOGI("GuideInput: BindController={:08X} InputSetState={:08X} "
+             "InputPress={:08X}",
+             bind, setstate, press);
+
+      // Phase 1099d: xam is loaded BEFORE the title (lle_xam), so resolving its
+      // exports says nothing about whether the kernel is ready to host a guest
+      // thread. Creating the pump at that point faulted before the thread body
+      // ever ran. Wait for the executable module to exist, and give its own
+      // start-up a moment, before creating anything.
+      for (int i = 0; i < 900; ++i) {
+        if (ks->GetExecutableModule()) break;
+        xe::threading::Sleep(std::chrono::milliseconds(100));
+      }
+      if (!ks->GetExecutableModule()) {
+        XELOGW("GuideInput: no executable module - not arming the pump");
+        return;
+      }
+      xe::threading::Sleep(std::chrono::seconds(8));
+      XELOGI("GuideInput: title is up, creating the pump");
+
+      // Parse the optional script once, before touching the guest.
+      struct Step { uint32_t delay_ms; uint16_t buttons; std::string name; };
+      std::vector<Step> script;
+      {
+        // Phase 1099p: "@<path>" reads the script from a file (a recording).
+        std::string sc = cvars::guide_input_script;
+        if (!sc.empty() && sc[0] == '@') {
+          std::string body;
+          if (FILE* sf = xe::filesystem::OpenFile(sc.substr(1), "rb")) {
+            char chunk[4096];
+            size_t n;
+            while ((n = fread(chunk, 1, sizeof(chunk), sf)) > 0) {
+              body.append(chunk, n);
+            }
+            fclose(sf);
+          } else {
+            XELOGW("GuideInput: cannot read script file {}", sc.substr(1));
+          }
+          sc = body;
+        }
+        size_t i = 0;
+        while (i < sc.size()) {
+          size_t comma = sc.find(',', i);
+          if (comma == std::string::npos) comma = sc.size();
+          std::string item = sc.substr(i, comma - i);
+          i = comma + 1;
+          size_t colon = item.find(':');
+          if (colon == std::string::npos) continue;
+          uint32_t d = uint32_t(std::strtoul(item.substr(0, colon).c_str(),
+                                             nullptr, 10));
+          std::string b = item.substr(colon + 1);
+          // Phase 1099e: these are XInput VK_PAD_* virtual keys, not gamepad
+          // bitmask bits. XAutomationpInputPress takes a CODE and maps it
+          // through xam's own table at 81612AF0 (codes 0x5800..0x5837), then
+          // posts a real input event - which is what actually produces a
+          // keystroke. Setting the gamepad bitmask with InputSetState marks the
+          // pad present but generates no keystroke, so the menu never moved.
+          // Phase 1099p: names (and raw "0x5824" hex) come from the shared
+          // kGuideVkNames table, which the recorder writes with - so every
+          // press a recording contains can be replayed. "guide" (0xFFFF) is
+          // xam's automation Guide button; "hostguide" (0xFFFE) is the host's
+          // Guide-button path, which a physical/keyboard press takes.
+          const uint16_t bits = GuideVkFromName(b);
+          if (!bits) {
+            XELOGW("GuideInput: unknown button '{}' in guide_input_script", b);
+            continue;
+          }
+          script.push_back({d, bits, b});
+        }
+        if (!script.empty()) {
+          XELOGI("GuideInput: script has {} step(s)", script.size());
+        }
+      }
+
+      auto t = kernel::object_ref<kernel::XHostThread>(new kernel::XHostThread(
+          ks, 256 * 1024, 0,
+          [this, ks, bind, setstate, press, script]() -> int {
+            auto* ts = kernel::XThread::GetCurrentThread()->thread_state();
+            XELOGI("GuideInput: pump thread entered");
+            GuideRecordStart();
+            const uint32_t pad = ks->memory()->SystemHeapAlloc(16);
+            XELOGI("GuideInput: gamepad struct at {:08X}", pad);
+            if (!pad) {
+              XELOGE("GuideInput: could not allocate the gamepad struct");
+              return 0;
+            }
+            uint64_t ba[] = {0};
+            uint64_t br =
+                ks->processor()->Execute(ts, bind, ba, xe::countof(ba));
+            XELOGI("GuideInput: BindController(0) -> {:08X}",
+                   static_cast<uint32_t>(br));
+
+            auto push = [&](const hid::X_INPUT_GAMEPAD& src) {
+              auto* gp = ks->memory()->TranslateVirtual<hid::X_INPUT_GAMEPAD*>(
+                  pad);
+              *gp = src;
+              uint64_t sa[] = {0, pad};
+              ks->processor()->Execute(ts, setstate, sa, xe::countof(sa));
+            };
+
+            // Phase 1099k: a REAL pad only ever reached xam through push()
+            // (InputSetState), which 1099d/e measured as moving nothing - it
+            // marks buttons held but posts no event, so no keystroke. The
+            // script path works because it calls InputPress. Do the same for
+            // the real pad: on each NEWLY pressed button, InputPress its XInput
+            // VK_PAD code (xam maps it through its own table at 81612AF0).
+            // Triggers and the left stick use XInput's documented thresholds
+            // (XINPUT_GAMEPAD_TRIGGER_THRESHOLD 30, LEFT_THUMB_DEADZONE 7849).
+            struct PadCode { uint32_t bit; uint16_t vk; const char* name; };
+            static const PadCode kPadCodes[] = {
+                {0x1000, 0x5800, "a"},      {0x2000, 0x5801, "b"},
+                {0x4000, 0x5802, "x"},      {0x8000, 0x5803, "y"},
+                {0x0200, 0x5804, "rb"},     {0x0100, 0x5805, "lb"},
+                {0x10000, 0x5806, "lt"},    {0x20000, 0x5807, "rt"},
+                {0x0001, 0x5810, "up"},     {0x0002, 0x5811, "down"},
+                {0x0004, 0x5812, "left"},   {0x0008, 0x5813, "right"},
+                {0x0010, 0x5814, "start"},  {0x0020, 0x5815, "back"},
+                {0x0040, 0x5816, "ls"},     {0x0080, 0x5817, "rs"},
+                {0x40000, 0x5820, "ls_up"}, {0x80000, 0x5821, "ls_down"},
+                {0x100000, 0x5822, "ls_right"},
+                {0x200000, 0x5823, "ls_left"}};
+            auto virtual_bits = [](const hid::X_INPUT_GAMEPAD& g) -> uint32_t {
+              uint32_t v = uint16_t(g.buttons);
+              if (g.left_trigger > 30) v |= 0x10000;
+              if (g.right_trigger > 30) v |= 0x20000;
+              const int lx = int16_t(g.thumb_lx), ly = int16_t(g.thumb_ly);
+              if (ly > 7849) v |= 0x40000;
+              if (ly < -7849) v |= 0x80000;
+              if (lx > 7849) v |= 0x100000;
+              if (lx < -7849) v |= 0x200000;
+              return v;
+            };
+            uint32_t prev_bits = 0;
+
+            // Phase 1099k: guide_input_fake_pad stands in for the DEVICE READ
+            // only ("delay_ms:hexbits,..." held for guide_input_hold_ms), so
+            // the real-pad path below can be verified without a person at the
+            // controller. Everything after the read is the real path.
+            struct FakeStep { uint32_t delay_ms; uint16_t bits; };
+            std::vector<FakeStep> fake;
+            {
+              const std::string& fs = cvars::guide_input_fake_pad;
+              size_t i = 0;
+              while (i < fs.size()) {
+                size_t comma = fs.find(',', i);
+                if (comma == std::string::npos) comma = fs.size();
+                std::string item = fs.substr(i, comma - i);
+                i = comma + 1;
+                size_t colon = item.find(':');
+                if (colon == std::string::npos) continue;
+                fake.push_back(
+                    {uint32_t(std::strtoul(item.substr(0, colon).c_str(),
+                                           nullptr, 10)),
+                     uint16_t(std::strtoul(item.substr(colon + 1).c_str(),
+                                           nullptr, 16))});
+              }
+            }
+            size_t fake_step = 0;
+            uint32_t fake_since = 0, fake_hold_left = 0;
+            uint16_t fake_bits = 0;
+
+            // Run the script first, if there is one, so a verification run is
+            // deterministic; then fall through to pumping the real pad.
+            size_t step = 0;
+            const uint32_t hold =
+                uint32_t(std::max(16, int(cvars::guide_input_hold_ms)));
+            uint32_t since = 0;
+            int64_t since_origin = 0;
+            uint16_t held = 0;
+            uint32_t held_left = 0;
+            while (!guide_input_stop_.load(std::memory_order_acquire)) {
+              uint16_t buttons = 0;
+              if (step < script.size()) {
+                // Phase 1099p: real clock, so a recorded session replays at the
+                // speed it was played (16 ms loop ticks drift slower).
+                const auto now_ms = std::chrono::duration_cast<
+                    std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count();
+                if (!since) since_origin = now_ms;
+                since = uint32_t(std::max<int64_t>(1, now_ms - since_origin));
+                if (since >= script[step].delay_ms) {
+                  if (script[step].buttons == 0xFFFE) {
+                    XELOGI("GuideInput: host Guide-button path");
+                    on_guide_button_pressed(0);
+                  } else if (press) {
+                    uint64_t pa[] = {0, script[step].buttons};
+                    uint64_t pr = ks->processor()->Execute(ts, press, pa,
+                                                           xe::countof(pa));
+                    XELOGI("GuideInput: InputPress('{}' = {:04X}) -> {:08X}",
+                           script[step].name, script[step].buttons,
+                           static_cast<uint32_t>(pr));
+                  }
+                  ++step;
+                  since = 0;
+                }
+                xe::threading::Sleep(std::chrono::milliseconds(16));
+                continue;
+              }
+              // Real controller, routed through the same guest API.
+              hid::X_INPUT_GAMEPAD gpad = {};
+              if (!fake.empty()) {
+                if (fake_hold_left) {
+                  fake_hold_left = fake_hold_left > 16 ? fake_hold_left - 16 : 0;
+                  if (!fake_hold_left) fake_bits = 0;
+                } else if (fake_step < fake.size()) {
+                  fake_since += 16;
+                  if (fake_since >= fake[fake_step].delay_ms) {
+                    fake_bits = fake[fake_step].bits;
+                    fake_hold_left = hold;
+                    fake_since = 0;
+                    ++fake_step;
+                    XELOGI("GuideInput: fake pad read {:04X}", fake_bits);
+                  }
+                }
+                gpad.buttons = fake_bits;
+              } else if (auto* is = cvars::guide_input_host_off
+                                           ? nullptr
+                                           : input_system()) {
+                hid::X_INPUT_STATE st = {};
+                // Phase 1099l: the flags argument SELECTS drivers - InputSystem
+                // keeps a driver only if (flags & its InputType) != 0, and the
+                // types are Controller 1 / Keyboard 2 / Other 4. Passing 0 (as
+                // this did) selected no driver at all, so every read returned
+                // DEVICE_NOT_CONNECTED and the pad was read as all zeros - which
+                // is exactly what "pumped N times, buttons 0000" showed while
+                // the user was pressing buttons.
+                const X_RESULT rr = is->GetState(
+                    0,
+                    hid::InputType::Controller | hid::InputType::Keyboard |
+                        hid::InputType::Other,
+                    &st);
+                static X_RESULT last_rr = 0xFFFFFFFF;
+                if (rr != last_rr) {
+                  last_rr = rr;
+                  XELOGI("GuideInput: controller read for user 0 -> {:08X} ({})",
+                         rr, rr == X_ERROR_SUCCESS ? "connected" : "no device");
+                }
+                if (rr == X_ERROR_SUCCESS) {
+                  gpad = st.gamepad;
+                }
+              }
+              const uint32_t bits = virtual_bits(gpad);
+              const uint32_t pressed = bits & ~prev_bits;
+              prev_bits = bits;
+              // The Guide button: same host handler the keyboard key and the
+              // ImGui path use (it opens via the kernel callback and closes via
+              // xam's automation button). Kept out of the held state so xam
+              // never sees it twice.
+              if (pressed & hid::X_INPUT_GAMEPAD_GUIDE) {
+                XELOGI("GuideInput: pad Guide button");
+                on_guide_button_pressed(0);
+              }
+              gpad.buttons = uint16_t(gpad.buttons) &
+                             uint16_t(~hid::X_INPUT_GAMEPAD_GUIDE);
+              push(gpad);
+              // Phase 1099m: for the REAL device, presses come from the host's
+              // own keystroke queue (XInputGetKeystroke via InputSystem), not
+              // from thresholding the state above. Measured in the user's hands
+              // run (hands1099l): the threshold version fired ls_right 23 /
+              // ls_up 23 / ls_left 18 / ls_down 12 - an off-axis stick crossed
+              // two thresholds and wobble re-crossed them. XInputGetKeystroke
+              // already turns a stick into ONE dominant or diagonal VK_PAD code
+              // (0x5820..0x5827) and supplies held-key REPEAT, so nothing about
+              // direction, deadzone or repeat timing is decided here.
+              if (fake.empty() && !cvars::guide_input_host_off) {
+                if (auto* is = input_system(); is && press) {
+                  hid::X_INPUT_KEYSTROKE k = {};
+                  for (int drain = 0; drain < 16; ++drain) {
+                    if (is->GetKeystroke(0,
+                                         hid::InputType::Controller |
+                                             hid::InputType::Keyboard |
+                                             hid::InputType::Other,
+                                         &k) != X_ERROR_SUCCESS) {
+                      break;
+                    }
+                    const uint16_t vk = uint16_t(k.virtual_key);
+                    const uint16_t fl = uint16_t(k.flags);
+                    if (vk < 0x5800 || vk > 0x5837) continue;
+                    if (!(fl & (hid::X_INPUT_KEYSTROKE_KEYDOWN |
+                                hid::X_INPUT_KEYSTROKE_REPEAT))) {
+                      continue;
+                    }
+                    GuideRecordPress(vk);
+                    uint64_t pa[] = {0, vk};
+                    uint64_t pr = ks->processor()->Execute(ts, press, pa,
+                                                           xe::countof(pa));
+                    static uint32_t klog = 0;
+                    if (klog++ < 400) {
+                      XELOGI("GuideInput: keystroke {:04X} flags {:X} -> "
+                             "InputPress -> {:08X}",
+                             vk, fl, static_cast<uint32_t>(pr));
+                    }
+                  }
+                }
+              }
+              if (!fake.empty() && pressed && press) {
+                for (const auto& pc : kPadCodes) {
+                  if (!(pressed & pc.bit)) continue;
+                  uint64_t pa[] = {0, pc.vk};
+                  uint64_t pr =
+                      ks->processor()->Execute(ts, press, pa, xe::countof(pa));
+                  static uint32_t plog = 0;
+                  if (plog++ < 200) {
+                    XELOGI("GuideInput: pad '{}' -> InputPress({:04X}) -> {:08X}",
+                           pc.name, pc.vk, static_cast<uint32_t>(pr));
+                  }
+                }
+              }
+              buttons = uint16_t(gpad.buttons);
+              static uint32_t pn = 0;
+              if ((pn++ % 300) == 0) {
+                XELOGI("GuideInput: pumped {} times, buttons {:04X}", pn,
+                       buttons);
+              }
+              xe::threading::Sleep(std::chrono::milliseconds(16));
+            }
+            return 0;
+          }));
+      t->set_name("GuideInputPump");
+      if (XFAILED(t->Create())) {
+        XELOGE("GuideInput: could not create the pump thread");
+        return;
+      }
+      t->Wait(0, 0, 0, nullptr);
+    }).detach();
+    XELOGI("GuideInput: automation input armed");
+  }
+
+  // Phase 1099n: research probe. Dump xam's storage-device table (20 slots of
+  // 0xA0 at 81D3E1A8, layout decoded from 81731188: +0x00 "<name>\", +0x40 type
+  // string, +0x78 device id, +0x7C kind, +0x80 state; state 3 = usable) at
+  // guide_storage_dump_seconds and again 15 s later.
+  if (cvars::guide_storage_dump_seconds > 0) {
+    int delay = cvars::guide_storage_dump_seconds;
+    std::thread([this, delay]() {
+      xe::threading::set_name("GuideStorageDump");
+      for (int pass = 0; pass < 2; ++pass) {
+        xe::threading::Sleep(std::chrono::seconds(pass ? 15 : delay));
+        auto* mem = memory();
+        if (!mem) return;
+        const uint8_t* t = mem->TranslateVirtual<const uint8_t*>(0x81D3E1A8u);
+        XELOGI("GuideStorageDump pass {}: count [81D3E1A4]={:08X}", pass,
+               xe::load_and_swap<uint32_t>(
+                   mem->TranslateVirtual<const uint8_t*>(0x81D3E1A4u)));
+        for (uint32_t i = 0; i < 20; ++i) {
+          const uint8_t* e = t + i * 0xA0;
+          if (!e[0]) continue;
+          std::string name(reinterpret_cast<const char*>(e),
+                           strnlen(reinterpret_cast<const char*>(e), 0x40));
+          std::string type(reinterpret_cast<const char*>(e + 0x40),
+                           strnlen(reinterpret_cast<const char*>(e + 0x40), 0x38));
+          XELOGI("GuideStorageDump   slot {}: '{}' type '{}' id={:08X} kind={:08X} "
+                 "state={:08X}",
+                 i, name, type, xe::load_and_swap<uint32_t>(e + 0x78),
+                 xe::load_and_swap<uint32_t>(e + 0x7C),
+                 xe::load_and_swap<uint32_t>(e + 0x80));
+        }
+      }
+    }).detach();
+  }
+
   if (cvars::guide_auto_press_seconds > 0) {
     int delay = cvars::guide_auto_press_seconds;
-    std::thread([this, delay]() {
+    int again = cvars::guide_auto_press_again_seconds;
+    std::thread([this, delay, again]() {
       xe::threading::set_name("GuideAutoPress");
       xe::threading::Sleep(std::chrono::seconds(delay));
       XELOGI("Guide button: auto-press firing after {}s", delay);
       on_guide_button_pressed(0);
+      if (again > 0) {
+        xe::threading::Sleep(std::chrono::seconds(again));
+        XELOGI("Guide button: second auto-press firing after {}s more", again);
+        on_guide_button_pressed(0);
+      }
     }).detach();
     XELOGI("Guide button: auto-press armed for {}s", delay);
   }
@@ -4891,12 +7353,69 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
     ArmGuideThreadProbe(kernel_state_.get(),
                         cvars::guide_probe_threads_seconds);
   }
+  if (cvars::guide_trace_signin) {
+    InstallGuideSigninTraces(kernel_state_.get());
+  }
+  if (cvars::guide_trace_dash_lua) {
+    // Guest hooks apply to code translated afterwards: add them before the
+    // title module loads.
+    InstallGuideLuaTraces(kernel_state_.get());
+  }
+  if (cvars::guide_probe_threads_at_terminate > 0 &&
+      !kernel_state_->title_terminate_hook) {
+    // Phase 1099z52: probe N seconds after the Mth title termination
+    // (--guide_probe_threads_at_terminate_index, default 2: the first is
+    // usually the dash leaving for the game). 0 = every termination.
+    auto* ks = kernel_state_.get();
+    auto count = std::make_shared<int>(0);
+    kernel_state_->title_terminate_hook = [ks, count]() {
+      const int32_t want = cvars::guide_probe_threads_at_terminate_index;
+      if (++*count == want || want == 0) {
+        ArmGuideThreadProbe(ks, cvars::guide_probe_threads_at_terminate);
+      }
+    };
+  }
   XELOGI("Loading module {}", module_path);
   auto module = kernel_state_->LoadUserModule(module_path);
   // xam code that was correct right after xam loaded reads back as zero later
   // in the run. Bracket the title load, which is the largest thing that
   // happens in between.
   ReportXamTextPopulation(memory(), "after title load");
+  // Phase 1096gw: same flat VA-indexed dump guide_dump_xam_path makes for xam,
+  // for the title. dash.xex's HdDvdRom retry loop is four frames above the
+  // call site (back chain 92262090 9226234C 922623CC 92198B0C) and there is no
+  // image of it to disassemble; reading it six words at a time through the xam
+  // probe list costs a rebuild per address.
+  if (module && !cvars::guide_dump_title_path.empty() &&
+      module->xex_module()) {
+    auto* tm = memory();
+    const uint32_t tbase = module->xex_module()->base_address();
+    const uint32_t tsize = module->xex_module()->image_size();
+    FILE* tf = std::fopen(cvars::guide_dump_title_path.c_str(), "wb");
+    if (!tf) {
+      XELOGW("DumpTitle: could not open {}", cvars::guide_dump_title_path);
+    } else {
+      static const uint8_t kTitleZero[0x1000] = {0};
+      uint32_t mapped = 0, holes = 0;
+      for (uint32_t off = 0; off < tsize; off += 0x1000u) {
+        const uint32_t a = tbase + off;
+        const uint32_t n = std::min<uint32_t>(0x1000u, tsize - off);
+        auto* hp = tm ? tm->LookupHeap(a) : nullptr;
+        const bool ok = hp && hp->QueryRangeAccess(a, a + n - 1) !=
+                                  xe::memory::PageAccess::kNoAccess;
+        if (ok) {
+          std::fwrite(tm->TranslateVirtual(a), 1, n, tf);
+          ++mapped;
+        } else {
+          std::fwrite(kTitleZero, 1, n, tf);
+          ++holes;
+        }
+      }
+      std::fclose(tf);
+      XELOGI("DumpTitle: {:08X}+{:08X} -> {} ({} pages mapped, {} zero-filled)",
+             tbase, tsize, cvars::guide_dump_title_path, mapped, holes);
+    }
+  }
   if (!module) {
     XELOGE("Failed to load user module {}", path);
     return X_STATUS_NOT_FOUND;
@@ -5203,11 +7722,97 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
         kernel::object_ref<kernel::XHostThread>(new kernel::XHostThread(
             ks, 1024 * 1024, 0, [ks, xam_mod]() -> int {
               auto* ts = kernel::XThread::GetCurrentThread()->thread_state();
+              // Phase 1096bl: create xam's D3D device BEFORE its DllMain, so
+              // xam's own boot sees the device gate set.
+              //
+              // xam reaches its skin init from 81751220 only past
+              // [[815F048C]] & 0x200 at 817511EC. The host's existing device
+              // creation lives in the GUIDE BUTTON path, which runs long after
+              // xam has booted, so xam reads that gate CLEAR, skips the init,
+              // and 8177B0A8 can never allocate the skin-callback manager -
+              // which is why the host had to hand [81D43C50+0x28] a stand-in
+              // (1096bg/bk). Xenia's own comment says what hardware does:
+              // 8178E9F0's mode-1 device is something "nothing inside xam ever
+              // calls, so on hardware it comes from the system boot".
+              //
+              // So do what the system boot does, at the time it does it. This
+              // is an ORDERING change, not a value: nothing is fabricated, xam
+              // creates its own device with its own code.
+              //
+              // lle_xam_device_init was defined in kernel_flags.cc with its
+              // implementation lost ("the declaration survived but the
+              // definition did not") and referenced nowhere. This is that
+              // definition. Defaults off.
+              if (cvars::lle_xam_device_init) {
+                uint8_t sv_pt = 0, sv_ptd = 0;
+                auto* dcur = kernel::XThread::GetCurrentThread();
+                if (dcur) {
+                  auto* kt = dcur->guest_object<kernel::X_KTHREAD>();
+                  sv_pt = kt->process_type;
+                  sv_ptd = kt->process_type_dup;
+                  // Mode 1 asserts unless it is running as SYSTEM: it checks
+                  // VdGlobalXamDevice (empty) rather than VdGlobalDevice (the
+                  // title's, already set).
+                  kt->process_type = kernel::X_PROCTYPE_SYSTEM;
+                  kt->process_type_dup = kernel::X_PROCTYPE_SYSTEM;
+                }
+                uint64_t dca[] = {0};
+                XELOGI("LLE xam: creating xam's device BEFORE DllMain "
+                       "(8178E9F0, mode 1 - the one the system boot makes)");
+                uint64_t dcr = ks->processor()->Execute(
+                    ts, kernel::xboxkrnl::GuideConst(0x8178E9F0u), dca,
+                    xe::countof(dca));
+                if (dcur) {
+                  auto* kt = dcur->guest_object<kernel::X_KTHREAD>();
+                  kt->process_type = sv_pt;
+                  kt->process_type_dup = sv_ptd;
+                }
+                auto rdg = [&](uint32_t a) {
+                  return xe::load_and_swap<uint32_t>(
+                      ks->memory()->TranslateVirtual(a));
+                };
+                const uint32_t gp = rdg(0x815F048Cu);
+                const uint32_t gv = gp ? rdg(gp) : 0;
+                XELOGI("LLE xam: early device creation returned {:08X} | gate "
+                       "[815F048C]={:08X} [*]={:08X} bit200={}",
+                       static_cast<uint32_t>(dcr), gp, gv,
+                       (gv & 0x200) ? "SET" : "clear");
+              }
+              // Phase 1096br: xam is a SYSTEM module on hardware. Its own
+              // allocator 8177B0A8 opens with
+              //   bl KeGetCurrentProcessType ; cmpwi r3,2 ; bne -> return null
+              // so it refuses to allocate for anything that is not
+              // X_PROCTYPE_SYSTEM(2). That is why 8177BFC8 - the skin-callback
+              // manager's constructor - returns null (1096bk) and why the host
+              // had to substitute a stand-in at [81D43C50+0x28] (1096bg).
+              // Tell the truth about which process this is and the guest builds
+              // its own object; nothing is fabricated.
+              uint8_t sv_ppt = 0, sv_pptd = 0;
+              kernel::XThread* sysca = nullptr;
+              if (cvars::lle_xam_system_process) {
+                sysca = kernel::XThread::GetCurrentThread();
+                if (sysca) {
+                  auto* kt = sysca->guest_object<kernel::X_KTHREAD>();
+                  sv_ppt = kt->process_type;
+                  sv_pptd = kt->process_type_dup;
+                  kt->process_type = kernel::X_PROCTYPE_SYSTEM;
+                  kt->process_type_dup = kernel::X_PROCTYPE_SYSTEM;
+                  XELOGI("LLE xam: boot thread process type {} -> SYSTEM for "
+                         "DllMain (xam is a system module; 8177B0A8 refuses to "
+                         "allocate otherwise)", sv_ppt);
+                }
+              }
               uint64_t args[] = {xam_mod->handle(), 1 /* PROCESS_ATTACH */, 0};
               XELOGI("LLE xam: DllMain entry={:08X}", xam_mod->entry_point());
               ks->processor()->Execute(ts, xam_mod->entry_point(), args,
                                        xe::countof(args));
               XELOGI("LLE xam: DllMain returned");
+              if (sysca) {
+                auto* kt = sysca->guest_object<kernel::X_KTHREAD>();
+                kt->process_type = sv_ppt;
+                kt->process_type_dup = sv_pptd;
+              }
+              GuideHudSlotMark(ks, "after xam DllMain");
               // xam's heap descriptors (array at 0x81D4E1B0, 10 x 408 bytes)
               // are still all-zero after DllMain: the "Unable to commit %d
               // bytes for heap." path never runs, so creation is not failing,
@@ -5231,6 +7836,95 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
               // visual registry is empty and every control reports a null
               // visual (80300017) while laying out correctly. It has no
               // callers inside xam and takes no arguments, so drive it here.
+              // Phase 1091r: THE VISUALS WITHOUT THE ORPHAN'S TAIL.
+              // 81795548's useful work is done well before the point that
+              // needs the fabricated manager. Reading it end to end:
+              //   817956B8 r3 = 816080F4 (L"\SystemRoot\huduiskin.xex")
+              //   817956B0 r4 = 0x40000008, r5 = 817AB9E8(), r6 = &handle
+              //   817956C4 bl 81D0F42C            <- XexLoadImage
+              //   817956EC bl 8178E340(handle, 81608850 L"skin",
+              //                        81608B24 L"skin.xur", &buf, 0x80)
+              //   817956F8 bl 8193D4B8(&buf, 0)   <- XuiVisualRegister(uri, 0)
+              //   ... and only at 8179593C does it read [81D43C50+0x28] and
+              //       register the skin-change callback, which is the part
+              //       that faults without a stand-in (the harness's own
+              //       comment says the visuals are already registered by then).
+              // 81608274/81608298 confirm the URI shape: "memory://%.*ws" and
+              // "section://%X,strtable#strings.xus".
+              // So do the first half only, with EVERY value taken from xam -
+              // its own path string, its own flags, its own format strings,
+              // its own version call - and never reach the tail, so nothing
+              // has to be fabricated. The two SystemHeapAllocs here are
+              // out-parameter scratch, not stand-ins for guest objects.
+              if (cvars::guide_skin_visuals_only) {
+                auto* m = ks->memory();
+                auto rd32 = [&](uint32_t a) {
+                  return xe::load_and_swap<uint32_t>(m->TranslateVirtual(a));
+                };
+                uint32_t hbuf = m->SystemHeapAlloc(16, 16);
+                uint32_t ubuf = m->SystemHeapAlloc(0x100, 16);
+                if (!hbuf || !ubuf) {
+                  XELOGW("SkinVisuals: could not allocate scratch - nothing done");
+                } else {
+                  std::memset(m->TranslateVirtual(hbuf), 0, 16);
+                  std::memset(m->TranslateVirtual(ubuf), 0, 0x100);
+                  // Phase 1091t: THE MISSING PIECE 1091r's 8000FFFF WAS.
+                  // 8178DC58 installs xam's XUI PROVIDERS - no arguments,
+                  // asserts the UI thread, and registers the object at
+                  // 81D22A54 with its interfaces 81D22A58 / 81D22A5C
+                  // (8178DD64 bl 8193F8E0, 8178DD78 bl 8196EF30). That is
+                  // where 817923A0 - the visual registrar working off the LIVE
+                  // [81D43C50+0x80] - actually lives. Its ONLY caller in the
+                  // image is 81795638, inside the orphan skin loader. So the
+                  // loader is not merely a skin loader: it is the
+                  // initialisation for the whole XUI provider subsystem, and
+                  // skipping it is exactly why XuiVisualRegister answered
+                  // 8000FFFF last time. 817900C0 is the call immediately
+                  // before it whose result the loader checks, so drive that
+                  // first and do not proceed if it fails.
+                  uint64_t pa[] = {0};
+                  uint32_t pre = uint32_t(ks->processor()->Execute(
+                      ts, kernel::xboxkrnl::GuideConst(0x817900C0u), pa, 1));
+                  uint32_t prov = 0xDEADu;
+                  if (int32_t(pre) >= 0) {
+                    uint64_t da[] = {0};
+                    prov = uint32_t(ks->processor()->Execute(
+                        ts, kernel::xboxkrnl::GuideConst(0x8178DC58u), da, 1));
+                  }
+                  XELOGI("SkinVisuals: 817900C0 -> {:08X}; provider install "
+                         "8178DC58 -> {:08X} (DEAD = skipped, the first call failed)",
+                         pre, prov);
+                  uint64_t va[] = {0};
+                  uint32_t ver = uint32_t(ks->processor()->Execute(
+                      ts, kernel::xboxkrnl::GuideConst(0x817AB9E8u), va, 1));
+                  uint64_t la[] = {0x816080F4ull, 0x40000008ull, ver, hbuf};
+                  uint32_t lr32 = uint32_t(ks->processor()->Execute(
+                      ts, kernel::xboxkrnl::GuideConst(0x81D0F42Cu), la, 4));
+                  uint32_t hmod = rd32(hbuf);
+                  XELOGI("SkinVisuals: XexLoadImage(816080F4, 40000008, ver {:08X}) "
+                         "-> {:08X}, module handle {:08X}", ver, lr32, hmod);
+                  if (int32_t(lr32) < 0 || !hmod) {
+                    XELOGW("SkinVisuals: the skin module did not load - stopping "
+                           "here rather than registering anything");
+                  } else {
+                    uint64_t fa[] = {hmod, 0x81608850ull, 0x81608B24ull, ubuf, 0x80ull};
+                    uint32_t fr = uint32_t(ks->processor()->Execute(
+                        ts, kernel::xboxkrnl::GuideConst(0x8178E340u), fa, 5));
+                    std::string uri;
+                    for (uint32_t i = 0; i < 96; ++i) {
+                      uint16_t u = xe::load_and_swap<uint16_t>(
+                          m->TranslateVirtual(ubuf + i * 2u));
+                      if (!u) break;
+                      uri += (u >= 32 && u < 127) ? char(u) : '?';
+                    }
+                    uint64_t ra[] = {ubuf, 0};
+                    uint32_t rr = uint32_t(ks->processor()->Execute(
+                        ts, kernel::xboxkrnl::GuideConst(0x8193D4B8u), ra, 2));
+                    XELOGI("SkinVisuals: 8178E340 -> {:08X}, uri \"{}\"; "
+                           "XuiVisualRegister(8193D4B8) -> {:08X}", fr, uri, rr);
+                  }
+                }
+              }
               if (cvars::lle_xam_skin_init) {
                 // The loader's tail loads [81D43C50+0x28] and calls through
                 // it to register a skin-change callback. Nothing in xam ever
@@ -5244,15 +7938,257 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                 // callee only stores the callback at +0x30/+0x34, and since
                 // nothing else in xam creates or reads this manager, nothing
                 // else can be misled by it.
-                uint32_t mgr = ks->memory()->SystemHeapAlloc(0x100, 16);
-                if (mgr) {
-                  std::memset(ks->memory()->TranslateVirtual(mgr), 0, 0x100);
-                  xe::store_and_swap<uint32_t>(
-                      ks->memory()->TranslateVirtual(0x81D43C78u), mgr);
-                  XELOGI("LLE xam: skin callback manager stand-in at {:08X}",
-                         mgr);
+                // Phase 1091m: ASK THE GUEST FOR IT FIRST. The stand-in below
+                // is a host-authored object sitting in a guest field, and it
+                // cost five phases (1091e-1091k) of reading OUR OWN block as
+                // if it were xam's. xam has a constructor for what this slot
+                // wants: 8177BFC8 takes no arguments, calls 8177B0A8 and
+                // returns its result ORed with 1 - and that tag bit is exactly
+                // what 8177BFB0 asserts on the value it reads out of the slot
+                // (clrlwi. r3,0x1f / bne / twui), which a raw host pointer can
+                // never satisfy. 8177B0A8 asserts KeGetCurrentProcessType == 2,
+                // calls 81778CD8, then 8177B058 for the object, and addrefs it
+                // at [obj+4].
+                // NO SILENT FALLBACK (the 1089 rule): if the guest returns 0
+                // the harness says so and leaves the slot alone rather than
+                // putting a number of its own back.
+                // Phase 1091n: WHY xam has no object to give - MEASURED, and
+                // the first attempt at this probe is why it is a plain read now.
+                // 8177BFC8 -> 8177B0A8 -> 8177B058, and 8177B058 is
+                // `817795A8(0,&out); return out ? [out+0x0C] : 0` - the current
+                // worker's current task ([worker+0x0C] is the slot 1074 named).
+                // CALLING 817795A8 HERE FAULTS (run worker1: access violation at
+                // guest PC 81779604): both it and 81778CD8 open by loading a TLS
+                // INDEX from [81D227F0], asserting it is not -1, asserting
+                // KeGetCurrentProcessType()==2, and then calling KeTlsGetValue
+                // (81D0FEFC) and dereferencing the result. On this bootstrap
+                // thread that slot is empty, the asserts are silenced by
+                // ignore_trap_instructions, and the dereference is the crash.
+                // So read the index instead of driving the chain.
+                if (cvars::guide_bkgnd_watch) {
+                  uint32_t tls_index = xe::load_and_swap<uint32_t>(
+                      ks->memory()->TranslateVirtual(0x81D227F0u));
+                  XELOGI("LLE xam: xam's per-thread context is a TLS slot, index "
+                         "[81D227F0] = {:08X}{}. 8177B058 reads it through "
+                         "KeTlsGetValue and returns [worker+0x0C]; on this thread "
+                         "there is no worker, so 8177BFC8 has no skin-callback "
+                         "manager to return and the harness must stand one in.",
+                         tls_index,
+                         tls_index == 0xFFFFFFFFu ? " (-1: xam never allocated it)"
+                                                  : "");
+                }
+                if (cvars::guide_hud_app_init) {
+                  // Phase 1095d: the device gate at 817511EC guards FOUR calls,
+                  // not one, and xam's own error strings name them:
+                  //   817ABBA0(the media: and SystemRoot path strings)
+                  //        815FB5D4 "Failed to create media symbolic link"
+                  //   81795970  815FB5A8 "Failed to initialize UI Thread"
+                  //   81BE5D18
+                  //   8176C588
+                  // Driving only 81795970 (1095c) left the other three undone
+                  // and the skin loader faulted in a different place each run.
+                  // Run the block in xam's own order and report each result.
+                  auto rdw2 = [&](uint32_t a) {
+                    return xe::load_and_swap<uint32_t>(
+                        ks->memory()->TranslateVirtual(a));
+                  };
+                  // Phase 1095e: make this a thread xam owns, using xam's
+                  // own installer, before running anything it gates on.
+                  uint32_t xam_tls_block = 0;
+                  if (cvars::guide_hud_app_init_tls) {
+                    xam_tls_block = ks->memory()->SystemHeapAlloc(64, 16);
+                    if (xam_tls_block) {
+                      std::memset(
+                          ks->memory()->TranslateVirtual(xam_tls_block), 0, 64);
+                      uint64_t ba2[] = {xam_tls_block};
+                      uint64_t br2 = ks->processor()->Execute(
+                          ts, kernel::xboxkrnl::GuideConst(0x81778D38u), ba2, 1);
+                      XELOGI("LLE xam: installed xam per-thread block {:08X} "
+                             "via 81778D38 -> {:08X}; 8177BFC8 now -> {:08X}",
+                             xam_tls_block, uint32_t(br2), [&] {
+                               uint64_t qa[] = {0};
+                               return uint32_t(ks->processor()->Execute(
+                                   ts, kernel::xboxkrnl::GuideConst(0x8177BFC8u),
+                                   qa, 1));
+                             }());
+                    }
+                  }
+                  {
+                    uint64_t la[] = {0x815FB608ull, 0x815FB61Cull};
+                    uint64_t lr2 = ks->processor()->Execute(
+                        ts, kernel::xboxkrnl::GuideConst(0x817ABBA0u), la, 2);
+                    XELOGI("LLE xam: media symlink 817ABBA0 -> {:08X}",
+                           uint32_t(lr2));
+                  }
+                  uint32_t before = rdw2(0x81D43C78u);
+                  uint64_t ia[] = {0};
+                  uint64_t ir = ks->processor()->Execute(
+                      ts, kernel::xboxkrnl::GuideConst(0x81795970u), ia, 1);
+                  XELOGI("LLE xam: HUD app init 81795970 -> {:08X} | "
+                         "[81D43C78] {:08X} -> {:08X} | [81D43C50] {:08X} | "
+                         "[81D43684] {:08X} (8178F748 via xam boot 817517FC; "
+                         "8178DCB4 passes it to 818FF2C8 and the skin loader "
+                         "faults if the object behind it is unconstructed) | "
+                         "[81D42970] {:08X} [81D42974] {:08X}",
+                         uint32_t(ir), before, rdw2(0x81D43C78u),
+                         rdw2(0x81D43C50u), rdw2(0x81D43684u),
+                         rdw2(0x81D42970u), rdw2(0x81D42974u));
+                  for (uint32_t fn : {0x81BE5D18u, 0x8176C588u}) {
+                    uint64_t fa[] = {0};
+                    uint64_t fr = ks->processor()->Execute(
+                        ts, kernel::xboxkrnl::GuideConst(fn), fa, 1);
+                    XELOGI("LLE xam: gated init {:08X} -> {:08X}", fn,
+                           uint32_t(fr));
+                  }
+                  if (xam_tls_block) {
+                    uint64_t ea[] = {0};
+                    ks->processor()->Execute(
+                        ts, kernel::xboxkrnl::GuideConst(0x81778DA8u), ea, 1);
+                    XELOGI("LLE xam: cleared xam per-thread block (81778DA8)");
+                  }
+                  // Phase 1095f: 8177BF38 QUEUES the skin loader (tail call to
+                  // 81779920), so 81795548 runs on a pool worker while this
+                  // thread would otherwise carry straight on into device
+                  // creation, XUI init and scene navigation - both sides
+                  // touching XUI state, which is what a fault site that moves
+                  // every run looks like. Wait on the loader's OWN completion
+                  // flag: 81795948 writes [81D43C50+0xB4] = 1 at its tail.
+                  if (cvars::guide_hud_app_init_wait_ms > 0) {
+                    const auto t0 = std::chrono::steady_clock::now();
+                    const auto deadline =
+                        t0 + std::chrono::milliseconds(
+                                 cvars::guide_hud_app_init_wait_ms);
+                    uint32_t done = 0;
+                    while (std::chrono::steady_clock::now() < deadline) {
+                      done = rdw2(0x81D43C50u + 0xB4u);
+                      if (done == 1u) break;
+                      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    }
+                    const auto ms =
+                        std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - t0)
+                            .count();
+                    if (done == 1u) {
+                      XELOGI("LLE xam: skin loader 81795548 completed after "
+                             "{} ms ([81D43C50+B4]=1, [+B8]={:08X})",
+                             ms, rdw2(0x81D43C50u + 0xB8u));
+                    } else {
+                      XELOGE("GUIDE FAULT: skin loader 81795548 did NOT "
+                             "complete in {} ms ([81D43C50+B4]={:08X}) - the "
+                             "Guide bootstrap is about to race it",
+                             ms, done);
+                    }
+                  }
+                }
+                uint32_t mgr = 0;
+                if (cvars::guide_real_skin_mgr) {
+                  uint64_t ma[] = {0};
+                  uint32_t before = xe::load_and_swap<uint32_t>(
+                      ks->memory()->TranslateVirtual(0x81D43C78u));
+                  uint64_t mr = ks->processor()->Execute(
+                      ts, kernel::xboxkrnl::GuideConst(0x8177BFC8u), ma, 1);
+                  mgr = uint32_t(mr);
+                  XELOGI("LLE xam: skin callback manager - asked xam (8177BFC8)"
+                         " -> {:08X} | tag bit {} | slot was {:08X}",
+                         mgr, (mgr & 1u) ? "SET" : "CLEAR", before);
+                  // 8177BFC8 ORs the tag bit in UNCONDITIONALLY (8177BFDC
+                  // `ori r3, r3, 1` sits before the null test), so a failure
+                  // returns 00000001, not 0. Testing truthiness stored that 1,
+                  // 8177BFB0 cleared the tag back to 0, and 8177B2C0 wrote the
+                  // procedure to [0+0x30] - an access violation at 8177B2F0,
+                  // which is the exact fault 1079's XamAppLoad guard was
+                  // written to avoid. The object is the value ABOVE the tag.
+                  if (mgr & ~1u) {
+                    xe::store_and_swap<uint32_t>(
+                        ks->memory()->TranslateVirtual(0x81D43C78u), mgr);
+                    XELOGI("LLE xam: skin callback manager is XAM'S OWN {:08X}",
+                           mgr);
+                  } else {
+                    XELOGW("LLE xam: xam returned NO skin callback manager "
+                           "(8177BFC8 -> {:08X}, i.e. 8177B0A8 gave null and only "
+                           "the tag bit survives) - the slot is LEFT ALONE, no "
+                           "stand-in substituted", mgr);
+                  }
+                } else if (uint32_t have = xe::load_and_swap<uint32_t>(
+                               ks->memory()->TranslateVirtual(0x81D43C78u))) {
+                  // Phase 1095f: the guest already put its OWN manager here
+                  // (81795970 writes it - see guide_hud_app_init). Never
+                  // overwrite it with a stand-in; that is the host authoring
+                  // over the guest, and it silently undid the whole point of
+                  // driving xam's init. 1095e also settled that asking
+                  // 8177BFC8 is the wrong question - it is a PER-THREAD
+                  // accessor, not a getter for this global slot.
+                  mgr = have;
+                  XELOGI("LLE xam: skin callback manager is XAM'S OWN {:08X} "
+                         "(already in the slot - no stand-in)", mgr);
+                } else {
+                  mgr = ks->memory()->SystemHeapAlloc(0x100, 16);
+                  if (mgr) {
+                    std::memset(ks->memory()->TranslateVirtual(mgr), 0, 0x100);
+                    xe::store_and_swap<uint32_t>(
+                        ks->memory()->TranslateVirtual(0x81D43C78u), mgr);
+                    XELOGI("LLE xam: skin callback manager stand-in at {:08X} "
+                           "(HOST-AUTHORED - the slot was empty; run "
+                           "guide_hud_app_init and the guest fills it itself)",
+                           mgr);
+                  }
                 }
                 uint64_t sargs[] = {0};
+                // Phase 1054: XUIFONT::Init sizes the glyph atlas by point
+                // size (81913A44: < 12 -> 128, < 64 -> 256, else 512). The
+                // harness replays one paint's stream later, so any glyph cell
+                // recycled within a paint shows as a missing or wrong letter.
+                // The patch must land before 8178DE50 translates the
+                // function (p1054e: patched after it, no effect). Words are
+                // "li r11, N" immediates (0x39600000 | N).
+                if (cvars::guide_font_atlas > 0) {
+                  uint32_t fa = uint32_t(cvars::guide_font_atlas) & 0xFFFFu;
+                  kernel::xboxkrnl::GuidePatchWord(0x81913A48u, 0x39600080u,
+                                                   0x39600000u | fa,
+                                                   "FontAtlas128");
+                  kernel::xboxkrnl::GuidePatchWord(0x81913A58u, 0x39600100u,
+                                                   0x39600000u | fa,
+                                                   "FontAtlas256");
+                  kernel::xboxkrnl::GuidePatchWord(0x81913A64u, 0x39600200u,
+                                                   0x39600000u | fa,
+                                                   "FontAtlas512");
+                  // The two thresholds the compares read at run time (12.0
+                  // and 64.0 points): -1.0 sends every size down the 512
+                  // arm whether or not the code patch beat the translator.
+                  kernel::xboxkrnl::GuidePatchWord(0x8163FA8Cu, 0x41400000u,
+                                                   0xBF800000u,
+                                                   "FontAtlasThresh12");
+                  kernel::xboxkrnl::GuidePatchWord(0x8163FA88u, 0x42800000u,
+                                                   0xBF800000u,
+                                                   "FontAtlasThresh64");
+                }
+                if (cvars::lle_xam_font_init) {
+                  uint64_t fargs[] = {0};
+                  uint64_t fr = ks->processor()->Execute(
+                      ts, kernel::xboxkrnl::GuideConst(0x8178DE50u), fargs, 0);
+                  XELOGI("LLE xam: font subsystem init 8178DE50 -> {:08X}",
+                         static_cast<uint32_t>(fr));
+                }
+                if (cvars::lle_xam_render_host_first) {
+                  auto rdw = [&](uint32_t a) {
+                    return a ? xe::load_and_swap<uint32_t>(
+                                   ks->memory()->TranslateVirtual(a))
+                             : 0u;
+                  };
+                  uint32_t rhost = kernel::xboxkrnl::XamRenderHost();
+                  uint32_t ctx_before = rdw(0x81D6C978u);
+                  uint64_t hargs[] = {0};
+                  uint64_t hr = rhost ? ks->processor()->Execute(ts, rhost, hargs, 0)
+                                      : 0xDEADull;
+                  uint32_t ctx_after = rdw(0x81D6C978u);
+                  XELOGI("LLE xam: render host {:08X} before skin init -> hr={:08X} "
+                         "ctx {:08X} -> {:08X} [+C]={:08X} [+1C]={:08X} "
+                         "texdev[81D6C980]={:08X}",
+                         rhost, static_cast<uint32_t>(hr), ctx_before, ctx_after,
+                         ctx_after ? rdw(ctx_after + 0x0Cu) : 0u,
+                         ctx_after ? rdw(ctx_after + 0x1Cu) : 0u,
+                         rdw(0x81D6C980u));
+                }
                 // Phase 517: the loader dies at 81901EAC, a bctrl through
                 // [[obj+0x1C8]+0x0C] where that slot holds 006E0065 - UTF-16
                 // "en" - so the field points at locale text, not an interface
@@ -5264,16 +8200,209 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                 // This must happen HERE, not in GuideBootstrap: the crash is
                 // during this call, and the bootstrap's patch site is never
                 // reached (RtUnbindPatch does not log in this configuration).
-                if (cvars::guide_patch_skin_dispatch) {
+                // Phase 1046: the nop is separable from the stand-ins below.
+                // Once the JIT translates 81901E40 with it, every image load
+                // returns E_FAIL for the session; see guide_skin_dispatch_nop.
+                if (cvars::guide_patch_skin_dispatch &&
+                    cvars::guide_skin_dispatch_nop) {
                   kernel::xboxkrnl::GuidePatchWord(0x81901E88u, 0x409A0010u,
                                                    0x60000000u,
                                                    "SkinDispatchPatch");
+                } else if (cvars::guide_patch_skin_dispatch) {
+                  XELOGI("LLE xam: SkinDispatchPatch skipped "
+                         "(guide_skin_dispatch_nop=false)");
                 }
-                XELOGI("LLE xam: calling skin loader 81795548");
-                uint64_t sr = ks->processor()->Execute(ts, kernel::xboxkrnl::GuideConst(0x81795548u), sargs,
-                                                       0);
-                XELOGI("LLE xam: skin loader returned {:08X}",
-                       static_cast<uint32_t>(sr));
+                // Phase 1096ci: this direct Execute is a SECOND invocation.
+                // 81795970 has already armed the task at [81D43C50+0x28] with
+                // proc 81795548 and flags 5 (proc | ENQUEUE) and kicked the
+                // pool at 81795A20. When the pool is live the guest dispatches
+                // it itself (measured: skin-loader caller history carries
+                // 81779D54, the dispatcher's bctrl on task[+0x30]), so calling
+                // it here as well makes it run twice and races its own tail.
+                if (cvars::guide_guest_dispatch_skin_loader) {
+                  XELOGI("LLE xam: NOT calling skin loader 81795548 - the "
+                         "guest queued it at 81795A18/81795A20; leaving the "
+                         "dispatch to xam's own task pool");
+                  // Phase 1096ck: removing the host's call alone reordered the
+                  // block - 81780A28's pool task ran first and faulted at
+                  // 81747DE8. The host still has to WAIT where it used to
+                  // block inside Execute, but waiting is not driving: poll
+                  // xam's own completion flag, the one 81795948 writes at the
+                  // loader's tail ([81D43C50+0xB4] = 1), which is set only
+                  // after 8179593C has re-armed the shared task with the
+                  // HUD-manager loop. Nothing is written to the guest.
+                  if (cvars::guide_guest_dispatch_wait_ms > 0) {
+                    auto rdw3 = [&](uint32_t a) {
+                      return a ? xe::load_and_swap<uint32_t>(
+                                     ks->memory()->TranslateVirtual(a))
+                               : 0u;
+                    };
+                    const auto t0 = std::chrono::steady_clock::now();
+                    const auto deadline =
+                        t0 + std::chrono::milliseconds(
+                                 cvars::guide_guest_dispatch_wait_ms);
+                    uint32_t done = 0;
+                    while (std::chrono::steady_clock::now() < deadline) {
+                      done = rdw3(0x81D43C50u + 0xB4u);
+                      if (done == 1u) break;
+                      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    }
+                    const auto ms =
+                        std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - t0)
+                            .count();
+                    const uint32_t slot = rdw3(0x81D43C50u + 0x28u);
+                    const uint32_t task = slot & ~1u;
+                    XELOGI("LLE xam: guest-dispatched skin loader {} after "
+                           "{} ms ([81D43C50+B4]={:08X}); slot={:08X} "
+                           "proc[+30]={:08X}",
+                           done == 1u ? "COMPLETED" : "DID NOT COMPLETE", ms,
+                           done, slot, task ? rdw3(task + 0x30u) : 0u);
+                    // Phase 1096dc: press the Guide button through xam's own
+                    // automation API. See guide_guest_xenon_button.
+                    if (cvars::guide_guest_xenon_button && done == 1u) {
+                      const uint32_t dev_before = rdw3(0x81D3C728u);
+                      uint64_t bargs[] = {0};
+                      uint64_t br = ks->processor()->Execute(
+                          ts, kernel::xboxkrnl::GuideConst(0x81723E08u), bargs,
+                          1);
+                      XELOGI("GuideXenonButton: 81723E08(0) -> {:08X} | "
+                             "[81D3C728] {:08X} -> {:08X} | state {:08X}",
+                             static_cast<uint32_t>(br), dev_before,
+                             rdw3(0x81D3C728u), rdw3(0x81D43C50u));
+                      // Phase 1096dc: and deliver the press itself through
+                      // xam ordinal 0x3D9, XAutomationpInputSetState
+                      // (81723ED0). It memcpy's 12 bytes - an XINPUT_GAMEPAD -
+                      // into [81D3C74C + user*12] (81723F00 mulli 0xC,
+                      // 81723F10 add, 81723F14 bl 8180D9F0 with r5=0xC). The
+                      // only value written is the button the user actually
+                      // pressed; xam decides what to do with it.
+                      const uint32_t pad =
+                          ks->memory()->SystemHeapAlloc(16u);
+                      if (pad) {
+                        auto* padp = ks->memory()->TranslateVirtual(pad);
+                        std::memset(padp, 0, 16);
+                        xe::store_and_swap<uint16_t>(
+                            padp, uint16_t(xe::hid::X_INPUT_GAMEPAD_GUIDE));
+                        uint64_t sargs2[] = {0, pad};
+                        uint64_t sr2 = ks->processor()->Execute(
+                            ts, kernel::xboxkrnl::GuideConst(0x81723ED0u),
+                            sargs2, 2);
+                        XELOGI("GuideXenonButton: 81723ED0(0, {:08X}) -> "
+                               "{:08X} | state {:08X}",
+                               pad, static_cast<uint32_t>(sr2),
+                               rdw3(0x81D43C50u));
+                        // Phase 1096dh: and the press itself, through xam
+                        // ordinal 0x3D8 XAutomationpInputPress (817243A8),
+                        // which takes (user, button mask) - 817243B4/B8 keep
+                        // r3/r4, 817243F4 compares the mask against 0xFFFF.
+                        // The only value passed is the button the user pressed.
+                        // Phase 1096dh: the mask 0xFFFF is xam's OWN sentinel
+                        // for the Guide button - 81724444 compares against it
+                        // and 81724454 `ori r11, r11, 0x400` sets
+                        // X_INPUT_GAMEPAD_GUIDE only on that path. Any other
+                        // mask goes through the validator at 817C4758, which
+                        // rejects 0x400 (measured: the call returned 0).
+                        uint64_t pargs[] = {0, 0xFFFFull};
+                        uint64_t pr = ks->processor()->Execute(
+                            ts, kernel::xboxkrnl::GuideConst(0x817243A8u),
+                            pargs, 2);
+                        XELOGI("GuideXenonButton: 817243A8(0, GUIDE) -> {:08X} "
+                               "| state {:08X}",
+                               static_cast<uint32_t>(pr), rdw3(0x81D43C50u));
+                        // Phase 1096dl: a watcher wants an EDGE, and one
+                        // press cannot produce one if nothing sampled the
+                        // released state first. Drive press/release pairs and
+                        // let the pump's argument capture say whether ANY new
+                        // message id appears. If none does, the automation
+                        // press notifies nothing and the Guide watcher is not
+                        // on this path at all - which is the open question
+                        // 1096dk withdrew to.
+                        for (int rep = 0; rep < 8; ++rep) {
+                          std::memset(padp, 0, 16);
+                          uint64_t z[] = {0, pad};
+                          ks->processor()->Execute(
+                              ts, kernel::xboxkrnl::GuideConst(0x81723ED0u), z,
+                              2);
+                          xe::threading::Sleep(std::chrono::milliseconds(40));
+                          uint64_t p2[] = {0, 0xFFFFull};
+                          ks->processor()->Execute(
+                              ts, kernel::xboxkrnl::GuideConst(0x817243A8u), p2,
+                              2);
+                          xe::threading::Sleep(std::chrono::milliseconds(40));
+                        }
+                        XELOGI("GuideXenonButton: 8 press/release pairs done | "
+                               "state {:08X}",
+                               rdw3(0x81D43C50u));
+                      }
+                    }
+                    // Phase 1096fq: DIAGNOSTIC, see guide_diag_call_launcher.
+                    if (cvars::guide_diag_call_launcher && done == 1u) {
+                      const uint32_t rec_before = rdw3(0x81D426C8u);
+                      uint64_t la[] = {0, 0, 0};
+                      uint64_t lr2 = ks->processor()->Execute(
+                          ts, kernel::xboxkrnl::GuideConst(0x817C2480u), la, 3);
+                      XELOGI("GuideDiagLauncher: 817C2480(0,0,0) -> {:08X} | "
+                             "[81D426C8] {:08X} -> {:08X} | state {:08X}",
+                             static_cast<uint32_t>(lr2), rec_before,
+                             rdw3(0x81D426C8u), rdw3(0x81D43C50u));
+                    }
+                    // Phase 1096fh: DIAGNOSTIC, see guide_diag_call_ordinal_580.
+                    if (cvars::guide_diag_call_ordinal_580 && done == 1u) {
+                      const uint32_t gate_before =
+                          rdw3(0x81D43C50u + 0xA8u);
+                      uint64_t o5[] = {0, 0, 0, 0, 0, 0};
+                      uint64_t or5 = ks->processor()->Execute(
+                          ts, kernel::xboxkrnl::GuideConst(0x81793AA0u), o5, 6);
+                      XELOGI("GuideDiag580: ordinal 0x244 (81793AA0) with six "
+                             "zeros -> {:08X} | [81D43C50+A8] {:08X} -> {:08X} "
+                             "| state {:08X}",
+                             static_cast<uint32_t>(or5), gate_before,
+                             rdw3(0x81D43C50u + 0xA8u), rdw3(0x81D43C50u));
+                    }
+                    // Phase 1096cs: call xam's OWN exported show entry
+                    // (ordinal 581) so xam sets its own HUD state and its own
+                    // loop reaches ShowHud. See guide_guest_show_via_xam.
+                    if (cvars::guide_guest_show_via_xam && done == 1u) {
+                      const uint32_t st_before = rdw3(0x81D43C50u);
+                      uint64_t nargs[] = {0};
+                      uint64_t xr = ks->processor()->Execute(
+                          ts, kernel::xboxkrnl::GuideConst(0x8178E240u), nargs,
+                          0);
+                      XELOGI("GuideGuestShow: xam ordinal 581 (8178E240) -> "
+                             "{:08X} | [81D43C50] {:08X} -> {:08X}",
+                             static_cast<uint32_t>(xr), st_before,
+                             rdw3(0x81D43C50u));
+                    }
+                    // Phase 1096cp: DIAGNOSTIC, see guide_diag_kick_hud_loop.
+                    if (cvars::guide_diag_kick_hud_loop && done == 1u && slot) {
+                      // Phase 1096cu: call 81790758, NOT the raw kick 8177BF38.
+                      // The loop's exit path CASes [81D43C50+0x24] and loops
+                      // back to 81794C64 only while that counter is non-zero
+                      // (81795460 cmpwi r10,0 / 81795464 bne -> 81794C64).
+                      // 81790758 is xam's own post: it atomically increments
+                      // [+0x24] AND kicks on the 0->1 transition (817907BC).
+                      // The raw kick alone dispatched a loop with no pending
+                      // work, which is why it exited immediately.
+                      const uint32_t proc = task ? rdw3(task + 0x30u) : 0u;
+                      const uint32_t cnt_before = rdw3(0x81D43C50u + 0x24u);
+                      uint64_t kargs[] = {0};
+                      uint64_t kr = ks->processor()->Execute(
+                          ts, kernel::xboxkrnl::GuideConst(0x81790758u), kargs,
+                          1);
+                      XELOGI("GuideDiagKick: 81790758(0) with proc[+30]={:08X} "
+                             "-> {:08X} | [+24] {:08X} -> {:08X} | state {:08X}",
+                             proc, static_cast<uint32_t>(kr), cnt_before,
+                             rdw3(0x81D43C50u + 0x24u), rdw3(0x81D43C50u));
+                    }
+                  }
+                } else {
+                  XELOGI("LLE xam: calling skin loader 81795548");
+                  uint64_t sr = ks->processor()->Execute(
+                      ts, kernel::xboxkrnl::GuideConst(0x81795548u), sargs, 0);
+                  XELOGI("LLE xam: skin loader returned {:08X}",
+                         static_cast<uint32_t>(sr));
+                }
                 // Phase 518: the Guide bootstrap then dies at 819138F0, on a
                 // different thread and long after skin init:
                 //
@@ -5302,7 +8431,18 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                 // Like the manager above this is a stand-in, not the real
                 // object - the call it replaces does not happen. It buys the
                 // bootstrap past this point so the draw hook can install.
-                if (cvars::guide_patch_skin_dispatch) {
+                // Phase 1047: [81D6C9C8] is the XUI font renderer. XUIFONT::Init
+                // (819138EC) calls its vtable slot 3 to build the typeface, and
+                // the render host's XuiInit path (81911D30 -> 819106F8) installs
+                // the static renderer 81D6CA00 there. Installing a blr-stub
+                // stand-in over a value xam has already set is what left every
+                // element typeface with no font behind it, so read the slot
+                // first and leave a non-null value alone.
+                uint32_t cur_fr = xe::load_and_swap<uint32_t>(
+                    ks->memory()->TranslateVirtual(0x81D6C9C8u));
+                XELOGI("LLE xam: [81D6C9C8] after skin loader = {:08X}{}", cur_fr,
+                       cur_fr ? " (xam's own; not overwriting)" : "");
+                if (cvars::guide_patch_skin_dispatch && !cur_fr) {
                   uint32_t blk = ks->memory()->SystemHeapAlloc(0x80, 16);
                   uint32_t nopfn = kernel::xboxkrnl::GuideNopFn();
                   if (cvars::guide_skin_dispatch_real) {
@@ -5506,6 +8646,14 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
           xam_mapped(alias_base, 2 * alias_stride)) {
         auto* d0 = memory()->TranslateVirtual(alias_base);
         auto* d1 = memory()->TranslateVirtual(alias_base + alias_stride);
+        // Phase 1099w: remember the real heap[0] (the per-title workspace
+        // placeholder) so a title switch can put it back. heap[0] is TITLE
+        // memory that xam destroys and releases at every title terminate
+        // (81750CD8 -> 817B4838 -> 817B3860 + 817B2970); with heap[1]'s
+        // descriptor aliased into it, that teardown released xam's own system
+        // heap at 40000000 and every system thread crashed.
+        kernel_state_->heap0_alias_address = alias_base;
+        kernel_state_->heap0_original.assign(d0, d0 + alias_stride);
         std::memcpy(d0, d1, alias_stride);
         xe::store_and_swap<uint32_t>(d0, 0);  // keep id field as index 0
         XELOGI("LLE xam: aliased heap[0] to heap[1] at {:08X} stride {}",
@@ -5640,7 +8788,204 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
     }
     main_thread = kernel::object_ref<kernel::XThread>(boot.release());
   } else {
-    main_thread = kernel_state_->LaunchModule(module);
+    // Phase 1096ed: see guide_hud_load_before_title. Registration only needs
+    // the module loaded and its DllMain run; the overlay's RENDERING is what
+    // needs the title up, and that still happens later on the existing thread.
+    if (cvars::guide_hud_load_before_title && !cvars::guide_hud_path.empty()) {
+      XELOGI("Guide: pre-loading {} BEFORE the title launches",
+             std::string(cvars::guide_hud_path));
+      auto pre = kernel_state_->LoadUserModule(cvars::guide_hud_path, false);
+      if (!pre) {
+        XELOGE("Guide: pre-load failed to load");
+      } else if (XFAILED(kernel_state_->FinishLoadingUserModule(pre, false))) {
+        XELOGE("Guide: pre-load failed to finish loading");
+      } else {
+        // Phase 1096ee: loading is not what registers. hud's DllMain is - it
+        // reaches 913E6B48, the module's ONLY call site of XamRegisterSysApp
+        // (measured: 8177F240 callers = 913E6B74, twice). FinishLoadingUserModule
+        // with false does not run it, which is why 1096ed's pre-load moved
+        // nothing. Run DllMain here, on a guest thread, and WAIT for it, so the
+        // registration lands before xam's one-shot sys-app pass.
+        auto* ks_pre = kernel_state_.get();
+        uint32_t ep = pre->entry_point();
+        uint32_t hm = pre->hmodule_ptr();
+        auto done = std::make_shared<std::atomic<bool>>(false);
+        auto dll_thread =
+            kernel::object_ref<kernel::XHostThread>(new kernel::XHostThread(
+                ks_pre, 1024 * 1024, 0, [ks_pre, ep, hm, done]() -> int {
+                  auto* ts2 =
+                      kernel::XThread::GetCurrentThread()->thread_state();
+                  uint64_t a[] = {hm, 1 /* PROCESS_ATTACH */, 0};
+                  uint64_t r = ks_pre->processor()->Execute(ts2, ep, a,
+                                                            xe::countof(a));
+                  XELOGI("Guide: pre-load DllMain({:08X}) returned {:08X}", ep,
+                         static_cast<uint32_t>(r));
+                  done->store(true);
+                  return 0;
+                }));
+        dll_thread->set_name("Guide PreRegister");
+        if (XFAILED(dll_thread->Create())) {
+          XELOGE("Guide: pre-load DllMain thread failed to start");
+        } else {
+          const auto t0 = std::chrono::steady_clock::now();
+          while (!done->load() &&
+                 std::chrono::steady_clock::now() - t0 <
+                     std::chrono::milliseconds(8000)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+          }
+          XELOGI("Guide: pre-load DllMain {} after {} ms",
+                 done->load() ? "completed" : "TIMED OUT",
+                 std::chrono::duration_cast<std::chrono::milliseconds>(
+                     std::chrono::steady_clock::now() - t0)
+                     .count());
+        }
+        XELOGI("Guide: pre-load complete, base {:08X}",
+               pre->xex_module()->base_address());
+      }
+    }
+    // Phase 1099z16: the optical drive's contents. The tray hook runs while
+    // the SMC tray moves: opening removes the disc, closing loads
+    // guide_tray_disc_path (the host's "put a disc in the tray").
+    {
+      {
+        std::lock_guard<std::mutex> lock(tray_disc_mutex_);
+        if (tray_disc_path_.empty()) {
+          tray_disc_path_ = cvars::guide_tray_disc_path;
+        }
+      }
+      auto mount_disc = [this]() {
+        const std::filesystem::path disc = GetTrayDisc();
+        if (disc.empty() || file_system_->ResolvePath("\\Device\\CdRom0\\")) {
+          return;
+        }
+        auto device = CreateVfsDevice(disc, "\\Device\\CdRom0");
+        if (!device || !device->Initialize() ||
+            !file_system_->RegisterDevice(std::move(device))) {
+          XELOGE("Tray: could not load disc image {}", xe::path_to_utf8(disc));
+          return;
+        }
+        XELOGI("Tray: disc {} is in the drive", xe::path_to_utf8(disc));
+      };
+      kernel_state_->smc()->set_tray_hook([this, mount_disc](bool open) {
+        if (open) {
+          if (file_system_->UnregisterDevice("\\Device\\CdRom0")) {
+            XELOGI("Tray: disc removed");
+          }
+        } else {
+          mount_disc();
+        }
+        on_tray_state_changed(open);
+      });
+      if (cvars::guide_tray_disc_at_boot) {
+        mount_disc();
+      }
+    }
+    if (cvars::kernel_boot_via_xam && !cvars::guide_xam_boot_launch &&
+        lle_xam_module_ && module->is_executable()) {
+      // 1099z17559-8: retail xam's loader launches its boot title itself
+      // (8169EAB0, launch type 2 -> XexLoadExecutable("\SystemRoot\dash.xex")).
+      // Starting the image here as well ran two dashboards (the host-started
+      // one was torn down by the XexLoadExecutable bypass and left a main
+      // thread behind). Keep the image loaded but unstarted; xam's own
+      // XexLoadExecutable adopts it and XexStartExecutable starts it. Nothing
+      // calls into xam from the host.
+      kernel_state_->boot_launch_module = module;
+      main_thread = kernel::object_ref<kernel::XThread>(new kernel::XHostThread(
+          kernel_state_.get(), 64 * 1024, 0,
+          []() -> int {
+            // Stands in for the title's main thread in WaitUntilExit; the
+            // console does not exit when a title does.
+            for (;;) {
+              xe::threading::Sleep(std::chrono::seconds(1));
+            }
+            return 0;
+          },
+          kernel_state_->GetSystemProcess()));
+      main_thread->set_name("Boot (xam launches the title)");
+      if (XFAILED(main_thread->Create())) {
+        XELOGE("BootViaXam: thread creation failed");
+        main_thread = nullptr;
+      }
+    } else if (cvars::guide_xam_boot_launch && lle_xam_module_ &&
+        module->is_executable()) {
+      // Phase 1099z6: a console's xam launches the dashboard through its own
+      // launcher, which records the running title (launcher +0x0 state 5,
+      // +0x28C title id), runs its per-title start routine and builds the
+      // title workspace. Keep the image Xenia just loaded, but hand the
+      // launch to xam: XexLoadExecutable adopts this module, then
+      // XexStartExecutable starts it.
+      kernel_state_->boot_launch_module = module;
+      auto* ks = kernel_state_.get();
+      auto xam_mod = lle_xam_module_;
+      std::string launch_path = cvars::guide_xam_boot_launch_path;
+      main_thread = kernel::object_ref<kernel::XThread>(new kernel::XHostThread(
+          ks, 1024 * 1024, kernel::X_CREATE_SUSPENDED,
+          [ks, xam_mod, launch_path]() -> int {
+            ks->RestoreHeap0Alias("BootLaunch");
+            uint32_t launch = xam_mod->GetProcAddressByOrdinal(0x1A4);
+            auto* mem = ks->memory();
+            uint32_t path = mem->SystemHeapAlloc(
+                static_cast<uint32_t>(launch_path.size() + 1));
+            std::memcpy(mem->TranslateVirtual(path), launch_path.c_str(),
+                        launch_path.size() + 1);
+            XELOGI("BootLaunch: XamLoaderLaunchTitle({:08X}) '{}'", launch,
+                   launch_path);
+            auto* ts = kernel::XThread::GetCurrentThread()->thread_state();
+            uint64_t args[] = {path, 0};
+            uint64_t r =
+                ks->processor()->Execute(ts, launch, args, xe::countof(args));
+            XELOGI("BootLaunch: XamLoaderLaunchTitle returned {:08X}",
+                   static_cast<uint32_t>(r));
+            if (cvars::guide_net_probe_seconds > 0) {
+              // Research probe: what real xam's network exports report.
+              xe::threading::Sleep(
+                  std::chrono::seconds(cvars::guide_net_probe_seconds));
+              uint32_t link_fn = xam_mod->GetProcAddressByOrdinal(0x4B);
+              uint32_t xnaddr_fn = xam_mod->GetProcAddressByOrdinal(0x49);
+              uint64_t la[] = {0};
+              uint64_t link =
+                  link_fn ? ks->processor()->Execute(ts, link_fn, la, 1) : ~0ull;
+              uint32_t addr = mem->SystemHeapAlloc(0x40);
+              std::memset(mem->TranslateVirtual(addr), 0, 0x40);
+              uint64_t xa[] = {0, addr};
+              uint64_t xn = xnaddr_fn
+                                ? ks->processor()->Execute(ts, xnaddr_fn, xa, 2)
+                                : ~0ull;
+              auto* w = mem->TranslateVirtual<xe::be<uint32_t>*>(addr);
+              XELOGI("NetProbe: XNetGetEthernetLinkStatus({:08X}) -> {:08X}; "
+                     "XNetGetTitleXnAddr({:08X}) -> {:08X} ina={:08X} "
+                     "inaOnline={:08X}",
+                     link_fn, static_cast<uint32_t>(link), xnaddr_fn,
+                     static_cast<uint32_t>(xn), uint32_t(w[0]), uint32_t(w[1]));
+              uint32_t media_fn = xam_mod->GetProcAddressByOrdinal(0x1A3);
+              uint32_t tray_fn = xam_mod->GetProcAddressByOrdinal(0x1AA);
+              std::memset(mem->TranslateVirtual(addr), 0, 0x40);
+              uint64_t ma[] = {addr, addr + 4};
+              uint64_t mr =
+                  media_fn ? ks->processor()->Execute(ts, media_fn, ma, 2) : ~0ull;
+              uint64_t tr =
+                  tray_fn ? ks->processor()->Execute(ts, tray_fn, la, 0) : ~0ull;
+              XELOGI("MediaProbe: XamLoaderGetMediaInfo({:08X}) -> {:08X} "
+                     "type={:08X} id={:08X}; XamLoaderGetDvdTrayState({:08X}) "
+                     "-> {:08X}",
+                     media_fn, static_cast<uint32_t>(mr), uint32_t(w[0]),
+                     uint32_t(w[1]), tray_fn, static_cast<uint32_t>(tr));
+            }
+            // This thread stands in for the title's main thread in
+            // WaitUntilExit; the console does not "exit" when a title does.
+            for (;;) {
+              xe::threading::Sleep(std::chrono::seconds(1));
+            }
+          },
+          ks->GetSystemProcess()));
+      main_thread->set_name("Boot Launch (xam)");
+      if (XFAILED(main_thread->Create())) {
+        XELOGE("BootLaunch: thread creation failed");
+        main_thread = nullptr;
+      }
+    } else {
+      main_thread = kernel_state_->LaunchModule(module);
+    }
   }
   if (!main_thread) {
     return X_STATUS_UNSUCCESSFUL;
@@ -5658,7 +9003,12 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
         kernel::object_ref<kernel::XHostThread>(new kernel::XHostThread(
             ks, 1024 * 1024, 0, [this, ks, hud_path, xam_mod_for_guide]() -> int {
               // Give the title time to bring up graphics before overlaying.
-              xe::threading::Sleep(std::chrono::seconds(8));
+              // Phase 1096: was a hardcoded 8 seconds. Behind a flag now so the
+              // value is measurable rather than asserted - see
+              // guide_hud_load_delay_ms for why it is suspected of losing xam's
+              // single message 0x7EC.
+              xe::threading::Sleep(std::chrono::milliseconds(
+                  std::max(0, cvars::guide_hud_load_delay_ms)));
               XELOGI("Guide: loading {}", hud_path);
               auto hud = ks->LoadUserModule(hud_path, false);
               if (!hud) {
@@ -5669,6 +9019,9 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                 XELOGE("Guide: failed to finish loading");
                 return 1;
               }
+              // Phase 1055 menus: the fix hooks on hud's xam imports (always)
+              // and the call trace (guide_trace_xam_imports).
+              GuideInstallXamImportTrace(hud.get());
               auto* ts = kernel::XThread::GetCurrentThread()->thread_state();
               // DllMain's first argument is the module's hmodule, not a
               // kernel object handle. hud keeps it and later hands it to
@@ -5729,7 +9082,18 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
               XELOGI("Guide: DllMain entry={:08X}", hud->entry_point());
               ks->processor()->Execute(ts, hud->entry_point(), args,
                                        xe::countof(args));
-              XELOGI("Guide: DllMain returned");
+              // Phase 1096: log the RETURN VALUE, not just "returned". hud's
+              // entry point (913F9D00) with reason==1 calls its CRT/static
+              // initialiser 913F9C88 and, if that returns 0, branches to
+              // 913F9D30 and returns 0 WITHOUT reaching 913E6B48 - the only
+              // call site of XamRegisterSysApp in the module, which registers
+              // hud as sysapp 0xFF with descriptor 913E69C0. A zero here means
+              // hud never registered, which is exactly what the sysapp table
+              // shows ([81D426C8] == 0, GuideSysAppTable id FF invalid).
+              // "DllMain returned" was true and uninformative in both cases.
+              XELOGI("Guide: DllMain returned {:08X} (0 = CRT init 913F9C88 "
+                     "failed, hud did NOT register sysapp FF)",
+                     static_cast<uint32_t>(ts->context()->r[3]));
               if (const char* hspec = std::getenv("XENIA_EFAIL_TAG_HUD")) {
                 TagEFailSites(ks->memory(), hspec, "hud");
               }
@@ -6354,12 +9718,28 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                            "XuiRenderCreateDC branch",
                            uint32_t(cvars::guide_force_obj14));
                   }
-                  XELOGI("Guide: hud XUI init {:08X} this={:08X}", (g_hud_xuiinit ? g_hud_xuiinit : hb + 0xA898u),
-                         obj);
-                  uint64_t ir = ks->processor()->Execute(ts, (g_hud_xuiinit ? g_hud_xuiinit : hb + 0xA898u), ia,
-                                                          xe::countof(ia));
-                  XELOGI("Guide: hud XUI init returned {:08X}",
-                         static_cast<uint32_t>(ir));
+                  // Phase 1097r: THIS is the site that actually runs - the
+                  // one whose object (401C1CC0) matches the one captured at
+                  // hud's init, and whose Execute leaves the BCBCBCBC link
+                  // register that identified the call as the host's. The two
+                  // sites in on_guide_button_pressed and the one in
+                  // GuideBootstrap are not reached in this configuration; an
+                  // earlier attempt to gate the bootstrap one measured
+                  // nothing because its block never ran (the "NOT calling"
+                  // line never appeared - the arming control caught it).
+                  uint64_t ir = 0;
+                  if (cvars::guide_guest_hud_init) {
+                    XELOGI("Guide: NOT calling hud's init {:08X} this={:08X} - "
+                           "leaving it to the guest (guide_guest_hud_init)",
+                           (g_hud_xuiinit ? g_hud_xuiinit : hb + 0xA898u), obj);
+                  } else {
+                    XELOGI("Guide: hud XUI init {:08X} this={:08X}", (g_hud_xuiinit ? g_hud_xuiinit : hb + 0xA898u),
+                           obj);
+                    ir = ks->processor()->Execute(ts, (g_hud_xuiinit ? g_hud_xuiinit : hb + 0xA898u), ia,
+                                                  xe::countof(ia));
+                    XELOGI("Guide: hud XUI init returned {:08X}",
+                           static_cast<uint32_t>(ir));
+                  }
                   // [obj+12] is null on this path, so the device context
                   // XuiRenderCreateDC produced is stored elsewhere in the
                   // object. Dump the head of it to find the pointer: a DC
@@ -6883,6 +10263,37 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                              "{:08X} (+0x{:X})",
                              uint32_t(cvars::guide_coverage_fn), ex, n, last,
                              last - td.start_address());
+                      // Phase 1096bb: the trace header already carries
+                      // function_call_count, a thread-use bitmask, and
+                      // function_caller_history[4] - the last four CALLER
+                      // addresses - filled by the x64 emitter. They are only
+                      // populated under kDebugInfoTraceFunctions, which used to
+                      // be global and therefore unusable; ppc_translator.cc now
+                      // restricts it to trace_coverage_only_fn, so
+                      // `--trace_functions=true` alongside a coverage target
+                      // instruments exactly one function and records who calls
+                      // it. Print it - this is the caller attribution phase 1096
+                      // could not otherwise get for an internal function with no
+                      // kernel import to hook.
+                      {
+                        auto* hdr = td.header();
+                        std::string ch;
+                        for (uint32_t i = 0;
+                             i < cpu::FunctionTraceData::
+                                     kFunctionCallerHistoryCount;
+                             ++i) {
+                          ch += fmt::format("{:08X} ",
+                                            hdr->function_caller_history[i]);
+                        }
+                        XELOGI("CoverageCallers {:08X}: calls={} threads={:016X}"
+                               " | last {} callers: {}",
+                               uint32_t(cvars::guide_coverage_fn),
+                               hdr->function_call_count,
+                               hdr->function_thread_use,
+                               cpu::FunctionTraceData::
+                                   kFunctionCallerHistoryCount,
+                               ch);
+                      }
                       // Phase 585: "17 of 203 executed" says the function
                       // bailed early but not down WHICH path. The executed
                       // set is the path; print it. Capped so a hot function
@@ -6941,7 +10352,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
                        static_cast<uint32_t>(r));
               }
               return 0;
-            }));
+            }, cvars::guide_system_process ? ks->GetSystemProcess() : 0u));  // phase 1055 menus
     hud_boot->set_name("Guide Loader");
     if (XFAILED(hud_boot->Create())) {
       XELOGE("Guide: failed to create loader thread");

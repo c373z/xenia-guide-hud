@@ -115,6 +115,14 @@ DiscImageDevice::Error DiscImageDevice::ReadAllEntries(
     ParseState* state, const uint8_t* root_buffer) {
   auto root_entry = new DiscImageEntry(this, nullptr, "", mmap_.get());
   root_entry->attributes_ = kFileAttributeDirectory;
+  // Phase 1099z38: opening the device itself ("\Device\CdRom0") reads the raw
+  // game partition - the dash's disc install (923174B0/923175D8) positions
+  // to 0x10000, checks "MICROSOFT*XBOX*MEDIA" and walks XDVDFS sectors. Give
+  // the root entry the partition as its data window (offset 0 = sector 0).
+  root_entry->data_offset_ = state->game_offset;
+  root_entry->data_size_ = state->size - state->game_offset;
+  root_entry->size_ = root_entry->data_size_;
+  root_entry->allocation_size_ = root_entry->data_size_;
   root_entry_ = std::unique_ptr<Entry>(root_entry);
 
   if (!ReadEntry(state, root_buffer, 0, root_entry)) {

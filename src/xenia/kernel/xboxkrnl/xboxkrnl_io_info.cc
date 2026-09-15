@@ -403,6 +403,25 @@ dword_result_t NtQueryVolumeInformationFile_entry(
     io_status_block_ptr->information = out_length;
   }
 
+  // Phase 1099n: xam decides a storage device is usable partly from these
+  // answers (FileFsSizeInformation at 817277FC / 817AE178). Measure them.
+  {
+    static std::atomic<uint32_t> vlog{0};
+    if (vlog.fetch_add(1) < 60) {
+      std::string extra;
+      if (info_class == XFileFsSizeInformation) {
+        auto info = info_ptr.as<X_FILE_FS_SIZE_INFORMATION*>();
+        extra = fmt::format(" total={} avail={} spu={} bps={}",
+                            uint64_t(info->total_allocation_units),
+                            uint64_t(info->available_allocation_units),
+                            uint32_t(info->sectors_per_allocation_unit),
+                            uint32_t(info->bytes_per_sector));
+      }
+      XELOGI("NtQueryVolumeInformationFile('{}', class {}) -> {:08X}{}",
+             file->path(), uint32_t(info_class), uint32_t(status), extra);
+    }
+  }
+
   return status;
 }
 DECLARE_XBOXKRNL_EXPORT1(NtQueryVolumeInformationFile, kFileSystem,

@@ -1236,6 +1236,79 @@ D3D12TextureCache::GetCurrentScaledResolveRangeGPUAddress() const {
           (uint64_t(buffer_index) << 30));
 }
 
+ID3D12Resource* D3D12TextureCache::RequestGuideTexture(
+    D3D12_SHADER_RESOURCE_VIEW_DESC& srv_desc_out,
+    xenos::TextureFormat& format_out, uint32_t base_addr, uint32_t width,
+    uint32_t height, uint32_t pitch_texels, xenos::TextureFormat format,
+    xenos::Endian endianness, bool tiled, bool dest_swap) {
+  // Phase 1098zc: mirrors RequestSwapTexture, but keyed on a surface the caller
+  // names rather than on texture fetch 0. Used for the Guide's resolved surface,
+  // whose base/size/pitch/format/endianness all come from the guest's own
+  // RB_COPY_DEST_* registers at the moment IT resolved.
+  if (!base_addr || !width || !height) {
+    return nullptr;
+  }
+  TextureKey key;
+  key.MakeInvalid();
+  key.base_page = (base_addr & 0x1FFFFFFFu) >> 12;
+  key.dimension = xenos::DataDimension::k2DOrStacked;
+  key.width_minus_1 = width - 1;
+  key.height_minus_1 = height - 1;
+  key.tiled = tiled ? 1 : 0;
+  key.packed_mips = 0;
+  key.mip_page = 0;
+  key.depth_or_array_size_minus_1 = 0;
+  key.pitch = pitch_texels >> 5;
+  key.mip_max_level = 0;
+  key.format = format;
+  key.endianness = endianness;
+  key.signed_separate = 0;
+  key.scaled_resolve = 0;
+  key.is_valid = 1;
+  D3D12Texture* texture = static_cast<D3D12Texture*>(FindOrCreateTexture(key));
+  if (texture == nullptr || !LoadTextureData(*texture)) {
+    return nullptr;
+  }
+  texture->MarkAsUsed();
+  ID3D12Resource* texture_resource = texture->resource();
+  command_processor_.PushTransitionBarrier(
+      texture_resource,
+      texture->SetResourceState(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
+      D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+  srv_desc_out.Format = GetDXGIUnormFormat(key);
+  srv_desc_out.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+  // Phase 1098zf: use the SAME channel mapping every other texture gets, not
+  // D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING. Xenia stores guest formats in a
+  // host representation whose channel order is described by
+  // GetHostFormatSwizzle(key); RequestSwapTexture applies it as
+  // GuestToHostSwizzle(fetch.swizzle, GetHostFormatSwizzle(key)). There is no
+  // fetch constant for a resolve destination, so the guest swizzle here is the
+  // IDENTITY (components 0,1,2,3 = 0x688), and GuestToHostSwizzle of the
+  // identity is just the host format swizzle. Using the default mapping instead
+  // was a host-side guess about channel order, and it is what skewed the
+  // Guide's colours.
+  constexpr uint32_t kIdentityGuestSwizzle = 0 | (1 << 3) | (2 << 6) | (3 << 9);
+  // Phase 1098zg: and undo the guest's own COPY_DEST_SWAP. RB_COPY_DEST_INFO
+  // bit 24 was set (info=01000300) at the Guide's resolve, and Xenia's resolve
+  // honours it when WRITING - so the bytes in that surface have R and B
+  // exchanged relative to plain k_8_8_8_8. Reading them back without undoing it
+  // turns blue-grey into tan, which is what the captured Guide showed. The bit
+  // is the guest's; this only reads it back the way the guest wrote it.
+  uint32_t guest_swizzle = kIdentityGuestSwizzle;
+  if (dest_swap) {
+    guest_swizzle = 2 | (1 << 3) | (0 << 6) | (3 << 9);
+  }
+  srv_desc_out.Shader4ComponentMapping =
+      GuestToHostSwizzle(guest_swizzle, GetHostFormatSwizzle(key)) |
+      D3D12_SHADER_COMPONENT_MAPPING_ALWAYS_SET_BIT_AVOIDING_ZEROMEM_MISTAKES;
+  srv_desc_out.Texture2D.MostDetailedMip = 0;
+  srv_desc_out.Texture2D.MipLevels = 1;
+  srv_desc_out.Texture2D.PlaneSlice = 0;
+  srv_desc_out.Texture2D.ResourceMinLODClamp = 0.0f;
+  format_out = key.format;
+  return texture_resource;
+}
+
 ID3D12Resource* D3D12TextureCache::RequestSwapTexture(
     D3D12_SHADER_RESOURCE_VIEW_DESC& srv_desc_out,
     xenos::TextureFormat& format_out) {

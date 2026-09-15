@@ -9,6 +9,10 @@
 
 #include "xenia/kernel/xboxkrnl/xboxkrnl_modules.h"
 #include "xenia/base/logging.h"
+#include "xenia/base/utf8.h"
+#include "xenia/cpu/function.h"
+#include "xenia/cpu/processor.h"
+#include "xenia/kernel/kernel_flags.h"
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/user_module.h"
 #include "xenia/kernel/util/shim_utils.h"
@@ -193,14 +197,195 @@ dword_result_t XexLoadImageFromMemory_entry(lpdword_t buffer, dword_t size,
 }
 DECLARE_XBOXKRNL_EXPORT1(XexLoadImageFromMemory, kModules, kImplemented);
 
+// Phase 1099t: the signature was XexLoadImage's, and it is not this function's.
+// The real kernel's XexLoadExecutable (80069930) takes
+//   (r3 name, r4 COMMAND LINE, r5 module flags, r6 minimum version)
+// loads into a LOCAL handle (80069838 with &[r1+0x50]) and passes the command
+// line to 80067178, which builds the title's command-line string - there is no
+// output handle argument. Treating r6 as an out pointer wrote the module handle
+// through the version number: HOST FAULT at xeXexLoadImage `*hmodule_ptr =`
+// with fault_addr 120076000 (guest 20076000), reached from xam's title launcher
+// (8175BDB4/8175BEF8/8175BF68) when the user opened the dashboard's Games tab.
+// Phase 1099z4 research probe: dump xam's launcher object (*81D41318) so the
+// state for a Xenia-booted title can be diffed against a xam-launched one.
+static void GuideDumpLauncher(const char* tag) {
+  auto* mem = kernel_state()->memory();
+  const uint32_t obj = xe::load_and_swap<uint32_t>(mem->TranslateVirtual(0x81D41318));
+  if (!obj) {
+    XELOGI("GuideLauncherDump[{}]: launcher object not set", tag);
+    return;
+  }
+  for (uint32_t off = 0; off < 0x2000; off += 0x40) {
+    std::string row;
+    for (uint32_t i = 0; i < 0x40; i += 4) {
+      row += fmt::format(" {:08X}", xe::load_and_swap<uint32_t>(
+                                        mem->TranslateVirtual(obj + off + i)));
+    }
+    XELOGI("GuideLauncherDump[{}] {:08X}+{:04X}:{}", tag, obj, off, row);
+  }
+}
+
 dword_result_t XexLoadExecutable_entry(lpstring_t module_name,
+                                       lpstring_t command_line,
                                        dword_t module_flags,
-                                       dword_t min_version,
-                                       lpdword_t hmodule_ptr) {
-  return XexLoadImage_entry(module_name, module_flags, min_version,
-                            hmodule_ptr);
+                                       dword_t min_version) {
+  XELOGI("XexLoadExecutable('{}', command line '{}', flags {:08X}, min "
+         "version {:08X})",
+         module_name ? module_name.value() : "",
+         command_line ? command_line.value() : "",
+         uint32_t(module_flags), uint32_t(min_version));
+  XELOGI("XexLoadExecutable: chain {}", kernel_state()->GuestBackChain());
+  if (cvars::guide_dump_launcher) {
+    GuideDumpLauncher("load");
+  }
+  // The periodic GuideLiveCoverage report rides a hook that stops firing
+  // before a launch; report the coverage function here as well.
+  if (cvars::guide_coverage_fn) {
+    auto* fn = kernel_state()->processor()->LookupFunction(
+        cvars::guide_coverage_fn);
+    auto* gfn = fn ? dynamic_cast<xe::cpu::GuestFunction*>(fn) : nullptr;
+    if (gfn && gfn->trace_data().is_valid()) {
+      auto& td = gfn->trace_data();
+      auto* c = reinterpret_cast<uint64_t*>(td.instruction_execute_counts());
+      uint32_t ex = 0;
+      for (uint32_t i = 0; i < td.instruction_count(); ++i) {
+        if (c[i]) ++ex;
+      }
+      XELOGI("GuideLaunchCoverage: {:08X} {}/{} executed, calls={}",
+             uint32_t(cvars::guide_coverage_fn), ex, td.instruction_count(),
+             td.header()->function_call_count);
+    } else {
+      XELOGI("GuideLaunchCoverage: {:08X} never compiled (not run)",
+             uint32_t(cvars::guide_coverage_fn));
+    }
+  }
+  // Phase 1099z6: guide_xam_boot_launch - the first launch xam makes names
+  // the boot title Xenia already loaded but did not start. Adopt that image
+  // instead of loading a second copy (the load itself went through the same
+  // XexLoadImage path); everything else is xam's own launch.
+  if (auto boot = kernel_state()->boot_launch_module) {
+    kernel_state()->boot_launch_module = nullptr;
+    std::string want = utf8::lower_ascii(
+        utf8::find_name_from_guest_path(module_name.value()));
+    std::string have = utf8::lower_ascii(boot->name());
+    if (want == have || want == have + ".xex") {
+      XELOGI("XexLoadExecutable: adopting boot image {} for '{}'",
+             boot->path(), module_name.value());
+      kernel_state()->SetExecutableModule(boot);
+      return X_STATUS_SUCCESS;
+    }
+    XELOGW("XexLoadExecutable: boot image {} does not match '{}'; loading "
+           "normally and leaving the boot image unstarted",
+           boot->path(), module_name.value());
+  }
+  // Phase 1099v: the real XexLoadExecutable (80069888) refuses while an
+  // executable is still loaded - XexExecutableModuleHandle must be 0, i.e. the
+  // previous title must have been terminated first. xam's failure path then
+  // calls ExTerminateTitleProcess and retries (8175EC38).
+  if (kernel_state()->GetExecutableModule()) {
+    // DECLARED BYPASS. xam's launcher only runs ExTerminateTitleProcess for a
+    // title IT launched: its boot path (817274B8 -> 8175A240) sets launcher
+    // +0x2E8 = 1, "no title launched yet", and 8175E770 skips the terminate
+    // while that holds. Xenia, not xam, launched the boot title, so xam never
+    // tears it down and every relaunch is refused (measured: dash, xshell,
+    // dash -> C0000022 x3, no ExTerminateTitleProcess). For a TITLE executable
+    // (0x40000000) replacing the title Xenia booted, do the terminate xam
+    // would have done, once, then load normally.
+    static bool host_terminated_boot_title = false;
+    if ((uint32_t(module_flags) & 0x40000000u) && !host_terminated_boot_title) {
+      host_terminated_boot_title = true;
+      XELOGI("XexLoadExecutable: boot title {} was launched by Xenia, not xam; "
+             "running the title terminate xam skips",
+             kernel_state()->GetExecutableModule()->path());
+      kernel_state()->TerminateTitleProcessSelective();
+    }
+  }
+  if (kernel_state()->GetExecutableModule()) {
+    XELOGI("XexLoadExecutable: an executable is still loaded ({}) -> C0000022",
+           kernel_state()->GetExecutableModule()->path());
+    return 0xC0000022;  // STATUS_ACCESS_DENIED
+  }
+  auto* mem = kernel_memory();
+  const uint32_t handle_slot = mem->SystemHeapAlloc(4);
+  if (!handle_slot) {
+    return X_STATUS_NO_MEMORY;
+  }
+  xe::store_and_swap<uint32_t>(mem->TranslateVirtual(handle_slot), 0);
+  shim::PrimitivePointerParam<uint32_t> handle_param(
+      mem->TranslateVirtual<uint32_t*>(handle_slot));
+  const uint32_t result = XexLoadImage_entry(module_name, module_flags,
+                                             min_version, handle_param);
+  const uint32_t hmodule =
+      xe::load_and_swap<uint32_t>(mem->TranslateVirtual(handle_slot));
+  XELOGI("XexLoadExecutable -> {:08X} (module handle {:08X})", result, hmodule);
+  mem->SystemHeapFree(handle_slot);
+  // Phase 1099v: make it THE title executable (sets XexExecutableModuleHandle,
+  // title KPROCESS TLS/stack from the header) - what flag 0x40000000 means.
+  if (result == X_STATUS_SUCCESS && hmodule) {
+    auto module = kernel_state()->GetModule(module_name.value(), true);
+    if (module) {
+      kernel_state()->SetExecutableModule(object_ref<UserModule>(
+          static_cast<UserModule*>(module.release())));
+    }
+  }
+  return result;
 }
 DECLARE_XBOXKRNL_EXPORT1(XexLoadExecutable, kModules, kSketchy);
+
+// Phase 1099v: XexStartExecutable(StartRoutine) (real 800672D8): fail with
+// C000000D if no executable is loaded; otherwise create the title's main
+// thread - a TITLE-process thread whose startup runs StartRoutine(0) and then
+// the executable's entry point. xam passes 8175DF50, which traps unless it is on
+// a title thread and performs the launcher handshake (+0x330/+0x340) and lock
+// release. It was an undefined extern: xam logged "XexStartExecutable failed".
+dword_result_t XexStartExecutable_entry(dword_t start_routine) {
+  auto exe = kernel_state()->GetExecutableModule();
+  if (!exe) {
+    XELOGW("XexStartExecutable({:08X}): no executable loaded -> C000000D",
+           uint32_t(start_routine));
+    return X_STATUS_INVALID_PARAMETER;
+  }
+  auto thread = object_ref<XThread>(
+      new XThread(kernel_state(), exe->stack_size(), 0, exe->entry_point(), 0,
+                  0, true, true));
+  thread->set_name("Main XThread");
+  thread->set_pre_start_routine(start_routine);
+  X_STATUS result = thread->Create();
+  XELOGI("XexStartExecutable({:08X}): {} entry {:08X} -> {:08X}",
+         uint32_t(start_routine), exe->path(), exe->entry_point(), result);
+  // Research probe: dump a xam-launched title's image (flat, VA-indexed), as
+  // guide_dump_title_path does for the boot title.
+  if (!cvars::guide_dump_launched_title_path.empty() && exe->xex_module()) {
+    auto* mem = kernel_memory();
+    const uint32_t base = exe->xex_module()->base_address();
+    const uint32_t size = exe->xex_module()->image_size();
+    if (FILE* f = std::fopen(cvars::guide_dump_launched_title_path.c_str(),
+                             "wb")) {
+      static const uint8_t zero[0x1000] = {0};
+      for (uint32_t off = 0; off < size; off += 0x1000) {
+        const uint32_t n = std::min<uint32_t>(0x1000, size - off);
+        auto* heap = mem->LookupHeap(base + off);
+        std::fwrite(heap ? mem->TranslateVirtual(base + off) : zero, 1, n, f);
+      }
+      std::fclose(f);
+      XELOGI("DumpLaunchedTitle: {:08X}+{:08X} -> {}", base, size,
+             cvars::guide_dump_launched_title_path);
+    }
+  }
+  if (cvars::guide_dump_launcher) {
+    std::thread([] {
+      std::this_thread::sleep_for(std::chrono::seconds(15));
+      GuideDumpLauncher("relaunched");
+    }).detach();
+  }
+  return result;
+}
+DECLARE_XBOXKRNL_EXPORT1(XexStartExecutable, kModules, kImplemented);
+
+dword_result_t XexSendDeferredNotifications_entry() {
+  return kernel_state()->SendDeferredNotifications();
+}
+DECLARE_XBOXKRNL_EXPORT1(XexSendDeferredNotifications, kModules, kImplemented);
 
 dword_result_t XexUnloadImage_entry(lpvoid_t hmodule) {
   auto module = XModule::GetFromHModule(kernel_state(), hmodule);
@@ -275,7 +460,7 @@ void ExRegisterTitleTerminateNotification_entry(
   if (create) {
     // Adding.
     kernel_state()->RegisterTitleTerminateNotification(
-        reg->notification_routine, reg->priority);
+        reg->notification_routine, reg->priority, reg.guest_address());
   } else {
     // Removing.
     kernel_state()->RemoveTitleTerminateNotification(reg->notification_routine);

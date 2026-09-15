@@ -7,16 +7,23 @@
  ******************************************************************************
  */
 
+#include <atomic>
+
 #include "xenia/base/logging.h"
 #include "xenia/emulator.h"
 #include "xenia/hid/input.h"
 #include "xenia/hid/input_system.h"
+#include "xenia/kernel/kernel_flags.h"
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/util/shim_utils.h"
 #include "xenia/kernel/xam/xam_private.h"
 #include "xenia/xbox.h"
 
 DECLARE_bool(allow_mic_initialization);
+
+// Phase 1053: raised when the Guide button is seen, consumed by the Guide
+// harness in xboxkrnl_video.cc (file-scope there, so file scope here).
+extern std::atomic<uint32_t> g_guide_button_edge;
 
 namespace xe {
 namespace kernel {
@@ -27,6 +34,19 @@ using xe::hid::X_INPUT_FLAG;
 using xe::hid::X_INPUT_KEYSTROKE;
 using xe::hid::X_INPUT_STATE;
 using xe::hid::X_INPUT_VIBRATION;
+
+// Phase 1053: the Guide button belongs to the system, not the title. Swallow
+// it here (both the keystroke queue and the pad state) and let the Guide
+// harness see the press.
+static bool GuideButtonSeenKeystroke(X_INPUT_KEYSTROKE* ks) {
+  if (!ks || ks->virtual_key != 0x5838) {
+    return false;
+  }
+  if (ks->flags & 1) {
+    ::g_guide_button_edge.store(1);
+  }
+  return true;
+}
 
 dword_result_t XAutomationpUnbindController_entry(dword_t user_index) {
   if (user_index >= XUserMaxUserCount) {
@@ -131,6 +151,49 @@ dword_result_t XamInputGetState_entry(dword_t user_index, dword_t flags,
         user_index, !flags ? X_INPUT_FLAG::X_INPUT_FLAG_GAMEPAD : flags,
         input_state);
   }
+  // Phase 1096cz: the harness's `key:guide` calls GuideScriptGuideButton(),
+  // which raises the HOST flag g_guide_button_edge directly and never touches
+  // the HID layer - so with guide_pass_guide_button alone the guest still sees
+  // nothing (1096cy measured exactly that: no GuideButtonPass line). Consume
+  // that pending edge HERE and present it to the guest as a real GUIDE press,
+  // which is what routing the user's button into the guest means.
+  if (cvars::guide_pass_guide_button && result == X_ERROR_SUCCESS &&
+      input_state && ::g_guide_button_edge.exchange(0)) {
+    input_state->gamepad.buttons = input_state->gamepad.buttons |
+                                   uint16_t(xe::hid::X_INPUT_GAMEPAD_GUIDE);
+    static uint32_t inj_n = 0;
+    if (++inj_n <= 4u) {
+      XELOGI("GuideButtonInject #{}: presenting X_INPUT_GAMEPAD_GUIDE to the "
+             "guest (buttons {:04X})",
+             inj_n, uint16_t(input_state->gamepad.buttons));
+    }
+  }
+  if (result == X_ERROR_SUCCESS && input_state) {
+    // Only the rising edge is a press: the button stays set for as long as it
+    // is held, and reporting it every poll re-opened the Guide immediately
+    // after it was closed.
+    static bool guide_held = false;
+    bool down = (input_state->gamepad.buttons &
+                 xe::hid::X_INPUT_GAMEPAD_GUIDE) != 0;
+    if (down && !guide_held) {
+      ::g_guide_button_edge.store(1);
+    }
+    guide_held = down;
+    // Phase 1096cy: stripping the bit here is why guest xam never asks for its
+    // own UI - see guide_pass_guide_button. Pass it through when that flag is
+    // set so xam's own show path can run.
+    if (down && !cvars::guide_pass_guide_button) {
+      input_state->gamepad.buttons =
+          input_state->gamepad.buttons & ~uint16_t(xe::hid::X_INPUT_GAMEPAD_GUIDE);
+    } else if (down) {
+      static uint32_t pass_n = 0;
+      if (++pass_n <= 4u) {
+        XELOGI("GuideButtonPass #{}: X_INPUT_GAMEPAD_GUIDE left set for the "
+               "guest (buttons {:04X})",
+               pass_n, uint16_t(input_state->gamepad.buttons));
+      }
+    }
+  }
 
   if (input_state && result == X_ERROR_SUCCESS) {
     if (auto patch = kernel_state()->xmp_volume_patch()) {
@@ -163,6 +226,12 @@ DECLARE_XAM_EXPORT1(XamInputSetState, kInput, kImplemented);
 // https://msdn.microsoft.com/en-us/library/windows/desktop/microsoft.directx_sdk.reference.xinputgetkeystroke(v=vs.85).aspx
 dword_result_t XamInputGetKeystroke_entry(
     dword_t user_index, dword_t flags, pointer_t<X_INPUT_KEYSTROKE> keystroke) {
+  // Phase 1053: while the Guide (or any system UI) holds input, titles see no
+  // keystrokes - the same gate XamInputGetKeystrokeEx and XamInputGetState use.
+  if (kernel_state()->xam_state()->IsUIActive()) {
+    if (keystroke) keystroke.Zero();
+    return X_ERROR_EMPTY;
+  }
   // https://github.com/CodeAsm/ffplay360/blob/master/Common/AtgXime.cpp
   // user index = index or XUSER_INDEX_ANY
   // flags = XINPUT_FLAG_GAMEPAD (| _ANYUSER | _ANYDEVICE)
@@ -180,7 +249,12 @@ dword_result_t XamInputGetKeystroke_entry(
 
   auto input_system = kernel_state()->emulator()->input_system();
   auto lock = input_system->lock();
-  return input_system->GetKeystroke(user_index, flags, keystroke);
+  X_RESULT kr = input_system->GetKeystroke(user_index, flags, keystroke);
+  if (kr == X_ERROR_SUCCESS && GuideButtonSeenKeystroke(keystroke)) {
+    keystroke.Zero();
+    return X_ERROR_EMPTY;
+  }
+  return kr;
 }
 DECLARE_XAM_EXPORT1(XamInputGetKeystroke, kInput, kImplemented);
 
@@ -223,6 +297,10 @@ dword_result_t XamInputGetKeystrokeEx_entry(
   }
 
   auto result = input_system->GetKeystroke(user_index, flags, keystroke);
+  if (result == X_ERROR_SUCCESS && GuideButtonSeenKeystroke(keystroke)) {
+    keystroke.Zero();
+    return X_ERROR_EMPTY;
+  }
 
   if (XSUCCEEDED(result)) {
     *user_index_ptr = keystroke->user_index;

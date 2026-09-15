@@ -38,6 +38,9 @@ class VirtualFileSystem {
   bool UnregisterSymbolicLink(const std::string_view path);
   bool IsSymbolicLinkRegistered(const std::string_view path);
   bool FindSymbolicLink(const std::string_view path, std::string& target);
+  // Phase 1099o: expand any symbolic link in `path` (as ResolvePath does) and
+  // report whether the result lands on a registered device.
+  bool TranslateSymbolicLinks(const std::string_view path, std::string& out);
 
   Entry* ResolvePath(const std::string_view path);
 

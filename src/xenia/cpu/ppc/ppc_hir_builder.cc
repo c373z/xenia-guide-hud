@@ -195,6 +195,13 @@ bool PPCHIRBuilder::Emit(GuestFunction* function, uint32_t flags) {
 
     MaybeBreakOnInstruction(address);
 
+    // Phase 1099z63: diagnostic host hook before this instruction.
+    if (auto* hook = frontend_->processor()->LookupGuestHook(address)) {
+      Comment("guest hook");
+      ContextBarrier();
+      CallExtern(hook);
+    }
+
     InstrData i;
     i.address = address;
     i.code = code;

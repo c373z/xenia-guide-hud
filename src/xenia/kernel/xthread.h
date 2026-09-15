@@ -396,7 +396,14 @@ class XThread : public XObject, public cpu::Thread {
     uint32_t start_context;
     uint32_t creation_flags;
     uint32_t guest_process;
+    // Phase 1099v: XexStartExecutable's StartRoutine. The real kernel's
+    // XapiStartup (80067290) calls StartRoutine(0) and then the executable's
+    // entry point on the new title thread.
+    uint32_t pre_start_routine = 0;
   };
+  void set_pre_start_routine(uint32_t routine) {
+    creation_params_.pre_start_routine = routine;
+  }
 
   XThread(KernelState* kernel_state);
   XThread(KernelState* kernel_state, uint32_t stack_size,
@@ -416,6 +423,7 @@ class XThread : public XObject, public cpu::Thread {
 
   const CreationParams* creation_params() const { return &creation_params_; }
   uint32_t tls_ptr() const { return tls_static_address_; }
+  uint32_t tls_total_size() const { return tls_total_size_; }
   uint32_t pcr_ptr() const { return pcr_address_; }
   uint32_t stack_base() const { return stack_base_; }
   uint32_t stack_limit() const { return stack_limit_; }

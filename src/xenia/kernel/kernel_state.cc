@@ -10,10 +10,17 @@
 #include <ranges>
 
 #include "xenia/kernel/kernel_state.h"
+#include "xenia/kernel/kernel_flags.h"  // phase 1085: guide_system_root
 
 #include "xenia/base/byte_stream.h"
+#include "xenia/base/platform.h"
+#if XE_PLATFORM_WIN32
+#include "xenia/base/platform_win.h"
+#endif
+#include "xenia/apu/audio_system.h"
 #include "xenia/base/logging.h"
 #include "xenia/emulator.h"
+#include "xenia/gpu/graphics_system.h"
 #include "xenia/hid/input_system.h"
 #include "xenia/kernel/user_module.h"
 #include "xenia/kernel/util/shim_utils.h"
@@ -42,6 +49,13 @@ DECLARE_string(cl);
 
 namespace xe {
 namespace kernel {
+namespace xboxkrnl {
+// xboxkrnl_video.cc: ring buffer + persisted front buffer (phase 1099z97).
+void GuideTitleSwitchKeepAddresses(std::vector<uint32_t>* out);
+// xboxkrnl_video.cc: the kernel's own title terminate notifications 800F8778
+// (6E800000) and 800F8358 (6D000000), phase 1099z139.
+void GuideKernelEngineTerminateSlot(bool send_id5);
+}  // namespace xboxkrnl
 
 constexpr std::chrono::milliseconds kDeferredOverlappedDelayMillis(25);
 
@@ -271,10 +285,12 @@ void KernelState::FreeTLS(cpu::ppc::PPCContext* context, uint32_t slot) {
 }
 
 void KernelState::RegisterTitleTerminateNotification(uint32_t routine,
-                                                     uint32_t priority) {
+                                                     uint32_t priority,
+                                                     uint32_t record) {
   TerminateNotification notify;
   notify.guest_routine = routine;
   notify.priority = priority;
+  notify.record = record;
 
   terminate_notifications_.push_back(notify);
 }
@@ -367,6 +383,18 @@ object_ref<KernelModule> KernelState::GetKernelModule(
   return nullptr;
 }
 
+bool KernelState::AddressInUserModuleImage(uint32_t address, uint32_t length) {
+  auto global_lock = global_critical_region_.Acquire();
+  for (auto& user_module : user_modules_) {
+    auto* xex = user_module ? user_module->xex_module() : nullptr;
+    if (!xex) continue;
+    const uint32_t lo = xex->base_address();
+    const uint32_t hi = lo + xex->image_size();
+    if (address >= lo && address + length <= hi) return true;
+  }
+  return false;
+}
+
 object_ref<XModule> KernelState::GetModule(const std::string_view name,
                                            bool user_only) {
   if (name.empty()) {
@@ -410,7 +438,15 @@ object_ref<XThread> KernelState::LaunchModule(object_ref<UserModule> module) {
   }
 
   SetExecutableModule(module);
-  XELOGI("KernelState: Launching module...");
+  // Phase 1096hs: dash's entry point writes -1 to [92A7C224] and [92A7C228]
+  // four instructions in, and a watch that demonstrably reads dash image
+  // memory never sees either change - yet dash's code runs. Print the entry
+  // this thread is actually created with, so "Xenia launches 92196660" stops
+  // being an inference from the XEX header and becomes a measurement.
+  XELOGI("KernelState: Launching module... entry_point={:08X} stack={:X} "
+         "@{}ms",
+         module->entry_point(), module->stack_size(),
+         xe::Clock::QueryHostUptimeMillis());
 
   // Create a thread to run in.
   // We start suspended so we can run the debugger prep.
@@ -452,7 +488,18 @@ void KernelState::SetExecutableModule(object_ref<UserModule> module) {
   auto title_process =
       memory_->TranslateVirtual<X_KPROCESS*>(GetTitleProcess());
 
+  // Phase 1099z125: the title process exists from kernel init (see
+  // InitializeKernelGuestGlobals) and can already own threads here - the boot
+  // animation runs in it before any title. Re-initializing its thread list
+  // under a live thread corrupts the list when that thread exits, so keep the
+  // list and count when they are in use.
+  const X_LIST_ENTRY live_threads = title_process->thread_list;
+  const auto live_count = title_process->thread_count;
   InitializeProcess(title_process, X_PROCTYPE_TITLE, 10, 13, 17);
+  if (live_count != 0) {
+    title_process->thread_list = live_threads;
+    title_process->thread_count = live_count;
+  }
 
   xex2_opt_tls_info* tls_header = nullptr;
   executable_module_->GetOptHeader(XEX_HEADER_TLS_INFO, &tls_header);
@@ -614,6 +661,27 @@ object_ref<UserModule> KernelState::LoadUserModule(
     // Module wasn't loaded, so load it.
     module = object_ref<UserModule>(new UserModule(this));
     X_STATUS status = module->LoadFromFile(path);
+    if (XFAILED(status) && cvars::guide_system_app_fallback &&
+        name == raw_name && !cvars::guide_system_root.empty()) {
+      // Phase 1085: a bare module name is joined to the EXECUTABLE's directory
+      // above, which for a real game disc is \Device\Cdrom0. xam asks for its
+      // system apps that way - `createprofile.xex` - and they live on the
+      // console's system partition, which this build mounts as SYS: via
+      // guide_system_root (the same reason that flag exists for xam.xex and
+      // hud.xex: "without it those files have to live on the title's own GAME:
+      // device, which only works when the title is the dashboard folder").
+      // OPT-IN (guide_system_app_fallback, default false): without the gate
+      // this also satisfies the title's own probe for xbdm.xex, which
+      // dashroot happens to contain - measured on reg1085 - and silently
+      // changes what the title sees. The default path must not move.
+      // Strictly a fallback: the title's own
+      // device is still tried first, so nothing that works today changes.
+      const std::string sys_path = "SYS:\\" + std::string(name);
+      X_STATUS sys_status = module->LoadFromFile(sys_path);
+      XELOGI("LoadUserModule: {} not on the title's device ({:08X}); SYS: retry {} -> {:08X}",
+             path, uint32_t(status), sys_path, uint32_t(sys_status));
+      status = sys_status;
+    }
     if (XFAILED(status)) {
       object_table()->ReleaseHandle(module->handle());
       return nullptr;
@@ -888,6 +956,459 @@ void KernelState::UnloadUserModule(const object_ref<UserModule>& module,
 
 void KernelState::InitXmpVolumePatch() {
   xmp_volume_patch_ = XmpVolumePatch::CreateForTitle(title_id(), this);
+}
+
+// Phase 1099v: the real ExTerminateTitleProcess (xboxkrnlce 80056800) does not
+// kill threads itself. It walks the title-terminate notification list
+// (800D03E0) from the HIGHEST signed priority down, calling routine(&record),
+// and never clears the list. The kernel's own subsystems are entries in that
+// list; their host equivalents run here at the same priority slots:
+//   0x6F000000 Ps  (800621C0) terminate every TITLE-process thread, wait for 0
+//   0x6E000000 Ob  (80075528) close title handles        - NOT YET (no owner)
+//   0x92000000 Xex (800678A0) unload title modules, clear XexExecutableModule-
+//                             Handle, free 82000000-8BFFFFFF / 92000000-9FFFFFFF
+//   0x91000000 Mm  (8006F090) free title physical memory - NOT YET (no owner)
+// xam registers its own at 7C800000, 6EF00000, 0 and 81000000, and they run in
+// between as guest code on this (system) thread.
+// Phase 1099x: XexSendDeferredNotifications (real 80067518). Under the loader
+// lock, ONCE per title (flag 800DEA38), 80067050 drains the deferred list
+// 800D071C: for each loader entry flagged deferred (+0x4C & 0x08, not 0x80)
+// with an entry point and not yet attached (+0x34 & 0x200), set attached and
+// call DllMain(handle, DLL_PROCESS_ATTACH, 0); a FALSE return stops with
+// C0000142. Xenia attaches DLLs at load, so the list is normally empty; this
+// attaches whatever a load skipped (e.g. no guest thread at the time).
+void KernelState::RestoreHeap0Alias(const char* why) {
+  if (heap0_alias_address && !heap0_original.empty()) {
+    std::memcpy(memory()->TranslateVirtual(heap0_alias_address),
+                heap0_original.data(), heap0_original.size());
+    XELOGI("{}: restored heap[0] descriptor at {:08X} ({} bytes) - the "
+           "boot-time heap0 alias is undone",
+           why, heap0_alias_address, heap0_original.size());
+    heap0_alias_address = 0;
+    heap0_original.clear();
+  }
+}
+
+std::string KernelState::GuestBackChain(int max_frames) {
+  auto* th = XThread::GetCurrentThread();
+  if (!th) {
+    return "(no guest thread)";
+  }
+  auto* ctx = th->thread_state()->context();
+  std::string bt = fmt::format("lr {:08X}:", static_cast<uint32_t>(ctx->lr));
+  uint32_t sp = static_cast<uint32_t>(ctx->r[1]);
+  for (int f = 0; f < max_frames && sp; ++f) {
+    uint32_t caller_sp = xe::load_and_swap<uint32_t>(memory()->TranslateVirtual(sp));
+    if (caller_sp <= sp || caller_sp - sp > 0x100000) break;
+    uint32_t ra =
+        xe::load_and_swap<uint32_t>(memory()->TranslateVirtual(caller_sp - 8));
+    bt += fmt::format(" {:08X}", ra);
+    sp = caller_sp;
+  }
+  return bt;
+}
+
+X_STATUS KernelState::SendDeferredNotifications() {
+  std::vector<object_ref<UserModule>> pending;
+  {
+    auto global_lock = global_critical_region_.Acquire();
+    if (deferred_notifications_sent_) {
+      return X_STATUS_SUCCESS;
+    }
+    deferred_notifications_sent_ = true;
+    for (auto& module : user_modules_) {
+      if (module->is_dll_module() && module->entry_point() &&
+          !module->is_attached()) {
+        pending.push_back(module);
+      }
+    }
+  }
+  auto cur_thread = XThread::GetCurrentThread();
+  XELOGI("XexSendDeferredNotifications: {} module(s) not yet attached",
+         pending.size());
+  if (!cur_thread) {
+    return X_STATUS_SUCCESS;
+  }
+  for (auto& module : pending) {
+    module->is_attached_ = true;
+    uint64_t args[] = {module->handle(), 1, 0};
+    processor()->Execute(cur_thread->thread_state(), module->entry_point(),
+                         args, xe::countof(args));
+    const uint32_t ok = uint32_t(cur_thread->thread_state()->context()->r[3]);
+    XELOGI("XexSendDeferredNotifications: DllMain({}) -> {}", module->name(),
+           ok);
+    if (!(ok & 0xFF)) {
+      return X_STATUS(0xC0000142);  // STATUS_DLL_INIT_FAILED
+    }
+  }
+  return X_STATUS_SUCCESS;
+}
+
+void KernelState::RecordTitleAllocation(uint32_t base) {
+  std::lock_guard<std::mutex> lock(title_allocations_mutex_);
+  title_allocations_.insert(base);
+}
+
+void KernelState::ForgetTitleAllocation(uint32_t base) {
+  std::lock_guard<std::mutex> lock(title_allocations_mutex_);
+  title_allocations_.erase(base);
+}
+
+uint32_t KernelState::ReleaseTitleAllocations(uint32_t* out_bytes) {
+  std::set<uint32_t> bases;
+  {
+    std::lock_guard<std::mutex> lock(title_allocations_mutex_);
+    bases.swap(title_allocations_);
+  }
+  uint32_t released = 0;
+  uint32_t bytes = 0;
+  for (uint32_t base : bases) {
+    auto heap = memory()->LookupHeap(base);
+    if (!heap || heap->heap_type() != HeapType::kGuestVirtual) {
+      continue;
+    }
+    uint32_t size = 0;
+    if (heap->Release(base, &size)) {
+      ++released;
+      bytes += size;
+    }
+  }
+  if (out_bytes) {
+    *out_bytes = bytes;
+  }
+  return released;
+}
+
+void KernelState::RecordPhysicalAllocation(uint32_t base, uint32_t size,
+                                           uint32_t type, uint32_t lr) {
+  uint32_t proc = 0;
+  if (auto* th = XThread::GetCurrentThread()) {
+    if (auto* kt = th->guest_object<X_KTHREAD>()) {
+      proc = kt->process_type;
+    }
+  }
+  std::lock_guard<std::mutex> lock(title_allocations_mutex_);
+  physical_allocations_[base] = {size, type, proc, lr};
+}
+
+void KernelState::ForgetPhysicalAllocation(uint32_t base) {
+  std::lock_guard<std::mutex> lock(title_allocations_mutex_);
+  physical_allocations_.erase(base);
+}
+
+uint32_t KernelState::ReleaseTitlePhysicalAllocations(
+    const std::vector<uint32_t>& keep, uint64_t* out_bytes) {
+  std::vector<std::pair<uint32_t, PhysicalAllocation>> victims;
+  std::map<std::pair<uint32_t, uint32_t>, std::pair<uint32_t, uint64_t>> held;
+  {
+    std::lock_guard<std::mutex> lock(title_allocations_mutex_);
+    for (auto it = physical_allocations_.begin();
+         it != physical_allocations_.end();) {
+      const auto& a = it->second;
+      auto& h = held[{a.type, a.proc_type}];
+      h.first++;
+      h.second += a.size;
+      // Type 1 = title, 2 = system, 0 = the calling thread's process.
+      const bool title_owned =
+          a.type == 1 || (a.type == 0 && a.proc_type == X_PROCTYPE_TITLE);
+      bool kept = !title_owned;
+      if (title_owned) {
+        const uint32_t lo = it->first & 0x1FFFFFFF;
+        const uint32_t hi = lo + a.size;
+        for (uint32_t k : keep) {
+          const uint32_t pk = k & 0x1FFFFFFF;
+          if (k && pk >= lo && pk < hi) {
+            kept = true;
+            XELOGI("TitleSwitch:   Mm: keeping physical {:08X} size {:X} (in "
+                   "use: {:08X})",
+                   it->first, a.size, k);
+            break;
+          }
+        }
+      }
+      if (kept) {
+        ++it;
+      } else {
+        victims.emplace_back(it->first, a);
+        it = physical_allocations_.erase(it);
+      }
+    }
+  }
+  for (const auto& [key, v] : held) {
+    XELOGI("TitleSwitch:   Mm: physical held at terminate: type {} proc {} -> "
+           "{} allocation(s), {:X} bytes",
+           key.first, key.second, v.first, v.second);
+  }
+  uint32_t released = 0;
+  uint64_t bytes = 0;
+  for (const auto& [base, a] : victims) {
+    auto heap = memory()->LookupHeap(base);
+    if (heap && heap->Release(base)) {
+      ++released;
+      bytes += a.size;
+    }
+  }
+  if (out_bytes) *out_bytes = bytes;
+  return released;
+}
+
+void KernelState::TerminateTitleProcessSelective() {
+  title_switch_log_budget.store(300);
+  if (title_terminate_hook) {
+    title_terminate_hook();
+  }
+  deferred_notifications_sent_ = false;
+  // Phase 1099w: undo lle_xam_heap0_alias before xam's terminate callbacks run.
+  // The alias copies the SYSTEM heap[1] descriptor into heap[0], xam's per-title
+  // workspace, because the boot title (launched by Xenia, not xam's launcher)
+  // never got a workspace. xam tears heap[0] down as title memory here, which
+  // with the alias destroyed and released its own system heap at 40000000
+  // (measured: NtFreeVirtualMemory 40000000+1F0000 from 817B2A04, then crashes
+  // on 401Axxxx-401Exxxx). Restored, heap[0] is the placeholder again and the
+  // new title's start routine (8175DF50 -> 8175DC58 -> 817B4750) creates a
+  // real workspace, as on a console.
+  RestoreHeap0Alias("TitleSwitch");
+  XELOGI("TitleSwitch: ExTerminateTitleProcess - {} registered notification(s)",
+         terminate_notifications_.size());
+  std::vector<TerminateNotification> ordered = terminate_notifications_;
+  std::stable_sort(ordered.begin(), ordered.end(),
+                   [](const TerminateNotification& a,
+                      const TerminateNotification& b) {
+                     return int32_t(a.priority) > int32_t(b.priority);
+                   });
+
+  auto run_guest = [&](const TerminateNotification& n) {
+    auto* cur = XThread::GetCurrentThread();
+    if (!cur || !n.guest_routine) return;
+    XELOGI("TitleSwitch:   notify {:08X}(&{:08X}) priority {:08X}",
+           n.guest_routine, n.record, n.priority);
+    uint64_t args[] = {n.record};
+    processor()->Execute(cur->thread_state(), n.guest_routine, args,
+                         xe::countof(args));
+  };
+
+  auto kill_title_threads = [&]() {
+    // Snapshot the title threads WITHOUT holding the global lock while killing.
+    std::vector<object_ref<XThread>> victims;
+    uint32_t kept = 0;
+    {
+      auto global_lock = global_critical_region_.Acquire();
+      for (auto& kv : threads_by_id_) {
+        auto* thread = kv.second;
+        const bool is_title =
+            thread->is_guest_thread() && !XThread::IsInThread(thread) &&
+            thread->guest_object<X_KTHREAD>() &&
+            thread->guest_object<X_KTHREAD>()->process_type ==
+                X_PROCTYPE_TITLE;
+        if (is_title) {
+          victims.push_back(retain_object(thread));
+        } else {
+          ++kept;
+        }
+      }
+    }
+#if XE_PLATFORM_WIN32
+    // Host code of the emulator itself: a thread stopped in here may hold a
+    // host lock (the global critical region, a heap lock, ...), and killing it
+    // there abandons that lock - measured: the switch deadlocked on the next
+    // lock acquire. Translated guest code and OS wait routines are safe.
+    const HMODULE exe_module = GetModuleHandleW(nullptr);
+    const auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(exe_module);
+    const auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(
+        reinterpret_cast<uint8_t*>(exe_module) + dos->e_lfanew);
+    const uint64_t exe_lo = reinterpret_cast<uint64_t>(exe_module);
+    const uint64_t exe_hi = exe_lo + nt->OptionalHeader.SizeOfImage;
+#endif
+    uint32_t killed = 0, retries = 0;
+    for (auto& thread : victims) {
+      if (!thread->is_running()) {
+        ++killed;
+        continue;
+      }
+      // NO StepToGuestSafePoint, unlike TerminateTitle: it only handles
+      // exports tagged kBlocking and otherwise steps the thread until its
+      // kernel call RETURNS - a title thread parked in a wait never returns
+      // (measured: every dash thread was in a wait and the switch hung). These
+      // threads are never resumed, so no synchronized guest context is needed;
+      // the real kernel ends them with a terminate APC (800620D8).
+      for (int attempt = 0; attempt < 5000; ++attempt) {
+        auto* native = thread->thread();
+#if XE_PLATFORM_WIN32
+        HANDLE h = reinterpret_cast<HANDLE>(native->native_handle());
+        if (SuspendThread(h) == static_cast<DWORD>(-1)) {
+          break;
+        }
+        CONTEXT c = {};
+        c.ContextFlags = CONTEXT_CONTROL;
+        const bool got = GetThreadContext(h, &c) != 0;
+        const bool in_emulator_host_code =
+            got && c.Rip >= exe_lo && c.Rip < exe_hi;
+        if (in_emulator_host_code) {
+          ResumeThread(h);
+          ++retries;
+          xe::threading::Sleep(std::chrono::milliseconds(1));
+          continue;
+        }
+#else
+        native->Suspend();
+#endif
+        thread->Terminate(0);
+        break;
+      }
+      ++killed;
+      UnregisterThread(thread.get());
+    }
+    XELOGI("TitleSwitch:   Ps: terminated {} title thread(s) ({} retries to "
+           "leave host code), kept {} other(s)",
+           killed, retries, kept);
+  };
+
+  auto unload_title_executable = [&]() {
+    auto exe = executable_module_;
+    if (!exe) {
+      XELOGI("TitleSwitch:   Xex: no executable module loaded");
+      return;
+    }
+    XELOGI("TitleSwitch:   Xex: unloading title executable {}", exe->path());
+    executable_module_ = nullptr;
+    auto export_entry = processor()->export_resolver()->GetExportByOrdinal(
+        "xboxkrnl.exe", ordinals::XexExecutableModuleHandle);
+    if (export_entry && export_entry->variable_ptr) {
+      *memory()->TranslateVirtual<xe::be<uint32_t>*>(
+          export_entry->variable_ptr) = 0;
+    }
+    // DECLARED HOST CLEANUP, not traced from the real kernel: callbacks the
+    // title registered with the video and audio drivers point into its image.
+    // Left in place they fire into released memory until the next title
+    // re-registers (measured 1099x: 921AFCB0 x3081, 924160C0 x125).
+    if (exe->xex_module()) {
+      const uint32_t low = exe->xex_module()->low_address();
+      const uint32_t high = exe->xex_module()->high_address();
+      auto* gs = emulator()->graphics_system();
+      if (gs && gs->interrupt_callback() >= low &&
+          gs->interrupt_callback() < high) {
+        XELOGI("TitleSwitch:   Xex: clearing graphics interrupt callback {:08X}",
+               gs->interrupt_callback());
+        gs->SetInterruptCallback(0, 0);
+      }
+      if (auto* as = emulator()->audio_system()) {
+        XELOGI("TitleSwitch:   Xex: unregistered {} audio client(s) in "
+               "{:08X}-{:08X}",
+               as->UnregisterClientsInRange(low, high), low, high);
+      }
+    }
+    UnloadUserModule(exe, false);
+    // Unload now. Left to the destructor, it runs whenever the last ref
+    // drops - after the new dash is loaded at the same base - and releases
+    // that image's memory and its processor registration.
+    auto status = exe->Unload();
+    XELOGI("TitleSwitch:   Xex: image released status={:08X} refs held "
+           "elsewhere may still exist",
+           status);
+  };
+
+  bool did_ps = false, did_ob = false, did_xex = false, did_mm = false;
+  bool did_vd9 = false, did_vd5 = false;
+  auto run_kernel_slots_above = [&](int32_t priority) {
+    if (!did_ps && int32_t(0x6F000000) > priority) {
+      did_ps = true;
+      kill_title_threads();
+    }
+    // Phase 1099z139: the kernel's video notifications. At an equal priority
+    // the guest registrations run first here; the real list order for ties
+    // was not read.
+    if (!did_vd9 && int32_t(0x6E800000) > priority) {
+      did_vd9 = true;
+      xboxkrnl::GuideKernelEngineTerminateSlot(false);
+    }
+    if (!did_ob && int32_t(0x6E000000) > priority) {
+      did_ob = true;
+      // Phase 1099z47: close the title's handles - those created by threads
+      // of the title process (real Ob slot 80075528 empties the title handle
+      // table; objects still referenced elsewhere stay alive).
+      if (cvars::guide_title_switch_close_handles) {
+        const uint32_t closed = object_table()->CloseHandlesOwnedBy(
+            static_cast<uint8_t>(X_PROCTYPE_TITLE));
+        XELOGI("TitleSwitch:   Ob: closed {} title handle(s)", closed);
+      } else {
+        XELOGI("TitleSwitch:   Ob: title handle close disabled");
+      }
+    }
+    if (!did_vd5 && int32_t(0x6D000000) > priority) {
+      did_vd5 = true;
+      xboxkrnl::GuideKernelEngineTerminateSlot(true);
+    }
+    if (!did_xex && int32_t(0x92000000) > priority) {
+      did_xex = true;
+      unload_title_executable();
+    }
+    if (!did_mm && int32_t(0x91000000) > priority) {
+      did_mm = true;
+      // Phase 1099z47: release the title's NtAllocateVirtualMemory regions.
+      // Phase 1099z97: and its physical allocations, except the live ring
+      // buffer and the persisted front buffer (the GPU still references
+      // them until the next title takes over) - without this a second launch
+      // of the same game found the physical heap empty.
+      if (cvars::guide_title_switch_release_memory) {
+        uint32_t bytes = 0;
+        const uint32_t released = ReleaseTitleAllocations(&bytes);
+        XELOGI("TitleSwitch:   Mm: released {} title virtual region(s), {:X} "
+               "bytes",
+               released, bytes);
+        std::vector<uint32_t> keep;
+        xboxkrnl::GuideTitleSwitchKeepAddresses(&keep);
+        uint64_t pbytes = 0;
+        const uint32_t preleased =
+            ReleaseTitlePhysicalAllocations(keep, &pbytes);
+        XELOGI("TitleSwitch:   Mm: released {} title physical allocation(s), "
+               "{:X} bytes",
+               preleased, pbytes);
+        // Phase 1099z147: what the next title can get in one piece.
+        if (auto* ph = memory()->GetPhysicalHeap()) {
+          uint32_t run_base = 0;
+          const uint32_t run = ph->LargestFreeRun(&run_base);
+          XELOGI("TitleSwitch:   Mm: physical free {}/{} pages, largest free "
+                 "run {:X} bytes at {:08X}",
+                 ph->unreserved_page_count(), ph->total_page_count(), run,
+                 run_base);
+          // Who bounds that run: the tracked allocations just above and below.
+          const uint32_t run_end = run_base + run;
+          HeapAllocationInfo above = {};
+          if (run_end < ph->heap_size() &&
+              ph->QueryRegionInfo(run_end, &above)) {
+            XELOGI("TitleSwitch:   Mm:   region above the run: base {:08X} "
+                   "size {:X} alloc_base {:08X} alloc_protect {:X} state {:X}",
+                   above.base_address, above.region_size,
+                   above.allocation_base, above.allocation_protect,
+                   above.state);
+          }
+          std::lock_guard<std::mutex> lock(title_allocations_mutex_);
+          for (const auto& kv : physical_allocations_) {
+            const uint32_t phys =
+                (kv.first & 0x1FFFFFFF) +
+                ((kv.first >= 0xE0000000u) ? 0x1000u : 0u);
+            if ((phys >= run_end && phys < run_end + 0x100000) ||
+                (phys + kv.second.size <= run_base &&
+                 phys + kv.second.size + 0x100000 > run_base)) {
+              XELOGI("TitleSwitch:   Mm:   bounding allocation {:08X} (phys "
+                     "{:08X}) size {:X} type {} proc {} lr {:08X}",
+                     kv.first, phys, kv.second.size, kv.second.type,
+                     kv.second.proc_type, kv.second.lr);
+            }
+          }
+        }
+      } else {
+        XELOGI("TitleSwitch:   Mm: title memory release disabled");
+      }
+    }
+  };
+
+  for (const auto& n : ordered) {
+    run_kernel_slots_above(int32_t(n.priority));
+    run_guest(n);
+  }
+  run_kernel_slots_above(INT32_MIN);
+  XELOGI("TitleSwitch: ExTerminateTitleProcess done");
 }
 
 void KernelState::TerminateTitle() {
@@ -1563,6 +2084,11 @@ void KernelState::InitializeKernelGuestGlobals() {
       memory()->TranslateVirtual<X_KPROCESS*>(GetSystemProcess());
   InitializeProcess(system_process, X_PROCTYPE_SYSTEM, 2, 5, 9);
   SetProcessTLSVars(system_process, 32, 0, 0);
+  // Phase 1099z125: the title process too, so a thread can be created in it
+  // before the first title (the kernel's boot animation thread). Its TLS vars
+  // are set per title in SetExecutableModule.
+  auto title_process = memory()->TranslateVirtual<X_KPROCESS*>(GetTitleProcess());
+  InitializeProcess(title_process, X_PROCTYPE_TITLE, 10, 13, 17);
 
   uint32_t oddobject_offset =
       kernel_guest_globals_ +
@@ -1679,6 +2205,12 @@ void KernelState::InitializeKernelGuestGlobals() {
        kernel_guest_globals_ +
            offsetof32(KernelGuestGlobals, IoDeviceObjectType)}};
   xboxkrnl::xeKeSetEvent(&block->UsbdBootEnumerationDoneEvent, 1, 0);
+  // Phase 1095bl: do NOT signal UsbdDriverLoadRequiredEvent here. Tried it
+  // (the sibling above IS signalled) and measured no benefit: the list head
+  // at 81D3CA08 stayed 0 and refusals were unchanged (64 vs 54). Signalling
+  // it would also assert that a driver load IS required, which is not true
+  // of this machine. Leaving it unsignalled is what lets the pool BLOCK on
+  // it correctly instead of spinning.
 }
 
 void KernelState::InitializeXbdmCpuCounters() {

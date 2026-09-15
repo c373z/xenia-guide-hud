@@ -197,6 +197,106 @@ DEFINE_bool(guide_fix_projection, false,
             "from a screen size of zero, giving infinity, so every vertex "
             "leaves the shader non-finite and covers nothing.",
             "GPU");
+// Phase 1098p: where to execute the system command buffer xam submits. Swap
+// time dispatches real draws (measured +2/+3 per exec) but changes nothing on
+// screen - phase 946's comment in IssueCopy says why: only the placement
+// immediately before the title's resolve leaves the pixels in EDRAM when the
+// copy to the displayed image runs.
+// Phase 1098s: execute EVERY queued submit instead of only the most recent.
+// Phase 1098zd: ON by default. It faulted when first tried (1098s) ONLY because
+// the guest was recycling its three buffers under the host; with the slot
+// contract (guide_syscmd_slot_contract) the backlog stays at or below three and
+// every queued pointer still describes the bytes that were in it - measured 0
+// host faults across every run since. And it is REQUIRED: executing only the
+// newest submit drops the stream that carries the Guide's resolving draw, so
+// 1FA50000 is never resolved and the Guide never reaches the screen.
+// Default 0 (phase 1099z123): at 60 it measured 60 presents/s over a 30 fps
+// Sonic, but the Guide's dim pass samples the title front buffer (fetch 15)
+// while the title is mid-frame, and Sonic reuses that memory for a smaller
+// intermediate resolve - the refresh showed that as garbage in the top-left.
+// Needs a snapshot of the finished title frame before it can default on.
+DEFINE_int32(guide_refresh_hz, 0,
+             "HOST-SIDE FIX, not present in real hardware: while the Guide is "
+             "up, re-present the title's last frame with the Guide redrawn at "
+             "this rate when the title presents slower, so a low-framerate "
+             "game does not cap the Guide. 0 = Guide follows the title's "
+             "swaps. Phase 1099z114.",
+             "Guide");
+DEFINE_int32(guide_syscmd_idle_drain_ms, 100,
+             "When the ring is idle and no swap/resolve has drained xam's "
+             "system command buffer for this many ms, drain it anyway (the "
+             "console GPU does not wait for a title to present). 0 = off. "
+             "Phase 1099z97.",
+             "Guide");
+DEFINE_bool(guide_syscmd_drain_all, true,
+            "Execute every queued system-command-buffer submit, not just the "
+            "most recent.",
+            "Guide");
+
+// Phase 1098zc: present the GUIDE's own resolved surface instead of the title's
+// swap texture. This is a DIAGNOSTIC, not the finished composite: it replaces
+// rather than blends, and it exists to answer a question no instrument has been
+// able to answer - does that surface contain the Guide? If it shows the blade
+// over a dimmed dashboard, xam composites the title itself and presenting it IS
+// the correct routing; if it shows the blade on black, a blend is needed.
+// Phase 1098ze: ALPHA BLEND the Guide over the title's frame instead of
+// replacing it - what the console's display hardware does. The captured image
+// from 1098zc settles that xam does not composite the title into its own
+// surface, so the blend has to happen here. Falls back to replacement if the
+// composite objects cannot be built.
+DEFINE_bool(guide_show_alpha, false,
+            "Diagnostic: draw the Guide surface alpha channel as grey.",
+            "Guide");
+// Phase 1099g: 1099a's "alpha is 255 everywhere" histogrammed the PRESENTED
+// capture, whose alpha the diagnostic shader forces to 1, and only at a settled
+// frame. This reads back the Guide's own texture every swap and logs how its
+// alpha changes, plus the guest's clear and per-draw blend/constant state.
+// Phase 1099h: the real VdSwap (xboxkrnl 0x25B, 80090080), when a system
+// command buffer is pending, writes PM4 0005485A - texture fetch 15 := the
+// title's front-buffer fetch header (base translated to physical, clamp X/Y =
+// ClampToEdge, mag/min = Linear) - and THEN an INDIRECT_BUFFER to the Guide's
+// PM4. xam's first draw blits fetch 15 x its dim ramp. Replicate that prefix.
+DEFINE_bool(guide_route_fetch15, true,
+            "Bind the title's front buffer to texture fetch 15 before running "
+            "the Guide's system command buffer, as the kernel's VdSwap does.",
+            "Guide");
+// Phase 1099j: WHERE the Guide's system command buffer runs. The real VdSwap
+// emits it into the ring at swap, after the title's resolve, with that swap's
+// front buffer in fetch 15. Draining at the title's resolve instead (1098p)
+// binds the previous swap's buffer - measured one frame behind, 900/900.
+DEFINE_bool(guide_syscmd_at_swap, true,
+            "Run the Guide's system command buffer at swap (as VdSwap does) "
+            "instead of at the title's resolve.",
+            "Guide");
+DEFINE_bool(guide_alpha_trace, false,
+            "Trace the Guide surface alpha over time: GPU readback of the "
+            "Guide texture each swap, guest clear registers at its resolves, "
+            "and blend/pixel-constant state of its first draws.",
+            "Guide");
+DEFINE_bool(guide_composite_blend, true,
+            "Blend the Guide's surface over the title's frame rather than "
+            "replacing it.",
+            "Guide");
+DEFINE_bool(guide_present_pitch_width, false,
+            "Use RB_COPY_DEST_PITCH as the Guide texture's width instead of the "
+            "descriptor's logical width. Only to A/B the 1098zi width change.",
+            "Guide");
+DEFINE_int32(guide_present_stale_swaps, 4,
+             "Present the Guide's surface only if the guest resolved it within "
+             "this many swaps - it resolves every frame while the Guide is up "
+             "and stops when it closes.",
+             "Guide");
+DEFINE_bool(guide_present_surface, true,
+            "Route the Guide's own resolved surface to the screen while the "
+            "guest is producing it. Still REPLACES rather than alpha-blends "
+            "over the title - see the note above.",
+            "Guide");
+
+DEFINE_bool(guide_syscmd_at_resolve, true,
+            "Execute the guest's system command buffer immediately before the "
+            "title's resolve instead of at swap.",
+            "Guide");
+
 DEFINE_bool(guide_overlay_before_resolve, false,
             "Execute the published Guide stream immediately before the title's "
             "own resolve, rather than at the swap. Phase 946: the title's "
@@ -292,6 +392,35 @@ DEFINE_bool(guide_clear_rt, false,
             "query says fragments ARE produced, so the question is whether "
             "this render target is the one that reaches the display at all.",
             "GuideResearch");
+DEFINE_bool(guide_readback_rt, false,
+            "Copy the bound colour target into a readback buffer INSIDE the "
+            "command list - once right after the pre-burst clear (positive "
+            "control, needs guide_clear_rt_pre) and once right after the "
+            "burst that emitted draws - then count marker pixels on the CPU. "
+            "Phase 1010: every visibility reading so far went through the "
+            "resolve, the swap, the presenter and a timed screenshot; this "
+            "reads the render target itself on the burst frame.",
+            "GuideResearch");
+DEFINE_bool(guide_readback_preclear, false,
+            "Also read the colour target back right after the pre-burst clear, "
+            "BEFORE the burst. Phase 1010: the GPU wait this needs sits between "
+            "the paint publishing its stream and the burst parsing it, and the "
+            "run that had it parsed 416 draws with zeroed constants instead of "
+            "541 - so it is off by default and the burst readback's green "
+            "background is the positive control instead.",
+            "GuideResearch");
+DEFINE_bool(guide_overlay_restore_regs, false,
+            "Snapshot the whole register file before the before-resolve burst "
+            "and put every changed register back afterwards through "
+            "WriteRegister, so the title's resolve that follows runs with the "
+            "title's own state. Phase 1011: the Guide's stream ends in copy-"
+            "mode resolves that leave RB_COPY_DEST_BASE/PITCH/INFO at zero, "
+            "so the title's resolve right after the burst failed "
+            "('Unsupported resolve vertex buffer format') and the frame the "
+            "blade was drawn into was never copied to a front buffer. The "
+            "scratch, coherency and DC_LUT registers are skipped because "
+            "writing them has side effects.",
+            "GuideResearch");
 DEFINE_bool(guide_occlusion_query, false,
             "Wrap the Guide's burst in a D3D12 occlusion query and report how "
             "many samples passed. Phase 976: every other instrument in this "
@@ -320,6 +449,38 @@ DEFINE_bool(guide_overlay_skip_lut, false,
             "Guide's stream. Phase 936: those writes, not the draws, are what "
             "blacks the display - Xenia applies the ramp, and the replayed "
             "entries overwrite the title's.",
+            "GPU");
+
+// Phase 1047: the burst runs inside the title's IssueCopy, with the title's
+// RB_MODECONTROL already in copy mode; once text paints, its quad-list draws
+// reach IssueDraw in that mode and are treated as resolves (every one fails
+// with "Unsupported resolve vertex buffer format" and the failed state then
+// breaks the title's own resolve for the rest of the run). Put the burst in
+// colour mode; guide_overlay_restore_regs puts the title's value back.
+DEFINE_bool(guide_overlay_color_mode, false,
+            "Set RB_MODECONTROL edram_mode to colour/depth for the "
+            "before-resolve burst.",
+            "GPU");
+
+// Phase 1052b: the Guide's slide-in. The burst replays the same stream every
+// frame, so a per-frame x offset on the Guide's viewport animates the whole
+// blade without touching XUI (XuiElementSetPosition on the scene hung).
+DEFINE_int32(guide_slide_ms, 0,
+             "Slide the Guide in from the left over this many milliseconds, "
+             "starting at the first burst; 0 off.",
+             "GPU");
+
+DEFINE_bool(guide_atlas_invalidate, false,
+            "Phase 1054: before every Guide burst, mark the shared-memory "
+            "ranges of the paint's 8-bit textures (the glyph atlases) as "
+            "modified by the CPU, so the texture cache re-uploads them. The "
+            "atlas in memory holds every glyph the screen lacks.",
+            "GPU");
+DEFINE_bool(guide_cond_write_force, false,
+            "Phase 1054: apply every COND_WRITE in the Guide's burst whether "
+            "or not its poll condition holds (XUI writes its glyph atlas "
+            "through 768 of them per paint; a replayed stream cannot satisfy "
+            "a fence it never wrote).",
             "GPU");
 DEFINE_bool(guide_overlay_reset_state, false,
             "Reset the host binding trackers after the Guide's stream runs, "

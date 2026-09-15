@@ -191,7 +191,30 @@ bool PPCTranslator::Translate(GuestFunction* function,
   if (cvars::disassemble_functions) {
     debug_info_flags |= DebugInfoFlags::kDebugInfoAllDisasm;
   }
-  if (cvars::trace_functions) {
+  // Phase 1054 fps: the counters can be restricted to an address range
+  // (trace_function_lo/hi, e.g. xam+hud) so the title's own code runs at full
+  // speed - instrumenting everything made the title too slow to reach the
+  // code under study inside a run.
+  const uint32_t fa = function->address();
+  const bool in_trace_range =
+      (!cvars::trace_function_hi && !cvars::trace_function_hi2) ||
+      (fa >= cvars::trace_function_lo && fa < cvars::trace_function_hi) ||
+      (fa >= cvars::trace_function_lo2 && fa < cvars::trace_function_hi2);
+  // Phase 1096bb: honour trace_coverage_only_fn here too. The x64 emitter
+  // records function_caller_history[4] - the last four CALLER addresses - but
+  // ONLY under kDebugInfoTraceFunctions, which was global. Instrumenting every
+  // function is heavy enough that the title never reaches the code under study
+  // (covrun.ps1 documents exactly that), so the caller history was effectively
+  // unobtainable. Restricting this flag to the single address the coverage flag
+  // already names makes it usable: one function instrumented, and its callers
+  // recorded by machinery that already exists.
+  //
+  // That answers the last open question of phase 1096 - which guest code invokes
+  // XuiRender::Uninit (vtable+4) - without backend work, a memory watch, or a
+  // hook on a function that has no kernel import to hook.
+  if (cvars::trace_functions && in_trace_range &&
+      (!cvars::trace_coverage_only_fn ||
+       function->address() == cvars::trace_coverage_only_fn)) {
     debug_info_flags |= DebugInfoFlags::kDebugInfoTraceFunctions;
   }
   // Coverage instrumentation, optionally restricted to one function.
@@ -201,7 +224,7 @@ bool PPCTranslator::Translate(GuestFunction* function,
   // the code under study and behaves differently when it does. Restricting it
   // to a single address keeps the instrument while removing nearly all of the
   // perturbation.
-  if (cvars::trace_function_coverage &&
+  if (cvars::trace_function_coverage && in_trace_range &&
       (!cvars::trace_coverage_only_fn ||
        function->address() == cvars::trace_coverage_only_fn)) {
     debug_info_flags |= DebugInfoFlags::kDebugInfoTraceFunctionCoverage;
@@ -209,7 +232,7 @@ bool PPCTranslator::Translate(GuestFunction* function,
   if (cvars::trace_function_references) {
     debug_info_flags |= DebugInfoFlags::kDebugInfoTraceFunctionReferences;
   }
-  if (cvars::trace_function_data) {
+  if (cvars::trace_function_data && in_trace_range) {
     debug_info_flags |= DebugInfoFlags::kDebugInfoTraceFunctionData;
   }
   std::unique_ptr<FunctionDebugInfo> debug_info;

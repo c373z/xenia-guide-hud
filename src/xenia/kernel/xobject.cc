@@ -12,8 +12,15 @@
 
 #include "xenia/kernel/xobject.h"
 
+#include <mutex>
+
+#include "xenia/base/memory.h"
+#include "xenia/kernel/kernel_flags.h"  // phase 1056: guide_dispatch_guard
+#include "xenia/kernel/xboxkrnl/xboxkrnl_video.h"  // phase 1073: XamAddrInImage
+
 #include "xenia/base/byte_stream.h"
 #include "xenia/kernel/kernel_state.h"
+#include "xenia/kernel/user_module.h"
 #include "xenia/kernel/util/shim_utils.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_private.h"
 #include "xenia/kernel/xenumerator.h"
@@ -275,7 +282,20 @@ X_STATUS XObject::WaitMultiple(uint32_t count, XObject** objects,
 
   for (size_t i = 0; i < count; ++i) {
     wait_handles[i] = objects[i]->GetWaitHandle();
-    assert_not_null(wait_handles[i]);
+    if (!wait_handles[i]) {
+      // Phase 1099z24: Sonic's first frames faulted in WaitAny on a null
+      // host wait handle. DECLARED DEFENSIVE FALLBACK until the object is
+      // identified: log it and fail the wait instead of crashing the host.
+      static std::atomic<uint32_t> reported{0};
+      if (++reported <= 10) {
+        XELOGE("WaitMultiple: object {} of {} (type {}, handle {:08X}) has no "
+               "wait handle; chain {}",
+               i, count, static_cast<int>(objects[i]->type()),
+               objects[i]->handle(),
+               objects[i]->kernel_state()->GuestBackChain());
+      }
+      return X_STATUS_INVALID_HANDLE;
+    }
   }
 
   auto timeout_ms =
@@ -436,11 +456,123 @@ object_ref<XObject> XObject::GetNativeObject(KernelState* kernel_state,
   // it wrongly rejects are dispatch types Xenia does not implement, which
   // resolve to nullptr a few lines below anyway, so the observable outcome
   // for them is unchanged.
-  const bool mapped =
-      guest_ptr != 0 && ptr_heap &&
-      ptr_heap->QueryRangeAccess(
-          guest_ptr, guest_ptr + sizeof(X_DISPATCH_HEADER) - 1) !=
-          xe::memory::PageAccess::kNoAccess;
+  // Phase 1056: the stopgap above refuses xam's own task-pool semaphores and
+  // timer (81D42450 / 81D424A8 / 81D424E4, dispatch types 5 and 9, live in
+  // xam's image), because the image's pages report kNoAccess in the heap's
+  // page table while being perfectly readable. Every wait on them then
+  // returned INVALID_PARAMETER and xam's task workers spun instead of
+  // running the tasks the Guide schedules. guide_dispatch_guard picks the
+  // test; the refusal path logs the page's own state so the choice is made
+  // from data, not from the protection bits alone.
+  uint32_t pg_state = 0, pg_alloc = 0, pg_cur = 0, pg_base = 0, pg_pages = 0;
+  const bool pg_ok = ptr_heap && ptr_heap->QueryPageEntry(guest_ptr, &pg_state, &pg_alloc,
+                                                          &pg_cur, &pg_base, &pg_pages);
+  bool mapped;
+  switch (cvars::guide_dispatch_guard) {
+    case 0:
+      mapped = guest_ptr != 0 && ptr_heap &&
+               ptr_heap->QueryRangeAccess(
+                   guest_ptr, guest_ptr + sizeof(X_DISPATCH_HEADER) - 1) !=
+                   xe::memory::PageAccess::kNoAccess;
+      break;
+    case 1:
+      // the heap has this page allocated (state != free), whatever the
+      // protection bits say. Useless for an LLE module, whose image the heap
+      // never recorded.
+      mapped = guest_ptr != 0 && pg_ok && pg_state != 0;
+      break;
+    default: {
+      // Is the host page mapped? Cached per 64 KB page: only positive answers
+      // are cached, so the cache can never turn a mapped page into a refusal.
+      static std::mutex mp_mu;
+      static std::unordered_map<uint32_t, bool> mp_ok;
+      mapped = false;
+      if (guest_ptr) {
+        const uint32_t key = guest_ptr >> 16;
+        {
+          std::lock_guard<std::mutex> lk(mp_mu);
+          auto it = mp_ok.find(key);
+          if (it != mp_ok.end()) mapped = it->second;
+        }
+        if (!mapped) {
+          size_t len = 0;
+          auto access = xe::memory::PageAccess::kNoAccess;
+          if (xe::memory::QueryProtect(native_ptr, len, access) &&
+              access != xe::memory::PageAccess::kNoAccess && len != 0) {
+            mapped = true;
+            std::lock_guard<std::mutex> lk(mp_mu);
+            mp_ok[key] = true;
+          }
+        }
+      }
+      // Phase 1073: xam's own dispatch objects live in the LLE image, whose
+      // pages the heap never recorded (the refusal logs `state 0 alloc 0`) and
+      // for which QueryProtect answers no. That refuses 81D42450 - the
+      // semaphore xam's task workers wait on - on every wait, from guest
+      // lr=8177A9F4, the instruction after their KeWaitForMultipleObjects. The
+      // wait then returns INVALID_PARAMETER and the workers spin: 81.8 MILLION
+      // refusals in a nine-second run (`resume6`). Accept an address that lies
+      // inside the loaded xam image; the range comes from the module itself,
+      // not from a hardcoded constant.
+      if (!mapped && guest_ptr &&
+          xboxkrnl::XamAddrInImage(guest_ptr, sizeof(X_DISPATCH_HEADER))) {
+        mapped = true;
+      }
+      // Phase 1096hx: the same argument as Phase 1073, for the TITLE image.
+      // dash builds its events INLINE, in C++ constructors - 92262200 does
+      // "stb 1,0x14(r3)" and self-links the wait list - which is a legitimate
+      // way to create a dispatcher header on the console, and it never calls
+      // KeInitializeEvent, so nothing ever stashes Xenia's signature in it.
+      // The nine objects dash waits on measure as
+      //     01000000 00000000 <self+8> <self+8>
+      // i.e. type 1 EventSynchronizationObject, unsignalled, empty wait list.
+      // They are perfectly valid. But they live in the title image, whose
+      // pages the heap never recorded and for which QueryProtect answers no,
+      // so `mapped` stayed false and EVERY wait on them returned
+      // ABANDONED_WAIT_0 without waiting - which is why dash's 500 ms poll
+      // ran 335,000 times a second. Accept an address inside the loaded title
+      // image, exactly as xam's image is accepted above, with the range taken
+      // from the module rather than hardcoded.
+      // Phase 1099z129: any loaded module's image, not only the executable's.
+      // bootanim.xex is a DLL loaded before any title, and its event objects
+      // (980590CC init-done, 98079068 audio) were refused the same way, so its
+      // waits returned at once without waiting.
+      if (!mapped && guest_ptr &&
+          kernel_state->AddressInUserModuleImage(
+              guest_ptr, sizeof(X_DISPATCH_HEADER))) {
+        mapped = true;
+      }
+      // Phase 1095: the heap's own page table is the authority on whether a
+      // guest page is readable; QueryProtect is not, and disagrees with it.
+      // Every worker KTHREAD xam's task pool creates (3002A010, 3002E010,
+      // 30032010, ... - as_type 6, and the header really does read 06000000,
+      // a valid Thread dispatch header) reports `state 3 alloc 3 cur 3`, i.e.
+      // Reserve|Commit with Read|Write, while QueryProtect answers no. The
+      // factory at 8177AE78 creates every pool thread suspended (81778940
+      // passes ExCreateThread creation_flags 0x82|1 - SystemThread |
+      // ReturnKThreadPtr | Suspended, which is why [worker+0x1C] holds a
+      // guest KTHREAD pointer and not a handle) and then starts it with
+      // KeResumeThread([worker+0x1C]). Refusing that pointer made
+      // KeResumeThread and KeSetBasePriorityThread return INVALID_HANDLE from
+      // inside the factory (guest lr 8177AF74 / 8177AF80 / 8177B04C /
+      // 81778924), so every task-pool worker stayed suspended for the whole
+      // run. Trust the page table: committed and readable, both ends of the
+      // header.
+      if (!mapped && guest_ptr && cvars::guide_dispatch_guard >= 3 && pg_ok &&
+          (pg_state & xe::kMemoryAllocationCommit) &&
+          (pg_cur & xe::kMemoryProtectRead)) {
+        uint32_t e_state = 0, e_cur = 0;
+        const uint32_t last = guest_ptr + sizeof(X_DISPATCH_HEADER) - 1;
+        if (ptr_heap->QueryPageEntry(last, &e_state, nullptr, &e_cur, nullptr,
+                                     nullptr) &&
+            (e_state & xe::kMemoryAllocationCommit) &&
+            (e_cur & xe::kMemoryProtectRead)) {
+          mapped = true;
+        }
+      }
+      break;
+    }
+  }
   if (!mapped) {
     uint32_t caller_lr = 0;
     auto* cur_thread = XThread::GetCurrentThread();
@@ -454,10 +586,18 @@ object_ref<XObject> XObject::GetNativeObject(KernelState* kernel_state,
     if (rn <= 8 || (rn % 100000) == 0) {
       XELOGE(
           "GetNativeObject #{}: refusing {} dispatch header guest={:08X} "
-          "host={} membase={} (as_type={}) from guest lr={:08X}",
+          "host={} membase={} (as_type={}) from guest lr={:08X} | guard {} "
+          "heap {:08X}+{:08X} page {} | entry {} state {} alloc {:X} cur {:X} "
+          "base {:08X} pages {} | header {:08X}",
           rn, guest_ptr ? "unmapped" : "null", guest_ptr,
           fmt::ptr(native_ptr), fmt::ptr(mem->virtual_membase()),
-          static_cast<uint32_t>(as_type), caller_lr);
+          static_cast<uint32_t>(as_type), caller_lr,
+          int(cvars::guide_dispatch_guard),
+          ptr_heap ? ptr_heap->heap_base() : 0,
+          ptr_heap ? ptr_heap->heap_size() : 0,
+          ptr_heap ? ptr_heap->page_size() : 0,
+          pg_ok ? "yes" : "no", pg_state, pg_alloc, pg_cur, pg_base, pg_pages,
+          guest_ptr ? xe::load_and_swap<uint32_t>(mem->TranslateVirtual(guest_ptr)) : 0u);
     }
     return object_ref<XObject>(nullptr);
   }
@@ -485,11 +625,59 @@ object_ref<XObject> XObject::GetNativeObject(KernelState* kernel_state,
 
   if (header->wait_list.flink_ptr == kXObjSignature) {
     // Already initialized.
-    // TODO: assert if the type of the object != as_type
     uint32_t handle = header->wait_list.blink_ptr;
     result = kernel_state->object_table()
                  ->LookupObject<XObject>(handle, true)
                  .release();
+    // Phase 1095ao: the TODO that used to sit here - "assert if the type
+    // of the object != as_type" - is a real hazard, not a nicety. The
+    // signature and handle live in header->wait_list, which the GUEST
+    // also owns and writes (the timer case a few hundred lines below
+    // avoids this mechanism for exactly that reason). A stale or
+    // guest-overwritten blink_ptr that still resolves in the object
+    // table hands back a VALID object of the WRONG type, and the
+    // templated caller then downcasts it - GetNativeObject<XEvent> ->
+    // ev->Set() - and calls an XEvent method on something that is not
+    // one. That is the "non-null but invalid" event behind all four
+    // host faults in the timers path (symbolicated: xeKeSetEvent
+    // xboxkrnl_threading.cc:619, fault_addr FFFFFFFFFFFFFFFF).
+    // Map only the guest dispatch types this function actually
+    // constructs; anything else is left alone.
+    XObject::Type expect = XObject::Type::Undefined;
+    switch (type) {
+      case X_OBJECT_TYPES::EventNotificationObject:
+      case X_OBJECT_TYPES::EventSynchronizationObject:
+        expect = XObject::Type::Event;
+        break;
+      case X_OBJECT_TYPES::MutantObject:
+        expect = XObject::Type::Mutant;
+        break;
+      case X_OBJECT_TYPES::SemaphoreObject:
+        expect = XObject::Type::Semaphore;
+        break;
+      case X_OBJECT_TYPES::TimerNotificationObject:
+      case X_OBJECT_TYPES::TimerSynchronizationObject:
+        expect = XObject::Type::Timer;
+        break;
+      default:
+        break;
+    }
+    if (result && expect != XObject::Type::Undefined &&
+        result->type() != expect) {
+      static std::atomic<uint32_t> mism{0};
+      const uint32_t mn = ++mism;
+      if (mn <= 8u) {
+        XELOGE(
+            "GetNativeObject: stashed handle {:08X} in header {:08X} "
+            "resolves to host type {} but the caller asked for guest "
+            "type {} - refusing the stale association",
+            handle, kernel_state->memory()->HostToGuestVirtual(native_ptr),
+            static_cast<uint32_t>(result->type()),
+            static_cast<uint32_t>(type));
+      }
+      result->Release();
+      result = nullptr;
+    }
   } else {
     // First use, create new.
     // https://www.nirsoft.net/kernel_struct/vista/KOBJECTS.html
@@ -514,7 +702,7 @@ object_ref<XObject> XObject::GetNativeObject(KernelState* kernel_state,
       } break;
       case X_OBJECT_TYPES::TimerNotificationObject:
       case X_OBJECT_TYPES::TimerSynchronizationObject: {
-        if (!cvars::guest_native_timers) {
+        if (!cvars::guest_native_timers && !cvars::kernel_guest_timers) {
           result = nullptr;
           break;
         }
@@ -578,6 +766,26 @@ object_ref<XObject> XObject::GetNativeObject(KernelState* kernel_state,
     if (result && type != X_OBJECT_TYPES::TimerNotificationObject &&
         type != X_OBJECT_TYPES::TimerSynchronizationObject) {
       StashHandle(header, result->handle());
+    }
+    // Phase 1099h: and record WHICH guest object the handle refers to.
+    //
+    // Wrapping a dispatcher the GUEST built (InitializeNative) set up the host
+    // side and stashed the handle, but never set guest_object_ptr_ - so
+    // guest_object() stayed 0 for every such object. ObReferenceObjectByHandle
+    // returns that as the referenced pointer, so the guest was handed a NULL
+    // and stored through it: the Guide's SECOND open crashed at
+    //     817A6174  stw r31, 0x18(r11)      r11 = [sp+0x54], fault 100000018
+    // whose caller (817C2D68 -> ObReferenceObjectByHandle) does not check the
+    // status, because on hardware the call cannot come back with a null.
+    // Measured: handle F80005C0, type 2 (Event), guest_object 0, while every
+    // other reference at that site had a real pointer.
+    //
+    // set_guest_object_no_stash, not SetNativePointer: the handle is already
+    // stashed above where a dispatch header exists, and objects the guest
+    // builds through ObCreateObject need not have one.
+    if (result && !result->guest_object()) {
+      result->set_guest_object_no_stash(
+          kernel_state->memory()->HostToGuestVirtual(native_ptr));
     }
   }
 

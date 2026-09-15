@@ -48,6 +48,9 @@ class XEvent : public XObject {
 
  private:
   bool manual_reset_ = false;
+  // Phase 1095am: one log per event when it is used uninitialised.
+  bool warned_uninitialised_ = false;
+  bool WarnUninitialised(const char* op);
   std::unique_ptr<xe::threading::Event> event_;
 };
 

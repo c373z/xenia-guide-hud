@@ -18,7 +18,12 @@
 #include "xenia/kernel/util/shim_utils.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_private.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_threading.h"
+#include "xenia/kernel/xboxkrnl/xboxkrnl_video.h"
 #include "xenia/kernel/xthread.h"
+// Phase 1096bn: the coverage report is needed off the paint path (see below).
+#include "xenia/cpu/function.h"
+#include "xenia/cpu/processor.h"
+#include "xenia/kernel/kernel_flags.h"
 
 namespace xe {
 namespace kernel {
@@ -82,6 +87,22 @@ void RtlFillMemoryUlong_entry(lpvoid_t destination, dword_t length,
   }
 }
 DECLARE_XBOXKRNL_EXPORT1(RtlFillMemoryUlong, kMemory, kImplemented);
+
+// Phase 1054 fps: xam's warning paths ("XMsgInProcessCall() failed to find
+// app id") capture a backtrace; undefined, the call returned garbage that xam
+// then dereferenced (guest crash at 81812FB0 under function tracing, whose
+// slower boot takes that path). Zero frames captured is the documented
+// "nothing available" answer.
+dword_result_t RtlCaptureStackBackTrace_entry(dword_t frames_to_skip,
+                                              dword_t frames_to_capture,
+                                              lpdword_t backtrace,
+                                              lpdword_t backtrace_hash) {
+  if (backtrace_hash) {
+    *backtrace_hash = 0;
+  }
+  return 0;
+}
+DECLARE_XBOXKRNL_EXPORT1(RtlCaptureStackBackTrace, kNone, kStub);
 
 static constexpr const unsigned char rtl_lower_table[256] = {
     0x0,  0x1,  0x2,  0x3,  0x4,  0x5,  0x6,  0x7,  0x8,  0x9,  0xA,  0xB,
@@ -284,6 +305,36 @@ void RtlCopyString_entry(pointer_t<X_ANSI_STRING> destination,
   destination->length = length;
 }
 DECLARE_XBOXKRNL_EXPORT1(RtlCopyString, kNone, kImplemented);
+
+// Phase 1099n: declared in the export table with no implementation, so it went
+// through UndefinedCallExtern and appended nothing. xam builds the new
+// profile's package path with it (17 undefined calls right after the profile
+// keyboard's Done), so the path stayed "\Device\Harddisk0\Partition1\" and the
+// create hit the volume root: "Couldn't create and mount package
+// "\Device\Harddisk0\Partition1\", hr = 0x80070002". Standard NT semantics:
+// fail with STATUS_BUFFER_TOO_SMALL if it does not fit, else append in place.
+// https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/nf-wdm-rtlappendstringtostring
+dword_result_t RtlAppendStringToString_entry(
+    pointer_t<X_ANSI_STRING> destination, pointer_t<X_ANSI_STRING> source) {
+  if (!destination || !source) {
+    return X_STATUS_INVALID_PARAMETER;
+  }
+  const uint16_t src_len = source->length;
+  if (!src_len) {
+    return X_STATUS_SUCCESS;
+  }
+  const uint32_t new_len = uint32_t(destination->length) + src_len;
+  if (new_len > destination->maximum_length) {
+    return X_STATUS_BUFFER_TOO_SMALL;
+  }
+  auto dst_buf = kernel_memory()->TranslateVirtual<uint8_t*>(
+      destination->pointer + destination->length);
+  auto src_buf = kernel_memory()->TranslateVirtual<uint8_t*>(source->pointer);
+  std::memmove(dst_buf, src_buf, src_len);
+  destination->length = uint16_t(new_len);
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XBOXKRNL_EXPORT1(RtlAppendStringToString, kNone, kImplemented);
 
 void RtlCopyUnicodeString_entry(pointer_t<X_UNICODE_STRING> destination,
                                 pointer_t<X_UNICODE_STRING> source) {
@@ -542,8 +593,31 @@ struct X_RTL_CRITICAL_SECTION {
 #pragma pack(pop)
 static_assert_size(X_RTL_CRITICAL_SECTION, 28);
 
+// Phase 1099z48: the Guide-over-Sonic crash is a critical section initialised
+// on top of a live xam task (vtable 81603CB4 at +0). Log who does that.
+static void GuideCsOverlapTrap(uint32_t cs_ptr, const char* which) {
+  if (cs_ptr < 0x10000) {
+    return;
+  }
+  const uint32_t first = xe::load_and_swap<uint32_t>(
+      kernel_memory()->TranslateVirtual(cs_ptr));
+  if ((first & 0xFFF00000) != 0x81600000) {
+    return;
+  }
+  static std::atomic<int> budget{20};
+  if (budget.fetch_sub(1) <= 0) {
+    return;
+  }
+  auto* th = XThread::GetCurrentThread();
+  XELOGE("GuideCsOverlap: {} on {:08X} holding vtable {:08X} thread {:08X} "
+         "chain {}",
+         which, cs_ptr, first, th ? th->handle() : 0,
+         kernel_state()->GuestBackChain());
+}
+
 void xeRtlInitializeCriticalSection(X_RTL_CRITICAL_SECTION* cs,
                                     uint32_t cs_ptr) {
+  GuideCsOverlapTrap(cs_ptr, "RtlInitializeCriticalSection");
   cs->header.type = X_OBJECT_TYPES::EventSynchronizationObject;
   cs->header.absolute = 0;  // spin count div 256
   cs->header.signal_state = 0;
@@ -567,6 +641,7 @@ X_STATUS xeRtlInitializeCriticalSectionAndSpinCount(X_RTL_CRITICAL_SECTION* cs,
     spin_count_div_256 = 255;
   }
 
+  GuideCsOverlapTrap(cs_ptr, "RtlInitializeCriticalSectionAndSpinCount");
   cs->header.type = X_OBJECT_TYPES::EventSynchronizationObject;
   cs->header.absolute = spin_count_div_256;
   cs->header.signal_state = 0;
@@ -593,6 +668,9 @@ static void CriticalSectionPrefetchW(const void* vp) {
 #endif
 }
 
+// Phase 1095bg: defined in xboxkrnl_threading.cc.
+void GuidePoisonWatch();
+
 void RtlEnterCriticalSection_entry(pointer_t<X_RTL_CRITICAL_SECTION> cs) {
   if (!cs.guest_address()) {
     XELOGE("Null critical section in RtlEnterCriticalSection!");
@@ -601,6 +679,690 @@ void RtlEnterCriticalSection_entry(pointer_t<X_RTL_CRITICAL_SECTION> cs) {
   CriticalSectionPrefetchW(&cs->lock_count);
   uint32_t cur_thread = XThread::GetCurrentThread()->guest_object();
   uint32_t spin_count = cs->header.absolute * 256;
+
+  // Phase 1096cb: report the TASK SLOT [81D43C50+0x28] and its procedure,
+  // paint-independently. Two things are armed on that one slot: 81795938 arms
+  // the HUD-manager loop 81794BC8 with flags 1 (proc only), and 81795A18 arms
+  // the SKIN LOADER 81795548 with flags 5 (proc + ENQUEUE). Whichever armed last
+  // is what the pool dispatches. Report on change so the sequence is visible.
+  {
+    auto* sm2 = kernel_memory();
+    // 1099z125: only once xam is mapped - the boot animation enters critical
+    // sections before xam loads, when the heap exists but this page does not.
+    if (sm2 && XamAddrInImage(0x81D43C78u, 4) && sm2->LookupHeap(0x81D43C78u)) {
+      const uint32_t raw =
+          xe::load_and_swap<uint32_t>(sm2->TranslateVirtual(0x81D43C78u));
+      const uint32_t tk = raw & ~1u;
+      uint32_t proc = 0;
+      if (tk >= 0x10000000u && tk < 0xA0000000u && sm2->LookupHeap(tk + 0x30u)) {
+        proc = xe::load_and_swap<uint32_t>(sm2->TranslateVirtual(tk + 0x30u));
+      }
+      static std::mutex ts_mu;
+      static uint32_t ts_prev = 0xFFFFFFFFu;
+      static uint32_t ts_n = 0;
+      bool ch = false;
+      {
+        std::lock_guard<std::mutex> lk(ts_mu);
+        if (proc != ts_prev && ts_n < 12u) { ts_prev = proc; ++ts_n; ch = true; }
+        else if (proc != ts_prev) { ts_prev = proc; }
+      }
+      if (ch) {
+        const char* who = proc == 0x81794BC8u   ? "HUD-MANAGER LOOP"
+                          : proc == 0x81795548u ? "SKIN LOADER"
+                          : proc ? "?" : "(none)";
+        XELOGI("GuideTaskSlot #{}: [81D43C50+28]={:08X} task={:08X} "
+               "proc[+30]={:08X} = {}",
+               ts_n, raw, tk, proc, who);
+      }
+    }
+  }
+
+  // Phase 1096bq: report the DEVICE GATE xam reads at 817511EC. 815F048C is
+  // xam's import slot for XboxHardwareInfo (ordinal 342, confirmed in the
+  // import listing), so the gate [[815F048C]] & 0x200 is bit 0x200 of the
+  // hardware-info FLAGS WORD - the value xbox_hardware_info_flags sets. If that
+  // bit is already set, kernel_flags.cc:1747's claim that xam "took that branch
+  // with the bit clear and skipped the init for good" is stale, and the whole
+  // device-ordering line of investigation (1096bl-1096bp) rests on it.
+  {
+    static std::atomic<uint32_t> gate_n{0};
+    if (gate_n.load(std::memory_order_relaxed) < 2u) {
+      auto* gm = kernel_memory();
+      if (gm && (XamAddrInImage(0x815F048Cu, 4) && gm->LookupHeap(0x815F048Cu))) {
+        const uint32_t slot =
+            xe::load_and_swap<uint32_t>(gm->TranslateVirtual(0x815F048Cu));
+        uint32_t val = 0;
+        if (slot && gm->LookupHeap(slot)) {
+          val = xe::load_and_swap<uint32_t>(gm->TranslateVirtual(slot));
+        }
+        if (++gate_n <= 2u) {
+          XELOGI("GuideDeviceGate: [815F048C]={:08X} -> [*]={:08X} | bit200={} "
+                 "(this slot is XboxHardwareInfo, ordinal 342)",
+                 slot, val, (val & 0x200) ? "SET" : "CLEAR");
+        }
+      }
+    }
+  }
+
+  // Phase 1096bn: PAINT-INDEPENDENT COVERAGE REPORT.
+  //
+  // Every reporting site built in phase 1096 - the coverage dump, the LR
+  // sampler, the app-manager and slot probes - lives in the paint path and
+  // fires per paint. So anything that fails BEFORE the first paint is invisible
+  // to all of them: the lle_xam_device_init hang (1096bm) and the timers-arm
+  // crash both produce 0 paints and therefore 0 diagnostics. The only probes
+  // that have worked pre-paint are the ones hooked into kernel functions the
+  // guest calls constantly - which is exactly where this one lives.
+  //
+  // Report the coverage target from here instead, on a timer, so a run that
+  // never paints still says where the guest got to.
+  if (cvars::guide_coverage_fn) {
+    static std::mutex cv_mu;
+    static uint64_t cv_next_ms = 0;
+    static uint32_t cv_n = 0;
+    const uint64_t now_ms = xe::Clock::QueryHostUptimeMillis();
+    bool due = false;
+    {
+      std::lock_guard<std::mutex> lk(cv_mu);
+      if (cv_n < 40u && now_ms >= cv_next_ms) {
+        cv_next_ms = now_ms + uint64_t(cvars::guide_coverage_interval_ms);
+        ++cv_n;
+        due = true;
+      }
+    }
+    if (due) {
+      auto* ks2 = kernel_state();
+      auto* fn = (ks2 && ks2->processor())
+                     ? ks2->processor()->LookupFunction(cvars::guide_coverage_fn)
+                     : nullptr;
+      auto* gfn = fn ? dynamic_cast<xe::cpu::GuestFunction*>(fn) : nullptr;
+      if (gfn && gfn->trace_data().is_valid()) {
+        auto& td2 = gfn->trace_data();
+        auto* c2 = reinterpret_cast<uint64_t*>(td2.instruction_execute_counts());
+        uint32_t n2 = td2.instruction_count(), ex2 = 0, last2 = 0;
+        for (uint32_t i = 0; i < n2; ++i) {
+          if (c2[i]) { ++ex2; last2 = td2.start_address() + i * 4; }
+        }
+        auto* h2 = td2.header();
+        XELOGI("GuideLiveCoverage@{}ms #{}: {:08X} {}/{} executed, furthest {:08X} "
+               "(+0x{:X}) | calls={} threads={:016X} callers {:08X} {:08X} "
+               "{:08X} {:08X} | r3 {:08X} {:08X} {:08X} {:08X}",
+               now_ms, cv_n, uint32_t(cvars::guide_coverage_fn), ex2, n2, last2,
+               last2 - td2.start_address(), h2->function_call_count,
+               h2->function_thread_use, h2->function_caller_history[0],
+               h2->function_caller_history[1], h2->function_caller_history[2],
+               h2->function_caller_history[3], h2->function_arg_history[0],
+               h2->function_arg_history[1], h2->function_arg_history[2],
+               h2->function_arg_history[3]);
+        if (cvars::guide_insn_value_addr) {
+          XELOGI("GuideInsnValue: {:08X} r{} seen {} time(s): {:08X} {:08X} "
+                 "{:08X} {:08X} {:08X} {:08X} {:08X} {:08X}",
+                 uint32_t(cvars::guide_insn_value_addr),
+                 uint32_t(cvars::guide_insn_value_reg), h2->insn_value_count,
+                 h2->insn_value_history[0], h2->insn_value_history[1],
+                 h2->insn_value_history[2], h2->insn_value_history[3],
+                 h2->insn_value_history[4], h2->insn_value_history[5],
+                 h2->insn_value_history[6], h2->insn_value_history[7]);
+          {
+            // Every value below 256 seen at the watched instruction, with its
+            // count. Printed as pairs so a whole message-id space reads in one
+            // line rather than one run per id.
+            std::string hist;
+            for (uint32_t v = 0; v < 256; ++v) {
+              if (h2->insn_value_hist[v]) {
+                hist += fmt::format("{:02X}x{} ", v, h2->insn_value_hist[v]);
+              }
+            }
+            if (!hist.empty()) {
+              XELOGI("GuideInsnHist: {:08X} r{} values<256: {}",
+                     uint32_t(cvars::guide_insn_value_addr),
+                     uint32_t(cvars::guide_insn_value_reg), hist);
+            }
+          }
+          if (cvars::guide_insn_value_match) {
+            XELOGI("GuideInsnMatch: {:08X} r{} == {:08X} {} time(s); last lr "
+                   "{:08X} {:08X} {:08X} {:08X}",
+                   uint32_t(cvars::guide_insn_value_addr),
+                   uint32_t(cvars::guide_insn_value_reg),
+                   uint32_t(cvars::guide_insn_value_match),
+                   h2->insn_match_count, h2->insn_match_lr[0],
+                   h2->insn_match_lr[1], h2->insn_match_lr[2],
+                   h2->insn_match_lr[3]);
+          }
+        }
+        XELOGI("GuideLiveCoverageArgs #{}: {:08X} | r4 {:08X} {:08X} {:08X} "
+               "{:08X}",
+               cv_n, uint32_t(cvars::guide_coverage_fn),
+               h2->function_arg2_history[0], h2->function_arg2_history[1],
+               h2->function_arg2_history[2], h2->function_arg2_history[3]);
+        // Phase 1096bs: also report the count at ONE chosen instruction.
+        // Spans only list runs of >= 4 unexecuted instructions, so a SINGLE
+        // instruction - like xam's `twui` assert at 81795560 - is invisible in
+        // them either way (the same trap 1096ac fell into). Ask for its count
+        // directly. guide_watch_alloc is an int32 that is otherwise unused as a
+        // watched address here, so reuse it as "report the count at this
+        // address" rather than adding another flag.
+        // Phase 1096bu: where do the two passes diverge? With calls=2, an
+        // instruction whose count is 1 ran in ONE pass only - that set IS the
+        // divergence. Printed once, bounded.
+        if (cvars::guide_insn_divergence && h2->function_call_count > 1) {
+          static std::atomic<uint32_t> dv{0};
+          if (++dv == 1u) {
+            std::string ones;
+            uint32_t nones = 0;
+            for (uint32_t i = 0; i < n2; ++i) {
+              if (c2[i] == 1u) {
+                ++nones;
+                if (nones <= 40u) {
+                  ones += fmt::format("{:08X} ", td2.start_address() + i * 4);
+                }
+              }
+            }
+            XELOGI("GuideInsnDivergence: {:08X} calls={} | {} instruction(s) "
+                   "ran EXACTLY ONCE (first 40): {}",
+                   uint32_t(cvars::guide_coverage_fn), h2->function_call_count,
+                   nones, ones);
+          }
+        }
+        if (cvars::guide_insn_count_addr) {
+          const uint32_t wa = cvars::guide_insn_count_addr;
+          if (wa >= td2.start_address() &&
+              wa < td2.start_address() + n2 * 4u) {
+            XELOGI("GuideInsnCount: {:08X} executed {} time(s)", wa,
+                   c2[(wa - td2.start_address()) / 4]);
+          }
+        }
+      } else {
+        XELOGI("GuideLiveCoverage #{}: {:08X} no valid trace yet", cv_n,
+               uint32_t(cvars::guide_coverage_fn));
+      }
+    }
+  }
+
+  // Phase 1096ak: ORDERED TRANSITION LOG for [81D6C9C8]. Three attempts to name
+  // the parties in this race were each refuted (1096ah harness, 1096ai xam-only,
+  // 1096aj DllMain), all by inferring a temporal claim from static code or one
+  // log line. A race needs an ordered log. RtlEnterCriticalSection is called
+  // constantly by every thread, so sampling the slot here gives a dense,
+  // thread-attributed sequence of its transitions at negligible cost (one load
+  // and a compare on the fast path).
+  {
+    auto* m = kernel_memory();
+    if (m && (XamAddrInImage(0x81D6C9C8u, 4) && m->LookupHeap(0x81D6C9C8u))) {
+      const uint32_t now =
+          xe::load_and_swap<uint32_t>(m->TranslateVirtual(0x81D6C9C8u));
+      static std::mutex tr_mu;
+      static uint32_t tr_prev = 0xFFFFFFFFu;
+      static uint32_t tr_seq = 0;
+      bool changed = false;
+      uint32_t seq = 0, was = 0;
+      {
+        std::lock_guard<std::mutex> lk(tr_mu);
+        if (now != tr_prev && tr_seq < 24u) {
+          was = tr_prev; tr_prev = now; seq = ++tr_seq; changed = true;
+        } else if (now != tr_prev) {
+          tr_prev = now;
+        }
+      }
+      if (changed) {
+        auto* t = XThread::GetCurrentThread();
+        const uint32_t lr =
+            (t && t->thread_state() && t->thread_state()->context())
+                ? static_cast<uint32_t>(t->thread_state()->context()->lr)
+                : 0u;
+        // Phase 1096at: also report the STATIC OBJECT's vtable at [81D6CA00].
+        // The re-acquire fails at 819107FC, a virtual call through vtable slot
+        // +8 of that object, and the image ships [81D6CA00] = 0 (the vtable is
+        // installed at construction). If the destructor's Release leaves it
+        // zeroed, the re-creation's virtual call has nothing to call - which
+        // would explain the failure exit without any further guesswork.
+        uint32_t vt = 0;
+        if ((XamAddrInImage(0x81D6CA00u, 4) && m->LookupHeap(0x81D6CA00u))) {
+          vt = xe::load_and_swap<uint32_t>(m->TranslateVirtual(0x81D6CA00u));
+        }
+        XELOGI("GuideSlotSeq #{}: [81D6C9C8] {:08X} -> {:08X} | [81D6CA00] "
+               "vtable={:08X} | observed by tid {:08X} at lr {:08X}",
+               seq, was, now, vt, t ? t->thread_id() : 0u, lr);
+      }
+    }
+  }
+
+  // Phase 1096es: 1096en concluded xam's sys-app launcher chain (817C27C8 ->
+  // 817C2700 -> 817C2480) is unreachable, from STATIC evidence only: no bl
+  // callers, not exported, its one dword reference is its own .pdata entry,
+  // not a thread entry. A pointer STORED AT RUNTIME would appear in none of
+  // those. So scan xam's data once, late enough for setup to have happened,
+  // for the entry addresses themselves. Finding one would overturn the
+  // conclusion; finding none makes it a runtime fact rather than an inference.
+  {
+    if (!cvars::guide_launcher_scan) goto skip_launcher_scan;
+    {
+    static std::once_flag scan_once;
+    static std::atomic<uint64_t> scan_at{0};
+    const uint64_t now4 = xe::Clock::QueryHostUptimeMillis();
+    if (scan_at.load() == 0) scan_at.store(now4 + 4000u);
+    if (now4 >= scan_at.load()) {
+      std::call_once(scan_once, [&]() {
+        auto* m6 = kernel_memory();
+        if (!m6) return;
+        // Phase 1096ez: also look for the ADDRESSES of the sys-app record
+        // pointer and handler slot. Every writer search in this phase assumed
+        // the address is formed with lis/addi or reached by displacement off a
+        // section base. A writer that LOADS the address from memory and stores
+        // through it would have been missed by all of them - and would show up
+        // here as the address itself sitting in committed memory.
+        // Phase 1096gc: repurposed to find the stale task field. 1096gb
+        // traced the pool spin to [task+0xC] == D2DCBEEF on a guest-heap
+        // structure; scanning for the value gives every structure holding it,
+        // and subtracting 0xC names the tasks.
+        const uint32_t targets[5] = {0xD2DCBEEFu, 0x817C2480u, 0x817C26E8u,
+                                     0x81D426C8u, 0x81D42688u};
+        uint32_t found[5] = {0, 0, 0, 0, 0};
+        std::string where;
+        // Phase 1096ev: the first version scanned only xam's static data, so a
+        // vtable or callback table BUILT AT RUNTIME - which lives in the guest
+        // heap, not the image - would have been missed. Scan the heap ranges
+        // too before claiming nothing references the chain.
+        // Phase 1096ev: the heap ranges 30000000/40000000 are REVERTED. Adding
+        // them faulted the host twice, and adding a QueryProtect page guard did
+        // not stop it - so reading guest heap pages from this probe is not safe
+        // by that method and needs a different one. xam's image data scans
+        // cleanly and is what 1096es reported.
+        // Phase 1096ew: walk REGIONS via QueryRegionInfo and scan only those
+        // whose state says committed, instead of sweeping addresses and hoping
+        // QueryProtect catches the holes (1096ev: it did not - 2 host faults).
+        // This lets the heap ranges be scanned safely, which is where a
+        // runtime-built dispatch table would live.
+        struct Rng { uint32_t lo, hi; };
+        // Phase 1096ex: 1096ew scanned only 19 MB, so "no reference anywhere"
+        // was really "none in the 19 MB I looked at". Widen to the whole guest
+        // virtual heap and the physical heaps now that the region walk is safe,
+        // so the claim matches what was actually covered.
+        const Rng ranges[] = {{0x81600000u, 0x81E00000u},
+                              {0x20000000u, 0x40000000u},
+                              {0x40000000u, 0x50000000u},
+                              {0x80000000u, 0x81600000u},
+                              {0x90000000u, 0x94000000u},
+                              {0xA0000000u, 0xC0000000u}};
+        uint32_t scanned_bytes = 0;
+        for (const auto& rg : ranges)
+        for (uint32_t pg = rg.lo; pg < rg.hi;) {
+          auto* heap6 = m6->LookupHeap(pg);
+          if (!heap6) { pg += 0x1000u; continue; }
+          // Phase 1096ew: xam's image range is swept directly - that is what
+          // 1096es did, it never faulted across many runs, and it is the only
+          // version that passes the built-in positive control (the three
+          // .pdata entries at 816F9FD0/E0/E8). QueryRegionInfo-gated scanning
+          // skipped those pages entirely and reported a false x0. Only the
+          // HEAP ranges, which did fault when swept, go through the region
+          // walk.
+          if (rg.lo == 0x81600000u) {
+            const uint32_t end7 = std::min<uint32_t>(pg + 0x1000u, rg.hi);
+            scanned_bytes += end7 - pg;
+            for (uint32_t a = pg; a < end7; a += 4u) {
+              auto* p7 = m6->TranslateVirtual(a);
+              if (!p7) continue;
+              const uint32_t v7 = xe::load_and_swap<uint32_t>(p7);
+              for (int i = 0; i < 5; ++i) {
+                if (v7 == targets[i]) {
+                  ++found[i];
+                  if (where.size() < 700) {
+                    where += fmt::format("{:08X}->{:08X} ", a, v7);
+                  }
+                }
+              }
+            }
+            pg = end7;
+            continue;
+          }
+          xe::HeapAllocationInfo info6 = {};
+          if (!heap6->QueryRegionInfo(pg, &info6) || !info6.region_size) {
+            pg += 0x1000u;
+            continue;
+          }
+          const uint32_t rsize = info6.region_size;
+          // Phase 1096ew: requiring kMemoryProtectRead skipped xam's own image
+          // pages, and the scan then reported x0 for all three targets - a
+          // FALSE NEGATIVE caught only because the .pdata entries found by the
+          // 1096es sweep act as a built-in positive control. Commit state alone
+          // is the right test; the read bit is not set the way this expects on
+          // image mappings.
+          const bool readable = (info6.state & xe::kMemoryAllocationCommit) != 0;
+          if (!readable) { pg += rsize; continue; }
+          const uint32_t end6 = std::min<uint32_t>(pg + rsize, rg.hi);
+          scanned_bytes += end6 - pg;
+          for (uint32_t a = pg; a < end6; a += 4u) {
+          auto* p6 = m6->TranslateVirtual(a);
+          if (!p6) continue;
+          const uint32_t v = xe::load_and_swap<uint32_t>(p6);
+          for (int i = 0; i < 5; ++i) {
+            if (v == targets[i]) {
+              ++found[i];
+              if (where.size() < 200) {
+                where += fmt::format("{:08X}->{:08X} ", a, v);
+              }
+            }
+          }
+          }
+          pg = end6;
+        }
+        XELOGI("GuideLauncherScan: D2DCBEEF x{}, 817C2480 x{}, 817C26E8 x{}, "
+               "&[81D426C8] x{}, &[81D42688] x{} in xam+heap, {} MB | {}",
+               found[0], found[1], found[2], found[3], found[4],
+               scanned_bytes >> 20,
+               where.empty() ? std::string("(none)") : where);
+      });
+    }
+    }
+  skip_launcher_scan:;
+  }
+
+  // Phase 1096ea: WHEN does hud's handler land in [81D42688]? 1096dz measured
+  // 13 sys-app invocations, 4 of which execute the load at 8177F78C and 8 of
+  // which pass the non-null check at 8177F7B0 and send. hud's handler is still
+  // only ever entered by the host, so the four that read [81D42688] plausibly
+  // read ZERO because XamRegisterSysApp had not run yet. That is an ORDERING
+  // claim and it needs a timestamped transition, not another count.
+  {
+    auto* m5 = kernel_memory();
+    if (m5 && (XamAddrInImage(0x81D42688u, 4) && m5->LookupHeap(0x81D42688u))) {
+      const uint32_t h = xe::load_and_swap<uint32_t>(
+          m5->TranslateVirtual(0x81D42688u));
+      static std::mutex sh_mu;
+      static uint32_t sh_prev = 0xFFFFFFFFu;
+      static uint32_t sh_n = 0;
+      bool ch = false;
+      uint32_t was = 0, n = 0;
+      {
+        std::lock_guard<std::mutex> lk(sh_mu);
+        if (h != sh_prev && sh_n < 8u) {
+          was = sh_prev;
+          sh_prev = h;
+          n = ++sh_n;
+          ch = true;
+        }
+      }
+      if (ch) {
+        XELOGI("GuideSysAppHandler #{}: [81D42688] {:08X} -> {:08X} at +{} ms",
+               n, was, h,
+               static_cast<uint64_t>(xe::Clock::QueryHostUptimeMillis()));
+      }
+    }
+  }
+
+  // Phase 1096ga: xam's pool wait array. 1096fz located the spin at 8177AC78:
+  // count = [81D423C0+0x234] + 2, array at 81D423C0+0x168, and the last slot
+  // holds D2DCBEEF. Both are STATIC addresses, so they can simply be read.
+  // Report once per change of the count, with the whole array, so the PvZ
+  // configuration (which works) and the dashboard (which spins) can be
+  // compared directly.
+  {
+    auto* m7 = kernel_memory();
+    if (m7 && (XamAddrInImage(0x81D423C0u, 4) && m7->LookupHeap(0x81D423C0u))) {
+      const uint32_t cnt =
+          xe::load_and_swap<uint32_t>(m7->TranslateVirtual(0x81D425F4u));
+      static std::mutex pw_mu;
+      static uint32_t pw_prev = 0xFFFFFFFFu;
+      static uint32_t pw_n = 0;
+      bool ch = false;
+      uint32_t n = 0;
+      {
+        std::lock_guard<std::mutex> lk(pw_mu);
+        if (cnt != pw_prev && pw_n < 12u) { pw_prev = cnt; n = ++pw_n; ch = true; }
+      }
+      if (ch) {
+        std::string arr;
+        for (uint32_t i = 0; i < 12u; ++i) {
+          const uint32_t v = xe::load_and_swap<uint32_t>(
+              m7->TranslateVirtual(0x81D42528u + i * 4u));
+          arr += fmt::format("{}{:08X}", i == cnt + 2u ? " |" : " ", v);
+        }
+        XELOGI("GuidePoolWaitArray #{}: [81D425F4] count={} (wait {} objects) "
+               "| array{}",
+               n, cnt, cnt + 2u, arr);
+      }
+    }
+  }
+
+  // Phase 1096dv: the sys-app invoke 8177F588 routes to hud's registered
+  // handler only when [record + 8] == [81D4268C], and 1096du established that
+  // [81D4268C] is written exactly once, with zero, across every store form in
+  // the image. So the gate is "[record+8] == 0". The three records the thirteen
+  // measured invocations used are static xam addresses, so their +8 fields can
+  // simply be read. Report them once each time they change.
+  {
+    auto* m4 = kernel_memory();
+    if (m4 && (XamAddrInImage(0x81D42A90u, 4) && m4->LookupHeap(0x81D42A90u))) {
+      static const uint32_t recs[3] = {0x81D42A90u, 0x81D42B50u, 0x81D43150u};
+      static std::mutex sr_mu;
+      static uint32_t sr_prev[3] = {0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu};
+      static uint32_t sr_n = 0;
+      for (int i = 0; i < 3; ++i) {
+        const uint32_t v =
+            xe::load_and_swap<uint32_t>(m4->TranslateVirtual(recs[i] + 8u));
+        bool ch = false;
+        uint32_t was = 0, n = 0;
+        {
+          std::lock_guard<std::mutex> lk(sr_mu);
+          if (v != sr_prev[i] && sr_n < 24u) {
+            was = sr_prev[i];
+            sr_prev[i] = v;
+            n = ++sr_n;
+            ch = true;
+          }
+        }
+        if (ch) {
+          XELOGI("GuideSysAppRec #{}: [{:08X}+8] {:08X} -> {:08X}{}", n,
+                 recs[i], was, v,
+                 v == 0u ? "  <== WOULD ROUTE TO hud" : "");
+        }
+      }
+    }
+  }
+
+  // Phase 1096cq: TRANSITION LOG for the HUD STATE at [81D43C50+0].
+  //
+  // The HUD-manager loop 81794BC8 - the only guest code that can call ShowHud
+  // 8174FDA0 (81795058 is its single call site) - gates its whole body on that
+  // word:
+  //     81794C64  lwz    r11, 0(r31)        ; r31 = 81D43C50
+  //     81794C68  cmplwi cr6, r11, 0x10
+  //     81794C6C  beq    cr6, 0x81794c7c    ; do the work
+  //     81794C70  lwz    r11, 0(r31)
+  //     81794C74  cmplwi cr6, r11, 0x20
+  //     81794C78  bne    cr6, 0x81794fa4    ; otherwise: nothing to do
+  //
+  // 1096cq measured the loop running (calls=1, dispatched by the guest pool)
+  // and taking that bne: 81795058 executed 0 times. So dispatching the loop is
+  // NOT what is missing - a pending request is. This says what values the word
+  // actually takes, and when, without depending on the paint path.
+  {
+    auto* m3 = kernel_memory();
+    if (m3 && (XamAddrInImage(0x81D43C50u, 4) && m3->LookupHeap(0x81D43C50u))) {
+      const uint32_t st =
+          xe::load_and_swap<uint32_t>(m3->TranslateVirtual(0x81D43C50u));
+      static std::mutex hs_mu;
+      static uint32_t hs_prev = 0xFFFFFFFFu;
+      static uint32_t hs_seq = 0;
+      bool ch = false;
+      uint32_t sq = 0, wa = 0;
+      {
+        std::lock_guard<std::mutex> lk(hs_mu);
+        if (st != hs_prev && hs_seq < 24u) {
+          wa = hs_prev; hs_prev = st; sq = ++hs_seq; ch = true;
+        }
+      }
+      if (ch) {
+        auto* t3 = XThread::GetCurrentThread();
+        XELOGI("GuideHudState #{}: [81D43C50] {:08X} -> {:08X}{} | tid {:08X}",
+               sq, wa, st,
+               (st == 0x10u || st == 0x20u) ? "  <== LOOP WOULD DO WORK" : "",
+               t3 ? t3->thread_id() : 0u);
+      }
+    }
+  }
+
+  // Phase 1096ad: ORDERING MARKER for the 819138F0 crash. 819106F8 - the
+  // get-or-create accessor that publishes 81D6CA00 into [81D6C9C8] - takes the
+  // critical section at 0x81D6C9A0 (81910784, `addi r28, r11, -0x3660`). The
+  // crashing function 81913770 makes NO kernel calls, so it cannot be hooked;
+  // but the guest-crash report is logged too, so the ORDER of these two lines in
+  // the log answers "acquire first, or fault first?" directly. Coverage cannot:
+  // the timers arm crashes and its trace is invalid (1096ac), and the LR sampler
+  // lives in the paint loop, which the crash precedes. Log entry AND the slot
+  // value, once, plus a count.
+  if (cs.guest_address() == 0x81D6C9A0u) {
+    static std::atomic<uint32_t> acq{0};
+    const uint32_t k = ++acq;
+    if (k <= 4u) {
+      uint32_t slot = 0;
+      auto* m = kernel_memory();
+      if (m && (XamAddrInImage(0x81D6C9C8u, 4) && m->LookupHeap(0x81D6C9C8u))) {
+        slot = xe::load_and_swap<uint32_t>(m->TranslateVirtual(0x81D6C9C8u));
+      }
+      XELOGI("GuideAcquireOrder #{}: entering 819106F8's lock 81D6C9A0; "
+             "[81D6C9C8] is {:08X} right now (0 = not published yet)",
+             k, slot);
+    }
+  }
+
+  // Phase 1096t: name the THREAD running the app-table walk's stalled entry.
+  // 1096r pinned the stall to entry 3, musicplayer (817D22C0 -> 81AA9FB8 ->
+  // vtable +0x28 at 81AAA0BC), and 1096s/1096t showed it is not a wait and not a
+  // contended lock. Log the first critical-section entry - contended or not -
+  // from any caller in musicplayer's range (817D0000-817E0000) or the dispatch
+  // helper's (81AA0000-81AB0000), with the thread id, so the stalled thread can
+  // be compared against the 3001E010 / 30046010 lock chain.
+  {
+    auto* nth = XThread::GetCurrentThread();
+    const uint32_t nlr =
+        (nth && nth->thread_state() && nth->thread_state()->context())
+            ? static_cast<uint32_t>(nth->thread_state()->context()->lr)
+            : 0u;
+    if ((nlr >= 0x817D0000u && nlr < 0x817E0000u) ||
+        (nlr >= 0x81AA0000u && nlr < 0x81AB0000u)) {
+      static std::mutex n_mu;
+      static std::unordered_map<uint32_t, uint32_t> n_seen;
+      bool nfirst = false;
+      {
+        std::lock_guard<std::mutex> lk(n_mu);
+        if (n_seen.size() < 24u && n_seen.find(nlr) == n_seen.end()) {
+          n_seen[nlr] = 1;
+          nfirst = true;
+        }
+      }
+      if (nfirst) {
+        XELOGI("GuideMpThread: lr={:08X} cs={:08X} cur_thread={:08X} "
+               "owner={:08X} (musicplayer/dispatch range)",
+               nlr, cs.guest_address(), cur_thread,
+               static_cast<uint32_t>(cs->owning_thread.m_ptr));
+      }
+    }
+  }
+
+  // Phase 1096s: census of CONTENDED critical-section entries, one line per
+  // distinct caller. 1096s ruled out single-object waits for the app-table
+  // stall at entry 3 (musicplayer, 817D2xxx / 81AAAxxx); a critical section
+  // already owned by another thread is the remaining candidate for a call that
+  // never returns. Logs only when the lock is held by someone else, so an
+  // uncontended fast path costs nothing but a compare.
+  {
+    // TypedGuestPointer has no guest_address(); its raw value is .m_ptr.
+    const uint32_t owner = static_cast<uint32_t>(cs->owning_thread.m_ptr);
+    if (owner && owner != cur_thread) {
+      auto* cth = XThread::GetCurrentThread();
+      const uint32_t clr =
+          (cth && cth->thread_state() && cth->thread_state()->context())
+              ? static_cast<uint32_t>(cth->thread_state()->context()->lr)
+              : 0u;
+      static std::mutex c_mu;
+      static std::unordered_map<uint32_t, uint32_t> c_seen;
+      bool cfirst = false;
+      {
+        std::lock_guard<std::mutex> lk(c_mu);
+        if (c_seen.size() < 16u && c_seen.find(clr) == c_seen.end()) {
+          c_seen[clr] = 1;
+          cfirst = true;
+        }
+      }
+      if (cfirst) {
+        XELOGI("GuideCsContended: lr={:08X} cs={:08X} owner={:08X} "
+               "cur={:08X} recursion={} (first contended entry from this "
+               "caller)",
+               clr, cs.guest_address(), owner, cur_thread,
+               int32_t(cs->recursion_count));
+      }
+    }
+  }
+
+  // Phase 1095k: 81750FA8's pool task stops dead at 81751120 -> 817BC5E0 ->
+  // 817BC370, which does RtlEnterCriticalSection(81D4F3B0 + 0x88). Coverage
+  // says the initialiser 817BA568 runs fully (39/39, calls=1), so the question
+  // is whether THIS instance is initialised (lock_count -1) or whether someone
+  // is holding it. Report the state on entry and on exit for that one address.
+  // Phase 1095bg: the record MOVES between runs, so the watch resolves it
+  // from the pool each call (see GuidePoisonWatch in xboxkrnl_threading.cc).
+  // Called from here because RtlEnterCriticalSection runs constantly, early
+  // and late, whereas KeTlsGetValue stops before the records exist.
+  GuidePoisonWatch();
+
+  // Phase 1095r: 817316A8 acquires the section at 81D213D8 at 817316D0 while
+  // r31 still holds the device-table ENTRY it was called with. The entry is
+  // {+0 name, +4 operation (1=register, 2=use), +8 kind}, and the kind is
+  // computed at runtime, not a constant - so read it here, from the guest's own
+  // registers, at the one call site whose return address is 817316D4.
+  {
+    auto* eth = XThread::GetCurrentThread();
+    auto* ectx = (eth && eth->thread_state()) ? eth->thread_state()->context()
+                                              : nullptr;
+    if (ectx && static_cast<uint32_t>(ectx->lr) == 0x817316D4u) {
+      static std::atomic<uint32_t> en{0};
+      const uint32_t i = ++en;
+      if (i <= 24u) {
+        const uint32_t entry = static_cast<uint32_t>(ectx->r[31]);
+        auto* mem = kernel_memory();
+        auto rd = [&](uint32_t a) {
+          return xe::load_and_swap<uint32_t>(mem->TranslateVirtual(a));
+        };
+        const uint32_t name_ptr = entry ? rd(entry + 0) : 0;
+        char nm[40] = {0};
+        if (name_ptr) {
+          auto* p8 = mem->TranslateVirtual<const char*>(name_ptr);
+          for (int k = 0; k < 39 && p8[k]; ++k) nm[k] = p8[k];
+        }
+        // Recover the caller: 817316A8's prologue goes through a
+        // save-registers helper, so the return address is not at a fixed
+        // slot. Scan the stack upward for the first word that lands inside
+        // the 8173xxxx band that holds the 13 call sites.
+        std::string callers;
+        const uint32_t sp = static_cast<uint32_t>(ectx->r[1]);
+        for (uint32_t k = 0; k < 96u && callers.size() < 60u; ++k) {
+          const uint32_t w = rd(sp + k * 4u);
+          if (w >= 0x81730000u && w < 0x81737000u) {
+            callers += fmt::format("{:08X} ", w);
+          }
+        }
+        XELOGI("GuideDevEntry #{}: entry {:08X} name '{}' op {} kind {} "
+               "(kinds xam handles: 0x10, 8, 4, 2, 3) | callers: {}",
+               i, entry, nm, entry ? rd(entry + 4) : 0,
+               entry ? rd(entry + 8) : 0, callers);
+      }
+    }
+  }
+
+  const bool kWatch = cs.guest_address() == 0x81D4F438u;
+  if (kWatch) {
+    static std::atomic<uint32_t> n{0};
+    const uint32_t i = ++n;
+    if (i <= 12u) {
+      auto* th = XThread::GetCurrentThread();
+      XELOGI("GuideCS 81D4F438 #{}: enter by tid {:08X} (guest obj {:08X}) | "
+             "lock_count {} recursion {} owning_thread {:08X} spin {}",
+             i, th ? th->thread_id() : 0u, cur_thread,
+             int32_t(cs->lock_count), uint32_t(cs->recursion_count),
+             uint32_t(cs->owning_thread.m_ptr), spin_count);
+    }
+  }
 
   if (cs->owning_thread == cur_thread) {
     // We already own the lock.

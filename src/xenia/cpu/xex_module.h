@@ -214,6 +214,8 @@ class XexModule : public xe::cpu::Module {
   bool Unload();
 
   bool ContainsAddress(uint32_t address) override;
+  uint32_t low_address() const { return low_address_; }
+  uint32_t high_address() const { return high_address_; }
 
   const std::string& name() const override { return name_; }
   bool is_executable() const override {

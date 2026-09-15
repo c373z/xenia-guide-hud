@@ -22,6 +22,11 @@
 namespace xe {
 namespace kernel {
 
+// Phase 1099z76: where the 0x1F0 XNET_PARAMETERS record is persisted.
+static std::filesystem::path SideRecordPath(const std::filesystem::path& p) {
+  return p.parent_path() / "xconfig_xnet_parameters.bin";
+}
+
 XConfig::XConfig(const std::filesystem::path& xconfig_path)
     : file_path_(xconfig_path) {
   if (!std::filesystem::exists(xconfig_path)) {
@@ -41,6 +46,29 @@ XConfig::XConfig(const std::filesystem::path& xconfig_path)
 
   fread(&xconfig_data_, sizeof(XConfigData), 1, file);
   fclose(file);
+
+  if (FILE* side = xe::filesystem::OpenFile(SideRecordPath(xconfig_path), "rb")) {
+    fread(xnet_parameters_record_.data(), 1, xnet_parameters_record_.size(),
+          side);
+    fclose(side);
+  }
+}
+
+void XConfig::ResetXnetCategoryIfStale(X_CONFIG_CATEGORY category) {
+  if (category != X_CONFIG_CATEGORY::XCONFIG_XNET_MACHINE_ACCOUNT_CATEGORY &&
+      category != X_CONFIG_CATEGORY::XCONFIG_XNET_PARAMETERS_CATEGORY) {
+    return;
+  }
+  uint8_t* base = CategoryBase(category);
+  if (xe::load_and_swap<uint32_t>(base) == 1) {
+    return;
+  }
+  std::memset(base, 0, 0x1F0);
+  xe::store_and_swap<uint32_t>(base, 1);
+  XELOGI("XConfig: category {} version was not 1 - reset to version 1 with "
+         "zero data (real kernel 80087AC0)",
+         static_cast<int>(category));
+  FlushToFile();
 }
 
 void XConfig::ReadSetting(const X_CONFIG_CATEGORY category,
@@ -52,6 +80,7 @@ void XConfig::ReadSetting(const X_CONFIG_CATEGORY category,
   }
 
   std::lock_guard<xe_mutex> lock(lock_);
+  ResetXnetCategoryIfStale(category);
   std::memcpy(buffer, CategoryBase(category) + setting->block_offset,
               setting->size);
 }
@@ -65,6 +94,7 @@ void XConfig::WriteSetting(const X_CONFIG_CATEGORY category,
   }
 
   std::lock_guard<xe_mutex> lock(lock_);
+  ResetXnetCategoryIfStale(category);
   std::memcpy(CategoryBase(category) + setting->block_offset, buffer,
               setting->size);
 
@@ -98,7 +128,12 @@ void XConfig::SetDefaults() {
   xconfig_data_.user.av_pack_hdmi_sz = XHDTVResolution.at(1).to_host();
   xconfig_data_.user.av_pack_component_sz = XHDTVResolution.at(1).to_host();
   xconfig_data_.user.av_pack_vga_sz = XVGAResolution.at(3).to_host();
-  xconfig_data_.user.retail_flags = DashboardInitialized;
+  // Phase 1099z11: signin.xex (9011B5F0) asks for Xbox Live privacy/update
+  // consent on a dashboard sign-in whenever bit 0x4 is clear, network or not;
+  // accepting writes 0x4 | 0x10000000 (9011B650). A console that has been
+  // set up has accepted, so a fresh config starts that way.
+  xconfig_data_.user.retail_flags =
+      DashboardInitialized | LiveConsentAccepted | LiveConsentAccepted2;
   xconfig_data_.user.video_flags = RatioNormal;
   xconfig_data_.user.parental_control_flags =
       XBLAllowed | XBLMembershipCreationAllowed;
@@ -132,6 +167,12 @@ void XConfig::FlushToFile() {
 
   fwrite(&xconfig_data_, 1, sizeof(XConfigData), file);
   fclose(file);
+
+  if (FILE* side = xe::filesystem::OpenFile(SideRecordPath(file_path_), "wb")) {
+    fwrite(xnet_parameters_record_.data(), 1, xnet_parameters_record_.size(),
+           side);
+    fclose(side);
+  }
 }
 
 const XConfig::FieldDescriptor* XConfig::FindField(X_CONFIG_CATEGORY category,
@@ -156,7 +197,7 @@ uint8_t* XConfig::CategoryBase(X_CONFIG_CATEGORY category) {
     case X_CONFIG_CATEGORY::XCONFIG_XNET_MACHINE_ACCOUNT_CATEGORY:
       return reinterpret_cast<uint8_t*>(&xconfig_data_.xnet_machine_account);
     case X_CONFIG_CATEGORY::XCONFIG_XNET_PARAMETERS_CATEGORY:
-      return reinterpret_cast<uint8_t*>(&xconfig_data_.xnet_parameters);
+      return xnet_parameters_record_.data();
     case X_CONFIG_CATEGORY::XCONFIG_MEDIA_CENTER_CATEGORY:
       return reinterpret_cast<uint8_t*>(&xconfig_data_.media_center);
     case X_CONFIG_CATEGORY::XCONFIG_CONSOLE_CATEGORY:

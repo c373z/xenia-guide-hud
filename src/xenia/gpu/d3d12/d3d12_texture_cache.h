@@ -174,6 +174,16 @@ class D3D12TextureCache final : public TextureCache {
   // NON_PIXEL_SHADER_RESOURCE state), or nullptr in case of failure, and writes
   // the description of its SRV. May call LoadTextureData, so the same
   // restrictions (such as about descriptor heap change possibility) apply.
+  // Phase 1098zc: the same path as RequestSwapTexture, but for a surface named
+  // explicitly instead of read from texture fetch 0 - used to present the
+  // Guide's own resolved surface. Every parameter is supplied by the caller
+  // from the GUEST's resolve registers; nothing here is chosen by the host.
+  ID3D12Resource* RequestGuideTexture(
+      D3D12_SHADER_RESOURCE_VIEW_DESC& srv_desc_out,
+      xenos::TextureFormat& format_out, uint32_t base_addr, uint32_t width,
+      uint32_t height, uint32_t pitch_texels, xenos::TextureFormat format,
+      xenos::Endian endianness, bool tiled, bool dest_swap);
+
   ID3D12Resource* RequestSwapTexture(
       D3D12_SHADER_RESOURCE_VIEW_DESC& srv_desc_out,
       xenos::TextureFormat& format_out);

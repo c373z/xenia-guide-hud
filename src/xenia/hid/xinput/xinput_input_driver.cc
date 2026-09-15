@@ -7,6 +7,8 @@
  ******************************************************************************
  */
 
+#include <atomic>
+#include <chrono>
 #include "xenia/hid/xinput/xinput_input_driver.h"
 
 // Must be included before xinput.h to avoid windows.h conflicts:
@@ -82,7 +84,11 @@ X_STATUS XInputInputDriver::Setup() {
   return X_STATUS_SUCCESS;
 }
 
-constexpr uint64_t SKIP_INVALID_CONTROLLER_TIME = 1100;
+// Phase 1054 input: 5 s, not 1.1 s. Asking XInput about a pad that is not
+// plugged in costs a device enumeration of 1-2.5 ms, and every recheck was a
+// hitch on the polling thread once a second; a pad plugged in is still seen
+// within five seconds.
+constexpr uint64_t SKIP_INVALID_CONTROLLER_TIME = 5000;
 static uint64_t last_invalid_time[4];
 
 static DWORD should_skip(uint32_t user_index) {
@@ -207,10 +213,24 @@ X_RESULT XInputInputDriver::GetKeystroke(uint32_t user_index, uint32_t flags,
   // If any user (0xFF) is polled this bug does not occur but GetCapabilities
   // would fail so we need to skip it.
   if (user_index != XUserIndexAny) {
+    // Phase 1054 input: XInputGetCapabilities for a pad that is not plugged
+    // in costs a device enumeration (1-2.5 ms) on every call, and the Guide
+    // polls every paint. GetState/GetCapabilities/SetState already remember
+    // "not connected" per user (should_skip/set_skip); the keystroke path
+    // now shares that state.
+    if (user_index < 4) {
+      DWORD skipper = should_skip(user_index);
+      if (skipper) {
+        return skipper;
+      }
+    }
     XINPUT_CAPABILITIES caps;
     auto xigc = (decltype(&XInputGetCapabilities))XInputGetCapabilities_;
     result = xigc(user_index, 0, &caps);
     if (result) {
+      if (user_index < 4 && result == ERROR_DEVICE_NOT_CONNECTED) {
+        set_skip(user_index);
+      }
       return result;
     }
   }

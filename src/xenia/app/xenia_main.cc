@@ -26,7 +26,9 @@
 #include "xenia/config.h"
 #include "xenia/debug/ui/debug_window.h"
 #include "xenia/emulator.h"
+#include "xenia/hid/input_system.h"
 #include "xenia/kernel/xam/xam_module.h"
+#include "xenia/kernel/xboxkrnl/xboxkrnl_video.h"  // phase 1055 bugs: GuidePaintThreadStop
 #include "xenia/ui/file_picker.h"
 #include "xenia/ui/window.h"
 #include "xenia/ui/window_listener.h"
@@ -116,6 +118,13 @@ DECLARE_bool(force_mount_devkit);
 DEFINE_transient_path(target, "",
                       "Specifies the target .xex or .iso to execute.",
                       "General");
+// Phase 1099z137: open the exe with no arguments and get the console.
+DEFINE_path(guide_boot_target, "",
+            "Title to boot when no target is given on the command line (the "
+            "dashboard, e.g. ...\\dashroot\\dash.xex). Persisted, unlike "
+            "target, so a plain double-click boots it.",
+            "Guide");
+DECLARE_bool(guide_power_on_with_guide_button);
 #ifndef XE_PLATFORM_WIN32
 DEFINE_transient_bool(portable, false,
                       "Specifies if Xenia should run in portable mode.",
@@ -558,6 +567,9 @@ bool EmulatorApp::OnInitialize() {
 }
 
 void EmulatorApp::OnDestroy() {
+  // Phase 1055 bugs: the Guide's paint thread runs guest code; let it finish
+  // its paint and exit before the quick exit below ends the process.
+  kernel::xboxkrnl::GuidePaintThreadStop();
   ShutdownEmulatorThreadFromUIThread();
 
   if (cvars::discord) {
@@ -756,6 +768,34 @@ void EmulatorApp::EmulatorThread() {
   std::filesystem::path path;
   if (!cvars::target.empty()) {
     path = cvars::target;
+  } else if (!cvars::guide_boot_target.empty()) {
+    path = cvars::guide_boot_target;
+  }
+
+  if (!path.empty() && cvars::guide_power_on_with_guide_button) {
+    XELOGI("Power: waiting for the Guide button to power on");
+    bool pressed = false;
+    auto* input = emulator_->input_system();
+    while (!pressed &&
+           !emulator_thread_quit_requested_.load(std::memory_order_relaxed)) {
+      // Keyboard Guide key and any other on_guide_button_pressed source.
+      pressed = emulator_->ConsumeGuidePowerPress();
+      // Controllers: the same query EmulatorWindow::GamepadHotKeys makes.
+      if (!pressed && input) {
+        auto input_lock = input->lock();
+        for (uint32_t user = 0; user < 4 && !pressed; ++user) {
+          hid::X_INPUT_STATE state = {};
+          if (input->GetState(user, hid::X_INPUT_FLAG::X_INPUT_FLAG_GAMEPAD,
+                              &state) == X_ERROR_SUCCESS &&
+              (state.gamepad.buttons & hid::X_INPUT_GAMEPAD_GUIDE)) {
+            pressed = true;
+          }
+        }
+      }
+      if (!pressed) xe::threading::Sleep(std::chrono::milliseconds(16));
+    }
+    if (!pressed) return;
+    XELOGI("Power: Guide button pressed, booting {}", xe::path_to_utf8(path));
   }
 
   if (!path.empty()) {

@@ -21,6 +21,10 @@ namespace kernel {
 
 class XThread;
 
+// Queues a DPC for the kernel DPC thread (kernel_guest_timers).
+void QueueKernelDpc(uint32_t routine, uint32_t dpc, uint32_t context,
+                    uint32_t arg1, uint32_t arg2);
+
 class XTimer : public XObject {
  public:
   static const XObject::Type kObjectType = XObject::Type::Timer;
@@ -35,8 +39,11 @@ class XTimer : public XObject {
   // waited on until it is adopted here - mirrors XEvent::InitializeNative.
   void InitializeNative(void* native_ptr, const X_DISPATCH_HEADER* header);
 
+  // dpc_ptr != 0: `routine` is a KDPC DeferredRoutine and is called as
+  // routine(Dpc, DeferredContext = routine_arg, SystemArgument1 = time low).
+  // dpc_ptr == 0: `routine` is a timer APC, called as (arg, low, high).
   X_STATUS SetTimer(int64_t due_time, uint32_t period_ms, uint32_t routine,
-                    uint32_t routine_arg, bool resume);
+                    uint32_t routine_arg, bool resume, uint32_t dpc_ptr = 0);
   X_STATUS Cancel();
 
  protected:

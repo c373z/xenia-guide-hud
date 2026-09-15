@@ -36,6 +36,24 @@ uint32_t xeXamNotifyCreateListener(uint64_t mask, uint32_t is_system,
   // Handle ref is incremented, so return that.
   uint32_t handle = listener->handle();
 
+  // Phase 1095ai: with lle_xam_scope blank the dash binds to real xam,
+  // yet type-7 (NotifyListener) objects with Xenia handles still reach
+  // real xam's ObReferenceObjectByHandle and get the 0xDEADF00D
+  // sentinel (crash 8176738C). This is the ONLY constructor, reached by
+  // both XamNotifyCreateListener (0x28A) and
+  // XamNotifyCreateListenerInternal (0x291) - the earlier probe only
+  // covered the first. Log every creation with its guest caller.
+  {
+    auto* th = XThread::GetCurrentThread();
+    auto* ctx = (th && th->thread_state()) ? th->thread_state()->context()
+                                           : nullptr;
+    XELOGI("GuideNotifyNew: handle {:08X} mask {:016X} is_system {} "
+           "max_version {} | guest lr {:08X} tid {:08X}",
+           handle, mask, is_system, max_version,
+           ctx ? static_cast<uint32_t>(ctx->lr) : 0u,
+           th ? th->thread_id() : 0u);
+  }
+
   return handle;
 }
 

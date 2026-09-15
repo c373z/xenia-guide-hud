@@ -318,6 +318,14 @@ class CommandProcessor {
   virtual void MakeCoherent();
   virtual void PrepareForWait();
   virtual void ReturnFromWait();
+  // Phase 1099z97: drain xam's system command buffer while the ring is idle
+  // (no title presenting, e.g. during a title switch). See D3D12 override.
+  virtual bool GuideIdleDrainPending() { return false; }
+  virtual void GuideIdleDrain() {}
+  // Phase 1099z114: re-present the title's last frame with the Guide redrawn.
+  // HOST-SIDE FIX - not present in real hardware.
+  virtual bool GuideRefreshDue() { return false; }
+  virtual void GuideRefresh() {}
 
   virtual void PollCompletedSubmission() {}
 
@@ -653,6 +661,79 @@ class CommandProcessor {
     ExecuteIndirectBuffer(ptr, count);
   }
 
+  // Phase 1098p: the SYSTEM COMMAND BUFFER - the second ring the 360 has and
+  // Xenia never modelled. xam submits a finished PM4 stream through
+  // VdSetSystemCommandBuffer about 1780 times a second (measured, 1098o); the
+  // descriptor's +0x00 is a PHYSICAL base cycling three slots 0x40000 apart and
+  // +0x04 is a word count. Published here by the kernel side as one 64-bit
+  // value so the consumer never pairs one submit's pointer with another's
+  // length, and consumed on the GPU thread in ExecutePacketType3_XE_SWAP.
+  //
+  // PHYSICAL, so it is executed with ExecuteGuestBufferUnsafe (TranslatePhysical),
+  // NOT the Virtual variant the older host-paint stream needed - that one lived
+  // at 3009C000 in the 4KB-page virtual heap.
+  std::atomic<uint64_t> guide_syscmd_pair_{0};
+  // Phase 1098s: keeping only the latest submit was wrong. The guest submits
+  // about 236 streams per frame and the ONE we kept never contained a resolve:
+  // a census of every IssueCopy destination saw only the title's 1F090000 and
+  // 1F428000, never the Guide's own 1FA50000, so its pixels never left EDRAM.
+  // Queue every submit and drain them in order instead.
+  static constexpr uint32_t kGuideSysCmdQueue = 1024;
+  std::atomic<uint64_t> guide_syscmd_ring_[kGuideSysCmdQueue] = {};
+  std::atomic<uint32_t> guide_syscmd_head_{0};  // producer: kernel side
+  std::atomic<uint32_t> guide_syscmd_tail_{0};  // consumer: GPU thread
+  std::atomic<uint32_t> guide_syscmd_dropped_{0};
+  // Phase 1098x: true while a submitted Guide stream is being executed, so
+  // draws can be attributed to it rather than to the title.
+  // Phase 1098z: a DEPTH, not a bool. The bool gave 677,050 "draws during the
+  // Guide's stream" in one probe and none in another (1098y) - the signature of
+  // a flag that is not balanced. A depth is checkable: it must be 0 outside the
+  // drain and exactly 1 inside it, and both are asserted below.
+  uint32_t guide_syscmd_depth_ = 0;
+  // Phase 1098z3: settle the 1098y/z contradiction with counters that cannot be
+  // compared wrongly - incremented unconditionally at the two sites and printed
+  // TOGETHER from one place at one cadence. 1098z2's "impossible arithmetic"
+  // was me comparing a 20000-cadence print against a 50-cadence print.
+  uint32_t guide_dbg_pm4_calls_ = 0;      // ExecutePacketType3Draw -> IssueDraw
+  uint32_t guide_dbg_pm4_indepth_ = 0;    // ... of those, with depth != 0
+  uint32_t guide_dbg_backend_calls_ = 0;  // inside the backend's IssueDraw
+  uint32_t guide_dbg_backend_indepth_ = 0;
+  // Phase 1098zc: the surface the GUEST's own Guide stream resolved to, taken
+  // from RB_COPY_DEST_* at the moment of that resolve. Recorded only when a
+  // submitted system-command-buffer stream is what is executing, so this is
+  // "the surface xam's Guide resolved to" and not a guess about which resolve
+  // is the Guide's.
+  uint32_t guide_surf_base_ = 0;
+  uint32_t guide_surf_width_ = 0;
+  uint32_t guide_surf_height_ = 0;
+  uint32_t guide_surf_pitch_ = 0;
+  uint32_t guide_surf_format_ = 0;
+  uint32_t guide_surf_endian_ = 0;
+  uint32_t guide_surf_swap_ = 0;
+  // Phase 1098zi: the LOGICAL size from the guest's submit descriptor, as
+  // opposed to the padded pitch in RB_COPY_DEST_PITCH.
+  // Phase 1099i: is the Guide on screen right now? xam resolves its surface
+  // every frame the Guide is up and stops when it closes, so this is the
+  // guest's own behaviour rather than a host flag. Used to pick WHICH of xam's
+  // two Guide-button doors to knock on.
+  bool GuideSurfaceIsLive() const {
+    return guide_surf_base_ != 0 &&
+           (guide_swap_index_ - guide_surf_last_swap_) <= 8u;
+  }
+
+  uint32_t guide_desc_width_ = 0;
+  uint32_t guide_desc_height_ = 0;
+  // Phase 1098zd: swap index at which the Guide last resolved its surface, and
+  // the running swap count. xam resolves only while the Guide is up, so
+  // "resolved within the last few swaps" is a GUEST-DRIVEN test for "the Guide
+  // is on screen" - no address and no blade-state constant hardcoded here.
+  uint32_t guide_surf_last_swap_ = 0;
+  uint32_t guide_swap_index_ = 0;
+  // How many submits arrived since the last swap consumed one, so the ratio
+  // (~30 per frame) is measurable rather than assumed.
+  std::atomic<uint32_t> guide_syscmd_submits_{0};
+  std::atomic<uint32_t> guide_syscmd_execs_{0};
+
   // A command stream the Guide has finished building, to be run on the GPU
   // thread just before the title's next swap. Set by the Guide draw hook on
   // the title thread; consumed and cleared in ExecutePacketType3_XE_SWAP.
@@ -664,7 +745,32 @@ class CommandProcessor {
   // built, its render target still bound, and the Guide's geometry drawn on
   // top immediately before present. The swap packet is exactly that point.
   volatile uint32_t guide_overlay_ptr_ = 0;
+  // Phase 1053: restart the slide-in timer at the next overlay execution.
+  volatile bool guide_slide_rearm_ = false;
+  // Phase 1054: the paint's 8-bit textures (glyph atlases), physical base and
+  // byte size, recorded by the kernel side at publish; the GPU side
+  // invalidates them before the burst when guide_atlas_invalidate is set.
+  volatile uint32_t guide_tex_base_[8] = {};
+  volatile uint32_t guide_tex_size_[8] = {};
+  volatile uint32_t guide_tex_count_ = 0;
   volatile uint32_t guide_overlay_words_ = 0;
+  // Phase 1055 bugs: (ptr << 32 | words) of the latest publish, stored by the
+  // kernel side after both fields; the replay reads it as one value so it
+  // never pairs a new pointer with an old length or the reverse.
+  std::atomic<uint64_t> guide_overlay_pair_{0};
+  // Phase 1055 bugs: the pair the replay is executing right now (0 between
+  // replays). The kernel side keeps that stream's pages pinned in the page
+  // cache however many publishes ago it was, so a replay a shader compile
+  // stalls for hundreds of ms never reads a recycled microcode page.
+  std::atomic<uint64_t> guide_overlay_replaying_{0};
+  // Phase 1010: sum of the published words, taken on the publishing thread,
+  // so the consumer can tell whether the stream it parses is the one that
+  // was published or a rewrite of the same arena.
+  volatile uint32_t guide_overlay_sum_ = 0;
+  // Phase 1011: once the stream is published, log the next resolves and swaps
+  // in order, so the frame structure around the burst can be read.
+  uint32_t guide_seq_left_ = 0;
+  uint32_t guide_seq_last_draws_ = 0;
 
   // Execute a PM4 stream that lives in the guest VIRTUAL address space.
   //

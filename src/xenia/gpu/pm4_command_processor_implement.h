@@ -1,3 +1,4 @@
+#include <chrono>
 #pragma once
 
 #if !defined(NDEBUG)
@@ -884,6 +885,81 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
   uint32_t frontbuffer_width = reader_.ReadAndSwap<uint32_t>();
   uint32_t frontbuffer_height = reader_.ReadAndSwap<uint32_t>();
   reader_.AdvanceRead((count - 4) * sizeof(uint32_t));
+  if (guide_seq_left_) {
+    xenos::xe_gpu_texture_fetch_t seq_tf = register_file_->GetTextureFetch(0);
+    XELOGI("GuideSeq: SWAP fb={:08X} {}x{} fetch0={:08X}", frontbuffer_ptr,
+           frontbuffer_width, frontbuffer_height, seq_tf.base_address << 12);
+  }
+
+  // Phase 1098p: execute the SYSTEM COMMAND BUFFER xam submitted. This is the
+  // Guide's own PM4 stream, built by real guest code (xam's XUI render backend
+  // via XuiRenderPresent) and handed to the host through
+  // VdSetSystemCommandBuffer ~1780 times a second. Xenia has never executed it:
+  // the GPU models only the title's ring. The host is not drawing anything here
+  // and knows nothing about what the stream contains - it routes the guest's
+  // own commands to the GPU, which is exactly the host's job.
+  //
+  // PHYSICAL pointer, so ExecuteGuestBufferUnsafe (TranslatePhysical), not the
+  // Virtual variant the older host-built stream needed.
+  //
+  // Placement: at swap, after the title's frame is built and before it is
+  // presented, which is what an overlay wants. Many submits arrive per frame;
+  // the most recent one wins, and both counts are recorded so the ratio is a
+  // measurement rather than an assumption.
+  {
+    uint64_t spair = cvars::guide_syscmd_at_resolve
+                         ? 0
+                         : guide_syscmd_pair_.exchange(
+                               0, std::memory_order_acquire);
+    if (spair) {
+      uint32_t sptr = uint32_t(spair >> 32);
+      uint32_t swords = uint32_t(spair & 0xFFFFFFFFu);
+      if (sptr && swords) {
+        uint32_t before = guide_draw_count_;
+        // Phase 1098z4: same depth marking as the IssueCopy drain, so the
+        // paired counter means the same thing at this placement. This site is
+        // NOT inside IssueCopy, which is the whole point of the comparison.
+        ++guide_syscmd_depth_;
+        // Phase 1098z5: see the note in IssueCopy - the base class's inline
+        // helper runs the stream through a no-op IssueDraw.
+        COMMAND_PROCESSOR::ExecuteIndirectBuffer(sptr, swords);
+        --guide_syscmd_depth_;
+        uint32_t n = guide_syscmd_execs_.fetch_add(1, std::memory_order_relaxed) + 1;
+        if (n <= 3 || (n % 300) == 0) {
+          XELOGI("GuideSysCmd exec #{}: {:08X} +{} words, draws {} -> {} "
+                 "(submits since start {})",
+                 n, sptr, swords, before, guide_draw_count_,
+                 guide_syscmd_submits_.load(std::memory_order_relaxed));
+        }
+      }
+    }
+  }
+
+  // Phase 1098s: sample the Guide's resolve destination from a point that is
+  // INDEPENDENT of where its stream is executed, so "the surface is empty" can
+  // be separated from "my execution site broke the resolve". 1FA50000 is the
+  // address the guest's own RB_COPY_DEST_BASE names, measured and stable.
+  {
+    static uint32_t sprobe = 0;
+    if ((sprobe++ % 120) == 0) {
+      const uint8_t* sb = memory_->TranslatePhysical(0x1FA50000u);
+      if (sb) {
+        // Phase 1098z7: scan the whole buffer LAYOUT-AGNOSTICALLY. The earlier
+        // 16x16 linear grid assumed a linear 864-wide surface; a Xenos resolve
+        // destination is usually TILED, so a linear grid can miss real content.
+        // "Is anything non-zero anywhere in 864*480*4 bytes" needs no layout.
+        uint32_t nz = 0, samples = 0, firstnz = 0;
+        const size_t bytes = size_t(864) * 480 * 4;
+        for (size_t off = 0; off < bytes; off += 64) {
+          uint32_t px = xe::load_and_swap<uint32_t>(sb + off);
+          ++samples;
+          if (px && !nz++) firstnz = px;
+        }
+        XELOGI("GuideSurfaceAtSwap 1FA50000: {}/{} non-zero, first {:08X}", nz,
+               samples, firstnz);
+      }
+    }
+  }
 
   // Draw the Guide over the finished frame, before it is presented.
   {
@@ -978,10 +1054,17 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
   // it, which is why the injection never fired.
   if (guide_overlay_ptr_ && guide_overlay_words_ &&
       !cvars::guide_overlay_before_resolve) {
-    uint32_t gptr = guide_overlay_ptr_;
-    uint32_t gwords = guide_overlay_words_;
+    // Phase 1055 bugs: pointer and length as one value (guide_overlay_pair_)
+    uint64_t gpair = guide_overlay_pair_.load(std::memory_order_acquire);
+    uint32_t gptr = uint32_t(gpair >> 32);
+    uint32_t gwords = uint32_t(gpair & 0xFFFFFFFFu);
+    if (!gptr || !gwords) {
+      gptr = guide_overlay_ptr_;
+      gwords = guide_overlay_words_;
+    }
     if (!cvars::guide_overlay_repeat) {
       guide_overlay_ptr_ = 0;
+      guide_overlay_pair_.store(0, std::memory_order_release);
     }
     XELOGI("GuideOverlay: executing {} words at {:08X} before swap", gwords,
            gptr);
@@ -1029,7 +1112,10 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_XE_SWAP(uint32_t packet,
     }
     guide_overlay_exec_ = true;
     COMMAND_PROCESSOR::GuideOcclusionBegin();
+    guide_overlay_replaying_.store((uint64_t(gptr) << 32) | uint64_t(gwords),
+                                   std::memory_order_release);  // phase 1055 bugs
     COMMAND_PROCESSOR::ExecuteGuestBufferVirtualUnsafe(gptr, gwords);
+    guide_overlay_replaying_.store(0, std::memory_order_release);
     if (cvars::guide_clear_rt) {
       COMMAND_PROCESSOR::GuideClearRenderTarget();
     }
@@ -1449,6 +1535,12 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_WAIT_REG_MEM(
           xe::threading::Sleep(std::chrono::milliseconds(wait / 0x100));
           ReturnFromWait();
         }
+        // Phase 1099z114 (HOST-SIDE, not on hardware): titles spend most of a
+        // frame in this vsync wait, so the Guide refresh must run from here
+        // for a low-framerate game not to cap the Guide.
+        if (GuideRefreshDue()) {
+          GuideRefresh();
+        }
 
         if (!worker_running_) {
           // Short-circuited exit.
@@ -1570,6 +1662,27 @@ bool COMMAND_PROCESSOR::ExecutePacketType3_COND_WRITE(
     value = register_file_->values[poll_reg_addr];
   }
   bool matched = MatchValueAndRef(value & mask, ref, wait_info);
+  // Phase 1054: what the Guide's COND_WRITEs are, and whether they pass.
+  if (guide_overlay_exec_) {
+    static uint32_t cw_logs = 0, cw_seen = 0, cw_matched = 0;
+    ++cw_seen;
+    if (matched) ++cw_matched;
+    if (cw_logs < 16) {
+      ++cw_logs;
+      XELOGI("GuideCondWrite: wait {:08X} poll {:08X} (value {:08X}) ref {:08X} "
+             "mask {:08X} write {:08X} data {:08X} -> {}{}",
+             wait_info, poll_reg_addr, value, ref, mask, write_reg_addr,
+             write_data, matched ? "write" : "SKIP",
+             cvars::guide_cond_write_force && !matched ? " (forced)" : "");
+    }
+    if ((cw_seen % 4096) == 0) {
+      XELOGI("GuideCondWrite: {} seen, {} matched in the Guide's bursts so far",
+             cw_seen, cw_matched);
+    }
+    if (cvars::guide_cond_write_force) {
+      matched = true;
+    }
+  }
 
   if (matched) {
     // Write.
@@ -2225,7 +2338,8 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
     // values AND the transform disabled, so allow both.
     if (cvars::guide_overlay_restore_surface &&
         (cvars::guide_overlay_vte_passthru || (drf[0x2206] & 0x3Fu)) &&
-        drf[0x210F] == 0u && drf[0x2111] == 0u) {
+        ((drf[0x210F] == 0u && drf[0x2111] == 0u) ||
+         (guide_overlay_exec_ && cvars::guide_slide_ms > 0))) {
       auto setf = [&](uint32_t r, float f) {
         uint32_t v;
         std::memcpy(&v, &f, 4);
@@ -2237,8 +2351,29 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
         setf(0x2111, 1.0f);   // y scale
         setf(0x2112, 0.0f);   // y offset
       } else {
+        float slide_px = 0.0f;
+        if (cvars::guide_slide_ms > 0 && guide_overlay_exec_) {
+          static bool slide_started = false;
+          static std::chrono::steady_clock::time_point slide_t0;
+          if (guide_slide_rearm_) {
+            slide_started = false;
+            guide_slide_rearm_ = false;
+          }
+          if (!slide_started) {
+            slide_started = true;
+            slide_t0 = std::chrono::steady_clock::now();
+          }
+          double t = std::chrono::duration<double, std::milli>(
+                         std::chrono::steady_clock::now() - slide_t0)
+                         .count() /
+                     double(cvars::guide_slide_ms);
+          if (t < 1.0) {
+            float e = float(1.0 - (1.0 - t) * (1.0 - t));  // ease-out
+            slide_px = -1280.0f * (1.0f - e);
+          }
+        }
         setf(0x210F, 640.0f);   // x scale
-        setf(0x2110, 640.0f);   // x offset
+        setf(0x2110, 640.0f + slide_px);   // x offset (+ slide-in)
         setf(0x2111, -360.0f);  // y scale
         setf(0x2112, 360.0f);   // y offset
       }
@@ -2702,6 +2837,25 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
         (viz_query.viz_query_ena && viz_query.kill_pix_post_hi_z)) {
       ++guide_ov_vizdrop_;
     }
+    // Phase 1098y: the Guide's draw packets are parsed but IssueDraw is never
+    // reached for them (GuideDrawModes duringGuideStream[none]). This is the
+    // one silent skip in this function - upstream Xenia drops the draw entirely
+    // when viz_query_ena && kill_pix_post_hi_z, with a TODO saying the backends
+    // should handle it properly. Census the two bits for draws made while a
+    // submitted Guide stream is executing, so "this is why" is measured rather
+    // than deduced from the comment.
+    if (guide_syscmd_depth_) {
+      static uint32_t g_skipped = 0, g_issued = 0, g_rep = 0;
+      bool skip = viz_query.viz_query_ena && viz_query.kill_pix_post_hi_z;
+      if (skip) ++g_skipped; else ++g_issued;
+      if ((++g_rep % 50) == 0 || g_rep <= 4) {
+        XELOGI("GuideVizSkip: depth={} viz_ena={} kill_post_hiz={} -> {} "
+               "(skipped {}, issued {})",
+               guide_syscmd_depth_, uint32_t(viz_query.viz_query_ena),
+               uint32_t(viz_query.kill_pix_post_hi_z),
+               skip ? "SKIPPED" : "issued", g_skipped, g_issued);
+      }
+    }
     if (!(viz_query.viz_query_ena && viz_query.kill_pix_post_hi_z)) {
       // TODO(Triang3l): Don't drop the draw call completely if the vertex
       // shader has memexport.
@@ -2714,6 +2868,62 @@ bool COMMAND_PROCESSOR::ExecutePacketType3Draw(
         // is not the Guide's geometry.
         draw_succeeded = true;
       } else {
+      ++guide_dbg_pm4_calls_;
+      if (guide_syscmd_depth_) ++guide_dbg_pm4_indepth_;
+      // Phase 1098zj: what do the GUIDE's draws sample? Its surround is opaque
+      // black, and the only guest-faithful way the title could show through is
+      // if xam reads the title's frame and dims it itself. Census the texture
+      // fetches bound at the Guide's own draws - the resolve has none bound, so
+      // this has to be sampled here.
+      if (guide_syscmd_depth_) {
+        // Phase 1099a: WHERE IS THE GUIDE'S BACKGROUND ALPHA? Not in the submit
+        // descriptor (censused: no opacity field) and not in the resolved
+        // surface (alpha 255 everywhere). The remaining guest-stated place is
+        // the blend state at its own draws - RB_BLEND_RED/GREEN/BLUE/ALPHA is
+        // the constant blend colour, which is exactly where a global fade would
+        // sit. Census distinct values; all of these are the guest's registers.
+        {
+          static std::map<uint32_t, std::set<uint32_t>> breg;
+          static uint32_t bn = 0;
+          const RegisterFile& brf = *register_file_;
+          for (uint32_t r : {0x2104u, 0x2105u, 0x2106u, 0x2107u, 0x2108u,
+                             0x2201u, 0x2202u, 0x2209u}) {
+            auto& sv = breg[r];
+            if (sv.size() < 10) sv.insert(uint32_t(brf[r]));
+          }
+          if ((++bn % 900) == 0) {
+            std::string out;
+            for (auto& kv : breg) {
+              out += fmt::format("\n  {:04X}:", kv.first);
+              for (uint32_t v : kv.second) {
+                float f;
+                std::memcpy(&f, &v, 4);
+                out += fmt::format(" {:08X}({:.3f})", v, f);
+              }
+            }
+            XELOGI("GuideBlendCensus:{}", out);
+          }
+        }
+        static std::set<uint32_t> guide_tex_bases;
+        static uint32_t gtn = 0;
+        const RegisterFile& trf = *register_file_;
+        for (uint32_t fi = 0; fi < 16; ++fi) {
+          xenos::xe_gpu_texture_fetch_t tf = trf.GetTextureFetch(fi);
+          if (tf.type == xenos::FetchConstantType::kTexture && tf.base_address) {
+            guide_tex_bases.insert(tf.base_address << 12);
+          }
+        }
+        if ((++gtn % 400) == 0) {
+          std::string acc;
+          for (uint32_t b : guide_tex_bases) acc += fmt::format("{:08X} ", b);
+          XELOGI("GuideDrawTextures: {}", acc.empty() ? "none" : acc);
+        }
+      }
+      if ((guide_dbg_pm4_calls_ % 20000) == 0) {
+        XELOGI("GuideDrawSites: pm4 {} (indepth {}) | backend {} (indepth {})",
+               guide_dbg_pm4_calls_, guide_dbg_pm4_indepth_,
+               guide_dbg_backend_calls_, guide_dbg_backend_indepth_);
+      }
       draw_succeeded = COMMAND_PROCESSOR::IssueDraw(
           vgt_draw_initiator.prim_type, vgt_draw_initiator.num_indices,
           is_indexed ? &index_buffer_info : nullptr,

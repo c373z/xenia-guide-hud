@@ -58,6 +58,7 @@ DECLARE_bool(debug);
 DECLARE_string(hid);
 
 DECLARE_bool(guide_button);
+DECLARE_bool(guide_power_on_with_guide_button);
 
 DECLARE_bool(clear_memory_page_state);
 
@@ -279,6 +280,17 @@ void EmulatorWindow::OnEmulatorInitialized() {
 
   emulator_initialized_ = true;
   window_->SetMainMenuEnabled(true);
+  // Phase 1099z105: keep "Change Disc..." in step with the virtual tray.
+  if (disc_menu_) {
+    disc_menu_->SetEnabled(emulator_->IsTrayOpen());
+    emulator_->on_tray_state_changed.AddListener([this](bool open) {
+      app_context().CallInUIThread([this, open]() {
+        if (disc_menu_) {
+          disc_menu_->SetEnabled(open);
+        }
+      });
+    });
+  }
   // When the user can see that the emulator isn't initializing anymore (the
   // menu isn't disabled), enter fullscreen if requested.
   if (cvars::fullscreen) {
@@ -800,6 +812,19 @@ bool EmulatorWindow::Initialize() {
   }
   main_menu->AddChild(std::move(file_menu));
 
+  // Phase 1099z105: Disc menu - swap the disc in the virtual DVD tray. Only
+  // usable while the tray is open (the guest opens/closes it); grayed out
+  // otherwise.
+  {
+    auto disc_menu = MenuItem::Create(MenuItem::Type::kPopup, "&Disc");
+    disc_menu->AddChild(
+        MenuItem::Create(MenuItem::Type::kString, "&Change Disc...",
+                         std::bind(&EmulatorWindow::ChangeTrayDisc, this)));
+    disc_menu_ = disc_menu.get();
+    disc_menu_->SetEnabled(false);
+    main_menu->AddChild(std::move(disc_menu));
+  }
+
   // Profile Menu
   auto profile_menu = MenuItem::Create(MenuItem::Type::kPopup, "&Profile");
   {
@@ -1140,6 +1165,10 @@ void EmulatorWindow::OnKeyDown(ui::KeyEvent& e) {
     } break;
 
     case ui::VirtualKey::kF9: {
+      if (cvars::guide_power_on_with_guide_button &&
+          !emulator_->is_title_open()) {
+        break;  // Phase 1099z138: powered off - only the Guide button boots.
+      }
       RunPreviouslyPlayedTitle();
     } break;
 
@@ -1275,6 +1304,29 @@ void EmulatorWindow::FileDrop(const std::filesystem::path& path) {
   }
 
   RunTitle(path);
+}
+
+void EmulatorWindow::ChangeTrayDisc() {
+  if (!emulator_->IsTrayOpen()) {
+    return;  // grayed out; a stale click while the tray moves
+  }
+  auto file_picker = xe::ui::FilePicker::Create();
+  file_picker->set_mode(ui::FilePicker::Mode::kOpen);
+  file_picker->set_type(ui::FilePicker::Type::kFile);
+  file_picker->set_multi_selection(false);
+  file_picker->set_title("Put a disc in the tray");
+  file_picker->set_extensions({
+      {"Disc Image (*.iso)", "*.iso"},
+      {"All Files (*.*)", "*.*"},
+  });
+  if (!file_picker->Show(window_.get())) {
+    return;
+  }
+  auto selected_files = file_picker->selected_files();
+  if (selected_files.empty()) {
+    return;
+  }
+  emulator_->SetTrayDisc(selected_files[0]);
 }
 
 void EmulatorWindow::FileOpen() {
@@ -1893,6 +1945,16 @@ EmulatorWindow::ControllerHotKey EmulatorWindow::ProcessControllerHotkey(
 
   auto it = controller_hotkey_map.find(buttons);
   if (it == controller_hotkey_map.end()) {
+    return Unknown_hotkey;
+  }
+
+  // Phase 1099z138: while the console is "off" waiting for the Guide button,
+  // Xenia's launcher hotkeys must not start a title behind its back (Start ran
+  // the recent-titles entry, i.e. the dashboard, with no cold boot request).
+  if (cvars::guide_power_on_with_guide_button && !emulator_->is_title_open() &&
+      (it->second.function == ButtonFunctions::RunTitle ||
+       it->second.function == ButtonFunctions::IncTitleSelect ||
+       it->second.function == ButtonFunctions::DecTitleSelect)) {
     return Unknown_hotkey;
   }
 

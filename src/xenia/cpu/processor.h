@@ -10,8 +10,10 @@
 #ifndef XENIA_CPU_PROCESSOR_H_
 #define XENIA_CPU_PROCESSOR_H_
 
+#include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -102,6 +104,10 @@ class Processor {
 
   bool AddModule(std::unique_ptr<Module> module);
   void RemoveModule(const std::string_view name);
+  void RemoveModule(Module* module);
+  size_t PurgeEntries(uint32_t low, uint32_t high, size_t* out_failed) {
+    return entry_table_.DeleteRange(low, high, out_failed);
+  }
   Module* GetModule(const std::string_view name);
   std::vector<Module*> GetModules();
 
@@ -109,6 +115,14 @@ class Processor {
   Function* DefineBuiltin(const std::string_view name,
                           BuiltinFunction::Handler handler, void* arg0,
                           void* arg1);
+
+  // Phase 1099z63: host callback run BEFORE the guest instruction at
+  // `address` executes (the translator emits a call to it). Only affects code
+  // translated after the hook is added. For diagnostics: upstream breakpoints
+  // pause the emulator and wait for a debugger.
+  using GuestHook = std::function<void(ppc::PPCContext*)>;
+  void AddGuestHook(uint32_t address, GuestHook hook);
+  Function* LookupGuestHook(uint32_t address);
 
   Function* QueryFunction(uint32_t address);
   std::vector<Function*> FindFunctionsWithAddress(uint32_t address);
@@ -266,6 +280,9 @@ class Processor {
   ExportResolver* export_resolver_ = nullptr;
 
   EntryTable entry_table_;
+  std::mutex guest_hooks_mutex_;
+  std::map<uint32_t, std::pair<Function*, std::unique_ptr<GuestHook>>>
+      guest_hooks_;
   xe::global_critical_region global_critical_region_;
   ExecutionState execution_state_ = ExecutionState::kPaused;
   std::vector<std::unique_ptr<Module>> modules_;

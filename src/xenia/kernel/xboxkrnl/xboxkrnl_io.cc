@@ -17,7 +17,18 @@
 #include "xenia/kernel/xiocompletion.h"
 #include "xenia/kernel/xsymboliclink.h"
 #include "xenia/kernel/xthread.h"
+#include "xenia/kernel/kernel_flags.h"
 #include "xenia/vfs/device.h"
+#include "xenia/vfs/devices/host_path_device.h"
+#include "xenia/vfs/devices/host_path_entry.h"
+#include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <mutex>
+#include <unordered_map>
+#include <vector>
+#include "third_party/crypto/TinySHA1.hpp"
 #include "xenia/xbox.h"
 
 namespace xe {
@@ -106,6 +117,29 @@ dword_result_t NtCreateFile_entry(lpdword_t handle_out, dword_t desired_access,
   }
 
   *handle_out = handle;
+
+  // Phase 1099n: xam's profile-device enumeration (8172FF20) opens
+  // "\Device\Harddisk0\Partition1\" with options 0x800021 before its volume
+  // size query, and its cache setup (81727750) creates "<name>Cache". Any
+  // failure here removes the drive from the enumeration. Measure device-rooted
+  // opens.
+  const uint32_t root_dir = object_attrs->root_directory;
+  if (target_path.rfind("\\Device\\", 0) == 0 ||
+      (root_dir != 0 && root_dir != 0xFFFFFFFD) ||
+      target_path.find("Content") != std::string::npos ||
+      target_path.find("F1111") != std::string::npos ||
+      // 1099z17559-9: and every failed open, whatever the path.
+      XFAILED(result)) {
+    static std::atomic<uint32_t> olog{0};
+    if (olog.fetch_add(1) < 400) {
+      XELOGI("NtCreateFile('{}', root {:08X}{}, access {:08X}, disp {}, "
+             "options {:08X}, alloc {}) -> {:08X}",
+             target_path, root_dir,
+             root_entry ? " '" + root_entry->path() + "'" : std::string(),
+             uint32_t(desired_access), uint32_t(creation_disposition),
+             uint32_t(create_options), allocation_size, uint32_t(result));
+    }
+  }
 
   return result;
 }
@@ -496,6 +530,16 @@ dword_result_t NtQueryFullAttributesFile_entry(
 
   // Resolve the file using the virtual file system.
   auto entry = kernel_state()->file_system()->ResolvePath(target_path);
+  // Phase 1099n: xam's storage gate (8172E088 -> 817ABDA0) is this call on
+  // "<device>\"; failing it leaves the device in state 4, never usable. Log
+  // device-rooted queries so that gate's answer is measured.
+  if (target_path.rfind("\\Device\\", 0) == 0) {
+    static std::atomic<uint32_t> dev_logs{0};
+    if (dev_logs.fetch_add(1) < 60) {
+      XELOGI("NtQueryFullAttributesFile('{}') -> {}", target_path,
+             entry ? "found" : "NO_SUCH_FILE");
+    }
+  }
   if (entry) {
     // Found.
     file_info->creation_time = entry->create_timestamp();
@@ -553,6 +597,24 @@ dword_result_t NtQueryDirectoryFile_entry(
     io_status_block->information = info;
   }
 
+  // Phase 1099o: after a reboot xam lists 0 profiles although one exists on
+  // the virtual HDD; profile enumeration lists Content\ with this call.
+  if (file && file->path().find("Content") != std::string::npos) {
+    static std::atomic<uint32_t> qlog{0};
+    if (qlog.fetch_add(1) < 120) {
+      std::string got;
+      if (XSUCCEEDED(result) && file_info_ptr) {
+        got = std::string(
+            file_info_ptr->file_name,
+            std::min<uint32_t>(file_info_ptr->file_name_length, 64));
+      }
+      XELOGI("NtQueryDirectoryFile('{}', mask '{}', len {}, restart {}) -> "
+             "{:08X} '{}'",
+             file->path(), name, uint32_t(length), uint32_t(restart_scan),
+             uint32_t(result), got);
+    }
+  }
+
   return result;
 }
 DECLARE_XBOXKRNL_EXPORT1(NtQueryDirectoryFile, kFileSystem, kImplemented);
@@ -585,8 +647,27 @@ dword_result_t NtOpenSymbolicLinkObject_entry(
 
   auto target_path = util::TranslateAnsiPath(kernel_memory(), object_name);
 
+  // Phase 1099z83: object-manager qualifiers contain '?', which IsValidPath
+  // (a FILE path check) rejects outside patterns - so every "\??\D:" and
+  // "\System??\_rand...:" open failed here with OBJECT_NAME_INVALID before the
+  // qualifier strip below ever ran, and xam logged "Couldn't resolve symbolic
+  // link root name" on each profile/content close. Strip first, then check.
+  target_path = xe::utf8::canonicalize_guest_path(target_path);
+  if (utf8::starts_with(target_path, "\\??\\")) {
+    target_path = target_path.substr(4);
+  } else if (utf8::starts_with(target_path, "\\System??\\")) {
+    target_path = target_path.substr(10);
+  }
+
   // Enforce that the path is ASCII.
   if (!IsValidPath(target_path, false)) {
+    static std::atomic<uint32_t> logs{0};
+    if (++logs <= 10) {
+      std::string hex;
+      for (unsigned char ch : target_path) hex += fmt::format("{:02X}", ch);
+      XELOGW("NtOpenSymbolicLinkObject: invalid name len {} hex {}",
+             target_path.size(), hex);
+    }
     return X_STATUS_OBJECT_NAME_INVALID;
   }
 
@@ -594,9 +675,13 @@ dword_result_t NtOpenSymbolicLinkObject_entry(
     assert_always();
   }
 
-  if (utf8::starts_with(target_path, "\\??\\")) {
-    target_path = target_path.substr(4);  // Strip the full qualifier
-  }
+  // Phase 1099q: strip BOTH qualifiers, exactly as ObCreateSymbolicLink does
+  // when it registers the link. xam mounts a profile as "\System??\_rand...:"
+  // (81739BA8) and on close re-opens that name here (817ABCC0); with only
+  // "\??\" stripped the lookup missed, xam logged "Couldn't resolve symbolic
+  // link root name" and returned before deleting the link and dereferencing
+  // the package (81736EE8) - every profile mount leaked.
+  // (The strip itself now runs before IsValidPath above - phase 1099z83.)
 
   std::string link_path;
   if (!kernel_state()->file_system()->FindSymbolicLink(target_path,
@@ -655,11 +740,125 @@ struct X_PARTITION_INFO {
 static_assert_size(X_PARTITION_INFO, 0x10);
 
 // todo: this should fill in the io status block and queue the apc
+// Phase 1099z16: the optical drive. xam's media detection (8176CD60) looks up
+// \Device\CdRom0 as a device object, sends CHECK_VERIFY (0x24800) through
+// IoSynchronousDeviceIoControlRequest and again through NtDeviceIoControlFile
+// on an opened handle, then classifies (8176EA80): default.xex headers with
+// execution info plus IOCTL 0x240CC returning 4 make it an Xbox 360 game
+// disc. The drive always exists; whether a disc is in it is whether a disc
+// image is mounted at \Device\CdRom0 (the tray hook mounts it).
+static const char kCdRomDevicePath[] = "\\Device\\CdRom0";
+
+uint32_t GuideCdRomDeviceObject() {
+  static uint32_t devobj = 0;
+  if (!devobj) {
+    auto* mem = kernel_memory();
+    devobj = mem->SystemHeapAlloc(0x80);
+    std::memset(mem->TranslateVirtual(devobj), 0, 0x80);
+  }
+  return devobj;
+}
+
+static bool GuideCdRomMediaPresent() {
+  return kernel_state()->file_system()->ResolvePath(
+             std::string(kCdRomDevicePath) + "\\") != nullptr;
+}
+
+static X_STATUS GuideCdRomIoctl(uint32_t code, lpvoid_t out, uint32_t out_len,
+                                uint32_t* information) {
+  *information = 0;
+  const bool media = GuideCdRomMediaPresent();
+  X_STATUS status = X_STATUS_SUCCESS;
+  switch (code) {
+    case 0x24800:  // IOCTL_STORAGE_CHECK_VERIFY
+      status = media ? X_STATUS_SUCCESS : X_STATUS(0xC0000013);
+      break;
+    case 0x240CC:  // disc authentication state; xam accepts 4 as a game disc
+      if (!media) {
+        status = X_STATUS(0xC0000013);
+      } else if (out && out_len >= 4) {
+        xe::store_and_swap<uint32_t>(out, 4);
+        *information = 4;
+      }
+      break;
+    default:
+      // Spindle, spin-down, XGD2 auth, reauth: the image needs none of it.
+      if (out && out_len) {
+        std::memset(out, 0, out_len);
+      }
+      break;
+  }
+  static std::unordered_map<uint32_t, uint32_t> logged;
+  {
+    auto log_lock = xe::global_critical_region::AcquireDirect();
+    if (++logged[code] <= 20) {
+      XELOGI("CdRom0 IOCTL {:08X} media={} -> {:08X}", code, media,
+             uint32_t(status));
+    }
+  }
+  return status;
+}
+
+dword_result_t IoSynchronousDeviceIoControlRequest_entry(
+    dword_t io_control_code, dword_t device_object, lpvoid_t input_buffer,
+    dword_t input_buffer_len, lpvoid_t output_buffer,
+    dword_t output_buffer_len, lpdword_t returned_length, dword_t internal) {
+  uint32_t info = 0;
+  X_STATUS status = X_STATUS_INVALID_PARAMETER;
+  if (device_object == GuideCdRomDeviceObject()) {
+    status = GuideCdRomIoctl(io_control_code, output_buffer,
+                             output_buffer_len, &info);
+  } else {
+    XELOGW("IoSynchronousDeviceIoControlRequest({:08X}) on unknown device "
+           "{:08X}",
+           uint32_t(io_control_code), uint32_t(device_object));
+  }
+  if (returned_length) {
+    *returned_length = info;
+  }
+  return status;
+}
+DECLARE_XBOXKRNL_EXPORT1(IoSynchronousDeviceIoControlRequest, kFileSystem,
+                         kImplemented);
+
 dword_result_t NtDeviceIoControlFile_entry(
     dword_t handle, dword_t event_handle, dword_t apc_routine,
     dword_t apc_context, pointer_t<X_IO_STATUS_BLOCK> io_status_block,
     dword_t io_control_code, lpvoid_t input_buffer, dword_t input_buffer_len,
     lpvoid_t output_buffer, dword_t output_buffer_len) {
+  if (auto file = kernel_state()->object_table()->LookupObject<XFile>(handle)) {
+    if (cvars::kernel_device_auth && file->device() &&
+        utf8::equal_case(file->device()->mount_path(),
+                         "\\Device\\DeviceAuth")) {
+      // 1099z17559-5: \Device\DeviceAuth. 0x474000 is xam's "next
+      // authentication request" call (retail xam 17559 sends it async with an
+      // APC and a 4-byte output). It completes only when an accessory needs
+      // authenticating; no emulated device ever does, so it stays pending.
+      // HOST-SIDE model of the driver: only this IOCTL is handled.
+      static std::atomic<uint32_t> alog{0};
+      if (alog.fetch_add(1) < 16) {
+        XELOGI("DeviceAuth: IOCTL {:08X} in {:08X}/{} out {:08X}/{} apc {:08X}",
+               uint32_t(io_control_code), input_buffer.guest_address(),
+               uint32_t(input_buffer_len), output_buffer.guest_address(),
+               uint32_t(output_buffer_len), uint32_t(apc_routine));
+      }
+      if (io_control_code == 0x474000) {
+        return X_STATUS_PENDING;
+      }
+      return X_STATUS_INVALID_DEVICE_REQUEST;
+    }
+    if (file->device() &&
+        utf8::equal_case(file->device()->mount_path(), kCdRomDevicePath)) {
+      uint32_t info = 0;
+      X_STATUS status = GuideCdRomIoctl(io_control_code, output_buffer,
+                                        output_buffer_len, &info);
+      if (io_status_block) {
+        io_status_block->status = status;
+        io_status_block->information = info;
+      }
+      return status;
+    }
+  }
   // Called by XMountUtilityDrive cache-mounting code
   // (checks if the returned values look valid, values below seem to pass the
   // checks)
@@ -878,7 +1077,257 @@ DECLARE_XBOXKRNL_EXPORT1(IoDeleteDevice, kFileSystem, kStub);
 // "undefined extern" path and the app retries forever, producing ~14k calls
 // and ~197k failed ObReferenceObjectByHandle in under a minute. There is no
 // HD-DVD drive to dismount, so report success and let the caller move on.
+// Phase 1095ac: DrvGetContentStorageNotification is declared in the export
+// table with NO implementation, so it went through UndefinedCallExtern, which
+// returns 0 - and 0 is SUCCESS. xam's task at 817318F0 calls it at 81731934
+// with a buffer at r1+0x70, sees "success", and reads a buffer nothing ever
+// wrote:
+//
+//     [r1+0x7C] name = 0   -> the probe logged  name ''
+//     [r1+0x80] op   = 0   -> not 1, so the dismount branch at 8173198C is
+//                             skipped (coverage: "8173198C+16" unexecuted)
+//     [r1+0x84] kind = 0   -> r30 = 0, and the probe logged  kind 0
+//
+// r30 = 0 is neither 2 nor 0xF, so the guard at 817319E0 lets it through to the
+// op-2 call at 817319F4, which walks the still-unlinked list head at 81D3CA08
+// and faults at 817286C0. (xam's own `twui` assert at 817319D4 would have
+// caught op 0, but Xenia does not honour trap instructions.)
+//
+// That one fault is what stops 81731B04's KeSetEvent(81D21404), which blocks
+// 81750FA8 at 81751120, which is why 81751164 -> 81780A28 never registers the
+// device handler or runs the subsystem startup loop (1095ab).
+//
+// Report the truth instead: there is no content-storage driver here, so the
+// call did not succeed. xam then takes its OWN error path at 81731940. This
+// fabricates nothing - it stops fabricating a notification that never arrived.
+dword_result_t DrvGetContentStorageNotification_entry(lpvoid_t buffer) {
+  return X_STATUS_UNSUCCESSFUL;
+}
+DECLARE_XBOXKRNL_EXPORT1(DrvGetContentStorageNotification, kFileSystem, kStub);
+
+// Phase 1099o: FOLDER-BACKED STFS DRIVER (user's choice: folders now, real STFS
+// packages later). Contract decoded from xam's caller 8173B3A0 and the real
+// kernel's StfsCreateDevice (800A0528) / StfsControlDevice (800A0318):
+//   StfsCreateDevice(params, 0x58)   params:
+//     +0x00 ANSI_STRING device name "\Device\Package_<md5 of package path>"
+//     +0x18 u32  handle of the package FILE xam just created and wrote
+//     +0x1C 0x24 STFS volume descriptor (returned verbatim by control code 3)
+//     +0x44 u32  size of the client extension xam wants
+//     +0x48 out  device object         +0x4C out  client extension area
+// The package's CONTENTS live in a host folder beside the package file
+// ("<package file>.stfs"), mounted writable at the device name. xam then links
+// "\??\_rand...:" to that name (ObCreateSymbolicLink) and opens files through
+// it. NOT byte-compatible with a console package - that is the later STFS
+// work. The package file itself (CON header + metadata) is xam's own output.
+struct StfsFolderVolume {
+  uint8_t descriptor[0x24];
+  std::filesystem::path folder;  // phase 1099z146: hashed by control code 3
+};
+
+// Phase 1099z99: NtDeleteFile(ObjectAttributes). Was an undefined extern, so
+// a game overwriting a save made xam delete the old package (no-op), then
+// create it again -> STATUS_OBJECT_NAME_COLLISION ("Couldn't create and mount
+// package ... 0xc0000035"): only the first save ever worked. A folder-backed
+// package's contents folder ("<file>.stfs", see StfsCreateDevice) goes with it.
+dword_result_t NtDeleteFile_entry(pointer_t<X_OBJECT_ATTRIBUTES> object_attrs) {
+  if (!object_attrs || !object_attrs->name_ptr) {
+    return X_STATUS_INVALID_PARAMETER;
+  }
+  if (object_attrs->root_directory != 0) {
+    XELOGW("NtDeleteFile: root-relative delete not implemented");
+    return X_STATUS_NOT_IMPLEMENTED;
+  }
+  auto* mem = kernel_memory();
+  const std::string path = util::TranslateAnsiPath(
+      mem, mem->TranslateVirtual<X_ANSI_STRING*>(object_attrs->name_ptr));
+  auto* fs = kernel_state()->file_system();
+  auto* entry = fs->ResolvePath(path);
+  if (!entry) {
+    return X_STATUS_OBJECT_NAME_NOT_FOUND;
+  }
+  std::filesystem::path companion;
+  if (auto* host = dynamic_cast<vfs::HostPathEntry*>(entry)) {
+    companion = host->host_path();
+    companion += ".stfs";
+  }
+  if (!fs->DeletePath(path)) {
+    XELOGW("NtDeleteFile('{}') failed", path);
+    return X_STATUS_ACCESS_DENIED;
+  }
+  if (!companion.empty()) {
+    std::error_code ec;
+    if (std::filesystem::is_directory(companion, ec)) {
+      std::filesystem::remove_all(companion, ec);
+    }
+  }
+  XELOGI("NtDeleteFile('{}') -> deleted", path);
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XBOXKRNL_EXPORT1(NtDeleteFile, kFileSystem, kImplemented);
+static std::mutex stfs_folder_lock;
+static std::unordered_map<uint32_t, StfsFolderVolume> stfs_folder_volumes;
+
+dword_result_t StfsCreateDevice_entry(lpvoid_t params, dword_t params_size,
+                                      const ppc_context_t& ctx) {
+  if (!params || params_size != 0x58) {
+    return X_STATUS_INVALID_PARAMETER;
+  }
+  auto* p = params.as<uint8_t*>();
+  auto* mem = kernel_memory();
+  const X_ANSI_STRING* name_str = params.as<X_ANSI_STRING*>();
+  const std::string device_name =
+      xe::utf8::canonicalize_guest_path(util::TranslateAnsiPath(mem, name_str));
+  const uint32_t file_handle = xe::load_and_swap<uint32_t>(p + 0x18);
+  const uint32_t ext_size = xe::load_and_swap<uint32_t>(p + 0x44);
+
+  auto file =
+      kernel_state()->object_table()->LookupObject<XFile>(file_handle);
+  auto* host_entry =
+      file ? dynamic_cast<vfs::HostPathEntry*>(file->entry()) : nullptr;
+  if (!host_entry || device_name.empty()) {
+    XELOGE("StfsCreateDevice: '{}' handle {:08X} is not a host file",
+           device_name, file_handle);
+    return X_STATUS_INVALID_PARAMETER;
+  }
+  std::filesystem::path folder = host_entry->host_path();
+  folder += ".stfs";
+  std::error_code ec;
+  std::filesystem::create_directories(folder, ec);
+
+  auto* fs = kernel_state()->file_system();
+  if (!fs->ResolvePath(device_name)) {
+    auto device =
+        std::make_unique<vfs::HostPathDevice>(device_name, folder, false);
+    if (!device->Initialize() || !fs->RegisterDevice(std::move(device))) {
+      XELOGE("StfsCreateDevice: could not mount {} at {}",
+             xe::path_to_utf8(folder), device_name);
+      return X_STATUS_UNSUCCESSFUL;
+    }
+  }
+
+  const uint32_t devobj = mem->SystemHeapAlloc(0x100);
+  const uint32_t ext = ext_size ? mem->SystemHeapAlloc(ext_size) : 0;
+  if (!devobj || (ext_size && !ext)) {
+    return X_STATUS_NO_MEMORY;
+  }
+  std::memset(mem->TranslateVirtual(devobj), 0, 0x100);
+  if (ext) std::memset(mem->TranslateVirtual(ext), 0, ext_size);
+  xe::store_and_swap<uint32_t>(p + 0x48, devobj);
+  xe::store_and_swap<uint32_t>(p + 0x4C, ext);
+  {
+    std::lock_guard<std::mutex> lock(stfs_folder_lock);
+    auto& vol = stfs_folder_volumes[devobj];
+    std::memcpy(vol.descriptor, p + 0x1C, sizeof(vol.descriptor));
+    vol.folder = folder;
+  }
+  XELOGI("StfsCreateDevice: {} -> {} (devobj {:08X}, ext {:08X} x{:X}, "
+         "mode {}) lr={:08X}",
+         device_name, xe::path_to_utf8(folder), devobj, ext, ext_size,
+         uint32_t(p[0x53]), uint32_t(ctx->lr));
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XBOXKRNL_EXPORT1(StfsCreateDevice, kFileSystem, kImplemented);
+
+dword_result_t StfsControlDevice_entry(dword_t device_object, dword_t code,
+                                       lpvoid_t buffer) {
+  static std::atomic<uint32_t> clog{0};
+  if (clog.fetch_add(1) < 40) {
+    XELOGI("StfsControlDevice({:08X}, code {}, buf {:08X})",
+           uint32_t(device_object), uint32_t(code), buffer.guest_address());
+  }
+  switch (uint32_t(code)) {
+    case 0:  // lock volume
+    case 1:  // unlock volume
+    case 2:  // flush - host files are written through as they change
+    case 4:  // clear dirty
+    case 5:
+      return X_STATUS_SUCCESS;
+    case 3: {  // report the volume descriptor
+      // Phase 1099z146: the kernel returns the LIVE volume descriptor, whose
+      // top hash table hash (+0x08..+0x1B) changes as soon as anything is
+      // written. xam's commit (817343F0) compares it with the header's copy
+      // (817344B0..E4) and, when they differ, hashes, signs and rewrites the
+      // package header (8172F1A8). Returning the creation descriptor always
+      // compared equal, so new profiles and saves kept a zero header digest,
+      // failed "Content digest isn't valid" on reopen and xam deleted them.
+      // HOST-SIDE MODEL (not an STFS volume): the folder has no hash tables, so
+      // the top-hash field is a SHA-1 of the folder's sorted relative paths,
+      // sizes and contents - it changes when the contents change, as the real
+      // field does, but is not byte-identical to a console package's.
+      std::lock_guard<std::mutex> lock(stfs_folder_lock);
+      auto it = stfs_folder_volumes.find(uint32_t(device_object));
+      if (it == stfs_folder_volumes.end() || !buffer) {
+        return X_STATUS_INVALID_PARAMETER;
+      }
+      uint8_t descriptor[0x24];
+      std::memcpy(descriptor, it->second.descriptor, sizeof(descriptor));
+      if (!it->second.folder.empty()) {
+        std::vector<std::filesystem::path> files;
+        std::error_code ec;
+        for (auto e = std::filesystem::recursive_directory_iterator(
+                 it->second.folder, ec);
+             !ec && e != std::filesystem::recursive_directory_iterator();
+             e.increment(ec)) {
+          if (e->is_regular_file(ec)) files.push_back(e->path());
+        }
+        std::sort(files.begin(), files.end());
+        sha1::SHA1 s;
+        std::vector<char> data;
+        for (const auto& f : files) {
+          const std::string rel = xe::path_to_utf8(
+              std::filesystem::relative(f, it->second.folder, ec));
+          s.processBytes(rel.data(), rel.size());
+          std::ifstream in(f, std::ios::binary);
+          data.assign(std::istreambuf_iterator<char>(in),
+                      std::istreambuf_iterator<char>());
+          const uint64_t size = data.size();
+          s.processBytes(&size, sizeof(size));
+          if (!data.empty()) s.processBytes(data.data(), data.size());
+        }
+        uint8_t digest[20];
+        s.finalize(digest);
+        std::memcpy(descriptor + 0x08, digest, sizeof(digest));
+      }
+      std::memcpy(buffer.as<uint8_t*>(), descriptor, sizeof(descriptor));
+      return X_STATUS_SUCCESS;
+    }
+    default:
+      return 0xC0000010;  // STATUS_INVALID_DEVICE_REQUEST, as the kernel does
+  }
+}
+DECLARE_XBOXKRNL_EXPORT1(StfsControlDevice, kFileSystem, kImplemented);
+
 dword_result_t IoDismountVolumeByName_entry(lpvoid_t name) {
+  // Phase 1095ac: the task at 817318F0 calls this at 817319C0 (return address
+  // 817319C4) and then, unless r30 is 2 or 0xF, calls 817316A8 with op 2 -
+  // which walks the still-unlinked list head at 81D3CA08 and faults at
+  // 817286C0. That one fault stops 81731B04's KeSetEvent(81D21404), which
+  // blocks 81750FA8 before 81751164 -> 81780A28, which is what would have built
+  // the list in the first place (1095ab). So r30 here decides whether the whole
+  // subsystem lives or dies. Read it from the guest.
+  if (cvars::guide_bkgnd_watch) {
+    auto* th = XThread::GetCurrentThread();
+    auto* ctx = (th && th->thread_state()) ? th->thread_state()->context()
+                                           : nullptr;
+    if (ctx && static_cast<uint32_t>(ctx->lr) == 0x817319C4u) {
+      static std::atomic<uint32_t> n{0};
+      const uint32_t i = ++n;
+      if (i <= 16u) {
+        const uint32_t r30 = static_cast<uint32_t>(ctx->r[30]);
+        const uint32_t r31 = static_cast<uint32_t>(ctx->r[31]);
+        char nm[48] = {0};
+        if (name.guest_address()) {
+          auto* p8 = kernel_memory()->TranslateVirtual<const char*>(
+              name.guest_address());
+          for (int k = 0; k < 47 && p8[k]; ++k) nm[k] = p8[k];
+        }
+        XELOGI("GuideDismount #{}: name@{:08X} '{}' | r30 {} (2 or 0xF would "
+               "SKIP the op-2 call at 817319F4) r31 {:08X} | tid {:08X}",
+               i, name.guest_address(), nm, r30, r31,
+               th ? th->thread_id() : 0u);
+      }
+    }
+  }
   return X_STATUS_SUCCESS;
 }
 DECLARE_XBOXKRNL_EXPORT1(IoDismountVolumeByName, kFileSystem, kStub);

@@ -11,9 +11,13 @@
 #define XENIA_KERNEL_SMC_H_
 
 #include <array>
+#include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <mutex>
+#include <vector>
 
 enum X_DVD_DISC_STATE {
   NO_DISC,
@@ -136,6 +140,11 @@ struct X_TEMPERATURE_DATA {
   }
 };
 
+// Phase 1099z21: the SMC message is 16 raw bytes: command at [0], data from
+// [1]. Without packing, set_standby's uint16 aligned the union to offset 2,
+// so every response landed a byte late - xam reads the tray state from byte
+// [1] (task 8177D590) and always saw 0.
+#pragma pack(push, 1)
 struct X_SMC_DATA {
   X_SMC_CMD command;
 
@@ -206,6 +215,9 @@ struct X_SMC_DATA {
     } led_state;
   };
 };
+#pragma pack(pop)
+static_assert(sizeof(X_SMC_DATA) == 16, "SMC message is 16 bytes");
+static_assert(offsetof(X_SMC_DATA, smc_data) == 1, "SMC data starts at 1");
 
 namespace xe {
 namespace kernel {
@@ -224,6 +236,17 @@ class SystemManagementController {
   void SetTrayState(X_DVD_TRAY_STATE state);
 
   void CallCommand(X_SMC_DATA* smc_message, X_SMC_DATA* smc_response);
+
+  // Phase 1099z12: HalRegisterSMCNotification records (real kernel list
+  // 800D04C0; walker 80057760 calls record[0](record, smc_message)).
+  void RegisterNotification(uint32_t record, bool add);
+  // Drive the tray like the SMC does: an OPENING/CLOSING event, the motion,
+  // then OPEN/CLOSED. Events go to every registered record on a system
+  // guest thread. on_closing runs before the CLOSED event (disc insertion).
+  void MoveTray(bool open);
+  void set_tray_hook(std::function<void(bool open)> hook) {
+    tray_hook_ = std::move(hook);
+  }
 
  private:
   const std::array<uint8_t, 3> smc_version = {65, 2, 1};
@@ -248,7 +271,15 @@ class SystemManagementController {
                                          X_SMC_DATA* smc_response)>>
       smc_commands_;
 
-  X_DVD_TRAY_STATE dvd_tray_state_ = X_DVD_TRAY_STATE::OPEN;
+  void DispatchNotification(uint8_t event_code);
+
+  std::mutex notification_lock_;
+  std::vector<uint32_t> notification_records_;
+  std::function<void(bool open)> tray_hook_;
+  std::atomic<bool> tray_moving_{false};
+
+  // A console boots with the tray closed.
+  X_DVD_TRAY_STATE dvd_tray_state_ = X_DVD_TRAY_STATE::CLOSED;
   REMOTE_CONTROL ir_address_ = REMOTE_CONTROL::MEDIA_REMOTE_360;
   TILT_STATE tilt_state_ = TILT_STATE::VERTICAL;
 

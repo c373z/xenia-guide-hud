@@ -14,6 +14,9 @@
 #include "xenia/base/xxhash.h"
 #include "xenia/cpu/elf_module.h"
 #include "xenia/emulator.h"
+#include "xenia/kernel/kernel_flags.h"
+#include "xenia/vfs/devices/disc_image_entry.h"
+#include "xenia/vfs/devices/disc_read_model.h"
 
 namespace xe {
 namespace kernel {
@@ -95,6 +98,11 @@ X_STATUS UserModule::LoadFromFile(const std::string_view path) {
     auto mmap = fs_entry->OpenMapped(MappedMemory::Mode::kRead);
     if (!mmap) {
       return result;
+    }
+    // Phase 1099z109: an executable on the disc comes off the drive; charge
+    // the optical drive model for the whole image (mapping bypasses ReadSync).
+    if (auto* disc_entry = dynamic_cast<vfs::DiscImageEntry*>(fs_entry)) {
+      vfs::DiscReadModelAccount(disc_entry->data_offset(), mmap->size());
     }
 
     // Load the module.
@@ -230,6 +238,39 @@ X_STATUS UserModule::LoadContinue() {
   uint8_t* xex_header_ptr = memory()->TranslateVirtual(guest_xex_header_);
   std::memcpy(xex_header_ptr, header, header->header_size);
 
+  // Phase 1097: the header is copied VERBATIM, which leaves the field at
+  // +0x10 holding security_offset - a FILE offset. Real xam dereferences it
+  // as a pointer. Measured, not reasoned from: with guest_native_timers on,
+  // xam's message-subsystem init reaches 81747D70, which walks
+  //     r31 = the module record 81D42D98 (ximecore.xex)
+  //     obj = [r31]        = 30102000, the LDR_DATA_TABLE_ENTRY
+  //     p   = [obj+0x58]   = xex_header_base, this very copy
+  //     r11 = [p+0x10]     = 000000E8
+  //     81747DE8: lwz r5,4(r11)      <- access violation
+  // and 0xE8 is exactly ximecore.xex's security_offset as it reads in the
+  // file on disk. There is no add of the header base anywhere on that path,
+  // and [security_info+4] is image_size - which is what the surrounding code
+  // is gathering alongside [r3+4] and [r3+0x10].
+  //
+  // OFF BY DEFAULT because the pointer interpretation is INFERRED from the
+  // dereference, not yet confirmed from the console loader's own code. The
+  // security info lies inside the copied header whenever the offset is within
+  // header_size, so rewriting the field to an absolute guest pointer leaves
+  // the pointed-to bytes exactly where the offset already said they were.
+  if (cvars::guide_xex_header_security_ptr) {
+    auto* guest_header = reinterpret_cast<xex2_header*>(xex_header_ptr);
+    const uint32_t sec_off = header->security_offset;
+    if (sec_off && sec_off < header->header_size) {
+      guest_header->security_offset = guest_xex_header_ + sec_off;
+      XELOGI("XexHeaderSecurityPtr: {} +10 {:08X} -> {:08X}", name(), sec_off,
+             guest_xex_header_ + sec_off);
+    } else {
+      XELOGW("XexHeaderSecurityPtr: {} security_offset {:08X} is not inside "
+             "the {:08X}-byte header - left as it is",
+             name(), sec_off, uint32_t(header->header_size));
+    }
+  }
+
   // Cache some commonly used headers...
   this->xex_module()->GetOptHeader(XEX_HEADER_ENTRY_POINT, &entry_point_);
   this->xex_module()->GetOptHeader(XEX_HEADER_DEFAULT_STACK_SIZE, &stack_size_);
@@ -267,7 +308,10 @@ X_STATUS UserModule::Unload() {
 
   if (module_format_ == kModuleFormatXex && processor_module_ &&
       xex_module()->Unload()) {
-    OnUnload();
+    // Remove this instance, not whatever module currently carries our name.
+    kernel_state_->processor()->RemoveModule(processor_module_);
+    kernel_state_->UnregisterModule(this);
+    processor_module_ = nullptr;
     return X_STATUS_SUCCESS;
   }
 

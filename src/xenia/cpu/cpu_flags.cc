@@ -37,6 +37,14 @@ DEFINE_uint32(
 
 DEFINE_bool(trace_function_references, false,
             "Generate tracing for function address references.", "CPU");
+DEFINE_uint64(trace_function_lo, 0,
+              "Phase 1054 fps: with trace_function_hi, only functions whose "
+              "address lies in [lo, hi) get the trace_functions / "
+              "trace_function_data counters.",
+              "CPU");
+DEFINE_uint64(trace_function_hi, 0, "Phase 1054 fps: see trace_function_lo; 0 = no restriction.", "CPU");
+DEFINE_uint64(trace_function_lo2, 0, "Phase 1054 fps: a second [lo2, hi2) range for the trace counters.", "CPU");
+DEFINE_uint64(trace_function_hi2, 0, "Phase 1054 fps: see trace_function_lo2.", "CPU");
 DEFINE_bool(trace_function_data, false,
             "Generate tracing for function result data.", "CPU");
 

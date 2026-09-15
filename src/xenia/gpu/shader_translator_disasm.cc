@@ -344,9 +344,19 @@ void ParsedVertexFetchInstruction::Disassemble(StringBuffer* out) const {
     out->AppendFormat(", Offset={}", attributes.offset);
   }
   if (attributes.data_format != xenos::VertexFormat::kUndefined) {
-    out->AppendFormat(
-        ", DataFormat={}",
-        kVertexFetchDataFormats[static_cast<int>(attributes.data_format)].name);
+    // Phase 1055 bugs: garbage microcode (a Guide stream whose shader page
+    // was recycled under the replay) names a format the table has no entry
+    // for, and a null name faulted the formatter. A placeholder, like the
+    // fetch opcode's "unknown_fetch".
+    const int fmt_index = static_cast<int>(attributes.data_format);
+    const char* fmt_name =
+        (fmt_index >= 0 &&
+         size_t(fmt_index) < sizeof(kVertexFetchDataFormats) /
+                                 sizeof(kVertexFetchDataFormats[0]))
+            ? kVertexFetchDataFormats[fmt_index].name
+            : nullptr;
+    out->AppendFormat(", DataFormat={}",
+                      fmt_name ? fmt_name : "unknown_format");
   }
   if (!is_mini_fetch && attributes.stride) {
     out->AppendFormat(", Stride={}", attributes.stride);
@@ -382,7 +392,9 @@ void ParsedTextureFetchInstruction::Disassemble(StringBuffer* out) const {
   } else {
     out->Append("      ");
   }
-  out->Append(opcode_name);
+  // Phase 1054 black: an opcode outside the table (garbage microcode - a
+  // shader page recycled under a replayed stream) has no name; do not fault.
+  out->Append(opcode_name ? opcode_name : "unknown_fetch");
   out->Append(' ');
   bool needs_comma = false;
   if (has_result()) {

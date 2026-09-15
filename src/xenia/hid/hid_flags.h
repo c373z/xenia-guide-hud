@@ -13,5 +13,6 @@
 #include "xenia/base/cvar.h"
 
 DECLARE_bool(guide_button);
+DECLARE_string(hid_test_pad_script);
 
 #endif  // XENIA_HID_HID_FLAGS_H_

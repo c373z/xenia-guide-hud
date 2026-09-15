@@ -555,6 +555,19 @@ void XThread::Execute() {
   bool want_exit_code;
   int exit_code = 0;
 
+  // Phase 1099v: XexStartExecutable's StartRoutine(0) runs first on the title
+  // thread, then the executable's entry point (real XapiStartup 80067290).
+  if (creation_params_.pre_start_routine) {
+    uint64_t pre_args[] = {0};
+    XELOGI("TitleSwitch: title thread {} runs StartRoutine {:08X} before entry "
+           "{:08X}",
+           thread_id_, creation_params_.pre_start_routine,
+           creation_params_.start_address);
+    kernel_state()->processor()->Execute(thread_state_,
+                                         creation_params_.pre_start_routine,
+                                         pre_args, xe::countof(pre_args));
+  }
+
   // If a XapiThreadStartup value is present, we use that as a trampoline.
   // Otherwise, we are a raw thread.
   if (creation_params_.xapi_thread_startup) {

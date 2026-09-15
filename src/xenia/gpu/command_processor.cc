@@ -407,6 +407,13 @@ void CommandProcessor::WorkerThreadMain() {
                  primary_buffer_ptr_, read_ptr_index_, write_ptr_index,
                  pending_fns_.empty() ? 0 : 1);
         }
+        // Phase 1099z97: the ring is idle - if xam's system command buffer
+        // has submits nobody is draining (no title presenting), stop waiting
+        // so they run below.
+        if ((loop_count % 16u) == 0u &&
+            (GuideIdleDrainPending() || GuideRefreshDue())) {
+          break;
+        }
       } while (worker_running_ && pending_fns_.empty() &&
                (write_ptr_index == 0xBAADF00D ||
                 read_ptr_index_ == write_ptr_index));
@@ -414,7 +421,14 @@ void CommandProcessor::WorkerThreadMain() {
       if (cvars::guide_cp_probe)
       XELOGI("CPWait returned #{} rptr={} wptr={}", pw_seq, read_ptr_index_,
              write_ptr_index);
-      if (!worker_running_ || !pending_fns_.empty()) {
+      if (worker_running_ && GuideRefreshDue()) {
+        GuideRefresh();
+      } else if (worker_running_ && GuideIdleDrainPending()) {
+        GuideIdleDrain();
+      }
+      if (!worker_running_ || !pending_fns_.empty() ||
+          write_ptr_index == 0xBAADF00D ||
+          read_ptr_index_ == write_ptr_index) {
         continue;
       }
     }
@@ -435,6 +449,12 @@ void CommandProcessor::WorkerThreadMain() {
                primary_buffer_ptr_, primary_buffer_size_, read_ptr_index_,
                write_ptr_index);
       }
+    }
+    // Phase 1099z114 (HOST-SIDE, not on hardware): a title that keeps the ring
+    // busy never reaches the idle wait above, so also check here, between
+    // ring batches.
+    if (GuideRefreshDue()) {
+      GuideRefresh();
     }
     // Execute. Note that we handle wraparound transparently.
     read_ptr_index_ = ExecutePrimaryBuffer(read_ptr_index_, write_ptr_index);

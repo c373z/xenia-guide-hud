@@ -133,6 +133,14 @@ X_STATUS ObjectTable::AddHandle(XObject* object, X_HANDLE* out_handle) {
       ObjectTableEntry& entry = host_object ? host_table_[slot] : table_[slot];
       entry.object = object;
       entry.handle_ref_count = 1;
+      // Phase 1099z47: the real kernel picks the title or system handle table
+      // from the CALLING thread's process type (800751B0).
+      entry.owner = 0;
+      if (auto* th = XThread::GetCurrentThread()) {
+        if (auto* kt = th->guest_object<X_KTHREAD>()) {
+          entry.owner = kt->process_type;
+        }
+      }
       handle = slot << 2;
       if (!host_object) {
         if (object->type() != XObject::Type::Socket) {
@@ -157,6 +165,37 @@ X_STATUS ObjectTable::AddHandle(XObject* object, X_HANDLE* out_handle) {
   }
 
   return result;
+}
+
+uint32_t ObjectTable::CloseHandlesOwnedBy(uint8_t owner) {
+  std::vector<X_HANDLE> handles;
+  {
+    auto global_lock = global_critical_region_.Acquire();
+    for (uint32_t slot = 0; slot < table_capacity_; ++slot) {
+      auto& entry = table_[slot];
+      if (entry.object && entry.owner == owner &&
+          !entry.object->is_host_object()) {
+        X_HANDLE handle = slot << 2;
+        if (entry.object->type() != XObject::Type::Socket) {
+          handle += XObject::kHandleBase;
+        }
+        handles.push_back(handle);
+      }
+    }
+  }
+  uint32_t closed = 0;
+  for (X_HANDLE handle : handles) {
+    auto global_lock = global_critical_region_.Acquire();
+    if (auto* entry = LookupTableInLock(handle)) {
+      if (entry->object) {
+        entry->handle_ref_count = 0;
+        if (XSUCCEEDED(RemoveHandle(handle))) {
+          ++closed;
+        }
+      }
+    }
+  }
+  return closed;
 }
 
 X_STATUS ObjectTable::DuplicateHandle(X_HANDLE handle, X_HANDLE* out_handle) {

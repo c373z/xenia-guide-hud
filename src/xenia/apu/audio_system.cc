@@ -10,6 +10,7 @@
 #include "xenia/apu/audio_system.h"
 
 #include <limits>
+#include <vector>
 
 #include "xenia/apu/apu_flags.h"
 #include "xenia/apu/audio_driver.h"
@@ -304,13 +305,40 @@ void AudioSystem::SubmitFrame(size_t index, float* samples) {
   (clients_[index].driver)->SubmitFrame(samples);
 }
 
+size_t AudioSystem::UnregisterClientsInRange(uint32_t low, uint32_t high) {
+  std::vector<size_t> indices;
+  {
+    auto global_lock = global_critical_region_.Acquire();
+    for (size_t i = 0; i < kMaximumClientCount; ++i) {
+      if (clients_[i].in_use && clients_[i].callback >= low &&
+          clients_[i].callback < high) {
+        indices.push_back(i);
+      }
+    }
+  }
+  // Not under the global lock: UnregisterClient takes the client lock first.
+  for (size_t i : indices) {
+    UnregisterClient(i);
+  }
+  return indices.size();
+}
+
 void AudioSystem::UnregisterClient(size_t index) {
   SCOPE_profile_cpu_f("apu");
 
-  auto global_lock = global_critical_region_.Acquire();
   assert_true(index < kMaximumClientCount);
-
+  // Phase 1099z58: lock order is client lock, THEN the global lock. The worker
+  // holds the client lock while the guest callback runs, and that callback
+  // takes the global lock (XAudioSubmitRenderDriverFrame -> SubmitFrame).
+  // Taking the global lock first here deadlocked Sonic's exit to Xbox Home:
+  // XAudioUnregisterRenderDriverClient from its terminate notification sat
+  // on the client lock while holding the global lock, and every guest thread
+  // (and the logger's callers) stopped behind it.
   std::lock_guard<std::mutex> guard(clients_[index].lock);
+  auto global_lock = global_critical_region_.Acquire();
+  if (!clients_[index].in_use) {
+    return;
+  }
 
   DestroyDriver(clients_[index].driver);
   memory()->SystemHeapFree(clients_[index].wrapped_callback_arg);

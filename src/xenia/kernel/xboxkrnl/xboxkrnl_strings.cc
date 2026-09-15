@@ -353,9 +353,18 @@ int32_t format_core(PPCContext* ppc_context, FormatData& data, ArgList& args,
             char* start = end;
             start[0] = '\0';
 
-            while (precision-- > 0 || value != 0) {
-              const auto digit = static_cast<uint64_t>(value) % radix;
-              value /= radix;
+            // Phase 1099o: divide UNSIGNED. `value` is int64_t, and for a
+            // 64-bit argument with the top bit set (%I64X of an offline XUID,
+            // E000...) the old signed `value /= radix` rounded toward zero,
+            // so every digit above the lowest came out one too high: xam
+            // created the profile folder "F1111114DDDDDDDC" for XUID
+            // E0000003CCCCCCCC, and on enumeration re-formatted it as
+            // "02222225EEEEEEEC" and never found its own profile. (Signed
+            // negatives were already made positive above.)
+            uint64_t uvalue = static_cast<uint64_t>(value);
+            while (precision-- > 0 || uvalue != 0) {
+              const auto digit = uvalue % radix;
+              uvalue /= radix;
               assert_true(digit < strlen(digits));
               *--start = digits[digit];
             }

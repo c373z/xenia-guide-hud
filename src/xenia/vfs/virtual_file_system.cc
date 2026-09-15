@@ -126,6 +126,28 @@ bool VirtualFileSystem::ResolveSymbolicLink(const std::string_view path,
   return was_resolved;
 }
 
+bool VirtualFileSystem::TranslateSymbolicLinks(const std::string_view path,
+                                               std::string& out) {
+  auto global_lock = global_critical_region_.Acquire();
+  std::string normalized(xe::utf8::canonicalize_guest_path(path));
+  // ObCreateSymbolicLink registers "\??\name:" and "\System??\name:" links
+  // WITHOUT their object-directory qualifier, so look them up the same way.
+  // Measured: xam's "\??\_rand...:" lookups failed ("Couldn't resolve symbolic
+  // link root name").
+  if (xe::utf8::starts_with(normalized, "\\??\\")) {
+    normalized = normalized.substr(4);
+  } else if (xe::utf8::starts_with(normalized, "\\System??\\")) {
+    normalized = normalized.substr(10);
+  }
+  std::string resolved;
+  out = ResolveSymbolicLink(normalized, resolved) ? resolved : normalized;
+  // Phase 1099z98: object names are case-insensitive - the dash opens
+  // "\Device\Cdrom0\default.xex" (lowercase r) for the disc's title info.
+  return std::ranges::any_of(devices_, [&](const auto& d) {
+    return xe::utf8::starts_with_case(out, d->mount_path());
+  });
+}
+
 Entry* VirtualFileSystem::ResolvePath(const std::string_view path) {
   auto global_lock = global_critical_region_.Acquire();
 
@@ -139,8 +161,10 @@ Entry* VirtualFileSystem::ResolvePath(const std::string_view path) {
   }
 
   // Find the device.
+  // Phase 1099z98: case-insensitive, like the object manager (dash asks for
+  // "\Device\Cdrom0\default.xex"; the device is mounted as "\Device\CdRom0").
   auto it = std::ranges::find_if(std::as_const(devices_), [&](const auto& d) {
-    return xe::utf8::starts_with(normalized_path, d->mount_path());
+    return xe::utf8::starts_with_case(normalized_path, d->mount_path());
   });
   if (it == devices_.cend()) {
     // Supress logging the error for ShaderDumpxe:\CompareBackEnds as this is
@@ -194,30 +218,52 @@ Entry* VirtualFileSystem::ResolvePath(const std::string_view path) {
 Entry* VirtualFileSystem::CreatePath(const std::string_view path,
                                      uint32_t attributes) {
   // Create all required directories recursively.
-  auto path_parts = xe::utf8::split_path(path);
-  if (path_parts.empty()) {
+  //
+  // Phase 1099n: this used to resolve the FIRST path component on its own and
+  // walk down from it. That only works when the first component is a symbolic
+  // link ("game:"). For a device path, "\Device\Harddisk0\Partition1\Cache"
+  // split to "Device", which resolves to nothing, so every create under a
+  // \Device\ path returned null -> ACCESS_DENIED (measured: xam's
+  // Partition1\Cache create, C0000022, on a writable device). Walk UP from the
+  // full path to the deepest ancestor that exists instead, then create the
+  // missing components below it.
+  std::string full(path);
+  while (!full.empty() && (full.back() == '\\' || full.back() == '/')) {
+    full.pop_back();
+  }
+  std::vector<std::string> missing;  // deepest first
+  Entry* parent_entry = nullptr;
+  std::string cur = full;
+  while (!parent_entry) {
+    const size_t sep = cur.find_last_of("\\/");
+    if (sep == std::string::npos) {
+      return nullptr;
+    }
+    std::string name = cur.substr(sep + 1);
+    cur.resize(sep);
+    if (!name.empty()) {
+      missing.push_back(std::move(name));
+    }
+    if (cur.empty()) {
+      return nullptr;
+    }
+    parent_entry = ResolvePath(cur);
+  }
+  if (missing.empty()) {
     return nullptr;
   }
-  auto partial_path = std::string(path_parts[0]);
-  auto partial_entry = ResolvePath(partial_path);
-  if (!partial_entry) {
-    return nullptr;
-  }
-  auto parent_entry = partial_entry;
-  for (size_t i = 1; i < path_parts.size() - 1; ++i) {
-    partial_path = xe::utf8::join_guest_paths(partial_path, path_parts[i]);
-    auto child_entry = ResolvePath(partial_path);
+  for (size_t i = missing.size() - 1; i > 0; --i) {
+    Entry* child_entry = parent_entry->GetChild(missing[i]);
     if (!child_entry) {
-      child_entry =
-          parent_entry->CreateEntry(path_parts[i], kFileAttributeDirectory);
+      child_entry = parent_entry->CreateEntry(missing[i],
+                                              kFileAttributeDirectory);
     }
     if (!child_entry) {
       return nullptr;
     }
     parent_entry = child_entry;
   }
-  return parent_entry->CreateEntry(path_parts[path_parts.size() - 1],
-                                   attributes);
+  return parent_entry->CreateEntry(missing[0], attributes);
 }
 
 bool VirtualFileSystem::DeletePath(const std::string_view path) {
@@ -258,7 +304,25 @@ X_STATUS VirtualFileSystem::OpenFile(Entry* root_entry,
   Entry* parent_entry = nullptr;
   Entry* entry = nullptr;
 
-  auto base_path = xe::utf8::find_base_guest_path(path);
+  // Phase 1099z22: a path that IS a device ("\Device\CdRom0", no trailing
+  // separator) opens the device itself - xam's media detection (8176CD60)
+  // opens the raw drive that way. Splitting it into parent "\Device" and
+  // child "CdRom0" found no device and returned OBJECT_PATH_NOT_FOUND, which
+  // xam retried forever.
+  bool is_device_path = false;
+  if (!root_entry) {
+    auto global_lock = global_critical_region_.Acquire();
+    const auto canonical = xe::utf8::canonicalize_guest_path(path);
+    for (const auto& d : devices_) {
+      if (xe::utf8::equal_case(canonical, d->mount_path())) {
+        is_device_path = true;
+        break;
+      }
+    }
+  }
+  std::string base_path =
+      is_device_path ? std::string()
+                     : std::string(xe::utf8::find_base_guest_path(path));
   if (!base_path.empty()) {
     parent_entry = !root_entry ? ResolvePath(base_path)
                                : root_entry->ResolvePath(base_path);
@@ -271,6 +335,21 @@ X_STATUS VirtualFileSystem::OpenFile(Entry* root_entry,
     entry = parent_entry->GetChild(file_name);
   } else {
     entry = !root_entry ? ResolvePath(path) : root_entry->GetChild(path);
+  }
+
+  // Phase 1099n: a path with a trailing separator names the directory itself,
+  // and "\Device\Harddisk0\Partition1\" names the VOLUME ROOT. Splitting it
+  // above gives the parent "\Device\Harddisk0\Partition1" and an empty child
+  // name, which never matches, so every open of a volume root failed with
+  // OBJECT_NAME_NOT_FOUND while NtQueryFullAttributesFile (which resolves the
+  // whole path) found it. xam's profile-device enumeration opens exactly that
+  // path (8172FF20, measured 6/6 C0000034), so no storage device was listed.
+  if (!entry && !root_entry && !path.empty() &&
+      (path.back() == '\\' || path.back() == '/')) {
+    if (Entry* whole = ResolvePath(path)) {
+      entry = whole;
+      parent_entry = nullptr;
+    }
   }
 
   if (entry) {

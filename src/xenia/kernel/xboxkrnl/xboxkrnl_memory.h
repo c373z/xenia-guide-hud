@@ -10,6 +10,7 @@
 #ifndef XENIA_KERNEL_XBOXKRNL_XBOXKRNL_MEMORY_H_
 #define XENIA_KERNEL_XBOXKRNL_XBOXKRNL_MEMORY_H_
 
+#include <vector>
 #include "xenia/kernel/util/shim_utils.h"
 #include "xenia/xbox.h"
 
@@ -55,6 +56,19 @@ uint32_t xeAllocatePoolTypeWithTag(PPCContext* context, uint32_t size,
 void xeFreePool(PPCContext* context, uint32_t base_address);
 
 uint32_t xeMmCreateKernelStack(uint32_t size, uint32_t r4);
+
+// Phase 1054 black: the pages (physical page numbers, address >> 12) that the
+// published Guide stream fetches vertices and textures from. The single-page
+// cache never hands a pinned page to a new allocation and keeps one that is
+// freed, so the stream replayed every frame keeps reading what it was built
+// on. An empty list clears the pins.
+// Phase 1055 bugs: tag = the (ptr << 32 | words) pair this publish will be
+// seen as by the GPU; keep_tag = the pair the GPU is replaying at this moment
+// (its entry stays pinned however old it is). Both 0 = untagged (hiding).
+void GuidePageCachePin(const std::vector<uint32_t>& phys_pages,
+                       uint64_t tag = 0, uint64_t keep_tag = 0);
+// Allocations that would have taken a pinned page (diagnostic).
+uint64_t GuidePageCachePinSkips();
 }  // namespace xboxkrnl
 }  // namespace kernel
 }  // namespace xe

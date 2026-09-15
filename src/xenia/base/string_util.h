@@ -145,12 +145,25 @@ inline bool hex_string_to_array(std::vector<uint8_t>& output_array,
 
 inline std::string BoolToString(bool value) { return value ? "true" : "false"; }
 
+// Phase 1054 fps: these used to build a std::regex on every call (two
+// compiles per trim); the Guide's paint thread spent a quarter of every paint
+// in that regex and its heap churn through the kernel's string exports. Plain
+// scans are equivalent for "\s" (space, tab, CR, LF, VT, FF).
+inline bool is_ascii_space(char c) {
+  return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\v' ||
+         c == '\f';
+}
+
 inline std::string ltrim(const std::string& value) {
-  return std::regex_replace(value, std::regex("^\\s+"), std::string(""));
+  size_t b = 0;
+  while (b < value.size() && is_ascii_space(value[b])) ++b;
+  return value.substr(b);
 }
 
 inline std::string rtrim(const std::string& value) {
-  return std::regex_replace(value, std::regex("\\s+$"), std::string(""));
+  size_t e = value.size();
+  while (e > 0 && is_ascii_space(value[e - 1])) --e;
+  return value.substr(0, e);
 }
 
 inline std::string trim(const std::string& value) {

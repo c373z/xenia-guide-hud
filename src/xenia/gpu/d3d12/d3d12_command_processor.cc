@@ -12,11 +12,13 @@
 #include <utility>
 
 #include "xenia/gpu/d3d12/d3d12_command_processor.h"
+#include <chrono>
 #include <cstring>
 #include "xenia/apu/audio_system.h"
 #include "xenia/base/assert.h"
 #include "xenia/base/byte_order.h"
 #include "xenia/base/cvar.h"
+#include "xenia/base/filesystem.h"
 #include "xenia/base/logging.h"
 #include "xenia/base/math.h"
 #include "xenia/base/profiling.h"
@@ -2230,6 +2232,356 @@ void D3D12CommandProcessor::OnGammaRampPWLValueWritten() {
   gamma_ramp_pwl_up_to_date_ = false;
 }
 
+
+// Phase 1098ze2: Xenia's swap textures are created with a TYPELESS format -
+// pipeline creation failed with "RTV format 27", which is
+// DXGI_FORMAT_R8G8B8A8_TYPELESS. A typeless format cannot be an RTV or SRV
+// format, so views over it must name a concrete one.
+static DXGI_FORMAT GuideConcreteViewFormat(DXGI_FORMAT format) {
+  switch (format) {
+    case DXGI_FORMAT_R8G8B8A8_TYPELESS:
+      return DXGI_FORMAT_R8G8B8A8_UNORM;
+    case DXGI_FORMAT_B8G8R8A8_TYPELESS:
+      return DXGI_FORMAT_B8G8R8A8_UNORM;
+    case DXGI_FORMAT_B8G8R8X8_TYPELESS:
+      return DXGI_FORMAT_B8G8R8X8_UNORM;
+    case DXGI_FORMAT_R10G10B10A2_TYPELESS:
+      return DXGI_FORMAT_R10G10B10A2_UNORM;
+    case DXGI_FORMAT_R16G16B16A16_TYPELESS:
+      return DXGI_FORMAT_R16G16B16A16_UNORM;
+    default:
+      return format;
+  }
+}
+
+// Phase 1098ze: build the objects for the Guide composite. The shaders are
+// compiled at RUNTIME through D3DCompiler_47.dll - which Xenia already loads for
+// DXBC disassembly - so this needs no change to the precompiled-shader build.
+bool D3D12CommandProcessor::GuideBlendEnsureObjects(DXGI_FORMAT rt_format) {
+  if (guide_blend_failed_) return false;
+  if (guide_blend_pipeline_ && guide_blend_rt_format_ == rt_format) return true;
+  guide_blend_pipeline_.Reset();
+  guide_blend_rt_format_ = rt_format;
+
+  const ui::d3d12::D3D12Provider& provider = GetD3D12Provider();
+  ID3D12Device* device = provider.GetDevice();
+
+  // A fullscreen triangle textured with the guest surface. No geometry is
+  // invented here: the quad covers the whole output, which is what the console
+  // scanout does with the system overlay plane, and every pixel it samples is
+  // the guest's.
+  static const char kHlsl[] =
+      "Texture2D<float4> src : register(t0);\n"
+      "SamplerState smp : register(s0);\n"
+      "struct VSOut { float4 pos : SV_Position; float2 uv : TEXCOORD0; };\n"
+      "VSOut VSMain(uint id : SV_VertexID) {\n"
+      "  VSOut o;\n"
+      "  o.uv = float2((id << 1) & 2, id & 2);\n"
+      "  o.pos = float4(o.uv * float2(2, -2) + float2(-1, 1), 0, 1);\n"
+      "  return o;\n"
+      "}\n"
+      "float4 PSMain(VSOut i) : SV_Target {\n"
+      "  float4 c = src.Sample(smp, i.uv);\n"
+      "  if (kGuideShowAlpha) return float4(c.aaa, 1);\n"
+      "  return c;\n"
+      "}\n";
+
+  typedef HRESULT(WINAPI * PFN_D3DCOMPILE_LOCAL)(
+      LPCVOID, SIZE_T, LPCSTR, const D3D_SHADER_MACRO*, ID3DInclude*, LPCSTR,
+      LPCSTR, UINT, UINT, ID3DBlob**, ID3DBlob**);
+  HMODULE compiler = LoadLibraryW(L"D3DCompiler_47.dll");
+  PFN_D3DCOMPILE_LOCAL compile =
+      compiler ? PFN_D3DCOMPILE_LOCAL(GetProcAddress(compiler, "D3DCompile"))
+               : nullptr;
+  if (!compile) {
+    XELOGW("GuideBlend: D3DCompile unavailable - cannot build the composite");
+    guide_blend_failed_ = true;
+    return false;
+  }
+  char alpha_def[2] = {cvars::guide_show_alpha ? '1' : '0', 0};
+  D3D_SHADER_MACRO macros[] = {{"kGuideShowAlpha", alpha_def},
+                               {nullptr, nullptr}};
+  Microsoft::WRL::ComPtr<ID3DBlob> vs_blob, ps_blob, err;
+  if (FAILED(compile(kHlsl, sizeof(kHlsl) - 1, "guide_blend", macros, nullptr,
+                     "VSMain", "vs_5_1", 0, 0, &vs_blob, &err)) ||
+      FAILED(compile(kHlsl, sizeof(kHlsl) - 1, "guide_blend", macros, nullptr,
+                     "PSMain", "ps_5_1", 0, 0, &ps_blob, &err))) {
+    XELOGW("GuideBlend: shader compilation failed");
+    guide_blend_failed_ = true;
+    return false;
+  }
+
+  if (!guide_blend_root_signature_) {
+    D3D12_DESCRIPTOR_RANGE range = {};
+    range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    range.NumDescriptors = 1;
+    range.BaseShaderRegister = 0;
+    range.RegisterSpace = 0;
+    range.OffsetInDescriptorsFromTableStart = 0;
+    D3D12_ROOT_PARAMETER param = {};
+    param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    param.DescriptorTable.NumDescriptorRanges = 1;
+    param.DescriptorTable.pDescriptorRanges = &range;
+    param.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+    D3D12_STATIC_SAMPLER_DESC sampler = {};
+    sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    sampler.AddressU = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    sampler.AddressV = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    sampler.MaxLOD = D3D12_FLOAT32_MAX;
+    sampler.ShaderRegister = 0;
+    sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+    D3D12_ROOT_SIGNATURE_DESC rs_desc = {};
+    rs_desc.NumParameters = 1;
+    rs_desc.pParameters = &param;
+    rs_desc.NumStaticSamplers = 1;
+    rs_desc.pStaticSamplers = &sampler;
+    rs_desc.Flags =
+        D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+    Microsoft::WRL::ComPtr<ID3DBlob> rs_blob, rs_err;
+    if (FAILED(provider.SerializeRootSignature(
+            &rs_desc, D3D_ROOT_SIGNATURE_VERSION_1, &rs_blob, &rs_err)) ||
+        FAILED(device->CreateRootSignature(
+            0, rs_blob->GetBufferPointer(), rs_blob->GetBufferSize(),
+            IID_PPV_ARGS(&guide_blend_root_signature_)))) {
+      XELOGW("GuideBlend: root signature creation failed");
+      guide_blend_failed_ = true;
+      return false;
+    }
+  }
+
+  D3D12_GRAPHICS_PIPELINE_STATE_DESC pso = {};
+  pso.pRootSignature = guide_blend_root_signature_.Get();
+  pso.VS.pShaderBytecode = vs_blob->GetBufferPointer();
+  pso.VS.BytecodeLength = vs_blob->GetBufferSize();
+  pso.PS.pShaderBytecode = ps_blob->GetBufferPointer();
+  pso.PS.BytecodeLength = ps_blob->GetBufferSize();
+  pso.BlendState.RenderTarget[0].BlendEnable = TRUE;
+  pso.BlendState.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
+  pso.BlendState.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+  pso.BlendState.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
+  pso.BlendState.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
+  pso.BlendState.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
+  pso.BlendState.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+  pso.BlendState.RenderTarget[0].RenderTargetWriteMask =
+      D3D12_COLOR_WRITE_ENABLE_ALL;
+  pso.SampleMask = UINT_MAX;
+  pso.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+  pso.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+  pso.RasterizerState.DepthClipEnable = TRUE;
+  pso.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+  pso.NumRenderTargets = 1;
+  pso.RTVFormats[0] = rt_format;
+  pso.SampleDesc.Count = 1;
+  if (FAILED(device->CreateGraphicsPipelineState(
+          &pso, IID_PPV_ARGS(&guide_blend_pipeline_)))) {
+    XELOGW("GuideBlend: pipeline state creation failed for RTV format {}",
+           uint32_t(rt_format));
+    guide_blend_failed_ = true;
+    return false;
+  }
+  if (!guide_blend_rtv_heap_) {
+    D3D12_DESCRIPTOR_HEAP_DESC heap_desc = {};
+    heap_desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+    heap_desc.NumDescriptors = 1;
+    if (FAILED(device->CreateDescriptorHeap(
+            &heap_desc, IID_PPV_ARGS(&guide_blend_rtv_heap_)))) {
+      XELOGW("GuideBlend: RTV heap creation failed");
+      guide_blend_failed_ = true;
+      return false;
+    }
+  }
+  XELOGI("GuideBlend: composite objects ready (RTV format {})",
+         uint32_t(rt_format));
+  return true;
+}
+
+ID3D12Resource* D3D12CommandProcessor::GuideCompositeOverTitle(
+    ID3D12Resource* title_resource,
+    const D3D12_SHADER_RESOURCE_VIEW_DESC& guide_srv_desc,
+    ID3D12Resource* guide_resource,
+    D3D12_SHADER_RESOURCE_VIEW_DESC& srv_desc_out) {
+  if (!title_resource || !guide_resource) return nullptr;
+  const ui::d3d12::D3D12Provider& provider = GetD3D12Provider();
+  ID3D12Device* device = provider.GetDevice();
+  D3D12_RESOURCE_DESC title_desc = title_resource->GetDesc();
+  const DXGI_FORMAT view_format =
+      GuideConcreteViewFormat(title_desc.Format);
+  if (!GuideBlendEnsureObjects(view_format)) return nullptr;
+
+  // A scratch render target matching the title frame, so the composite is the
+  // title's own image with the Guide blended on top of it.
+  if (guide_composite_texture_) {
+    D3D12_RESOURCE_DESC have = guide_composite_texture_->GetDesc();
+    if (have.Width != title_desc.Width || have.Height != title_desc.Height ||
+        have.Format != title_desc.Format) {
+      guide_composite_texture_.Reset();
+    }
+  }
+  if (!guide_composite_texture_) {
+    D3D12_RESOURCE_DESC desc = title_desc;
+    desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+    if (FAILED(device->CreateCommittedResource(
+            &ui::d3d12::util::kHeapPropertiesDefault,
+            provider.GetHeapFlagCreateNotZeroed(), &desc,
+            D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+            IID_PPV_ARGS(&guide_composite_texture_)))) {
+      XELOGW("GuideBlend: composite texture creation failed");
+      guide_blend_failed_ = true;
+      return nullptr;
+    }
+  }
+  ID3D12Resource* dest = guide_composite_texture_.Get();
+
+  ui::d3d12::util::DescriptorCpuGpuHandlePair srv_handle;
+  if (!RequestOneUseSingleViewDescriptors(1, &srv_handle)) return nullptr;
+  device->CreateShaderResourceView(guide_resource, &guide_srv_desc,
+                                   srv_handle.first);
+
+  D3D12_CPU_DESCRIPTOR_HANDLE rtv =
+      guide_blend_rtv_heap_->GetCPUDescriptorHandleForHeapStart();
+  D3D12_RENDER_TARGET_VIEW_DESC rtv_desc = {};
+  rtv_desc.Format = view_format;
+  rtv_desc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+  device->CreateRenderTargetView(dest, &rtv_desc, rtv);
+
+  deferred_command_list_.D3DCopyResource(dest, title_resource);
+  PushTransitionBarrier(dest, D3D12_RESOURCE_STATE_COPY_DEST,
+                        D3D12_RESOURCE_STATE_RENDER_TARGET);
+  SubmitBarriers();
+
+  deferred_command_list_.D3DOMSetRenderTargets(1, &rtv, FALSE, nullptr);
+  D3D12_VIEWPORT viewport = {};
+  viewport.Width = float(title_desc.Width);
+  viewport.Height = float(title_desc.Height);
+  viewport.MaxDepth = 1.0f;
+  deferred_command_list_.RSSetViewport(viewport);
+  D3D12_RECT scissor = {};
+  scissor.right = LONG(title_desc.Width);
+  scissor.bottom = LONG(title_desc.Height);
+  deferred_command_list_.RSSetScissorRect(scissor);
+  deferred_command_list_.D3DSetGraphicsRootSignature(
+      guide_blend_root_signature_.Get());
+  deferred_command_list_.D3DSetGraphicsRootDescriptorTable(0,
+                                                           srv_handle.second);
+  deferred_command_list_.D3DSetPipelineState(guide_blend_pipeline_.Get());
+  deferred_command_list_.D3DIASetPrimitiveTopology(
+      D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+  deferred_command_list_.D3DDrawInstanced(3, 1, 0, 0);
+
+  PushTransitionBarrier(dest, D3D12_RESOURCE_STATE_RENDER_TARGET,
+                        D3D12_RESOURCE_STATE_COPY_DEST);
+  SubmitBarriers();
+  srv_desc_out = {};
+  srv_desc_out.Format = view_format;
+  srv_desc_out.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+  srv_desc_out.Shader4ComponentMapping =
+      D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+  srv_desc_out.Texture2D.MipLevels = 1;
+  return dest;
+}
+
+static uint64_t GuideSteadyMsForSwap() {
+  return uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(
+                      std::chrono::steady_clock::now().time_since_epoch())
+                      .count());
+}
+
+// Phase 1099z114: HOST-SIDE FIX - NOT PRESENT IN REAL HARDWARE. There is no
+// such re-present on a console; it exists only because of how this emulator
+// shows the Guide. Here the Guide's stream is drained and composited inside
+// the title's swap, so the Guide (and xam's HUD tick, gated on the drained
+// slots) could never run faster than the game presents - a 30 fps game capped
+// the Guide at 30 fps. While the guest is producing the Guide, this
+// re-presents the title's LAST frame with the Guide re-drawn whenever the
+// title hasn't swapped for one display interval (--guide_refresh_hz).
+bool D3D12CommandProcessor::GuideRefreshDue() {
+  static uint32_t gate[6] = {};
+  static uint64_t gate_log = 0;
+  auto why = [&](int g) {
+    ++gate[g];
+    const uint64_t now = GuideSteadyMsForSwap();
+    if (!gate_log) gate_log = now;
+    if (now - gate_log >= 5000) {
+      XELOGI("GuideRefreshDue: 5 s gates off={} nofetch={} depth={} "
+             "refreshing={} nosurf/stale={} early={}",
+             gate[0], gate[1], gate[2], gate[3], gate[4], gate[5]);
+      std::memset(gate, 0, sizeof(gate));
+      gate_log = now;
+    }
+    return false;
+  };
+  if (cvars::guide_refresh_hz <= 0) return why(0);
+  if (!guide_title_fetch0_valid_) return why(1);
+  if (guide_syscmd_depth_ != 0) return why(2);
+  if (guide_refreshing_) return why(3);
+  if (!guide_surf_base_ || (guide_swap_index_ - guide_surf_last_swap_) >
+                               uint32_t(cvars::guide_present_stale_swaps)) {
+    return why(4);  // Guide not up
+  }
+  // Fill the display grid: the next refresh is due one interval after the
+  // previous one, pulled forward by any title present in between so title +
+  // refresh presents together stay at the refresh rate.
+  const uint64_t interval = 1000u / uint32_t(cvars::guide_refresh_hz);
+  const uint64_t now = GuideSteadyMsForSwap();
+  if (now - guide_last_present_ms_ < interval) {
+    return why(5);
+  }
+  // Skip if the title's next present (from its measured frame period) lands
+  // within one interval - it will carry the Guide itself.
+  const double next_title =
+      double(guide_last_title_swap_ms_) + guide_title_period_ms_;
+  if (guide_title_period_ms_ > 0.0 && double(now + interval) >= next_title &&
+      double(now) < next_title + double(interval)) {  // title not late
+    return why(5);
+  }
+  return true;
+}
+
+void D3D12CommandProcessor::GuideRefresh() {
+  uint32_t saved[6];
+  for (uint32_t k = 0; k < 6; ++k) {
+    saved[k] = (*register_file_)[0x4800 + k];
+    if (saved[k] != guide_title_fetch0_[k]) {
+      WriteRegister(0x4800 + k, guide_title_fetch0_[k]);
+    }
+  }
+  guide_refreshing_ = true;
+  guide_last_refresh_ms_ = GuideSteadyMsForSwap();
+  IssueSwap(guide_title_fb_ptr_, guide_title_fb_w_, guide_title_fb_h_);
+  guide_refreshing_ = false;
+  for (uint32_t k = 0; k < 6; ++k) {
+    if ((*register_file_)[0x4800 + k] != saved[k]) {
+      WriteRegister(0x4800 + k, saved[k]);
+    }
+  }
+  static uint32_t n = 0;
+  static uint64_t window_start = 0;
+  static uint32_t window_refreshes = 0;
+  static uint32_t window_swaps_at_start = 0;
+  ++n;
+  ++window_refreshes;
+  const uint64_t now = GuideSteadyMsForSwap();
+  if (!window_start) {
+    window_start = now;
+    window_swaps_at_start = guide_swap_index_;
+  }
+  if (n <= 3) {
+    XELOGI("GuideRefresh: #{} re-presented the title's last frame with the "
+           "Guide (host-side, not on hardware)",
+           n);
+  }
+  if (now - window_start >= 5000) {
+    const uint32_t swaps = guide_swap_index_ - window_swaps_at_start;
+    XELOGI("GuideRefresh: last {} ms: {} refreshes, {} presents total "
+           "(title + refresh)",
+           now - window_start, window_refreshes, swaps);
+    window_start = now;
+    window_refreshes = 0;
+    window_swaps_at_start = guide_swap_index_;
+  }
+}
+
 void D3D12CommandProcessor::IssueSwap(uint32_t frontbuffer_ptr,
                                       uint32_t frontbuffer_width,
                                       uint32_t frontbuffer_height) {
@@ -2245,12 +2597,189 @@ void D3D12CommandProcessor::IssueSwap(uint32_t frontbuffer_ptr,
     return;
   }
 
+  // Phase 1099h: capture the front-buffer fetch VdSwap just wrote to fetch 0
+  // (Xenia's VdSwap already translated its base to physical, as the real one
+  // does at 800900F4..8009011C) and apply the real kernel's two other patches
+  // before it goes to fetch 15:
+  //   800900EC rlwimi r10,9,11,16,21  dword_0 bits 10-15 = 0x12
+  //            -> clamp_x = clamp_y = kClampToEdge
+  //   800900E8 rlwimi r11,5,19,9,12   dword_3 bits 19-22 = 0x5
+  //            -> mag_filter = min_filter = kLinear
+  // Phase 1099z114: remember the title's real swap (its front-buffer fetch 0
+  // and size) so the Guide can be re-presented over it at display rate.
+  if (!guide_refreshing_) {
+    // Title presents per 5 s while the Guide is up, beside the refreshes.
+    if (guide_surf_base_ && (guide_swap_index_ - guide_surf_last_swap_) <=
+                                uint32_t(cvars::guide_present_stale_swaps)) {
+      static uint64_t ws = 0;
+      static uint32_t title_swaps = 0;
+      const uint64_t now = GuideSteadyMsForSwap();
+      ++title_swaps;
+      if (!ws) ws = now;
+      if (now - ws >= 5000) {
+        XELOGI("GuideRefresh: Guide up - title presented {} frames in {} ms",
+               title_swaps, now - ws);
+        ws = now;
+        title_swaps = 0;
+      }
+    }
+    for (uint32_t k = 0; k < 6; ++k) {
+      guide_title_fetch0_[k] = (*register_file_)[0x4800 + k];
+    }
+    guide_title_fb_ptr_ = frontbuffer_ptr;
+    guide_title_fb_w_ = frontbuffer_width;
+    guide_title_fb_h_ = frontbuffer_height;
+    guide_title_fetch0_valid_ = true;
+    {
+      const uint64_t now = GuideSteadyMsForSwap();
+      if (guide_last_title_swap_ms_) {
+        const double delta = double(now - guide_last_title_swap_ms_);
+        guide_title_period_ms_ = guide_title_period_ms_ > 0.0
+                                     ? guide_title_period_ms_ * 0.9 + delta * 0.1
+                                     : delta;
+        if (delta > 500.0) guide_title_period_ms_ = 0.0;  // title stalled
+      }
+      guide_last_title_swap_ms_ = now;
+    }
+  }
+  guide_last_present_ms_ = GuideSteadyMsForSwap();
+  if (cvars::guide_route_fetch15) {
+    const RegisterFile& sregs = *register_file_;
+    xenos::xe_gpu_texture_fetch_t fb = sregs.GetTextureFetch(0);
+    if (fb.type == xenos::FetchConstantType::kTexture && fb.base_address) {
+      // Phase 1099i: which buffer did the drain's frame end up presenting?
+      if (guide_lag_dest_) {
+        const uint32_t presented = fb.base_address << 12;
+        ++guide_lag_n_[presented == guide_lag_dest_    ? 0
+                       : presented == guide_lag_bound_ ? 1
+                                                       : 2];
+        const uint32_t total =
+            guide_lag_n_[0] + guide_lag_n_[1] + guide_lag_n_[2];
+        if (total <= 3 || (total % 300) == 0) {
+          XELOGI("GuideLag: drained frames {} | presented == resolve dest "
+                 "(we bound the PREVIOUS frame) {} | presented == bound {} | "
+                 "other {} | last: dest={:08X} bound={:08X} presented={:08X}",
+                 total, guide_lag_n_[0], guide_lag_n_[1], guide_lag_n_[2],
+                 guide_lag_dest_, guide_lag_bound_, presented);
+        }
+        guide_lag_dest_ = 0;
+      }
+      for (uint32_t k = 0; k < 6; ++k) guide_tf15_[k] = sregs[0x4800 + k];
+      guide_tf15_[0] = (guide_tf15_[0] & ~0x0000FC00u) | (0x12u << 10);
+      guide_tf15_[3] = (guide_tf15_[3] & ~0x00780000u) | (0x5u << 19);
+      static uint32_t tl = 0;
+      if (tl++ < 3) {
+        XELOGI("GuideTf15: front buffer fetch {:08X} {:08X} {:08X} {:08X} "
+               "{:08X} {:08X} -> base {:08X} {}x{}",
+               guide_tf15_[0], guide_tf15_[1], guide_tf15_[2], guide_tf15_[3],
+               guide_tf15_[4], guide_tf15_[5], fb.base_address << 12,
+               fb.size_2d.width + 1, fb.size_2d.height + 1);
+      }
+      guide_tf15_valid_ = true;
+    }
+  }
+  // Phase 1099j: VdSwap's order - fetch 15 := this swap's front buffer (just
+  // captured above), then the Guide's buffer, then present. Runs before the
+  // swap texture is requested so the Guide's draws cannot disturb its state.
+  if (cvars::guide_syscmd_at_swap && cvars::guide_syscmd_at_resolve &&
+      guide_syscmd_depth_ == 0) {
+    // The Guide binds its own atlases to fetch 0, and RequestSwapTexture below
+    // finds the front buffer through fetch 0 (VdSwap's PM4). Measured without
+    // this: shots with the Guide up came back 852x480, i.e. the swap texture
+    // was no longer the title's frame. Restore every fetch constant.
+    uint32_t saved_fetch[0xC0];
+    for (uint32_t k = 0; k < 0xC0u; ++k) {
+      saved_fetch[k] = (*register_file_)[0x4800 + k];
+    }
+    GuideDrainSystemCommands();
+    for (uint32_t k = 0; k < 0xC0u; ++k) {
+      if ((*register_file_)[0x4800 + k] != saved_fetch[k]) {
+        WriteRegister(0x4800 + k, saved_fetch[k]);
+      }
+    }
+  }
   // Obtain the actual front buffer size to pass to RefreshGuestOutput,
   // resolution-scaled if it's a resolve destination, or not otherwise.
   D3D12_SHADER_RESOURCE_VIEW_DESC swap_texture_srv_desc;
   xenos::TextureFormat frontbuffer_format;
   ID3D12Resource* swap_texture_resource = texture_cache_->RequestSwapTexture(
       swap_texture_srv_desc, frontbuffer_format);
+  // Phase 1098zc: diagnostic - show the Guide's own resolved surface instead.
+  // Its address, size, pitch, format and endianness were all recorded from the
+  // guest's RB_COPY_DEST_* registers at the moment the Guide's own stream
+  // resolved (see IssueCopy), so nothing here is a host choice.
+  ++guide_swap_index_;
+  // Phase 1098zd: route the Guide to the screen only while the GUEST is still
+  // producing it. xam resolves its surface every frame the Guide is up and
+  // stops when it closes, so this follows the guest's own behaviour instead of
+  // a host decision about when the Guide should be visible.
+  const bool guide_surface_fresh =
+      guide_surf_base_ &&
+      (guide_swap_index_ - guide_surf_last_swap_) <=
+          uint32_t(cvars::guide_present_stale_swaps);
+  if (cvars::guide_alpha_trace) {
+    static bool was_fresh = false;
+    if (guide_surface_fresh != was_fresh) {
+      was_fresh = guide_surface_fresh;
+      XELOGI("GuideAT present: swap={} guide surface {}", guide_swap_index_,
+             guide_surface_fresh ? "FRESH (guest resolving it)" : "STALE");
+    }
+  }
+  if (cvars::guide_present_surface && guide_surface_fresh &&
+      guide_surf_width_ && guide_surf_height_) {
+    D3D12_SHADER_RESOURCE_VIEW_DESC guide_srv_desc;
+    xenos::TextureFormat guide_format;
+    // Phase 1098zi: WIDTH is the guest's logical size, PITCH is the padded
+    // row stride. Passing the pitch as the width stretched the padding columns
+    // across the frame.
+    const uint32_t guide_w =
+        (guide_desc_width_ && !cvars::guide_present_pitch_width)
+            ? guide_desc_width_
+            : guide_surf_width_;
+    const uint32_t guide_h =
+        guide_desc_height_ ? guide_desc_height_ : guide_surf_height_;
+    ID3D12Resource* guide_res = texture_cache_->RequestGuideTexture(
+        guide_srv_desc, guide_format, guide_surf_base_, guide_w, guide_h,
+        guide_surf_pitch_,
+        xenos::TextureFormat(guide_surf_format_),
+        xenos::Endian(guide_surf_endian_), true, guide_surf_swap_ != 0);
+    static uint32_t gpn = 0;
+    if (gpn++ < 4) {
+      XELOGI("GuidePresent: base={:08X} {}x{} (pitch {}) fmt={} endian={} "
+             "swap={} -> {}",
+             guide_surf_base_, guide_w, guide_h, guide_surf_pitch_,
+             guide_surf_format_, guide_surf_endian_, guide_surf_swap_,
+             guide_res ? "texture ok" : "NULL");
+    }
+    if (guide_res && cvars::guide_alpha_trace) {
+      GuideAlphaReadback(guide_res);
+    }
+    if (guide_res) {
+      // Phase 1098ze: blend it OVER the title's frame. Replacement is the
+      // fallback, kept because it is what proved the Guide renders at all.
+      bool composited = false;
+      if (cvars::guide_composite_blend && swap_texture_resource) {
+        D3D12_SHADER_RESOURCE_VIEW_DESC composite_srv_desc;
+        ID3D12Resource* composite = GuideCompositeOverTitle(
+            swap_texture_resource, guide_srv_desc, guide_res,
+            composite_srv_desc);
+        if (composite) {
+          swap_texture_resource = composite;
+          swap_texture_srv_desc = composite_srv_desc;
+          composited = true;
+          static uint32_t cn = 0;
+          if (cn++ < 3) {
+            XELOGI("GuideComposite: blended over the title's frame");
+          }
+        }
+      }
+      if (!composited) {
+        swap_texture_resource = guide_res;
+        swap_texture_srv_desc = guide_srv_desc;
+        frontbuffer_format = guide_format;
+      }
+    }
+  }
   // Phase 881: the displayed image comes from this texture, not from guest
   // memory at the frontbuffer pointer (880). If the Guide's paint makes this
   // request fail, or hands back a different texture, the swap presents
@@ -2640,7 +3169,96 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type,
   ID3D12Device* device = GetD3D12Provider().GetDevice();
   const RegisterFile& regs = *register_file_;
 
+  ++guide_dbg_backend_calls_;
+  if (guide_syscmd_depth_) ++guide_dbg_backend_indepth_;
+  // Phase 1099g: per-draw state of the Guide's first draws in each stream -
+  // blend, write mask, and the first two pixel constants (colour/alpha factors
+  // the Guide's shaders multiply by). Logged only when a draw slot's state
+  // CHANGES, so an animated alpha shows up as a sequence of lines.
+  if (cvars::guide_alpha_trace && guide_syscmd_depth_) {
+    const uint32_t idx = guide_at_draw_idx_++;
+    if (idx < 16) {
+      struct Slot {
+        uint32_t v[12];
+      };
+      static Slot last[16];
+      static bool init = false;
+      static uint32_t lines = 0;
+      if (!init) {
+        init = true;
+        std::memset(last, 0xFF, sizeof(last));
+      }
+      Slot s;
+      s.v[0] = regs[0x2201];
+      s.v[1] = regs[0x2104];
+      s.v[2] = uint32_t(primitive_type);
+      s.v[3] = index_count;
+      for (uint32_t k = 0; k < 8; ++k) s.v[4 + k] = regs[0x4400 + k];
+      if (std::memcmp(&s, &last[idx], sizeof(s)) != 0 && lines < 1500) {
+        ++lines;
+        last[idx] = s;
+        auto f = [&](uint32_t k) { return regs.Get<float>(0x4400 + k); };
+        XELOGI("GuideAT draw: swap={} slot={} blend0={:08X} mask={:X} prim={} "
+               "count={} c0=({:.3f} {:.3f} {:.3f} {:.3f}) "
+               "c1=({:.3f} {:.3f} {:.3f} {:.3f})",
+               guide_swap_index_, idx, s.v[0], s.v[1], s.v[2], s.v[3], f(0),
+               f(1), f(2), f(3), f(4), f(5), f(6), f(7));
+        // What the draw samples: every bound texture fetch, and the shaders.
+        static uint32_t tex_lines[16] = {};
+        if (idx < 3 && tex_lines[idx] < 3) {
+          ++tex_lines[idx];
+          std::string fetches;
+          for (uint32_t fi = 0; fi < 32; ++fi) {
+            xenos::xe_gpu_texture_fetch_t tf = regs.GetTextureFetch(fi);
+            if (tf.type == xenos::FetchConstantType::kTexture &&
+                tf.base_address) {
+              fetches += fmt::format("f{}={:08X}:{}x{}:fmt{} ", fi,
+                                     tf.base_address << 12,
+                                     tf.size_2d.width + 1,
+                                     tf.size_2d.height + 1,
+                                     uint32_t(tf.format));
+            }
+          }
+          XELOGI("GuideAT tex: swap={} slot={} vs={:016X} ps={:016X} | {}",
+                 guide_swap_index_, idx,
+                 active_vertex_shader_ ? active_vertex_shader_->ucode_data_hash()
+                                       : 0,
+                 active_pixel_shader_ ? active_pixel_shader_->ucode_data_hash()
+                                      : 0,
+                 fetches.empty() ? "none" : fetches);
+          // Slot 0's pixel shader is `tfetch2D tf15 * c0`, and b128 picks
+          // whether its alpha is the texture's or 1. Raw words, no decoding.
+          XELOGI("GuideAT tf15: swap={} slot={} fetch15 = {:08X} {:08X} {:08X} "
+                 "{:08X} {:08X} {:08X} | fetch0 = {:08X} {:08X} {:08X} | "
+                 "bools ps 128..159 = {:08X}",
+                 guide_swap_index_, idx, regs[0x4800 + 15 * 6],
+                 regs[0x4801 + 15 * 6], regs[0x4802 + 15 * 6],
+                 regs[0x4803 + 15 * 6], regs[0x4804 + 15 * 6],
+                 regs[0x4805 + 15 * 6], regs[0x4800], regs[0x4801],
+                 regs[0x4802], regs[0x4904]);
+        }
+      }
+    }
+  }
   xenos::EdramMode edram_mode = regs.Get<reg::RB_MODECONTROL>().edram_mode;
+  // Phase 1098x: census the mode EVERY draw is issued in, and separately the
+  // draws that happen while the Guide's stream is the one executing. 3800 of
+  // 3800 sampled Guide streams write RB_MODECONTROL = kCopy (1098u), yet no
+  // resolve to the Guide's surface ever reaches IssueCopy. Either its draws are
+  // not issued in copy mode after all, or they are not reaching this function.
+  {
+    static std::map<uint32_t, uint32_t> modes, modes_in_guide;
+    static uint32_t nrep2 = 0;
+    ++modes[uint32_t(edram_mode)];
+    if (guide_syscmd_depth_) ++modes_in_guide[uint32_t(edram_mode)];
+    if ((++nrep2 % 20000) == 0) {
+      std::string a1, a2;
+      for (auto& kv : modes) a1 += fmt::format("{}x{} ", kv.first, kv.second);
+      for (auto& kv : modes_in_guide) a2 += fmt::format("{}x{} ", kv.first, kv.second);
+      XELOGI("GuideDrawModes: all[{}] duringGuideStream[{}]", a1,
+             a2.empty() ? "none" : a2);
+    }
+  }
   if (edram_mode == xenos::EdramMode::kCopy) {
     // Phase 706: report the destination the command processor actually reads,
     // rather than the one the buffer was patched with. Only for the Guide's
@@ -3517,6 +4135,121 @@ void D3D12CommandProcessor::InitializeTrace() {
 }
 
 bool D3D12CommandProcessor::IssueCopy() {
+  // Phase 1098s: census every resolve destination, so "the Guide's surface is
+  // empty" can be told apart from "the Guide never issues a resolve". If
+  // 1FA50000 never appears here, the copy registers its stream sets are never
+  // acted on and the pixels die before the surface, not in it.
+  {
+    RegisterFile& rf0 = *register_file_;
+    uint32_t cdst = uint32_t(rf0[0x2319]) & ~0xFFFu;
+    static std::map<uint32_t, uint32_t> dests;
+    static uint32_t nrep = 0;
+    ++dests[cdst];
+    // Phase 1098zb: when this IS the Guide's resolve, record the parameters
+    // that describe its destination surface - format, endianness and tiling
+    // come from RB_COPY_DEST_INFO (0x231B) and the pitch/height from 0x231A.
+    // These are needed to address the surface as a texture, and guessing any of
+    // them would produce a wrong image that still looked plausible.
+    // Phase 1098zc: record the Guide's own resolve target, identified not by a
+    // hardcoded address but by "a submitted Guide stream is what is executing".
+    if (guide_syscmd_depth_ && cdst) {
+      uint32_t pitch_reg = uint32_t(rf0[0x231A]);
+      uint32_t info_reg = uint32_t(rf0[0x231B]);
+      guide_surf_base_ = cdst;
+      guide_surf_pitch_ = pitch_reg & 0x3FFF;
+      guide_surf_height_ = (pitch_reg >> 16) & 0x3FFF;
+      guide_surf_width_ = guide_surf_pitch_;
+      guide_surf_format_ = (info_reg >> 7) & 0x3F;
+      guide_surf_endian_ = info_reg & 0x7;
+      guide_surf_swap_ = (info_reg >> 24) & 0x1;
+      // Phase 1099a: xam resolves this surface ~7-8 times a frame (tiled). If
+      // one of those passes used a DIFFERENT destination format it could be a
+      // separate alpha/mask surface - the last place a guest-stated background
+      // alpha could hide. Census distinct (base, info) pairs.
+      {
+        static std::map<uint32_t, std::set<uint32_t>> rcen;
+        static uint32_t rn = 0;
+        auto& sv = rcen[cdst];
+        if (sv.size() < 8) sv.insert(info_reg);
+        if ((++rn % 4000) == 0) {
+          std::string out;
+          for (auto& kv : rcen) {
+            out += fmt::format("\n  {:08X}:", kv.first);
+            for (uint32_t v : kv.second) {
+              out += fmt::format(" info={:08X}(fmt={} swap={} endian={})", v,
+                                 (v >> 7) & 0x3F, (v >> 24) & 1, v & 7);
+            }
+          }
+          XELOGI("GuideResolveFormats:{}", out);
+        }
+      }
+      guide_surf_last_swap_ = guide_swap_index_;
+      // Phase 1099g: the guest's clear state at its OWN resolve. If the
+      // background alpha is a clear value, it is here: RB_COPY_CONTROL says
+      // whether the resolve clears, RB_COLOR_CLEAR(_LO) with what.
+      if (cvars::guide_alpha_trace) {
+        ++guide_at_resolves_;
+        const uint32_t t[5] = {uint32_t(rf0[0x2318]), uint32_t(rf0[0x231E]),
+                               uint32_t(rf0[0x231F]), uint32_t(rf0[0x2104]),
+                               uint32_t(rf0[0x2201])};
+        static uint32_t last[5] = {~0u, ~0u, ~0u, ~0u, ~0u};
+        static uint32_t lines = 0;
+        if (std::memcmp(t, last, sizeof(t)) != 0 && lines < 300) {
+          ++lines;
+          std::memcpy(last, t, sizeof(t));
+          XELOGI("GuideAT resolve: swap={} n={} copy_control={:08X} "
+                 "color_clear={:08X} color_clear_lo={:08X} color_mask={:08X} "
+                 "blend0={:08X}",
+                 guide_swap_index_, guide_at_resolves_, t[0], t[1], t[2], t[3],
+                 t[4]);
+        }
+      }
+    }
+    if (cdst == 0x1FA50000u) {
+      static uint32_t gi = 0;
+      if (gi++ < 4) {
+        XELOGI("GuideResolveInfo: control={:08X} base={:08X} pitch={:08X} "
+               "info={:08X} | surface={:08X} modecontrol={:08X}",
+               uint32_t(rf0[0x2318]), uint32_t(rf0[0x2319]),
+               uint32_t(rf0[0x231A]), uint32_t(rf0[0x231B]),
+               uint32_t(rf0[0x2000]), uint32_t(rf0[0x2208]));
+        // Phase 1098zg: the EDRAM colour format the Guide renders INTO.
+        // If it carries no alpha, the resolve can only write opaque, and
+        // the transparency has to come from somewhere else - which is a
+        // guest question, not a host one.
+        XELOGI("GuideColorInfo: rb_color_info={:08X} rb_color_mask={:08X} "
+               "rb_blendcontrol0={:08X}",
+               uint32_t(rf0[0x2001]), uint32_t(rf0[0x2104]),
+               uint32_t(rf0[0x2105]));
+        // Phase 1098zh: WHAT DOES THE GUIDE SAMPLE? Its surround is opaque
+        // black, and the submit descriptor tells xam the TITLE's framebuffer
+        // size (1280x720) - which only makes sense if xam means to read the
+        // title's frame and dim it. If one of its texture fetches points at the
+        // title's front buffer, then the black is a guest-side gap (xam got
+        // nothing to dim) rather than something the host should invent alpha
+        // for. Fetch constants are 6 dwords apart from 0x4800.
+        {
+          // Use Xenia's own accessor rather than hand-rolled bit maths - the
+          // first attempt decoded the type field wrongly and reported "none"
+          // for a Guide that is visibly drawing text.
+          std::string fetches;
+          for (uint32_t fi = 0; fi < 16; ++fi) {
+            xenos::xe_gpu_texture_fetch_t tf = rf0.GetTextureFetch(fi);
+            if (tf.type == xenos::FetchConstantType::kTexture &&
+                tf.base_address) {
+              fetches += fmt::format("f{}={:08X} ", fi, tf.base_address << 12);
+            }
+          }
+          XELOGI("GuideFetches: {}", fetches.empty() ? "none" : fetches);
+        }
+      }
+    }
+    if ((++nrep % 600) == 0) {
+      std::string acc;
+      for (auto& kv : dests) acc += fmt::format("{:08X}x{} ", kv.first, kv.second);
+      XELOGI("GuideResolveDests: {}", acc);
+    }
+  }
   ++guide_resolve_count_;  // phase 522: see command_processor.h
   // Phase 523: capture the state a working resolve runs with, so the extra
   // resolve issued after the Guide's draws can restore it. Only capture on the
@@ -3667,17 +4400,128 @@ bool D3D12CommandProcessor::IssueCopy() {
   // Phase 946: run the Guide's stream here, immediately before the title's
   // resolve, so its pixels are in EDRAM when the step that copies EDRAM to the
   // displayed image runs. Every other placement leaves them after that copy.
+  uint32_t guide_seq_d0 = guide_draw_count_;
+  // Phase 1098p: the Guide's SYSTEM COMMAND BUFFER stream, executed here -
+  // immediately before the title's resolve - for the reason phase 946 records
+  // just above: this is the only placement whose pixels are still in EDRAM when
+  // the step that copies EDRAM to the displayed image runs. Executing it at
+  // swap instead (1098p, first attempt) dispatched real draws (+2, +3 per
+  // exec, measured) and changed NOTHING on screen, which is exactly the
+  // after-the-copy failure 946 describes.
+  // Phase 1098z6: do NOT re-enter the drain from a nested IssueCopy. Once the
+  // Guide's draws actually reach the backend (1098z5), one of them is a kCopy
+  // draw, which calls IssueCopy, which lands back here - measured running away
+  // to depth=2250 and killing the run. The drain belongs to the OUTERMOST
+  // resolve only; a nested one is the Guide's own resolve doing its job.
+  // Phase 1099j: the console runs the Guide's buffer inside VdSwap, after the
+  // title's resolve. guide_syscmd_at_swap moves the drain there (IssueSwap).
+  if (cvars::guide_syscmd_at_resolve && !cvars::guide_syscmd_at_swap &&
+      guide_syscmd_depth_ == 0) {
+    GuideDrainSystemCommands();
+    uint64_t spair = 0;
+    if (spair) {  // retained dead branch: the pair path, superseded by the ring
+      uint32_t sptr = uint32_t(spair >> 32);
+      uint32_t swords = uint32_t(spair & 0xFFFFFFFFu);
+      if (sptr && swords) {
+        uint32_t before = guide_draw_count_;
+        ExecuteGuestBufferUnsafe(sptr, swords);
+        uint32_t n =
+            guide_syscmd_execs_.fetch_add(1, std::memory_order_relaxed) + 1;
+        if (n <= 3 || (n % 300) == 0) {
+          // Phase 1098q: WHERE does the Guide's own stream draw? Two or three
+          // draws from 2800 words, and its descriptor carries 852x480 rather
+          // than the title's size, so the hypothesis is that it targets its own
+          // surface and is never composited. These are the registers that say
+          // so: RB_SURFACE_INFO (0x2000), RB_COLOR_INFO (0x2001) and the copy
+          // destination block (0x2318..0x231B).
+          RegisterFile& rfv = *register_file_;
+          XELOGI("GuideSysCmd resolve-exec #{}: {:08X} +{} words, draws {} -> {}"
+                 " | surface={:08X} color={:08X} copy={:08X} {:08X} {:08X} {:08X}",
+                 n, sptr, swords, before, guide_draw_count_,
+                 uint32_t(rfv[0x2000]), uint32_t(rfv[0x2001]),
+                 uint32_t(rfv[0x2318]), uint32_t(rfv[0x2319]),
+                 uint32_t(rfv[0x231A]), uint32_t(rfv[0x231B]));
+          // Phase 1098s: does the surface the Guide resolves to actually
+          // CONTAIN anything? Compositing it is only justified if it does, and
+          // "it must, the draws ran" is an assumption, not a measurement.
+          // Sample the destination the stream itself names and count non-zero
+          // and distinct 32-bit pixels over a stride-spaced grid.
+          {
+            uint32_t dst = uint32_t(rfv[0x2319]) & ~0xFFFu;
+            uint32_t wh = uint32_t(rfv[0x231A]);
+            uint32_t w = wh & 0x3FFF, h = (wh >> 16) & 0x3FFF;
+            if (dst && w && h) {
+              const uint8_t* base = memory_->TranslatePhysical(dst);
+              uint32_t nz = 0, samples = 0;
+              uint32_t first_nz = 0;
+              std::set<uint32_t> distinct;
+              for (uint32_t y = 0; y < h; y += 16) {
+                for (uint32_t x = 0; x < w; x += 16) {
+                  uint32_t px = xe::load_and_swap<uint32_t>(
+                      base + (size_t(y) * w + x) * 4);
+                  ++samples;
+                  if (px) {
+                    if (!nz) first_nz = px;
+                    ++nz;
+                  }
+                  if (distinct.size() < 64) distinct.insert(px);
+                }
+              }
+              XELOGI("GuideSurface {:08X} {}x{}: {}/{} non-zero, {} distinct, "
+                     "first {:08X}",
+                     dst, w, h, nz, samples, uint32_t(distinct.size()),
+                     first_nz);
+            }
+          }
+        }
+      }
+    }
+  }
+  if (!guide_seq_left_ && guide_overlay_ptr_ && guide_overlay_words_) {
+    guide_seq_left_ = 160;
+  }
+  if (cvars::guide_atlas_invalidate && !guide_resolve_replay_ &&
+      !guide_overlay_exec_ && guide_overlay_ptr_ && guide_overlay_words_) {
+    uint32_t tc = guide_tex_count_;
+    if (tc > 8u) tc = 8u;
+    static uint32_t inv_logs = 0;
+    for (uint32_t i = 0; i < tc; ++i) {
+      uint32_t tb = guide_tex_base_[i], tsz = guide_tex_size_[i];
+      if (!tb || !tsz) continue;
+      auto r = shared_memory_->MemoryInvalidationCallback(tb, tsz, true);
+      if (inv_logs < 4) {
+        ++inv_logs;
+        XELOGI("GuideAtlasInvalidate: {:08X} +{:X} -> ({:08X}, {:X})", tb, tsz,
+               r.first, r.second);
+      }
+    }
+  }
   if (cvars::guide_overlay_before_resolve && !guide_resolve_replay_ &&
       !guide_overlay_exec_ && guide_overlay_ptr_ && guide_overlay_words_) {
-    uint32_t bptr = guide_overlay_ptr_;
-    uint32_t bwords = guide_overlay_words_;
+    // Phase 1055 bugs: pointer and length as one value (see
+    // guide_overlay_pair_); the fields alone are the fallback.
+    uint64_t bpair = guide_overlay_pair_.load(std::memory_order_acquire);
+    uint32_t bptr = uint32_t(bpair >> 32);
+    uint32_t bwords = uint32_t(bpair & 0xFFFFFFFFu);
+    if (!bptr || !bwords) {
+      bptr = guide_overlay_ptr_;
+      bwords = guide_overlay_words_;
+    }
     if (!cvars::guide_overlay_repeat) {
       guide_overlay_ptr_ = 0;
+      guide_overlay_pair_.store(0, std::memory_order_release);
     }
     guide_overlay_exec_ = true;
     uint32_t before_draws = guide_draw_count_;
     if (cvars::guide_clear_rt_pre) {
       GuideClearRenderTarget(true);
+      // Phase 1010: positive control for the readback - the clear must show
+      // up in the target when read back at this point.
+      static bool rb_pre_done = false;
+      if (!rb_pre_done && cvars::guide_readback_preclear) {
+        rb_pre_done = true;
+        GuideReadbackColor0("preclear");
+      }
     }
     // Phase 992: the occlusion query has only ever run at the swap-time
     // placement, which 980 showed is dead. Whether fragments are produced at
@@ -3685,10 +4529,96 @@ bool D3D12CommandProcessor::IssueCopy() {
     // and it is the difference between "the draws write nothing" and "at this
     // placement the draws are dropped before the rasteriser".
     GuideDrainDebugMessages("pre");
-    GuideOcclusionBegin();
+    // Phase 1010: is the stream about to be parsed the one that was published?
+    auto guide_sum_words = [this](uint32_t p, uint32_t n) {
+      uint32_t s = 0;
+      const uint8_t* q = memory_->TranslateVirtual(p);
+      for (uint32_t i = 0; i < n; ++i) {
+        s += xe::load_and_swap<uint32_t>(q + i * 4);
+      }
+      return s;
+    };
+    uint32_t sum_publish = guide_overlay_sum_;
+    uint32_t sum_consume = guide_sum_words(bptr, bwords);
+    // Phase 1011: keep the title's register state across the burst.
+    static std::vector<uint32_t> guide_reg_snapshot;
+    if (cvars::guide_overlay_restore_regs) {
+      guide_reg_snapshot.assign(
+          register_file_->values,
+          register_file_->values + RegisterFile::kRegisterCount);
+    }
+    static uint32_t oq_bursts = 0;
+    bool oq_this = oq_bursts++ < 3;
+    if (oq_this) {
+      GuideOcclusionBegin();
+    }
+    if (cvars::guide_overlay_color_mode) {
+      uint32_t mc = (*register_file_)[XE_GPU_REG_RB_MODECONTROL];
+      WriteRegister(XE_GPU_REG_RB_MODECONTROL,
+                    (mc & ~7u) | uint32_t(xenos::EdramMode::kColorDepth));
+      static uint32_t mcl = 0;
+      if (mcl++ < 2) {
+        XELOGI("GuideBurstMode: RB_MODECONTROL {:08X} -> {:08X} for the burst",
+               mc, (*register_file_)[XE_GPU_REG_RB_MODECONTROL]);
+      }
+    }
+    guide_overlay_replaying_.store((uint64_t(bptr) << 32) | uint64_t(bwords),
+                                   std::memory_order_release);  // phase 1055 bugs
     ExecuteGuestBufferVirtualUnsafe(bptr, bwords);
-    GuideOcclusionEnd();
+    guide_overlay_replaying_.store(0, std::memory_order_release);
+    if (oq_this) {
+      GuideOcclusionEnd();
+    }
+    if (cvars::guide_overlay_restore_regs) {
+      uint32_t restored = 0, first[6] = {};
+      for (uint32_t i = 0; i < RegisterFile::kRegisterCount; ++i) {
+        if (register_file_->values[i] == guide_reg_snapshot[i]) {
+          continue;
+        }
+        bool special =
+            (i >= XE_GPU_REG_SCRATCH_REG0 && i <= XE_GPU_REG_SCRATCH_REG7) ||
+            i == XE_GPU_REG_COHER_STATUS_HOST ||
+            (i >= XE_GPU_REG_DC_LUT_RW_INDEX && i <= XE_GPU_REG_DC_LUT_30_COLOR);
+        if (special) {
+          continue;
+        }
+        if (restored < 6) {
+          first[restored] = i;
+        }
+        ++restored;
+        WriteRegister(i, guide_reg_snapshot[i]);
+      }
+      static uint32_t rrl = 0;
+      if (rrl++ < 4) {
+        XELOGI("GuideRestoreRegs: {} registers put back after the burst | first "
+               "{:04X} {:04X} {:04X} {:04X} {:04X} {:04X} | COPY_DEST now "
+               "{:08X} pitch {:08X}",
+               restored, first[0], first[1], first[2], first[3], first[4],
+               first[5], (*register_file_)[0x2319], (*register_file_)[0x231A]);
+      }
+    }
+    uint32_t sum_after = guide_sum_words(bptr, bwords);
+    {
+      static uint32_t ssl = 0;
+      if (ssl++ < 6) {
+        XELOGI("GuideStreamSum: publish={:08X} consume={:08X} after={:08X} "
+               "-> {} / {}",
+               sum_publish, sum_consume, sum_after,
+               sum_publish == sum_consume ? "same at consume"
+                                          : "CHANGED before consume",
+               sum_consume == sum_after ? "stable during parse"
+                                        : "CHANGED during parse");
+      }
+    }
     GuideDrainDebugMessages("post");
+    // Phase 1010: read the target back right here, on the burst that drew,
+    // before the resolve and before anything else touches it.
+    if (guide_draw_count_ != before_draws) {
+      static uint32_t rb_bursts = 0;
+      if (rb_bursts++ < 2) {
+        GuideReadbackColor0(rb_bursts == 1 ? "burst" : "burst2");
+      }
+    }
     static_cast<D3D12RenderTargetCache*>(render_target_cache_.get())
         ->GuideLogHostRTCensus();
     // Phase 978: the same two probes the swap-time placement has, so the two
@@ -3708,6 +4638,17 @@ bool D3D12CommandProcessor::IssueCopy() {
              bwords, bptr, guide_draw_count_ - before_draws);
     }
   }
+  if (guide_seq_left_) {
+    --guide_seq_left_;
+    const RegisterFile& sr = *register_file_;
+    XELOGI("GuideSeq: COPY dest={:08X} pitch={:08X} info={:08X} ctrl={:08X} "
+           "surf={:08X} color={:08X} depth={:08X} draws_since_last={} "
+           "burst_draws={}",
+           sr[0x2319], sr[0x231A], sr[0x231B], sr[0x2318], sr[0x2000],
+           sr[0x2001], sr[0x2003], guide_seq_d0 - guide_seq_last_draws_,
+           guide_draw_count_ - guide_seq_d0);
+  }
+  guide_seq_last_draws_ = guide_draw_count_;
   bool ic_sub = BeginSubmission(true);
   if (guide_resolve_replay_) {
     static uint32_t icl = 0;
@@ -4396,6 +5337,423 @@ void D3D12CommandProcessor::GuideRebindRenderTargets() {
     static_cast<D3D12RenderTargetCache*>(render_target_cache_.get())
         ->InvalidateCommandListRenderTargets();
   }
+}
+
+void D3D12CommandProcessor::GuideReadbackColor0(const char* tag) {
+  if (!cvars::guide_readback_rt || !render_target_cache_) {
+    return;
+  }
+  auto* rtc = static_cast<D3D12RenderTargetCache*>(render_target_cache_.get());
+  ID3D12Resource* res = rtc->GuideBoundColor0Resource();
+  if (!res) {
+    XELOGW("GuideReadback[{}]: no colour target has been bound yet", tag);
+    return;
+  }
+  if (!BeginSubmission(true)) {
+    XELOGW("GuideReadback[{}]: no submission", tag);
+    return;
+  }
+  const ui::d3d12::D3D12Provider& provider = GetD3D12Provider();
+  ID3D12Device* device = provider.GetDevice();
+  D3D12_RESOURCE_DESC desc = res->GetDesc();
+  D3D12_TEXTURE_COPY_LOCATION dst = {};
+  dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+  UINT rows = 0;
+  UINT64 row_bytes = 0, total = 0;
+  device->GetCopyableFootprints(&desc, 0, 1, 0, &dst.PlacedFootprint, &rows,
+                                &row_bytes, &total);
+  if (!guide_rb_buffer_ || guide_rb_size_ < total) {
+    if (guide_rb_buffer_) {
+      guide_rb_buffer_->Release();
+      guide_rb_buffer_ = nullptr;
+    }
+    D3D12_RESOURCE_DESC buffer_desc;
+    ui::d3d12::util::FillBufferResourceDesc(buffer_desc, total,
+                                            D3D12_RESOURCE_FLAG_NONE);
+    if (FAILED(device->CreateCommittedResource(
+            &ui::d3d12::util::kHeapPropertiesReadback,
+            provider.GetHeapFlagCreateNotZeroed(), &buffer_desc,
+            D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+            IID_PPV_ARGS(&guide_rb_buffer_)))) {
+      XELOGE("GuideReadback[{}]: failed to create a {} byte readback buffer",
+             tag, total);
+      guide_rb_buffer_ = nullptr;
+      return;
+    }
+    guide_rb_size_ = total;
+  }
+  dst.pResource = guide_rb_buffer_;
+  D3D12_TEXTURE_COPY_LOCATION src = {};
+  src.pResource = res;
+  src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+  src.SubresourceIndex = 0;
+  PushTransitionBarrier(
+      res, rtc->GuideSetBoundColor0State(D3D12_RESOURCE_STATE_COPY_SOURCE),
+      D3D12_RESOURCE_STATE_COPY_SOURCE);
+  SubmitBarriers();
+  deferred_command_list_.D3DCopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+  PushTransitionBarrier(
+      res, rtc->GuideSetBoundColor0State(D3D12_RESOURCE_STATE_RENDER_TARGET),
+      D3D12_RESOURCE_STATE_RENDER_TARGET);
+  SubmitBarriers();
+  uint64_t sub = GetCurrentSubmission();
+  EndSubmission(false);
+  if (!AwaitAllQueueOperationsCompletion()) {
+    XELOGW("GuideReadback[{}]: could not wait for the queue", tag);
+    return;
+  }
+  D3D12_RANGE read_range = {0, size_t(total)};
+  void* mapping = nullptr;
+  if (FAILED(guide_rb_buffer_->Map(0, &read_range, &mapping)) || !mapping) {
+    XELOGW("GuideReadback[{}]: could not map the readback buffer", tag);
+    return;
+  }
+  const uint8_t* base = reinterpret_cast<const uint8_t*>(mapping) +
+                        dst.PlacedFootprint.Offset;
+  uint32_t width = dst.PlacedFootprint.Footprint.Width;
+  uint32_t height = dst.PlacedFootprint.Footprint.Height;
+  uint32_t pitch = dst.PlacedFootprint.Footprint.RowPitch;
+  uint32_t magenta = 0, green = 0, magenta_beyond = 0, nonzero = 0;
+  uint32_t minx = ~0u, miny = ~0u, maxx = 0, maxy = 0;
+  uint32_t sum = 0;
+  const uint32_t visible_rows = std::min<uint32_t>(height, 720);
+  for (uint32_t y = 0; y < height; ++y) {
+    const uint8_t* row = base + size_t(y) * pitch;
+    for (uint32_t x = 0; x < width; ++x) {
+      const uint8_t* p = row + size_t(x) * 4;
+      uint8_t r = p[0], g = p[1], b = p[2];
+      bool is_magenta = r >= 225 && g <= 30 && b >= 225;
+      if (y < visible_rows) {
+        sum += *reinterpret_cast<const uint32_t*>(p);
+        if (r | g | b) {
+          ++nonzero;
+        }
+        if (is_magenta) {
+          ++magenta;
+          minx = std::min(minx, x);
+          maxx = std::max(maxx, x);
+          miny = std::min(miny, y);
+          maxy = std::max(maxy, y);
+        }
+        if (r <= 30 && g >= 225 && b <= 30) {
+          ++green;
+        }
+      } else if (is_magenta) {
+        ++magenta_beyond;
+      }
+    }
+  }
+  auto path = xe::filesystem::GetExecutableFolder() /
+              fmt::format("guide_rt_{}.raw", tag);
+  FILE* f = xe::filesystem::OpenFile(path, "wb");
+  if (f) {
+    uint32_t hdr[3] = {width, visible_rows, width * 4};
+    fwrite(hdr, sizeof(hdr), 1, f);
+    for (uint32_t y = 0; y < visible_rows; ++y) {
+      fwrite(base + size_t(y) * pitch, 1, size_t(width) * 4, f);
+    }
+    fclose(f);
+  }
+  D3D12_RANGE write_range = {0, 0};
+  guide_rb_buffer_->Unmap(0, &write_range);
+  XELOGI("GuideReadback[{}]: resource={} {}x{} fmt={} pitch={} submission={} "
+         "| rows<720: magenta={} bbox x {}..{} y {}..{} green={} nonzero={} "
+         "sum={:08X} | magenta rows>=720: {} | wrote {}",
+         tag, static_cast<void*>(res), width, height, uint32_t(desc.Format),
+         pitch, sub, magenta, magenta ? minx : 0, magenta ? maxx : 0,
+         magenta ? miny : 0, magenta ? maxy : 0, green, nonzero, sum,
+         magenta_beyond, xe::path_to_utf8(path));
+}
+
+static uint64_t GuideSteadyMs() {
+  return uint64_t(std::chrono::duration_cast<std::chrono::milliseconds>(
+                      std::chrono::steady_clock::now().time_since_epoch())
+                      .count());
+}
+
+bool D3D12CommandProcessor::GuideIdleDrainPending() {
+  if (!cvars::guide_syscmd_idle_drain_ms) {
+    return false;
+  }
+  if (guide_syscmd_head_.load(std::memory_order_acquire) ==
+      guide_syscmd_tail_.load(std::memory_order_relaxed)) {
+    return false;
+  }
+  return GuideSteadyMs() - guide_last_drain_ms_.load() >=
+         uint64_t(cvars::guide_syscmd_idle_drain_ms);
+}
+
+void D3D12CommandProcessor::GuideIdleDrain() {
+  if (guide_syscmd_depth_ != 0) {
+    return;
+  }
+  static std::atomic<uint32_t> logs{0};
+  if (++logs <= 5) {
+    XELOGI("GuideSysCmd: idle drain (no swap/resolve drain for {} ms)",
+           GuideSteadyMs() - guide_last_drain_ms_.load());
+  }
+  // Same fetch-constant bracket as the swap-time drain.
+  uint32_t saved_fetch[0xC0];
+  for (uint32_t k = 0; k < 0xC0u; ++k) {
+    saved_fetch[k] = (*register_file_)[0x4800 + k];
+  }
+  GuideDrainSystemCommands();
+  for (uint32_t k = 0; k < 0xC0u; ++k) {
+    if ((*register_file_)[0x4800 + k] != saved_fetch[k]) {
+      WriteRegister(0x4800 + k, saved_fetch[k]);
+    }
+  }
+  EndSubmission(false);
+}
+
+void D3D12CommandProcessor::GuideDrainSystemCommands() {
+  guide_last_drain_ms_ = GuideSteadyMs();
+  // Phase 1098s: drain the WHOLE queue, oldest first. One submit per frame
+  // was never enough - the Guide's resolve lives in the stream that finishes
+  // its frame, not in whichever one happened to be latest when a swap ran.
+  uint32_t qt = guide_syscmd_tail_.load(std::memory_order_relaxed);
+  uint32_t qh = guide_syscmd_head_.load(std::memory_order_acquire);
+  if (!cvars::guide_syscmd_drain_all) {
+    // Default: skip the backlog and run only the newest, which is the
+    // fault-free behaviour. The queue is still advanced so it cannot fill.
+    if (qh != qt) qt = qh - 1;
+  }
+  uint32_t drained = 0;
+  uint32_t batch_before = guide_draw_count_;
+  while (qt != qh) {
+    uint64_t qp = guide_syscmd_ring_[qt % kGuideSysCmdQueue].load(
+        std::memory_order_acquire);
+    ++qt;
+    ++drained;
+    uint32_t qptr = uint32_t(qp >> 32);
+    uint32_t qwords = uint32_t(qp & 0xFFFFFFFFu);
+    if (qptr && qwords) {
+      ++guide_syscmd_depth_;
+      // Phase 1098t: dump the stream once. Three phases have now inferred
+      // what the Guide draws from registers and counters and been wrong each
+      // time; the PM4 itself is the primary source and has never been read.
+      static bool dumped = false;
+      if (!dumped && qwords > 64) {
+        dumped = true;
+        const uint8_t* src = memory_->TranslatePhysical(qptr);
+        if (src) {
+          auto path = xe::filesystem::GetExecutableFolder() /
+                      "guide_syscmd_stream.bin";
+          FILE* f = xe::filesystem::OpenFile(path, "wb");
+          if (f) {
+            fwrite(src, 4, qwords, f);
+            fclose(f);
+            XELOGI("GuideSysCmd dumped {} words from {:08X} to {}", qwords,
+                   qptr, xe::path_to_utf8(path));
+          }
+        }
+      }
+      // Phase 1098z5: THE BUG, and it was mine. ExecuteGuestBufferUnsafe is
+      // defined inline in command_processor.h, inside class CommandProcessor,
+      // so the ExecuteIndirectBuffer it calls binds to the BASE class's copy
+      // of the PM4 template. pm4_command_processor_implement.h is compiled
+      // three times - command_processor.cc defines COMMAND_PROCESSOR as the
+      // base CommandProcessor - and in that copy the draw call is the
+      // QUALIFIED `COMMAND_PROCESSOR::IssueDraw(...)`, which bypasses virtual
+      // dispatch and lands on the base's default:
+      //     virtual bool IssueDraw(...) { return false; }
+      // So every draw in the Guide's stream was parsed, counted, and thrown
+      // away by a no-op, which is exactly what the paired counters measured:
+      //     pm4 920000 (indepth 664965) | backend 255034 (indepth 0)
+      // Calling ExecuteIndirectBuffer here, from inside
+      // D3D12CommandProcessor, resolves to the D3D12 instantiation, whose
+      // IssueDraw is the real backend.
+      guide_at_draw_idx_ = 0;
+      // Phase 1099h: VdSwap's prefix - fetch 15 := the title's front buffer,
+      // then the Guide's PM4. The Guide's stream never writes fetch 15, so
+      // restoring it afterwards returns the title's state exactly.
+      uint32_t saved_tf15[6];
+      const bool route_tf15 =
+          cvars::guide_route_fetch15 && guide_tf15_valid_;
+      if (route_tf15) {
+        // First stream of the first drain after a swap only: once a Guide
+        // stream has run, 0x2319 holds the Guide's own resolve target.
+        if (!guide_lag_dest_) {
+          guide_lag_dest_ = uint32_t((*register_file_)[0x2319]) & ~0xFFFu;
+          guide_lag_bound_ = ((guide_tf15_[1] >> 12) & 0xFFFFFu) << 12;
+          // Direct form of the lag question, valid in either placement: is
+          // the buffer we bind the one the title resolved most recently?
+          ++guide_lag_same_[guide_lag_bound_ == guide_lag_dest_ ? 0 : 1];
+          const uint32_t t = guide_lag_same_[0] + guide_lag_same_[1];
+          if (t <= 3 || (t % 300) == 0) {
+            XELOGI("GuideLagDirect: at_swap={} | bound == title's latest "
+                   "resolve {} | bound != {} | dest={:08X} bound={:08X}",
+                   cvars::guide_syscmd_at_swap, guide_lag_same_[0],
+                   guide_lag_same_[1], guide_lag_dest_, guide_lag_bound_);
+          }
+        }
+        for (uint32_t k = 0; k < 6; ++k) {
+          saved_tf15[k] = (*register_file_)[0x485A + k];
+          WriteRegister(0x485A + k, guide_tf15_[k]);
+        }
+      }
+      ExecuteIndirectBuffer(qptr, qwords);
+      if (route_tf15) {
+        for (uint32_t k = 0; k < 6; ++k) {
+          WriteRegister(0x485A + k, saved_tf15[k]);
+        }
+      }
+      // Phase 1098z8: does the Guide's geometry actually RASTERISE? Guest RAM
+      // at the resolve destination is the wrong place to look (D3D12 resolves
+      // into GPU-side shared memory), so read back the bound colour target
+      // instead - the EDRAM the Guide just drew into. This is the difference
+      // between "compositing its surface is the remaining work" and "its
+      // draws still produce nothing".
+      {
+        static uint32_t rb_n = 0;
+        if (cvars::guide_readback_rt && rb_n < 3) {
+          ++rb_n;
+          GuideReadbackColor0("syscmd");
+        }
+      }
+      --guide_syscmd_depth_;
+    }
+  }
+  guide_syscmd_tail_.store(qt, std::memory_order_release);
+  if (drained) {
+    uint32_t n = guide_syscmd_execs_.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (n <= 3 || (n % 120) == 0) {
+      XELOGI("GuideSysCmd drained {} streams, draws {} -> {} (dropped {})",
+             drained, batch_before, guide_draw_count_,
+             guide_syscmd_dropped_.load(std::memory_order_relaxed));
+    }
+  }
+}
+
+void D3D12CommandProcessor::GuideAlphaReadback(ID3D12Resource* res) {
+  // Phase 1099g: the Guide's own texture (what the composite samples), read
+  // back in full. Alpha is byte 3 for k_8_8_8_8; copy_dest_swap only exchanges
+  // R and B, so it does not touch alpha.
+  if (!res) return;
+  const ui::d3d12::D3D12Provider& provider = GetD3D12Provider();
+  ID3D12Device* device = provider.GetDevice();
+  D3D12_RESOURCE_DESC desc = res->GetDesc();
+  D3D12_TEXTURE_COPY_LOCATION dst = {};
+  dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+  UINT rows = 0;
+  UINT64 row_bytes = 0, total = 0;
+  device->GetCopyableFootprints(&desc, 0, 1, 0, &dst.PlacedFootprint, &rows,
+                                &row_bytes, &total);
+  if (!guide_rb_buffer_ || guide_rb_size_ < total) {
+    if (guide_rb_buffer_) {
+      guide_rb_buffer_->Release();
+      guide_rb_buffer_ = nullptr;
+    }
+    D3D12_RESOURCE_DESC buffer_desc;
+    ui::d3d12::util::FillBufferResourceDesc(buffer_desc, total,
+                                            D3D12_RESOURCE_FLAG_NONE);
+    if (FAILED(device->CreateCommittedResource(
+            &ui::d3d12::util::kHeapPropertiesReadback,
+            provider.GetHeapFlagCreateNotZeroed(), &buffer_desc,
+            D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+            IID_PPV_ARGS(&guide_rb_buffer_)))) {
+      XELOGE("GuideAT: readback buffer creation failed ({} bytes)", total);
+      guide_rb_buffer_ = nullptr;
+      return;
+    }
+    guide_rb_size_ = total;
+  }
+  dst.pResource = guide_rb_buffer_;
+  D3D12_TEXTURE_COPY_LOCATION src = {};
+  src.pResource = res;
+  src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+  src.SubresourceIndex = 0;
+  PushTransitionBarrier(res, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                        D3D12_RESOURCE_STATE_COPY_SOURCE);
+  SubmitBarriers();
+  deferred_command_list_.D3DCopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+  PushTransitionBarrier(res, D3D12_RESOURCE_STATE_COPY_SOURCE,
+                        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+  SubmitBarriers();
+  EndSubmission(false);
+  bool ok = AwaitAllQueueOperationsCompletion();
+  if (ok) {
+    D3D12_RANGE read_range = {0, size_t(total)};
+    void* mapping = nullptr;
+    if (SUCCEEDED(guide_rb_buffer_->Map(0, &read_range, &mapping)) &&
+        mapping) {
+      const uint8_t* base = reinterpret_cast<const uint8_t*>(mapping) +
+                            dst.PlacedFootprint.Offset;
+      const uint32_t w = dst.PlacedFootprint.Footprint.Width;
+      const uint32_t h = dst.PlacedFootprint.Footprint.Height;
+      const uint32_t pitch = dst.PlacedFootprint.Footprint.RowPitch;
+      uint32_t hist[6] = {};  // 0 | 1-63 | 64-127 | 128-191 | 192-254 | 255
+      uint32_t distinct[256] = {};
+      uint64_t asum = 0;
+      for (uint32_t y = 0; y < h; ++y) {
+        const uint8_t* row = base + size_t(y) * pitch;
+        for (uint32_t x = 0; x < w; ++x) {
+          const uint8_t a = row[size_t(x) * 4 + 3];
+          ++distinct[a];
+          asum += a;
+          hist[a == 0 ? 0 : a == 255 ? 5 : 1 + (a >> 6)]++;
+        }
+      }
+      uint32_t ndistinct = 0, top_val = 0, top_n = 0;
+      for (uint32_t v = 0; v < 256; ++v) {
+        if (distinct[v]) ++ndistinct;
+        if (v != 0 && v != 255 && distinct[v] > top_n) {
+          top_n = distinct[v];
+          top_val = v;
+        }
+      }
+      auto px = [&](uint32_t x, uint32_t y) -> uint32_t {
+        if (x >= w || y >= h) return 0;
+        const uint8_t* p = base + size_t(y) * pitch + size_t(x) * 4;
+        return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 |
+               uint32_t(p[2]) << 8 | p[3];
+      };
+      // Change detection on a coarse signature, so the log is one line per
+      // visible change plus a heartbeat.
+      uint64_t sig = 1469598103934665603ull;
+      for (uint32_t k = 0; k < 6; ++k) sig = (sig ^ (hist[k] >> 8)) * 1099511628211ull;
+      sig = (sig ^ (asum / (uint64_t(w) * h))) * 1099511628211ull;
+      // Colour too: the dim may move RGB while alpha stays put.
+      sig = (sig ^ (px(8, 8) >> 12)) * 1099511628211ull;
+      sig = (sig ^ (px(120, 240) >> 12)) * 1099511628211ull;
+      sig = (sig ^ (px(426, 240) >> 12)) * 1099511628211ull;
+      sig = (sig ^ (px(800, 450) >> 12)) * 1099511628211ull;
+      static uint64_t last_sig = 0;
+      static uint32_t lines = 0, dumps = 0, beat = 0;
+      const bool changed = sig != last_sig;
+      if ((changed || (++beat % 120) == 0) && lines < 600) {
+        ++lines;
+        last_sig = sig;
+        XELOGI("GuideAT surface: swap={} {}x{} {} | alpha mean={:.1f} "
+               "distinct={} [0]={} [1-63]={} [64-127]={} [128-191]={} "
+               "[192-254]={} [255]={} mode_mid={}x{} | px RGBA (8,8)={:08X} "
+               "(120,240)={:08X} (426,240)={:08X} (800,450)={:08X}",
+               guide_swap_index_, w, h, changed ? "CHANGED" : "same",
+               double(asum) / double(uint64_t(w) * h), ndistinct, hist[0],
+               hist[1], hist[2], hist[3], hist[4], hist[5], top_val, top_n,
+               px(8, 8), px(120, 240), px(426, 240), px(800, 450));
+        if (changed && dumps < 60) {
+          ++dumps;
+          auto path = xe::filesystem::GetExecutableFolder() /
+                      fmt::format("guide_at_{:05}.raw", guide_swap_index_);
+          FILE* f = xe::filesystem::OpenFile(path, "wb");
+          if (f) {
+            uint32_t hdr[3] = {w, h, w * 4};
+            fwrite(hdr, sizeof(hdr), 1, f);
+            for (uint32_t y = 0; y < h; ++y) {
+              fwrite(base + size_t(y) * pitch, 1, size_t(w) * 4, f);
+            }
+            fclose(f);
+          }
+        }
+      }
+      D3D12_RANGE write_range = {0, 0};
+      guide_rb_buffer_->Unmap(0, &write_range);
+    }
+  } else {
+    XELOGW("GuideAT: could not wait for the queue");
+  }
+  BeginSubmission(true);
 }
 
 void D3D12CommandProcessor::GuideClearRenderTarget(bool green) {

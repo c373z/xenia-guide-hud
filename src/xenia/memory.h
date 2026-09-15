@@ -163,6 +163,9 @@ class BaseHeap {
   // Dumps information about all allocations within the heap to the log.
   void DumpMap();
 
+  // Phase 1099z147: size in bytes and base of the largest free page run.
+  uint32_t LargestFreeRun(uint32_t* out_base = nullptr);
+
   // Allocates pages with the given properties and allocation strategy.
   // This can reserve and commit the pages as well as set protection modes.
   // This will fail if not enough contiguous pages can be found.
@@ -205,6 +208,7 @@ class BaseHeap {
 
   // Queries the size of the region containing the given address.
   bool QuerySize(uint32_t address, uint32_t* out_size);
+  bool QuerySizeUnlocked(uint32_t address, uint32_t* out_size);
 
   // Queries the base and size of a region containing the given address.
   bool QueryBaseAndSize(uint32_t* in_out_address, uint32_t* out_size);
@@ -212,11 +216,21 @@ class BaseHeap {
   // Queries the current protection mode of the region containing the given
   // address.
   bool QueryProtect(uint32_t address, uint32_t* out_protect);
+  // Phase 1056: the raw page entry (state and protections) for one address.
+  // XObject::GetNativeObject needs "has the heap allocated this page", which
+  // the protection bits alone do not answer.
+  bool QueryPageEntry(uint32_t address, uint32_t* out_state,
+                      uint32_t* out_alloc_protect, uint32_t* out_current_protect,
+                      uint32_t* out_base_address, uint32_t* out_region_pages) const;
+  bool QueryProtectUnlocked(uint32_t address, uint32_t* out_protect);
 
   // Queries the currently strictest readability and writability for the entire
   // range.
   xe::memory::PageAccess QueryRangeAccess(uint32_t low_address,
                                           uint32_t high_address);
+  // Phase 1054 dbg: the same without the global lock (a heuristic read).
+  xe::memory::PageAccess QueryRangeAccessUnlocked(uint32_t low_address,
+                                                  uint32_t high_address);
 
   bool Save(ByteStream* stream);
   bool Restore(ByteStream* stream);
@@ -254,6 +268,8 @@ class BaseHeap {
   // Auxiliary free block tracker: maps start_page -> count of contiguous free
   // pages. Kept in sync with page_table_ mutations. Not serialized.
   std::map<uint32_t, uint32_t> free_blocks_;
+
+  friend class PhysicalHeap;  // phase 1099z147: allocation failure report
 };
 
 // Normal heap allowing allocations from guest virtual address ranges.

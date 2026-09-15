@@ -10,10 +10,14 @@
 #ifndef XENIA_KERNEL_KERNEL_STATE_H_
 #define XENIA_KERNEL_KERNEL_STATE_H_
 
+#include <atomic>
 #include <bitset>
 #include <condition_variable>
 #include <functional>
 #include <list>
+#include <map>
+#include <mutex>
+#include <set>
 #include <vector>
 
 #include "xenia/base/bit_map.h"
@@ -91,6 +95,9 @@ static_assert_size(X_KPROCESS, 0x60);
 struct TerminateNotification {
   uint32_t guest_routine;
   uint32_t priority;
+  // Phase 1099v: the guest X_EX_TITLE_TERMINATE_REGISTRATION record; the real
+  // kernel calls routine(r3 = &record).
+  uint32_t record = 0;
 };
 
 // structure for KeTimeStampBuindle
@@ -137,6 +144,17 @@ struct KernelGuestGlobals {
 
   // if LLE emulating Xam, this is needed or you get an immediate freeze
   X_KEVENT UsbdBootEnumerationDoneEvent;
+  // Phase 1095bk: same reason, same subsystem. xboxkrnl exports this as a
+  // VARIABLE (ordinal 0x2F1) and it had no value, so xex_module filled
+  // xam's import slot with its marker for that case:
+  //     *record_slot = 0xD000BEEF | (ordinal & 0xFFF) << 16
+  // which for 0x2F1 is exactly 0xD2F1BEEF - the value that ended up in
+  // the USB record's +0xC, then in the task pool's 8-object wait array,
+  // which KeWaitForMultipleObjects then refused 6.2 MILLION times in one
+  // short run. Zeroed memory is already a valid UNSIGNALLED notification
+  // event (type 0), which is what this should be: no driver load is
+  // required here, so the pool should BLOCK on it rather than spin.
+  X_KEVENT UsbdDriverLoadRequiredEvent;
 };
 struct DPCImpersonationScope {
   uint8_t previous_irql_;
@@ -229,7 +247,8 @@ class KernelState {
   uint32_t AllocateTLS(cpu::ppc::PPCContext* context);
   void FreeTLS(cpu::ppc::PPCContext* context, uint32_t slot);
 
-  void RegisterTitleTerminateNotification(uint32_t routine, uint32_t priority);
+  void RegisterTitleTerminateNotification(uint32_t routine, uint32_t priority,
+                                          uint32_t record = 0);
   void RemoveTitleTerminateNotification(uint32_t routine);
 
   void RegisterModule(XModule* module);
@@ -238,6 +257,9 @@ class KernelState {
   void UnregisterUserModule(UserModule* module);
   bool IsKernelModule(const std::string_view name);
   bool IsModuleLoaded(const std::string_view name);
+  // True if [address, address + length) lies inside a loaded user module's
+  // image (title, xam, hud, bootanim, ...).
+  bool AddressInUserModuleImage(uint32_t address, uint32_t length);
   object_ref<XModule> GetModule(const std::string_view name,
                                 bool user_only = false);
 
@@ -271,6 +293,52 @@ class KernelState {
   // Terminates a title: Unloads all modules, and kills all guest threads.
   // This DOES NOT RETURN if called from a guest thread!
   void TerminateTitle();
+  // Phase 1099v: the real kernel's ExTerminateTitleProcess - tear down ONLY the
+  // title process (threads, executable) and keep system modules/threads (LLE
+  // xam, hud) alive, so xam can load and start the next title in-process.
+  void TerminateTitleProcessSelective();
+  X_STATUS SendDeferredNotifications();
+  // Return addresses from the calling guest thread's back chain ([sp] is the
+  // caller's frame, its return address at [caller_sp - 8]).
+  std::string GuestBackChain(int max_frames = 16);
+  bool deferred_notifications_sent_ = false;
+  // Phase 1099v: >0 while a title switch is being diagnosed (log budget).
+  std::atomic<int32_t> title_switch_log_budget{0};
+  // Phase 1099w: lle_xam_heap0_alias bookkeeping (see emulator.cc).
+  uint32_t heap0_alias_address = 0;
+  std::vector<uint8_t> heap0_original;
+  void RestoreHeap0Alias(const char* why);
+  // Phase 1099z6: guide_xam_boot_launch - the boot title Xenia loaded but did
+  // not start; xam's own launcher adopts it at its first XexLoadExecutable.
+  object_ref<UserModule> boot_launch_module;
+  // Phase 1099z47: NtAllocateVirtualMemory regions owned by the title process
+  // (base addresses), released by the ExTerminateTitleProcess Mm slot.
+  void RecordTitleAllocation(uint32_t base);
+  void ForgetTitleAllocation(uint32_t base);
+  uint32_t ReleaseTitleAllocations(uint32_t* out_bytes);
+  // Phase 1099z52: diagnostic hook run when ExTerminateTitleProcess starts
+  // (emulator.cc arms the thread probe from it).
+  std::function<void()> title_terminate_hook;
+  std::mutex title_allocations_mutex_;
+  std::set<uint32_t> title_allocations_;
+  // Phase 1099z97: MmAllocatePhysicalMemory(Ex) allocations still held, with
+  // the type argument and the calling thread's process type, so the Mm slot
+  // can release the title's physical memory (a second launch of the same game
+  // ran out of physical pages - the first run's were never returned).
+  struct PhysicalAllocation {
+    uint32_t size;
+    uint32_t type;       // MmAllocatePhysicalMemoryEx 1st argument
+    uint32_t proc_type;  // X_PROCTYPE of the calling thread
+    uint32_t lr;
+  };
+  void RecordPhysicalAllocation(uint32_t base, uint32_t size, uint32_t type,
+                                uint32_t lr);
+  void ForgetPhysicalAllocation(uint32_t base);
+  // Releases title-owned physical allocations except those containing any
+  // address in `keep` (ring buffer, persisted front buffer, ...).
+  uint32_t ReleaseTitlePhysicalAllocations(const std::vector<uint32_t>& keep,
+                                           uint64_t* out_bytes);
+  std::map<uint32_t, PhysicalAllocation> physical_allocations_;
 
   void RegisterThread(XThread* thread);
   void UnregisterThread(XThread* thread);

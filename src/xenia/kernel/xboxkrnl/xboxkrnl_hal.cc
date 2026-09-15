@@ -56,11 +56,22 @@ void HalSendSMCMessage_entry(pointer_t<X_SMC_DATA> smc_message,
 DECLARE_XBOXKRNL_EXPORT3(HalSendSMCMessage, kNone, kStub, kImportant,
                          kHighFrequency);
 
+// Phase 1099z12: real kernel 80059800 sends SMC 0x8B with 0x60 for a nonzero
+// argument (OPEN) and 0x62 for zero (CLOSE) - the old mapping was inverted -
+// and the SMC then reports the motion through registered notifications.
 void HalOpenCloseODDTray_entry(dword_t open_close) {
-  kernel_state()->smc()->SetTrayState(open_close ? X_DVD_TRAY_STATE::CLOSED
-                                                 : X_DVD_TRAY_STATE::OPEN);
+  XELOGI("HalOpenCloseODDTray({})", uint32_t(open_close));
+  kernel_state()->smc()->MoveTray(open_close != 0);
 }
-DECLARE_XBOXKRNL_EXPORT1(HalOpenCloseODDTray, kNone, kStub);
+DECLARE_XBOXKRNL_EXPORT1(HalOpenCloseODDTray, kNone, kImplemented);
+
+// Phase 1099z12: HalRegisterSMCNotification(record, register) - xam 8177D878
+// registers 81D42628 (routine 8177D418) with register = 1. It was an
+// undefined extern, so xam never heard about the tray.
+void HalRegisterSMCNotification_entry(dword_t record, dword_t reg) {
+  kernel_state()->smc()->RegisterNotification(record, reg != 0);
+}
+DECLARE_XBOXKRNL_EXPORT1(HalRegisterSMCNotification, kNone, kImplemented);
 
 }  // namespace xboxkrnl
 }  // namespace kernel

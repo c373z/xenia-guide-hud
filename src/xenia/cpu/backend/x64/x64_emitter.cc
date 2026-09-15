@@ -12,6 +12,8 @@
 
 #include "xenia/cpu/backend/x64/x64_emitter.h"
 
+#include "xenia/kernel/kernel_flags.h"
+
 #include <stddef.h>
 
 #include <climits>
@@ -262,9 +264,39 @@ bool X64Emitter::Emit(HIRBuilder* builder, EmitFunctionInfo& func_info) {
     mov(rax, qword[low_address(&trace_header->function_call_count)]);
     and_(rax, 0b00000011);
 
-    // Record call history value into slot (guest addr in RDX).
+    // Record call history value into slot.
+    //
+    // Phase 1096bd: the comment used to say "guest addr in RDX" and this stored
+    // EDX. Measured, EDX at guest-function entry is NOT a code address - on
+    // _XuiFontRenderUninit it recorded 7027F9E8, which the run's own log places
+    // inside "XThreadF80000D4 (7) Stack: 70270000-70280000". So the field never
+    // held a caller, which is why phase 1096 could not attribute the teardown.
+    //
+    // RCX is stored into StackLayout::GUEST_RET_ADDR a few instructions above,
+    // so it is the guest return address and is still live here. Record that
+    // instead: it makes function_caller_history mean what its name says.
+    // Blast radius is one function, because ppc_translator.cc now restricts
+    // kDebugInfoTraceFunctions to trace_coverage_only_fn, and trace_functions
+    // defaults off.
     mov(dword[Xbyak::RegExp(uint32_t(uint64_t(
                   low_address(&trace_header->function_caller_history)))) +
+              rax * 4],
+        ecx);
+
+    // Phase 1096cx: also record the first guest argument (r3). The caller
+    // history answers "who called this"; several questions in phase 1096 need
+    // "with what" - specifically which message id reaches the dispatcher at
+    // 81780460, whose ordinal-580 case fires only when (r3 & 0x2F000) ==
+    // 0x21000. GUEST_CTX_HOME was stored above but GetContextReg() is still
+    // live here, and ecx has already been consumed by the store above.
+    mov(edx, dword[GetContextReg() + offsetof(ppc::PPCContext, r[3])]);
+    mov(dword[Xbyak::RegExp(uint32_t(uint64_t(
+                  low_address(&trace_header->function_arg_history)))) +
+              rax * 4],
+        edx);
+    mov(edx, dword[GetContextReg() + offsetof(ppc::PPCContext, r[4])]);
+    mov(dword[Xbyak::RegExp(uint32_t(uint64_t(
+                  low_address(&trace_header->function_arg2_history)))) +
               rax * 4],
         edx);
 
@@ -400,6 +432,54 @@ void X64Emitter::MarkSourceOffset(const Instr* i) {
     lock();
     inc(qword[low_address(trace_data_->instruction_execute_counts() +
                           instruction_index * 8)]);
+    // Phase 1096ej: see guide_insn_value_addr. Capture one guest register's
+    // value each time one chosen instruction executes.
+    if (cvars::guide_insn_value_addr &&
+        entry->guest_address == cvars::guide_insn_value_addr) {
+      auto* h = trace_data_->header();
+      const uint32_t reg = std::min<uint32_t>(cvars::guide_insn_value_reg, 31u);
+      mov(eax, dword[low_address(&h->insn_value_count)]);
+      and_(eax, 0b00000111);
+      mov(edx, dword[GetContextReg() + offsetof(ppc::PPCContext, r[0]) +
+                     reg * sizeof(uint64_t)]);
+      mov(dword[Xbyak::RegExp(uint32_t(uint64_t(
+                    low_address(&h->insn_value_history)))) +
+                rax * 4],
+          edx);
+      lock();
+      inc(dword[low_address(&h->insn_value_count)]);
+      // Phase 1097: a bucket per value below 256, so one run censuses every
+      // id instead of one run per id. edx still holds the register's low 32
+      // bits, zero-extended into rdx by the mov above.
+      {
+        Xbyak::Label too_big;
+        cmp(edx, 256);
+        jae(too_big);
+        lock();
+        inc(dword[Xbyak::RegExp(uint32_t(uint64_t(
+                      low_address(&h->insn_value_hist)))) +
+                  rdx * 4]);
+        L(too_big);
+      }
+      // Phase 1097: and, uncapped, count how often it holds one chosen value
+      // and keep the last four link registers at a match. edx still holds the
+      // register's low 32 bits from the store above.
+      if (cvars::guide_insn_value_match) {
+        Xbyak::Label no_match;
+        cmp(edx, uint32_t(cvars::guide_insn_value_match));
+        jne(no_match);
+        mov(eax, dword[low_address(&h->insn_match_count)]);
+        and_(eax, 0b00000011);
+        mov(edx, dword[GetContextReg() + offsetof(ppc::PPCContext, lr)]);
+        mov(dword[Xbyak::RegExp(uint32_t(uint64_t(
+                      low_address(&h->insn_match_lr)))) +
+                  rax * 4],
+            edx);
+        lock();
+        inc(dword[low_address(&h->insn_match_count)]);
+        L(no_match);
+      }
+    }
   }
 }
 

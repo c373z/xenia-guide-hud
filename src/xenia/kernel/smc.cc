@@ -8,7 +8,13 @@
  */
 
 #include "xenia/kernel/smc.h"
+#include <algorithm>
+#include <cstring>
+#include "xenia/base/threading.h"
+#include "xenia/cpu/processor.h"
+#include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/util/shim_utils.h"
+#include "xenia/kernel/xthread.h"
 
 DECLARE_int32(avpack);
 
@@ -16,7 +22,7 @@ namespace xe {
 namespace kernel {
 
 SystemManagementController::SystemManagementController()
-    : dvd_tray_state_(X_DVD_TRAY_STATE::OPEN) {
+    : dvd_tray_state_(X_DVD_TRAY_STATE::CLOSED) {
   auto registerQuery =
       [&](X_SMC_CMD command,
           void (SystemManagementController::*fn)(X_SMC_DATA*, X_SMC_DATA*)) {
@@ -90,8 +96,90 @@ void SystemManagementController::QueryDriveTraySensor(
   }
 
   smc_response->command = smc_message->command;
-  smc_response->dvd_tray.state = dvd_tray_state_;
+  // Phase 1099z12: the SMC reports 0x60 | state (xam 8176D7F4-8176D80C
+  // compares 0x60 open, 0x62 closed, 0x63 opening, 0x64 closing). The raw
+  // enum never matched, so xam never learned the tray state.
+  smc_response->dvd_tray.state =
+      static_cast<X_DVD_TRAY_STATE>(0x60 | static_cast<uint8_t>(dvd_tray_state_));
+  static uint32_t query_count = 0;
+  if (++query_count <= 40) {
+    XELOGI("SMC QUERY_TRAY #{} -> {:02X}", query_count,
+           0x60 | static_cast<uint8_t>(dvd_tray_state_));
+  }
 };
+
+void SystemManagementController::RegisterNotification(uint32_t record,
+                                                      bool add) {
+  std::lock_guard<std::mutex> lock(notification_lock_);
+  auto it = std::find(notification_records_.begin(),
+                      notification_records_.end(), record);
+  if (add && it == notification_records_.end()) {
+    notification_records_.push_back(record);
+  } else if (!add && it != notification_records_.end()) {
+    notification_records_.erase(it);
+  }
+  XELOGI("HalRegisterSMCNotification({:08X}, {}) -> {} record(s)", record, add,
+         notification_records_.size());
+}
+
+void SystemManagementController::DispatchNotification(uint8_t event_code) {
+  auto* ks = kernel_state();
+  auto* thread = XThread::GetCurrentThread();
+  if (!ks || !thread) {
+    return;
+  }
+  std::vector<uint32_t> records;
+  {
+    std::lock_guard<std::mutex> lock(notification_lock_);
+    records = notification_records_;
+  }
+  auto* mem = ks->memory();
+  uint32_t msg = mem->SystemHeapAlloc(sizeof(X_SMC_DATA));
+  std::memset(mem->TranslateVirtual(msg), 0, sizeof(X_SMC_DATA));
+  auto* bytes = mem->TranslateVirtual<uint8_t*>(msg);
+  bytes[0] = 0x83;  // SMC interrupt: tray event
+  bytes[1] = event_code;
+  for (uint32_t record : records) {
+    uint32_t routine =
+        xe::load_and_swap<uint32_t>(mem->TranslateVirtual(record));
+    XELOGI("SMC tray event {:02X} -> {:08X}({:08X})", event_code, routine,
+           record);
+    uint64_t args[] = {record, msg};
+    ks->processor()->Execute(thread->thread_state(), routine, args, 2);
+  }
+  mem->SystemHeapFree(msg);
+}
+
+void SystemManagementController::MoveTray(bool open) {
+  if (tray_moving_.exchange(true)) {
+    XELOGW("SMC: tray already moving, ignoring {} request",
+           open ? "open" : "close");
+    return;
+  }
+  auto* ks = kernel_state();
+  auto mover = object_ref<XHostThread>(new XHostThread(
+      ks, 256 * 1024, 0,
+      [this, open]() -> int {
+        const auto moving =
+            open ? X_DVD_TRAY_STATE::OPENING : X_DVD_TRAY_STATE::CLOSING;
+        const auto done =
+            open ? X_DVD_TRAY_STATE::OPEN : X_DVD_TRAY_STATE::CLOSED;
+        SetTrayState(moving);
+        DispatchNotification(0x60 | static_cast<uint8_t>(moving));
+        // Tray motion. Not measured on hardware; about a second.
+        xe::threading::Sleep(std::chrono::milliseconds(1200));
+        if (tray_hook_) {
+          tray_hook_(open);
+        }
+        SetTrayState(done);
+        DispatchNotification(0x60 | static_cast<uint8_t>(done));
+        tray_moving_ = false;
+        return 0;
+      },
+      ks->GetSystemProcess()));
+  mover->set_name("SMC Tray");
+  mover->Create();
+}
 
 void SystemManagementController::QueryAvPack(X_SMC_DATA* smc_message,
                                              X_SMC_DATA* smc_response) {
