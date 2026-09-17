@@ -1,6 +1,7 @@
 # how to use
 
 put a zipped system update in `updates\`
+- pre kinect needs 1888, decompress that in `\firmware`
 
 open xenia
 
