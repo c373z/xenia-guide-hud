@@ -9,6 +9,7 @@
 
 #include <unordered_map>
 
+#include "xenia/kernel/power_reset.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_ob.h"
 #include "xenia/base/logging.h"
 #include "xenia/cpu/processor.h"
@@ -999,6 +1000,8 @@ dword_result_t ObTranslateSymbolicLink_entry(
   return X_STATUS_SUCCESS;
 }
 DECLARE_XBOXKRNL_EXPORT1(ObTranslateSymbolicLink, kNone, kImplemented);
+
+void ResetObStateForPowerOff() { InsertedObjectTable().clear(); }
 
 }  // namespace xboxkrnl
 }  // namespace kernel

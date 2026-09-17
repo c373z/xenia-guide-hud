@@ -46,6 +46,9 @@ void MenuItem::AddChild(std::unique_ptr<MenuItem> child_item) {
 
 void MenuItem::AddChild(MenuItemPtr child_item) {
   auto child_item_ptr = child_item.get();
+  // Phase 1099z165: parent_item() existed but was never set, so nothing could
+  // walk back up. SetItemEnabled needs it to find the popup an entry sits in.
+  child_item_ptr->parent_item_ = this;
   children_.emplace_back(std::move(child_item));
   OnChildAdded(child_item_ptr);
 }
@@ -58,6 +61,15 @@ void MenuItem::RemoveChild(MenuItem* child_item) {
       break;
     }
   }
+}
+
+void MenuItem::RemoveAllChildren() {
+  if (children_.empty()) {
+    return;
+  }
+  // The platform menu still needs the children to find its own entries.
+  OnChildrenRemoved();
+  children_.clear();
 }
 
 MenuItem* MenuItem::child(size_t index) { return children_[index].get(); }

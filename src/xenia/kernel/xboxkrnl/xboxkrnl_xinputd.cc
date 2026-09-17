@@ -48,13 +48,16 @@
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <ctime>
 #include <mutex>
 
+#include "xenia/base/filesystem.h"
 #include "xenia/base/logging.h"
 #include "xenia/base/threading.h"
 #include "xenia/cpu/processor.h"
 #include "xenia/emulator.h"
 #include "xenia/hid/input_system.h"
+#include "xenia/kernel/power_reset.h"
 #include "xenia/kernel/kernel_flags.h"
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/util/shim_utils.h"
@@ -91,6 +94,7 @@ struct Port {
 };
 std::array<Port, 4> g_ports;
 std::mutex g_ports_lock;
+uint32_t g_bind_idx_ptr = 0;  // guest scratch for DrvBindToUser's user index
 
 hid::InputSystem* Input() {
   auto* emu = kernel_state()->emulator();
@@ -152,7 +156,7 @@ uint32_t RunBind(cpu::ThreadState* ts, uint32_t port, bool unbind,
   const uint32_t cb = g_bind_cb.load();
   if (!cb) return kStatusNoCallback;
   auto* mem = kernel_state()->memory();
-  static uint32_t idx_ptr = 0;
+  uint32_t& idx_ptr = g_bind_idx_ptr;
   if (!idx_ptr) idx_ptr = mem->SystemHeapAlloc(4);
   xe::store_and_swap<uint32_t>(mem->TranslateVirtual(idx_ptr), 0xFF000000u);
   uint64_t args[] = {PortUserId(port), kClassRgc | port, 0, unbind ? 1u : 0u,
@@ -179,6 +183,87 @@ void DeliverGuide(cpu::ThreadState* ts, uint32_t port, uint32_t kind) {
   XELOGI("XInputd: Guide button port {} -> DrvXenonButtonPressed({:08X}, 0, "
          "{}) via {:08X}",
          port, kClassRgc | port, kind, cb);
+}
+
+// Phase 1099z156: TEST TOOLING, not console behaviour. Record port 0's button
+// state changes (all 16 bits, Guide included) to kernel_xinputd_record_path in
+// hid_test_pad_script format "ms:hexbuttons:hold_ms,...", so a play session can
+// be replayed in an automated run (--hid=nop --hid_test_pad_script=@<file>).
+// ms is measured from process start; the nop driver's clock starts when it is
+// constructed, a fraction of a second later, so a replay runs slightly early.
+// Phase 1099z159: sticks and triggers are recorded too (a step is
+// "ms:buttons:hold:lt:rt:lx:ly:rx:ry" when any of them is off rest); the first
+// recorder kept buttons only, so stick navigation was lost on replay.
+const auto g_process_start = std::chrono::steady_clock::now();
+std::mutex g_rec_lock;
+FILE* g_rec_file = nullptr;
+hid::X_INPUT_GAMEPAD g_rec_pad = {};
+uint32_t g_rec_since_ms = 0;
+bool g_rec_first = true;
+
+bool PadAtRest(const hid::X_INPUT_GAMEPAD& g) {
+  return !uint16_t(g.buttons) && !g.left_trigger && !g.right_trigger &&
+         !int16_t(g.thumb_lx) && !int16_t(g.thumb_ly) && !int16_t(g.thumb_rx) &&
+         !int16_t(g.thumb_ry);
+}
+
+// A new step starts when a button changes, a trigger moves by 16 or more, or a
+// stick axis moves by 2048 or more (sticks jitter; the recorded values are the
+// exact ones sampled at the start of the step).
+bool PadChanged(const hid::X_INPUT_GAMEPAD& a, const hid::X_INPUT_GAMEPAD& b) {
+  auto moved = [](int x, int y, int t) { return (x > y ? x - y : y - x) >= t; };
+  return uint16_t(a.buttons) != uint16_t(b.buttons) ||
+         moved(a.left_trigger, b.left_trigger, 16) ||
+         moved(a.right_trigger, b.right_trigger, 16) ||
+         moved(int16_t(a.thumb_lx), int16_t(b.thumb_lx), 2048) ||
+         moved(int16_t(a.thumb_ly), int16_t(b.thumb_ly), 2048) ||
+         moved(int16_t(a.thumb_rx), int16_t(b.thumb_rx), 2048) ||
+         moved(int16_t(a.thumb_ry), int16_t(b.thumb_ry), 2048) ||
+         PadAtRest(a) != PadAtRest(b);
+}
+
+void RecordPad(const hid::X_INPUT_GAMEPAD& pad) {
+  if (cvars::kernel_xinputd_record_path.empty()) return;
+  std::lock_guard<std::mutex> lock(g_rec_lock);
+  if (!g_rec_file) {
+    // "{time}" in the path becomes the launch time, so a window that records
+    // every session does not overwrite the previous recording.
+    std::string path = xe::path_to_utf8(cvars::kernel_xinputd_record_path);
+    const size_t at = path.find("{time}");
+    if (at != std::string::npos) {
+      std::time_t t = std::time(nullptr);
+      std::tm tm_local;
+      localtime_s(&tm_local, &t);
+      char stamp[32];
+      std::strftime(stamp, sizeof(stamp), "%Y%m%d-%H%M%S", &tm_local);
+      path.replace(at, 6, stamp);
+    }
+    g_rec_file = xe::filesystem::OpenFile(xe::to_path(path), "wb");
+    if (!g_rec_file) return;
+    XELOGI("XInputd: recording port 0 buttons, sticks and triggers to {}",
+           path);
+  }
+  if (!PadChanged(pad, g_rec_pad)) return;
+  const uint32_t now_ms = uint32_t(
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - g_process_start)
+          .count());
+  const auto& g = g_rec_pad;
+  if (!PadAtRest(g)) {
+    // Close the held step: it lasted from g_rec_since_ms until now.
+    fprintf(g_rec_file, "%s%u:%04X:%u", g_rec_first ? "" : ",", g_rec_since_ms,
+            uint16_t(g.buttons), now_ms - g_rec_since_ms);
+    if (g.left_trigger || g.right_trigger || int16_t(g.thumb_lx) ||
+        int16_t(g.thumb_ly) || int16_t(g.thumb_rx) || int16_t(g.thumb_ry)) {
+      fprintf(g_rec_file, ":%u:%u:%d:%d:%d:%d", uint8_t(g.left_trigger),
+              uint8_t(g.right_trigger), int16_t(g.thumb_lx), int16_t(g.thumb_ly),
+              int16_t(g.thumb_rx), int16_t(g.thumb_ry));
+    }
+    g_rec_first = false;
+    fflush(g_rec_file);
+  }
+  g_rec_pad = pad;
+  g_rec_since_ms = now_ms;
 }
 
 // The RGC driver's device thread: connection -> bind, and the Guide button.
@@ -216,6 +301,7 @@ int RgcThread() {
       if (!is || is->GetState(port, kAllTypes, &st) != X_ERROR_SUCCESS) {
         continue;
       }
+      if (port == 0) RecordPad(st.gamepad);
       const bool guide = (uint16_t(st.gamepad.buttons) & 0x0400) != 0;
       const auto now = std::chrono::steady_clock::now();
       if (guide) {
@@ -305,9 +391,22 @@ DECLARE_XBOXKRNL_EXPORT1(DrvSetAutobind, kInput, kImplemented);
 
 // --- device queries ----------------------------------------------------------
 
+// The trailing "suppressed" out param of XInputdGetCapabilities (3rd) and
+// XInputdReadState (4th) is newer than those exports. Measured at every xam
+// call site (2 ReadState, 1 GetCapabilities per build): 2.0.6770 7357 8955
+// 12625 13604 14699 14717 14719 leave r5/r6 unset - a leftover; 6770's r6 was
+// 4 and the zeroing write host-faulted at guest 4, hanging the Blades
+// dashboard on its boot logo. 15574 16197 16547 16747 17559 pass a stack
+// address. Same boundary as XInputdGetDeviceStats below.
+constexpr uint16_t kSuppressedOutArgBuild = 15574;
+
+static bool HasSuppressedOutArg() {
+  return kernel_state()->GetKernelVersion()->build >= kSuppressedOutArgBuild;
+}
+
 dword_result_t XInputdGetCapabilities_entry(dword_t context, lpvoid_t caps_ptr,
                                             lpdword_t suppressed_ptr) {
-  if (suppressed_ptr) *suppressed_ptr = 0;
+  if (suppressed_ptr && HasSuppressedOutArg()) *suppressed_ptr = 0;
   uint32_t port;
   uint32_t status = DecodeRgc(context, &port);
   if (status) return status;
@@ -328,7 +427,7 @@ DECLARE_XBOXKRNL_EXPORT2(XInputdGetCapabilities, kInput, kImplemented,
 dword_result_t XInputdReadState_entry(dword_t context, lpdword_t packet_ptr,
                                       lpvoid_t gamepad_ptr,
                                       lpdword_t suppressed_ptr) {
-  if (suppressed_ptr) *suppressed_ptr = 0;
+  if (suppressed_ptr && HasSuppressedOutArg()) *suppressed_ptr = 0;
   uint32_t port;
   uint32_t status = DecodeRgc(context, &port);
   if (status) return status;
@@ -365,22 +464,39 @@ dword_result_t XInputdWriteState_entry(dword_t context, dword_t user,
 }
 DECLARE_XBOXKRNL_EXPORT1(XInputdWriteState, kInput, kImplemented);
 
+// Older kernels take two arguments. Measured at xam's call sites: 2.0.12625,
+// 2.0.13604 and 2.0.14719 call XInputdGetDeviceStats(handle, &stats) (13604
+// xam 818C4600: r3 = handle, r4 = caller's buffer, r5/r6 left as leftovers
+// pointing into xam's own frame); 2.0.16197 and 17559 call
+// (handle, 1, &stats, &flag) like the 17489 kernel at 80130660. Reading the
+// 4-argument form on an old xam zeroed 0x1C bytes over xam's saved LR and it
+// crashed (blr to 0).
+constexpr uint16_t kGetDeviceStats4ArgBuild = 15574;
+
 dword_result_t XInputdGetDeviceStats_entry(dword_t context, dword_t unk,
                                            lpvoid_t stats_ptr,
                                            lpdword_t flag_ptr) {
-  if (flag_ptr) *flag_ptr = 0;
+  auto* mem = kernel_memory();
+  uint32_t stats_addr = stats_ptr.guest_address();
+  uint32_t flag_addr = flag_ptr.guest_address();
+  if (kernel_state()->GetKernelVersion()->build < kGetDeviceStats4ArgBuild) {
+    stats_addr = uint32_t(unk);
+    flag_addr = 0;
+  }
+  if (flag_addr) xe::store_and_swap<uint32_t>(mem->TranslateVirtual(flag_addr), 0);
   uint32_t port;
   uint32_t status = DecodeRgc(context, &port);
   if (status) return status;
-  if (stats_ptr) std::memset(stats_ptr.as<uint8_t*>(), 0, 0x1C);
+  uint8_t* stats = stats_addr ? mem->TranslateVirtual(stats_addr) : nullptr;
+  if (stats) std::memset(stats, 0, 0x1C);
   if (!HostPresent(port, nullptr)) return kStatusNotConnected;
-  if (stats_ptr) {
+  if (stats) {
     // HOST-SIDE: +0x0/+0x4/+0x8/+0x14/+0x18 come from driver state that is not modelled
     // (left zero). +0xC and +0x10 are what xam checks.
-    xe::store_and_swap<uint32_t>(stats_ptr.as<uint8_t*>() + 0xC, kClassRgc);
-    xe::store_and_swap<uint32_t>(stats_ptr.as<uint8_t*>() + 0x10, port);
+    xe::store_and_swap<uint32_t>(stats + 0xC, kClassRgc);
+    xe::store_and_swap<uint32_t>(stats + 0x10, port);
   }
-  LogOnce("XInputdGetDeviceStats", context, unk, stats_ptr.guest_address());
+  LogOnce("XInputdGetDeviceStats", context, unk, stats_addr);
   return X_STATUS_SUCCESS;
 }
 DECLARE_XBOXKRNL_EXPORT1(XInputdGetDeviceStats, kInput, kImplemented);
@@ -497,6 +613,18 @@ dword_result_t HidGetCapabilities_entry(dword_t a, dword_t b) {
   return kStatusNotConnected;
 }
 DECLARE_XBOXKRNL_EXPORT1(HidGetCapabilities, kInput, kStub);
+
+void ResetXInputdStateForPowerOff() {
+  g_bind_cb = 0;
+  g_config_cb = 0;
+  g_failed_bind_cb = 0;
+  g_failed_bind = 0;
+  g_autobind = 0;
+  g_rgc_started = false;
+  g_bind_idx_ptr = 0;
+  std::lock_guard<std::mutex> lock(g_ports_lock);
+  g_ports = {};
+}
 
 }  // namespace xboxkrnl
 }  // namespace kernel

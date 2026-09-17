@@ -35,10 +35,24 @@ class HostPathDevice : public Device {
   uint32_t attributes() const override { return 0; }
   uint32_t component_name_max_length() const override { return 255; }
 
-  uint32_t total_allocation_units() const override { return 128 * 1024; }
-  uint32_t available_allocation_units() const override { return 128 * 1024; }
-  uint32_t sectors_per_allocation_unit() const override { return 1; }
+  uint32_t total_allocation_units() const override;
+  uint32_t available_allocation_units() const override;
+  uint32_t sectors_per_allocation_unit() const override {
+    return model_bytes_ ? 32 : 1;
+  }
   uint32_t bytes_per_sector() const override { return 0x200; }
+
+  // Phase 1099z159: report the volume as a drive of this many bytes (FATX
+  // geometry: 512-byte sectors, 16 KB clusters), with free space = the host
+  // folder's free space capped at that size. 0 = Xenia's fixed 64 MB answer.
+  void set_model_bytes(uint64_t bytes) { model_bytes_ = bytes; }
+
+  // 2026-09-16: the entry tree is read from the host folder once, at
+  // Initialize, so files the host writes afterwards (the game library
+  // installer) are invisible to the guest until the next mount. Add entries for
+  // every host file and folder under `entry` (an entry of this device) that the
+  // tree does not have yet. Additive only: nothing is removed or re-read.
+  void RefreshFromHost(Entry* entry);
 
  protected:
   friend class HostPathEntry;
@@ -51,6 +65,7 @@ class HostPathDevice : public Device {
   std::filesystem::path host_path_;
   std::unique_ptr<Entry> root_entry_;
   bool read_only_;
+  uint64_t model_bytes_ = 0;
 };
 
 }  // namespace vfs

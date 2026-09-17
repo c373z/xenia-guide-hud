@@ -10,6 +10,7 @@
 #ifndef XENIA_KERNEL_UTIL_OBJECT_TABLE_H_
 #define XENIA_KERNEL_UTIL_OBJECT_TABLE_H_
 
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -87,7 +88,14 @@ class ObjectTable {
   // process type (1 title, 2 system) - the real ExTerminateTitleProcess Ob
   // slot (17003 kernel 80075528) empties the TITLE handle table. Returns the
   // number of handles closed.
-  uint32_t CloseHandlesOwnedBy(uint8_t owner);
+  // Phase 1099z160: keep_wrapper, when set, is asked about every
+  // XObject::is_guest_dispatcher_wrapper() entry (not a handle on the
+  // console) with the guest address of its dispatcher; true leaves the entry
+  // alone. *out_kept / *out_wrappers count kept / all wrapper entries.
+  uint32_t CloseHandlesOwnedBy(
+      uint8_t owner,
+      const std::function<bool(uint32_t)>& keep_wrapper = nullptr,
+      uint32_t* out_kept = nullptr, uint32_t* out_wrappers = nullptr);
 
  private:
   struct ObjectTableEntry {

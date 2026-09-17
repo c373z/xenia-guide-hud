@@ -196,6 +196,12 @@ class XObject {
   bool is_host_object() const { return host_object_; }
   void set_host_object(bool host_object) { host_object_ = host_object; }
 
+  // Phase 1099z160: created by GetNativeObject on first use of a dispatcher
+  // the GUEST built in its own memory (KeInitializeEvent or inline). On the
+  // console such an object has no handle at all; the table entry exists only
+  // because Xenia needs one to find the host side again.
+  bool is_guest_dispatcher_wrapper() const { return guest_dispatcher_wrapper_; }
+
   template <typename T>
   T* guest_object() {
     return memory()->TranslateVirtual<T*>(guest_object_ptr_);
@@ -279,6 +285,8 @@ class XObject {
 
   // Host objects are persisted through resets/etc.
   bool host_object_ = false;
+  // Phase 1099z160: see is_guest_dispatcher_wrapper().
+  bool guest_dispatcher_wrapper_ = false;
 
  private:
   std::atomic<int32_t> pointer_ref_count_;

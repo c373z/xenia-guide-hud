@@ -7,6 +7,7 @@
  ******************************************************************************
  */
 
+#include "xenia/kernel/power_reset.h"
 #include "xenia/kernel/xtimer.h"
 
 #include <condition_variable>
@@ -197,6 +198,14 @@ X_STATUS XTimer::SetTimer(int64_t due_time, uint32_t period_ms,
 X_STATUS XTimer::Cancel() {
   std::lock_guard<std::mutex> lock(timer_lock_);
   return timer_->Cancel() ? X_STATUS_SUCCESS : X_STATUS_UNSUCCESSFUL;
+}
+
+void ResetXTimerStateForPowerOff() {
+  // The "Kernel DPC" thread died with the other kernel threads; the next
+  // queued DPC starts a new one.
+  std::lock_guard<std::mutex> lock(g_dpc_lock);
+  g_dpc_queue.clear();
+  g_dpc_thread_started = false;
 }
 
 }  // namespace kernel

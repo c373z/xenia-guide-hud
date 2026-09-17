@@ -117,6 +117,14 @@ class ProfileManager {
 
   std::filesystem::path GetProfilePath(const uint64_t xuid) const;
   std::filesystem::path GetProfilePath(const std::string xuid) const;
+  // The directory a profile's FILES live in. A profile written by the real xam
+  // on the emulated hard drive is a folder-backed STFS package: the profile
+  // path is the package FILE (the CON header) and its contents sit in
+  // "<package>.stfs" beside it (see StfsCreateDevice in xboxkrnl_io.cc).
+  // Xenia's own profiles are plain folders at the profile path itself.
+  std::filesystem::path ProfilesRoot() const;
+  std::filesystem::path GetProfileFilesPath(const uint64_t xuid) const;
+  bool CreateProfilePackage(const uint64_t xuid) const;
 
   std::vector<uint64_t> FindProfiles() const;
 

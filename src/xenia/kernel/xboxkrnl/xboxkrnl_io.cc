@@ -1,4 +1,4 @@
-﻿/**
+/**
  ******************************************************************************
  * Xenia : Xbox 360 Emulator Research Project                                 *
  ******************************************************************************
@@ -8,6 +8,7 @@
  */
 
 #include "xenia/base/logging.h"
+#include "xenia/kernel/power_reset.h"
 #include "xenia/kernel/info/file.h"
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/util/shim_utils.h"
@@ -20,7 +21,13 @@
 #include "xenia/kernel/kernel_flags.h"
 #include "xenia/vfs/device.h"
 #include "xenia/vfs/devices/host_path_device.h"
+#include "xenia/vfs/devices/disc_image_device.h"
+#include "xenia/vfs/devices/disc_image_entry.h"
+#include "xenia/emulator.h"
 #include "xenia/vfs/devices/host_path_entry.h"
+#include "xenia/vfs/devices/xcontent_container_device.h"
+#include "xenia/vfs/host_disc_link.h"
+#include <cstring>
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -30,6 +37,8 @@
 #include <vector>
 #include "third_party/crypto/TinySHA1.hpp"
 #include "xenia/xbox.h"
+
+DECLARE_bool(disc_synth_security_block);
 
 namespace xe {
 namespace kernel {
@@ -749,8 +758,9 @@ static_assert_size(X_PARTITION_INFO, 0x10);
 // image is mounted at \Device\CdRom0 (the tray hook mounts it).
 static const char kCdRomDevicePath[] = "\\Device\\CdRom0";
 
+static uint32_t g_cdrom_devobj = 0;
 uint32_t GuideCdRomDeviceObject() {
-  static uint32_t devobj = 0;
+  uint32_t& devobj = g_cdrom_devobj;
   if (!devobj) {
     auto* mem = kernel_memory();
     devobj = mem->SystemHeapAlloc(0x80);
@@ -779,6 +789,39 @@ static X_STATUS GuideCdRomIoctl(uint32_t code, lpvoid_t out, uint32_t out_len,
       } else if (out && out_len >= 4) {
         xe::store_and_swap<uint32_t>(out, 4);
         *information = 4;
+      }
+      break;
+    case 0x24090:
+      // Security-sector summary (17489 kernel 800C4700, from the drive's
+      // 0x804-byte security sector): +00 u32 hash-tree root sector, +04 u8,
+      // +05 u8 flags (bit 4 = dash verifies reads), +08 u32, +0C/+10 layer
+      // sector counts, +14 SHA-1 of the 0x8000 bytes at the root sector.
+      // HOST-SIDE (disc_synth_security_block): a plain image has no security
+      // sector; report a zero root block past the partition (served by
+      // DiscImageFile) with verification off. Otherwise zero-filled as before.
+      if (!media) {
+        status = X_STATUS(0xC0000013);
+      } else if (cvars::disc_synth_security_block && out && out_len >= 8) {
+        std::memset(out, 0, out_len);
+        auto* root = kernel_state()->file_system()->ResolvePath(
+            std::string(kCdRomDevicePath) + "\\");
+        const uint32_t sectors =
+            root ? uint32_t((root->size() + 0x7FF) / 0x800) : 0;
+        xe::store_and_swap<uint32_t>(out, sectors);
+        if (out_len >= 0x28) {
+          // Layer split: the XGD2 break (0x1B3880) when it fits, else half.
+          const uint32_t l0 = sectors > 0x1B3880 ? 0x1B3880u : sectors / 2;
+          xe::store_and_swap<uint32_t>(out.as<uint8_t*>() + 0x0C, l0);
+          xe::store_and_swap<uint32_t>(out.as<uint8_t*>() + 0x10,
+                                       sectors - l0);
+          static const uint8_t kZeroBlockSha1[20] = {
+              0x51, 0x88, 0x43, 0x18, 0x49, 0xb4, 0x61, 0x31, 0x52, 0xfd,
+              0x7b, 0xdb, 0xa6, 0xa3, 0xff, 0x0a, 0x4f, 0xd6, 0x42, 0x4b};
+          std::memcpy(out.as<uint8_t*>() + 0x14, kZeroBlockSha1, 20);
+        }
+        *information = out_len >= 0x28 ? 0x28 : (out_len >= 0xC ? 0xC : 8);
+      } else if (out && out_len) {
+        std::memset(out, 0, out_len);
       }
       break;
     default:
@@ -1184,18 +1227,82 @@ dword_result_t StfsCreateDevice_entry(lpvoid_t params, dword_t params_size,
       kernel_state()->object_table()->LookupObject<XFile>(file_handle);
   auto* host_entry =
       file ? dynamic_cast<vfs::HostPathEntry*>(file->entry()) : nullptr;
-  if (!host_entry || device_name.empty()) {
+  auto* disc_entry =
+      file ? dynamic_cast<vfs::DiscImageEntry*>(file->entry()) : nullptr;
+  std::error_code ec;
+  // Phase 1099z176: a package INSIDE the disc image (every NXE-era disc's
+  // \nxeart, a PIRS theme holding the dash tile/background art). The real
+  // kernel's STFS driver reads it straight off the disc. HOST-SIDE: Xenia's
+  // STFS reader only opens host files, so the entry's bytes are copied once
+  // to <cache>\disc_packages\<device name> and that copy is mounted read-only.
+  // The guest sees the same package contents either way.
+  std::filesystem::path package_path;
+  bool read_only_source = false;
+  if (host_entry) {
+    package_path = host_entry->host_path();
+    read_only_source = host_entry->device()->is_read_only();
+  } else if (disc_entry && disc_entry->mmap() && !device_name.empty()) {
+    const std::string leaf = device_name.substr(device_name.rfind('\\') + 1);
+    package_path = kernel_state()->emulator()->cache_root() / "disc_packages";
+    std::filesystem::create_directories(package_path, ec);
+    package_path /= leaf;
+    const size_t size = disc_entry->data_size();
+    if (std::filesystem::file_size(package_path, ec) != size || ec) {
+      std::ofstream out(package_path, std::ios::binary | std::ios::trunc);
+      out.write(reinterpret_cast<const char*>(disc_entry->mmap()->data() +
+                                              disc_entry->data_offset()),
+                std::streamsize(size));
+      if (!out) {
+        XELOGE("StfsCreateDevice: could not copy disc package to {}",
+               xe::path_to_utf8(package_path));
+        return X_STATUS_UNSUCCESSFUL;
+      }
+    }
+    read_only_source = true;
+    XELOGI("StfsCreateDevice: disc package {} ({} bytes) -> {}",
+           disc_entry->path(), size, xe::path_to_utf8(package_path));
+  }
+  if (package_path.empty() || device_name.empty()) {
     XELOGE("StfsCreateDevice: '{}' handle {:08X} is not a host file",
            device_name, file_handle);
     return X_STATUS_INVALID_PARAMETER;
   }
-  std::filesystem::path folder = host_entry->host_path();
+  std::filesystem::path folder = package_path;
   folder += ".stfs";
-  std::error_code ec;
-  std::filesystem::create_directories(folder, ec);
-
   auto* fs = kernel_state()->file_system();
-  if (!fs->ResolvePath(device_name)) {
+
+  // Phase 1099z161: a REAL package on a read-only device (the system update's
+  // FFFE07DF packages in SystemExtPartition) is mounted with Xenia's own STFS
+  // reader instead of the folder model, which only suits packages this
+  // emulator creates and writes (profiles, saves). Without it the avatar
+  // asset pack mounted as an empty folder and the Avatar Editor could not open
+  // AvatarAssetPack:\AvatarAssetPack.toc.
+  bool real_package = false;
+  if (read_only_source && !std::filesystem::exists(folder, ec)) {
+    std::ifstream in(package_path, std::ios::binary);
+    char magic[4] = {};
+    in.read(magic, 4);
+    real_package = in.gcount() == 4 && (std::memcmp(magic, "PIRS", 4) == 0 ||
+                                        std::memcmp(magic, "CON ", 4) == 0 ||
+                                        std::memcmp(magic, "LIVE", 4) == 0);
+  }
+  if (real_package) {
+    if (!fs->ResolvePath(device_name)) {
+      auto device = vfs::XContentContainerDevice::CreateContentDevice(
+          device_name, package_path);
+      if (!device || !device->Initialize() ||
+          !fs->RegisterDevice(std::move(device))) {
+        XELOGE("StfsCreateDevice: could not open package {} at {}",
+               xe::path_to_utf8(package_path), device_name);
+        return X_STATUS_UNSUCCESSFUL;
+      }
+    }
+    folder.clear();  // StfsControlDevice code 3: the stored descriptor
+  } else {
+    std::filesystem::create_directories(folder, ec);
+  }
+
+  if (!real_package && !fs->ResolvePath(device_name)) {
     auto device =
         std::make_unique<vfs::HostPathDevice>(device_name, folder, false);
     if (!device->Initialize() || !fs->RegisterDevice(std::move(device))) {
@@ -1227,6 +1334,93 @@ dword_result_t StfsCreateDevice_entry(lpvoid_t params, dword_t params_size,
   return X_STATUS_SUCCESS;
 }
 DECLARE_XBOXKRNL_EXPORT1(StfsCreateDevice, kFileSystem, kImplemented);
+
+// Phase 1099z164: NTSTATUS SvodCreateDevice(desc) - mounts a Games-on-Demand
+// (SVOD) package, e.g. a disc installed to the hard drive. Contract from the
+// 17489 kernel 80194680 and xam's caller 81680AC4 (0x2C bytes):
+//   +0x00 ANSI_STRING device name   +0x08 ANSI_STRING package path
+//   +0x10 root directory handle     +0x14 -> SVOD volume descriptor (>=0x24)
+//   +0x18 cache object              +0x1C u32 caller data size
+//   +0x20 OUT device object         +0x24 OUT caller data (in the extension,
+//                                   after 0x4C0 + 8 * descriptor[1] bytes)
+// The kernel's SVOD file system is Xenia's XContentContainerDevice here; the
+// device object and extension are zeroed stand-ins (HOST-SIDE model).
+dword_result_t SvodCreateDevice_entry(lpvoid_t desc, const ppc_context_t& ctx) {
+  if (!cvars::kernel_svod_create_device || !desc) {
+    return X_STATUS_NOT_IMPLEMENTED;
+  }
+  auto* p = desc.as<uint8_t*>();
+  auto* mem = kernel_memory();
+  const std::string device_name = xe::utf8::canonicalize_guest_path(
+      util::TranslateAnsiPath(mem, desc.as<X_ANSI_STRING*>()));
+  std::string package_path = util::TranslateAnsiPath(
+      mem, reinterpret_cast<const X_ANSI_STRING*>(p + 8));
+  const uint32_t root_handle = xe::load_and_swap<uint32_t>(p + 0x10);
+  const uint32_t vol_ptr = xe::load_and_swap<uint32_t>(p + 0x14);
+  const uint32_t data_size = xe::load_and_swap<uint32_t>(p + 0x1C);
+  const uint32_t cache_count =
+      vol_ptr ? *mem->TranslateVirtual<uint8_t*>(vol_ptr + 1) : 0;
+
+  auto* fs = kernel_state()->file_system();
+  vfs::Entry* entry = nullptr;
+  if (root_handle) {
+    if (auto root =
+            kernel_state()->object_table()->LookupObject<XFile>(root_handle)) {
+      entry = root->entry()->ResolvePath(package_path);
+    }
+  } else {
+    entry = fs->ResolvePath(package_path);
+  }
+  auto* host_entry = dynamic_cast<vfs::HostPathEntry*>(entry);
+  XELOGI("SvodCreateDevice: {} <- '{}' (root {:08X}, cache {}, data {:X}) "
+         "lr={:08X}",
+         device_name, package_path, root_handle, cache_count, data_size,
+         uint32_t(ctx->lr));
+  if (!host_entry || device_name.empty()) {
+    return X_STATUS_OBJECT_NAME_NOT_FOUND;
+  }
+  std::filesystem::path header = host_entry->host_path();
+  std::filesystem::path data_folder = header;
+  if (header.extension() == ".data") {
+    header.replace_extension();
+  } else {
+    data_folder += ".data";
+  }
+  // Phase 1099z165: HOST-SIDE. A package the host-side game library installed
+  // holds a link to a disc image instead of the SVOD fragments a real install
+  // would have copied. Mount the image itself; its GDFX file system has the
+  // same shape at the device root that the SVOD package would have had.
+  const std::filesystem::path linked_disc = vfs::ReadHostDiscLink(data_folder);
+  if (!fs->ResolvePath(device_name)) {
+    std::unique_ptr<vfs::Device> device;
+    if (!linked_disc.empty()) {
+      XELOGI("SvodCreateDevice: {} is a host game library link -> {}",
+             xe::path_to_utf8(header), xe::path_to_utf8(linked_disc));
+      device = std::make_unique<vfs::DiscImageDevice>(device_name, linked_disc);
+    } else {
+      device =
+          vfs::XContentContainerDevice::CreateContentDevice(device_name, header);
+    }
+    if (!device || !device->Initialize() ||
+        !fs->RegisterDevice(std::move(device))) {
+      XELOGE("SvodCreateDevice: could not open {} at {}",
+             xe::path_to_utf8(header), device_name);
+      return X_STATUS_UNSUCCESSFUL;
+    }
+  }
+  const uint32_t ext_size = 0x4C0 + 8 * cache_count + data_size;
+  const uint32_t devobj = mem->SystemHeapAlloc(0x100);
+  const uint32_t ext = mem->SystemHeapAlloc(ext_size);
+  if (!devobj || !ext) {
+    return X_STATUS_NO_MEMORY;
+  }
+  std::memset(mem->TranslateVirtual(devobj), 0, 0x100);
+  std::memset(mem->TranslateVirtual(ext), 0, ext_size);
+  xe::store_and_swap<uint32_t>(p + 0x20, devobj);
+  xe::store_and_swap<uint32_t>(p + 0x24, ext + 0x4C0 + 8 * cache_count);
+  return X_STATUS_SUCCESS;
+}
+DECLARE_XBOXKRNL_EXPORT1(SvodCreateDevice, kFileSystem, kSketchy);
 
 dword_result_t StfsControlDevice_entry(dword_t device_object, dword_t code,
                                        lpvoid_t buffer) {
@@ -1331,6 +1525,12 @@ dword_result_t IoDismountVolumeByName_entry(lpvoid_t name) {
   return X_STATUS_SUCCESS;
 }
 DECLARE_XBOXKRNL_EXPORT1(IoDismountVolumeByName, kFileSystem, kStub);
+
+void ResetIoStateForPowerOff() {
+  g_cdrom_devobj = 0;
+  std::lock_guard<std::mutex> lock(stfs_folder_lock);
+  stfs_folder_volumes.clear();
+}
 
 }  // namespace xboxkrnl
 }  // namespace kernel

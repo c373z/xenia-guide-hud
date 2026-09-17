@@ -10,6 +10,7 @@
 #include "xenia/base/logging.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 
@@ -53,6 +54,11 @@ DEFINE_bool(log_to_debugprint, false, "Dump the log to DebugPrint.", "Logging");
 DEFINE_bool(flush_log, true, "Flush log file after each log line batch.",
             "Logging");
 
+DEFINE_bool(log_timestamps, false,
+            "Prefix each log line with the milliseconds since the logger "
+            "started (diagnostic, phase 1099z159).",
+            "Logging");
+
 DEFINE_uint32(log_mask, 0,
               "Disables specific categorizes for more granular debug logging. "
               "Kernel = 1, Apu = 2, Cpu = 4, Gpu = 8.",
@@ -79,6 +85,7 @@ struct LogLine {
   uint16_t _pad_0;  // (2b) padding
   bool terminate;
   char prefix_char;
+  uint32_t time_ms;  // since the logger started (--log_timestamps)
 };
 
 thread_local char thread_log_buffer_[64_KiB];
@@ -249,6 +256,8 @@ class Logger {
 
  private:
   static constexpr size_t kBufferSize = 8_MiB;
+  const std::chrono::steady_clock::time_point start_time_ =
+      std::chrono::steady_clock::now();
   uint8_t buffer_[kBufferSize] = {};
 
   static constexpr size_t kBlockSize = 256;
@@ -338,6 +347,13 @@ class Logger {
             fmt::format_to_n(prefix + 3, sizeof(prefix) - 3, "{:08X}",
                              line.thread_id);
             Write(prefix, sizeof(prefix) - 1);
+            if (cvars::log_timestamps) {
+              // Phase 1099z159 (diagnostic): "T+<ms> " after the thread id.
+              char stamp[16];
+              auto r = fmt::format_to_n(stamp, sizeof(stamp), "T+{:08} ",
+                                        line.time_ms);
+              Write(stamp, r.size);
+            }
           }
 
           if (line.buffer_length) {
@@ -422,6 +438,9 @@ class Logger {
     line.thread_id = thread_id;
     line.prefix_char = prefix_char;
     line.terminate = terminate;
+    line.time_ms = uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::steady_clock::now() - start_time_)
+                                .count());
 
     rb.Write(&line, sizeof(LogLine));
     if (buffer_length) {

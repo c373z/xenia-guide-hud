@@ -10,6 +10,7 @@
 #ifndef XENIA_KERNEL_XAM_CONTENT_MANAGER_H_
 #define XENIA_KERNEL_XAM_CONTENT_MANAGER_H_
 
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -32,6 +33,22 @@ class KernelState;
 namespace xe {
 namespace kernel {
 namespace xam {
+
+// FOLDER-BACKED CONSOLE PACKAGES. The real xam on the emulated hard drive
+// stores a package as an XContent header FILE with its files in a
+// "<package>.stfs" folder beside it (see StfsCreateDevice in xboxkrnl_io.cc);
+// Xenia's own packages are plain folders at the package path itself. These
+// helpers let the host read and write the console's form so both sides see the
+// same content root (see the content_root default in xenia_main.cc).
+
+// The directory a package's FILES live in: "<package>.stfs" for a console
+// package, the package path itself otherwise.
+std::filesystem::path ContentPackageFilesPath(
+    const std::filesystem::path& package_path);
+
+// True when package_path is a console package (a file with its contents folder
+// beside it).
+bool IsConsolePackage(const std::filesystem::path& package_path);
 
 // If set in XCONTENT_AGGREGATE_DATA, will be substituted with the running
 // titles ID
@@ -118,6 +135,23 @@ struct XCONTENT_AGGREGATE_DATA : XCONTENT_DATA {
   }
 };
 static_assert_size(XCONTENT_AGGREGATE_DATA, 0x148);
+
+// Fills the fields a console package's own XContent header carries (content
+// type, title id, display name, and the profile that owns it). Used when there
+// is no Xenia ".header" sidecar, which is every package the console wrote.
+bool ReadConsolePackageHeader(const std::filesystem::path& package_path,
+                              XCONTENT_AGGREGATE_DATA& data);
+
+// Writes an XContent header the real xam accepts, and creates the
+// "<package>.stfs" folder its files go in. Mirrors the header xam itself
+// writes for a package it creates (measured from a profile package on the
+// emulated hard drive): CON magic, this build's console certificate, one
+// unrestricted license, metadata version 2 and a zeroed volume descriptor -
+// the folder-backed driver never reads the descriptor's block layout.
+bool WriteConsolePackage(const std::filesystem::path& package_path,
+                         XContentType content_type, uint32_t title_id,
+                         uint64_t profile_id,
+                         const std::u16string& display_name);
 
 struct XCONTENT_CROSS_TITLE_DATA {
   XCONTENT_DATA content_data;

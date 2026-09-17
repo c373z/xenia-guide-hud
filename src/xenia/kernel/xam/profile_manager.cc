@@ -7,6 +7,7 @@
  ******************************************************************************
  */
 
+#include <algorithm>
 #include <regex>
 
 #include "xenia/kernel/xam/profile_manager.h"
@@ -14,7 +15,9 @@
 #include "xenia/base/logging.h"
 #include "xenia/emulator.h"
 #include "xenia/hid/input_system.h"
+#include "xenia/kernel/kernel_flags.h"
 #include "xenia/kernel/kernel_state.h"
+#include "xenia/kernel/xam/content_manager.h"
 #include "xenia/kernel/util/crypto_utils.h"
 #include "xenia/vfs/devices/host_path_device.h"
 
@@ -26,6 +29,12 @@ DEFINE_string(logged_profile_slot_2_xuid, "",
               "XUID of the profile to load on boot in slot 2", "Profiles");
 DEFINE_string(logged_profile_slot_3_xuid, "",
               "XUID of the profile to load on boot in slot 3", "Profiles");
+DEFINE_string(create_profile_gamertag, "",
+              "Create a profile with this gamertag at startup unless one "
+              "already has it - the profile manager's Create button without "
+              "the window. With an emulated hard drive the profile is written "
+              "in the console's own form, so the real xam sees it too.",
+              "Profiles");
 
 namespace xe {
 namespace kernel {
@@ -103,6 +112,23 @@ ProfileManager::ProfileManager(KernelState* kernel_state,
 
   for (const auto account_xuid : FindProfiles()) {
     LoadAccount(account_xuid);
+  }
+
+  if (!cvars::create_profile_gamertag.empty()) {
+    const std::string gamertag = cvars::create_profile_gamertag;
+    const bool exists = std::ranges::any_of(
+        accounts_, [&gamertag](const auto& entry) {
+          return entry.second.GetGamertagString() == gamertag;
+        });
+    if (exists) {
+      XELOGI("create_profile_gamertag: '{}' already exists", gamertag);
+    } else if (!IsGamertagValid(gamertag)) {
+      XELOGE("create_profile_gamertag: '{}' is not a valid gamertag",
+             gamertag);
+    } else {
+      XELOGI("create_profile_gamertag: creating '{}' -> {}", gamertag,
+             CreateProfile(gamertag, false) ? "created" : "FAILED");
+    }
   }
 
   if (!cvars::logged_profile_slot_0_xuid.empty()) {
@@ -233,8 +259,40 @@ bool ProfileManager::LoadAccount(const uint64_t xuid) {
   return true;
 }
 
+// Creates the profile package itself: on a console with an emulated hard drive
+// that is an XContent header file plus its "<package>.stfs" files folder, the
+// form the real xam reads (a plain folder is invisible to it); without one,
+// Xenia's plain folder.
+bool ProfileManager::CreateProfilePackage(const uint64_t xuid) const {
+  const std::filesystem::path profile_path = GetProfilePath(xuid);
+  std::error_code ec;
+  if (std::filesystem::exists(profile_path, ec)) {
+    return false;
+  }
+  if (cvars::guide_hdd_path.empty()) {
+    return std::filesystem::create_directories(profile_path);
+  }
+  // The display name xam gives a profile package is the profile's XUID, not
+  // the gamertag (measured on packages xam wrote).
+  const std::string xuid_string = fmt::format("{:016X}", xuid);
+  return WriteConsolePackage(profile_path, XContentType::kProfile,
+                             kDashboardID, xuid, xe::to_utf16(xuid_string));
+}
+
+std::filesystem::path ProfileManager::GetProfileFilesPath(
+    const uint64_t xuid) const {
+  const std::filesystem::path profile_path = GetProfilePath(xuid);
+  std::filesystem::path contents = profile_path;
+  contents += ".stfs";
+  std::error_code ec;
+  if (std::filesystem::is_directory(contents, ec)) {
+    return contents;
+  }
+  return profile_path;
+}
+
 bool ProfileManager::MountProfile(const uint64_t xuid, std::string mount_path) {
-  std::filesystem::path profile_path = GetProfilePath(xuid);
+  std::filesystem::path profile_path = GetProfileFilesPath(xuid);
   if (mount_path.empty()) {
     mount_path = fmt::format(kDefaultMountFormat, xuid);
   }
@@ -339,13 +397,27 @@ void ProfileManager::LoginMultiple(
                                        slots_mask);
 }
 
+// Where the console keeps its profiles. With an emulated hard drive that is
+// the console's own Content tree, which the real xam reads and writes - the
+// host has to look there or it reports "No Profiles Found" while the console
+// has profiles. It is deliberately NOT the content root: pointing the whole
+// HLE content manager at that tree made a title using HLE XamContent see the
+// console's packages and stop loading its own save (2026-09-15). Profiles are
+// host-managed, per-title content is not.
+std::filesystem::path ProfileManager::ProfilesRoot() const {
+  if (!cvars::guide_hdd_path.empty()) {
+    return std::filesystem::absolute(
+        std::filesystem::path(cvars::guide_hdd_path) / "Content");
+  }
+  return kernel_state_->emulator()->content_root();
+}
+
 std::vector<uint64_t> ProfileManager::FindProfiles() const {
   // Info: Profile directory name is also it's offline xuid
   std::vector<uint64_t> profiles_xuids;
 
   auto profiles_directory = xe::filesystem::FilterByName(
-      xe::filesystem::ListDirectories(
-          kernel_state_->emulator()->content_root()),
+      xe::filesystem::ListDirectories(ProfilesRoot()),
       std::regex("[0-9A-F]{16}"));
 
   for (const auto& profile : profiles_directory) {
@@ -423,7 +495,7 @@ std::filesystem::path ProfileManager::GetProfileContentPath(
     const uint64_t xuid, const uint32_t title_id,
     const XContentType content_type) const {
   std::filesystem::path profile_content_path =
-      kernel_state_->emulator()->content_root() / fmt::format("{:016X}", xuid);
+      ProfilesRoot() / fmt::format("{:016X}", xuid);
   if (title_id != -1 && title_id != 0) {
     profile_content_path =
         profile_content_path / fmt::format("{:08X}", title_id);
@@ -444,7 +516,7 @@ std::filesystem::path ProfileManager::GetProfilePath(
 
 std::filesystem::path ProfileManager::GetProfilePath(
     const std::string xuid) const {
-  return kernel_state_->emulator()->content_root() / xuid / kDashboardStringID /
+  return ProfilesRoot() / xuid / kDashboardStringID /
          fmt::format("{:08X}", static_cast<uint32_t>(XContentType::kProfile)) /
          xuid;
 }
@@ -453,7 +525,7 @@ bool ProfileManager::CreateProfile(const std::string gamertag, bool autologin,
                                    bool default_xuid) {
   const auto xuid = !default_xuid ? GenerateXuid() : 0xB13EBABEBABEBABE;
 
-  if (!std::filesystem::create_directories(GetProfilePath(xuid))) {
+  if (!CreateProfilePackage(xuid)) {
     return false;
   }
 
@@ -474,7 +546,7 @@ bool ProfileManager::CreateProfile(const X_XAMACCOUNTINFO* account_info,
     xuid = GenerateXuid();
   }
 
-  if (!std::filesystem::create_directories(GetProfilePath(xuid))) {
+  if (!CreateProfilePackage(xuid)) {
     return false;
   }
 

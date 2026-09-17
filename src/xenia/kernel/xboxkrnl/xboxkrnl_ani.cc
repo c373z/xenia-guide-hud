@@ -17,6 +17,7 @@
 // its UI thread (81794BC8) and its title start (8175DDC8), so neither draws
 // until the animation has released the GPU.
 
+#include "xenia/kernel/power_reset.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_ani.h"
 
 #include <atomic>
@@ -245,6 +246,15 @@ void AniSetLogo_entry(lpvoid_t bits, dword_t arg, const ppc_context_t& ctx) {
   if (XSUCCEEDED(t->Create())) t->Wait(3, 0, 0, nullptr);
 }
 DECLARE_XBOXKRNL_EXPORT1(AniSetLogo, kNone, kImplemented);
+
+void ResetAniStateForPowerOff() {
+  std::lock_guard<std::mutex> lock(ani_lock);
+  ani_handle = 0;
+  ani_thread.reset();
+  ani_started = false;
+  ani_refs = 0;
+  ani_done.reset();
+}
 
 }  // namespace xboxkrnl
 }  // namespace kernel

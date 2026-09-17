@@ -315,6 +315,14 @@ class Emulator {
   // "off"), consumed by the power-on wait in xenia_main.
   bool ConsumeGuidePowerPress() { return guide_power_press_.exchange(false); }
   std::atomic<bool> guide_power_press_{false};
+  // Host Power Off: the console is off, waiting for the Guide button (the
+  // startup wait with guide_power_on_with_guide_button, or after PowerOff).
+  bool awaiting_power_on() const { return awaiting_power_on_; }
+  void set_awaiting_power_on(bool v) { awaiting_power_on_ = v; }
+  std::atomic<bool> awaiting_power_on_{false};
+  // Host Power Off: stop every guest thread and unload every user module
+  // (title and LLE xam) so this Emulator can be destroyed.
+  void PowerOff();
 
   // Set once hud.xex is loaded: its registered message-handler address and
   // the guest buffers used to dispatch to it. Lets the Guide button drive the

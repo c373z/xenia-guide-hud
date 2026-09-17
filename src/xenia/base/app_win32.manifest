@@ -26,6 +26,11 @@
       <!-- https://blogs.windows.com/windowsdeveloper/2017/04/04/high-dpi-scaling-improvements-desktop-applications-windows-10-creators-update/ -->
       <!-- PerMonitor on Windows 10 1607, PerMonitorV2 on Windows 10 1703. -->
       <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2,PerMonitor</dpiAwareness>
+      <!-- 2026-09-16: paths past MAX_PATH (Windows 10 1607+ with the system's
+           LongPathsEnabled on). From an install folder ~184 characters deep,
+           cache_host\modules\<sha>\executable_addr_flags.bin (XexInfoCache)
+           was past 260 and the boot died after xam loaded. -->
+      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
     </asmv3:windowsSettings>
   </asmv3:application>
 </assembly>

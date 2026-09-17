@@ -9,6 +9,17 @@
 
 #include "xenia/kernel/user_module.h"
 
+#include "xenia/base/cvar.h"
+DECLARE_uint32(trace_heap_watch_addr);
+// 2026-09-16 (nxe-agent, research probe): flat VA-indexed image dump of every
+// user module as it loads (after imports resolve), <dir>\<name>.bin. The
+// title/xam dumps do not cover hud.xex/signin.xex, whose NXE 7357 images are
+// delta-patched at load and exist nowhere else.
+DEFINE_string(guide_dump_modules_dir, "",
+              "Research probe: write every loaded user module's image as a "
+              "flat VA-indexed <name>.bin into this folder. Off when empty.",
+              "Guide");
+
 #include "xenia/base/byte_stream.h"
 #include "xenia/base/logging.h"
 #include "xenia/base/xxhash.h"
@@ -233,6 +244,49 @@ X_STATUS UserModule::LoadContinue() {
   // Copy the xex2 header into guest memory.
   auto header = this->xex_module()->xex_header();
   auto security_header = this->xex_module()->xex_security_info();
+  // 1099z17559-11 (diagnostic): does the heap's page table record the image?
+  // GetNativeObject's guard reads it, and objects inside dash's image were
+  // refused as "state 0".
+  {
+    const uint32_t b = xex_module()->base_address();
+    const uint32_t sz = security_header->image_size;
+    auto* h = memory()->LookupHeap(b);
+    uint32_t s0 = 0, p0 = 0, s1 = 0, p1 = 0, s2 = 0, p2 = 0;
+    if (h) {
+      h->QueryPageEntry(b, &s0, nullptr, &p0, nullptr, nullptr);
+      h->QueryPageEntry(b + sz / 2, &s1, nullptr, &p1, nullptr, nullptr);
+      h->QueryPageEntry(b + sz - 1, &s2, nullptr, &p2, nullptr, nullptr);
+    }
+    if (cvars::trace_heap_watch_addr && h) {
+      uint32_t ws = 0, wp = 0, wb = 0, wn = 0;
+      h->QueryPageEntry(cvars::trace_heap_watch_addr, &ws, nullptr, &wp, &wb,
+                        &wn);
+      XELOGI("ImagePages: {} watch {:08X}: state {} prot {:X} base {:08X} "
+             "pages {}", name(), uint32_t(cvars::trace_heap_watch_addr), ws, wp,
+             wb, wn);
+    }
+    XELOGI("ImagePages: {} {:08X}+{:08X} heap {:08X} page {} | start state {} "
+           "prot {:X} | mid state {} prot {:X} | end state {} prot {:X}",
+           name(), b, sz, h ? h->heap_base() : 0, h ? h->page_size() : 0, s0,
+           p0, s1, p1, s2, p2);
+  }
+  if (!cvars::guide_dump_modules_dir.empty()) {
+    const uint32_t b = xex_module()->base_address();
+    const uint32_t sz = security_header->image_size;
+    auto* h = memory()->LookupHeap(b);
+    std::string path = cvars::guide_dump_modules_dir + "\\" + name() + ".bin";
+    if (FILE* f = std::fopen(path.c_str(), "wb")) {
+      static const uint8_t kZero[0x1000] = {0};
+      for (uint32_t off = 0; off < sz; off += 0x1000u) {
+        const uint32_t n = std::min<uint32_t>(0x1000u, sz - off);
+        const bool ok = h && h->QueryRangeAccess(b + off, b + off + n - 1) !=
+                                 xe::memory::PageAccess::kNoAccess;
+        std::fwrite(ok ? memory()->TranslateVirtual(b + off) : kZero, 1, n, f);
+      }
+      std::fclose(f);
+      XELOGI("DumpModule: {} {:08X}+{:08X} -> {}", name(), b, sz, path);
+    }
+  }
   guest_xex_header_ = memory()->SystemHeapAlloc(header->header_size);
 
   uint8_t* xex_header_ptr = memory()->TranslateVirtual(guest_xex_header_);
@@ -252,8 +306,10 @@ X_STATUS UserModule::LoadContinue() {
   // and [security_info+4] is image_size - which is what the surrounding code
   // is gathering alongside [r3+4] and [r3+0x10].
   //
-  // OFF BY DEFAULT because the pointer interpretation is INFERRED from the
-  // dereference, not yet confirmed from the console loader's own code. The
+  // Phase 1099z154: CONFIRMED from the 17489 kernel, which reads this field as
+  // a pointer itself ([ldr+0x58] -> +0x10 -> +0x10C at 800A04C0, and -> +0x160
+  // at 800A131C, no base added) - kernel behaviour, not a workaround. Still off
+  // by default so existing configs are unchanged; the harnesses turn it on. The
   // security info lies inside the copied header whenever the offset is within
   // header_size, so rewriting the field to an absolute guest pointer leaves
   // the pointed-to bytes exactly where the offset already said they were.

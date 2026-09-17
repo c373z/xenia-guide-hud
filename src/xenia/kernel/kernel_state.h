@@ -260,6 +260,8 @@ class KernelState {
   // True if [address, address + length) lies inside a loaded user module's
   // image (title, xam, hud, bootanim, ...).
   bool AddressInUserModuleImage(uint32_t address, uint32_t length);
+  // The loaded user module whose image contains address, or null.
+  object_ref<UserModule> GetUserModuleByAddress(uint32_t address);
   object_ref<XModule> GetModule(const std::string_view name,
                                 bool user_only = false);
 
@@ -297,6 +299,12 @@ class KernelState {
   // title process (threads, executable) and keep system modules/threads (LLE
   // xam, hud) alive, so xam can load and start the next title in-process.
   void TerminateTitleProcessSelective();
+  // Drop a pre-loaded boot image xam never started (see kernel_state.cc).
+  void DiscardUnstartedBootImage(object_ref<UserModule> module);
+  XHostThread* dispatch_thread() const { return dispatch_thread_.get(); }
+  uint32_t TerminateGuestThreadsSafely(
+      const std::function<bool(XThread*)>& pick, const char* tag,
+      bool guest_only = true);
   X_STATUS SendDeferredNotifications();
   // Return addresses from the calling guest thread's back chain ([sp] is the
   // caller's frame, its return address at [caller_sp - 8]).
@@ -304,6 +312,9 @@ class KernelState {
   bool deferred_notifications_sent_ = false;
   // Phase 1099v: >0 while a title switch is being diagnosed (log budget).
   std::atomic<int32_t> title_switch_log_budget{0};
+  // 1099z170: guide_trace_transitions - log every VdSwap until this
+  // steady_clock millisecond count (set when a launch is requested).
+  std::atomic<int64_t> transition_trace_until_ms{0};
   // Phase 1099w: lle_xam_heap0_alias bookkeeping (see emulator.cc).
   uint32_t heap0_alias_address = 0;
   std::vector<uint8_t> heap0_original;
@@ -319,6 +330,9 @@ class KernelState {
   // Phase 1099z52: diagnostic hook run when ExTerminateTitleProcess starts
   // (emulator.cc arms the thread probe from it).
   std::function<void()> title_terminate_hook;
+  // 2026-09-16: called after a user module is loaded and title patches are
+  // applied, before its entry point runs (cover art dash patch, emulator.cc).
+  std::function<void(UserModule*)> user_module_loaded_hook;
   std::mutex title_allocations_mutex_;
   std::set<uint32_t> title_allocations_;
   // Phase 1099z97: MmAllocatePhysicalMemory(Ex) allocations still held, with
@@ -424,6 +438,9 @@ class KernelState {
 
   X_RESULT ApplyTitleUpdate(const object_ref<UserModule> title_module,
                             const object_ref<UserModule> patch_module);
+
+  // Phase 1099z159 (DIAGNOSTIC): --kernel_sample_from_ms/--kernel_sample_to_ms.
+  void StartGuestSampler();
 
   Emulator* emulator_;
   Memory* memory_;

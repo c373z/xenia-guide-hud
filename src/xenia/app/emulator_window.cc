@@ -21,6 +21,8 @@
 #endif
 
 #include "xenia/app/console_settings_dialog.h"
+#include "xenia/app/firmware_dialog.h"
+#include "xenia/app/game_library.h"
 #include "xenia/base/assert.h"
 #include "xenia/base/clock.h"
 #include "xenia/base/cvar.h"
@@ -28,12 +30,15 @@
 DECLARE_string(keybind_guide);
 #include "xenia/base/debugging.h"
 #include "xenia/base/logging.h"
+#include "xenia/base/mutex.h"
 #include "xenia/base/platform.h"
 #include "xenia/base/profiling.h"
 #include "xenia/base/system.h"
 #include "xenia/base/threading.h"
+#include "xenia/config.h"
 #include "xenia/cpu/processor.h"
 #include "xenia/emulator.h"
+#include "xenia/kernel/kernel_flags.h"
 #include "xenia/gpu/command_processor.h"
 #include "xenia/gpu/graphics_system.h"
 #include "xenia/hid/input_system.h"
@@ -50,6 +55,8 @@ DECLARE_string(keybind_guide);
 #include "xenia/ui/presenter.h"
 #include "xenia/ui/ui_event.h"
 #include "xenia/ui/virtual_key.h"
+#include "xenia/vfs/devices/host_path_device.h"
+#include "xenia/vfs/virtual_file_system.h"
 
 #include "version.h"
 
@@ -68,6 +75,21 @@ DECLARE_bool(readback_memexport);
 
 DEFINE_bool(fullscreen, false, "Whether to launch the emulator in fullscreen.",
             "Display");
+
+// HOST-SIDE enhancement (upscale_to_window): pick draw_resolution_scale_x/_y
+// from the window size at startup. See xenia_main.cc ApplyUpscaleToWindow.
+DEFINE_bool(upscale_to_window, true,
+            "HOST-SIDE enhancement: choose the internal render resolution "
+            "scale (draw_resolution_scale_x/_y) from the size of the window "
+            "(or its monitor in fullscreen) - the smallest integer scale whose "
+            "1280x720 image covers it, 1 to 7, clamped further by the GPU. "
+            "Overrides the configured draw_resolution_scale_x/_y without "
+            "changing them in the config. Takes effect at launch and after "
+            "File > Power Off Console; the scale cannot change while the GPU "
+            "is running.",
+            "Display");
+DECLARE_int32(draw_resolution_scale_x);
+DECLARE_int32(draw_resolution_scale_y);
 
 DEFINE_bool(controller_hotkeys, false, "Hotkeys for Xbox and PS controllers.",
             "General");
@@ -169,6 +191,11 @@ using namespace xe::hid;
 using namespace xe::gpu;
 
 constexpr std::string_view kRecentlyPlayedTitlesFilename = "recent.toml";
+// Phase 1099z165: the discs that have been put in the virtual tray, kept the
+// same way and next to recent.toml. A separate list because a disc in the tray
+// is not a launched title - the two menus would otherwise mix entries the
+// other one cannot act on.
+constexpr std::string_view kRecentDiscsFilename = "recent_discs.toml";
 constexpr std::string_view kBaseTitle = "Xenia-canary";
 
 EmulatorWindow::EmulatorWindow(Emulator* emulator,
@@ -198,6 +225,9 @@ EmulatorWindow::EmulatorWindow(Emulator* emulator,
                 ")";
 
   LoadRecentlyLaunchedTitles();
+  LoadRecentEntries(emulator_->storage_root() / kRecentDiscsFilename,
+                    &recent_discs_);
+  default_disc_path_ = cvars::guide_tray_disc_path;
 }
 
 std::unique_ptr<EmulatorWindow> EmulatorWindow::Create(
@@ -280,17 +310,17 @@ void EmulatorWindow::OnEmulatorInitialized() {
 
   emulator_initialized_ = true;
   window_->SetMainMenuEnabled(true);
-  // Phase 1099z105: keep "Change Disc..." in step with the virtual tray.
+  // Phase 1099z105: keep the tray entries in step with the virtual tray.
   if (disc_menu_) {
-    disc_menu_->SetEnabled(emulator_->IsTrayOpen());
+    RebuildDiscMenu();
     emulator_->on_tray_state_changed.AddListener([this](bool open) {
-      app_context().CallInUIThread([this, open]() {
-        if (disc_menu_) {
-          disc_menu_->SetEnabled(open);
-        }
-      });
+      app_context().CallInUIThreadDeferred([this]() { RebuildDiscMenu(); });
     });
   }
+  // The game library check runs after the first title launch (RunTitle), not
+  // here: RunTitle clears every dialog, and the emulated drive is only mounted
+  // by the launch.
+
   // When the user can see that the emulator isn't initializing anymore (the
   // menu isn't disabled), enter fullscreen if requested.
   if (cvars::fullscreen) {
@@ -425,6 +455,21 @@ void EmulatorWindow::DisplayConfigDialog::OnDraw(ImGuiIO& io) {
 
       ImGui::TreePop();
     }
+  }
+
+  if (ImGui::TreeNodeEx("Resolution", ImGuiTreeNodeFlags_Framed |
+                                          ImGuiTreeNodeFlags_DefaultOpen)) {
+    bool upscale = cvars::upscale_to_window;
+    if (ImGui::Checkbox("Upscale to window (host-side)", &upscale)) {
+      emulator_window_.SetUpscaleToWindow(upscale);
+    }
+    // The value requested at GPU setup; the backend may clamp it lower (the
+    // log says so).
+    ImGui::Text("Requested internal scale: %dx%d",
+                cvars::draw_resolution_scale_x, cvars::draw_resolution_scale_y);
+    ImGui::TextUnformatted(
+        "Applies on next launch or after File > Power Off Console.");
+    ImGui::TreePop();
   }
 
   ui::Presenter* presenter = graphics_system->presenter();
@@ -802,6 +847,10 @@ bool EmulatorWindow::Initialize() {
                          std::bind(&EmulatorWindow::FileClose, this)));
 #endif  // #ifdef DEBUG
     file_menu->AddChild(MenuItem::Create(MenuItem::Type::kSeparator));
+    file_menu->AddChild(
+        MenuItem::Create(MenuItem::Type::kString, "&Power Off Console",
+                         std::bind(&EmulatorWindow::PowerOff, this)));
+    file_menu->AddChild(MenuItem::Create(MenuItem::Type::kSeparator));
     file_menu->AddChild(MenuItem::Create(
         MenuItem::Type::kString, "Show content directory...",
         std::bind(&EmulatorWindow::ShowContentDirectory, this)));
@@ -813,16 +862,15 @@ bool EmulatorWindow::Initialize() {
   main_menu->AddChild(std::move(file_menu));
 
   // Phase 1099z105: Disc menu - swap the disc in the virtual DVD tray. Only
-  // usable while the tray is open (the guest opens/closes it); grayed out
-  // otherwise.
+  // the tray entries are gated on the tray being open (the guest opens and
+  // closes it); phase 1099z165 added the recents, the saved default and the
+  // game library, which are usable at any time, so the menu is no longer
+  // grayed as a whole.
   {
     auto disc_menu = MenuItem::Create(MenuItem::Type::kPopup, "&Disc");
-    disc_menu->AddChild(
-        MenuItem::Create(MenuItem::Type::kString, "&Change Disc...",
-                         std::bind(&EmulatorWindow::ChangeTrayDisc, this)));
     disc_menu_ = disc_menu.get();
-    disc_menu_->SetEnabled(false);
     main_menu->AddChild(std::move(disc_menu));
+    RebuildDiscMenu();
   }
 
   // Profile Menu
@@ -894,6 +942,9 @@ bool EmulatorWindow::Initialize() {
   }
   display_menu->AddChild(MenuItem::Create(MenuItem::Type::kSeparator));
   {
+    display_menu->AddChild(MenuItem::Create(
+        MenuItem::Type::kString, "Toggle &upscale to window (next launch)", "",
+        [this]() { SetUpscaleToWindow(!cvars::upscale_to_window); }));
     display_menu->AddChild(
         MenuItem::Create(MenuItem::Type::kString, "&Fullscreen", "F11",
                          std::bind(&EmulatorWindow::ToggleFullscreen, this)));
@@ -930,6 +981,9 @@ bool EmulatorWindow::Initialize() {
     console_menu->AddChild(MenuItem::Create(
         MenuItem::Type::kString, "&Open console settings", "",
         std::bind(&EmulatorWindow::ToggleConsoleSettingsDialog, this)));
+    console_menu->AddChild(MenuItem::Create(
+        MenuItem::Type::kString, "&Firmware...", "",
+        std::bind(&EmulatorWindow::ShowFirmwareDialog, this)));
   }
   main_menu->AddChild(std::move(console_menu));
 
@@ -1165,8 +1219,7 @@ void EmulatorWindow::OnKeyDown(ui::KeyEvent& e) {
     } break;
 
     case ui::VirtualKey::kF9: {
-      if (cvars::guide_power_on_with_guide_button &&
-          !emulator_->is_title_open()) {
+      if (emulator_->awaiting_power_on()) {
         break;  // Phase 1099z138: powered off - only the Guide button boots.
       }
       RunPreviouslyPlayedTitle();
@@ -1326,7 +1379,475 @@ void EmulatorWindow::ChangeTrayDisc() {
   if (selected_files.empty()) {
     return;
   }
-  emulator_->SetTrayDisc(selected_files[0]);
+  SetTrayDiscFromMenu(selected_files[0]);
+}
+
+// Phase 1099z165: put a disc in the tray and remember it, from the picker or
+// from the Recents list.
+void EmulatorWindow::SetTrayDiscFromMenu(std::filesystem::path path) {
+  if (path.empty() || !emulator_->SetTrayDisc(path)) {
+    return;
+  }
+  default_disc_path_ = path;
+
+  const std::string title_name = GetDiscTitleName(path);
+  auto existing = std::ranges::find_if(
+      std::as_const(recent_discs_), [&path](const RecentTitleEntry& entry) {
+        return entry.path_to_file == path;
+      });
+  if (existing != recent_discs_.cend()) {
+    recent_discs_.erase(existing);
+  }
+  recent_discs_.insert(recent_discs_.cbegin(),
+                       {title_name, path, time(nullptr)});
+  if (cvars::recent_titles_entry_amount > 0 &&
+      recent_discs_.size() > size_t(cvars::recent_titles_entry_amount)) {
+    recent_discs_.resize(size_t(cvars::recent_titles_entry_amount));
+  }
+  SaveRecentEntries(emulator()->storage_root() / kRecentDiscsFilename,
+                    recent_discs_);
+  RebuildDiscMenu();
+}
+
+// Phase 1099z165: persist the current disc as the one the console starts with.
+// Writes the same two cvars a command line would set, into the config, so the
+// next run boots with it in the drive.
+void EmulatorWindow::SaveDefaultDisc() {
+  if (default_disc_path_.empty()) {
+    return;
+  }
+  auto* path_var = dynamic_cast<cvar::ConfigVar<std::filesystem::path>*>(
+      cvar::ConfigVars->count("guide_tray_disc_path")
+          ? cvar::ConfigVars->at("guide_tray_disc_path")
+          : nullptr);
+  auto* at_boot_var = dynamic_cast<cvar::ConfigVar<bool>*>(
+      cvar::ConfigVars->count("guide_tray_disc_at_boot")
+          ? cvar::ConfigVars->at("guide_tray_disc_at_boot")
+          : nullptr);
+  if (!path_var || !at_boot_var) {
+    XELOGE("Save Default: the tray disc cvars are missing");
+    return;
+  }
+  // Override, not Set: a command line value would otherwise keep winning and
+  // the menu would show something the next boot does not do.
+  path_var->OverrideConfigValue(default_disc_path_);
+  at_boot_var->OverrideConfigValue(true);
+  config::SaveConfig();
+  XELOGI("Save Default: {} is now the disc at boot",
+         xe::path_to_utf8(default_disc_path_));
+  RebuildDiscMenu();
+}
+
+// Phase 1099z165: the title name of a disc image, read out of the disc itself.
+// Reading it means decrypting and decompressing the disc's default.xex, which
+// is far too slow for a menu build, so the menu asks for what is cached and a
+// worker fills the cache in and rebuilds the menu.
+std::string EmulatorWindow::GetDiscTitleName(
+    const std::filesystem::path& path) {
+  if (path.empty()) {
+    return "";
+  }
+  const std::string key = xe::path_to_utf8(path);
+  {
+    std::lock_guard<std::mutex> lock(disc_title_names_mutex_);
+    auto it = disc_title_names_.find(key);
+    if (it != disc_title_names_.end()) {
+      return it->second;
+    }
+  }
+  if (disc_title_lookup_running_.exchange(true)) {
+    return "";  // a lookup is already running; the rebuild it triggers will
+                // pick this one up
+  }
+  std::thread([this, path, key]() {
+    xe::threading::set_name("Disc Title Lookup");
+    const DiscTitleInfo info = ReadDiscTitleInfo(path);
+    {
+      std::lock_guard<std::mutex> lock(disc_title_names_mutex_);
+      disc_title_names_[key] =
+          info.title_name.empty() ? xe::path_to_utf8(path.stem())
+                                  : info.title_name;
+    }
+    disc_title_lookup_running_.store(false);
+    app_context().CallInUIThreadDeferred([this]() { RebuildDiscMenu(); });
+  }).detach();
+  return "";
+}
+
+void EmulatorWindow::RebuildDiscMenu() {
+  if (!disc_menu_ || !app_context().IsInUIThread()) {
+    return;
+  }
+  disc_menu_->RemoveAllChildren();
+
+  const bool tray_open = emulator_->IsTrayOpen();
+  auto add = [this](MenuItem::Type type, const std::string& text,
+                    std::function<void()> callback,
+                    bool enabled) -> ui::MenuItem* {
+    auto item = MenuItem::Create(type, text, "", std::move(callback));
+    ui::MenuItem* item_ptr = item.get();
+    disc_menu_->AddChild(std::move(item));
+    if (!enabled) {
+      item_ptr->SetItemEnabled(false);
+    }
+    return item_ptr;
+  };
+
+  add(MenuItem::Type::kString, "&Change Disc...",
+      std::bind(&EmulatorWindow::ChangeTrayDisc, this), tray_open);
+
+  // Recents: most recent first. Choosing one puts it in the tray, which only
+  // works while the tray is open, so the whole submenu follows the tray.
+  {
+    auto recents = MenuItem::Create(MenuItem::Type::kPopup, "&Recents");
+    ui::MenuItem* recents_ptr = recents.get();
+    if (recent_discs_.empty()) {
+      auto empty = MenuItem::Create(MenuItem::Type::kString, "(no discs yet)");
+      ui::MenuItem* empty_ptr = empty.get();
+      recents_ptr->AddChild(std::move(empty));
+      empty_ptr->SetItemEnabled(false);
+    } else {
+      for (const RecentTitleEntry& entry : recent_discs_) {
+        const std::string text =
+            entry.title_name.empty()
+                ? xe::path_to_utf8(entry.path_to_file.filename())
+                : entry.title_name;
+        const std::filesystem::path path = entry.path_to_file;
+        recents_ptr->AddChild(MenuItem::Create(
+            MenuItem::Type::kString, text, "", [this, path]() {
+              // Never rebuild the menu from inside a menu callback: the item
+              // owning this lambda would be destroyed while it runs.
+              app_context().CallInUIThreadDeferred(
+                  [this, path]() { SetTrayDiscFromMenu(path); });
+            }));
+      }
+    }
+    disc_menu_->AddChild(std::move(recents));
+    recents_ptr->SetItemEnabled(tray_open);
+  }
+
+  disc_menu_->AddChild(MenuItem::Create(MenuItem::Type::kSeparator));
+
+  add(MenuItem::Type::kString, "Save De&fault",
+      [this]() {
+        app_context().CallInUIThreadDeferred([this]() { SaveDefaultDisc(); });
+      },
+      !default_disc_path_.empty());
+
+  // The disabled line under it names the disc that would be / has been saved,
+  // by its title, not its file name.
+  {
+    std::string label;
+    if (default_disc_path_.empty()) {
+      label = "(no disc chosen)";
+    } else {
+      const std::string title_name = GetDiscTitleName(default_disc_path_);
+      label = title_name.empty() ? "(reading the disc...)" : title_name;
+    }
+    add(MenuItem::Type::kString, "    " + label, nullptr, false);
+  }
+
+  disc_menu_->AddChild(MenuItem::Create(MenuItem::Type::kSeparator));
+
+  add(MenuItem::Type::kString, "Add &Game Library Folder...",
+      [this]() {
+        app_context().CallInUIThreadDeferred(
+            [this]() { ChooseGameLibraryFolder(); });
+      },
+      !cvars::guide_hdd_path.empty());
+
+  window_->CompleteMainMenuItemsUpdate();
+}
+
+// Phase 1099z165: HOST-SIDE. Install every disc image in a host folder into
+// the emulated hard drive so the dashboard's My Games lists them. See
+// GameLibraryInstaller and research\WORKAROUNDS.md for what "install" means
+// here - the payload is linked, not copied.
+// Phase 1099z165: install the host game library folder, if one is set. Runs
+// on a worker; new packages are added to the mounted drive as they are
+// written, so the dashboard's content scan sees them on this boot.
+// 2026-09-16: once per session, after the first title launch. Quietly - the
+// window only appears if a disc is new - or, with no folder set, ask for one.
+void EmulatorWindow::StartGameLibraryCheck() {
+  if (game_library_checked_ || cvars::guide_hdd_path.empty()) {
+    return;
+  }
+  game_library_checked_ = true;
+  if (!cvars::guide_game_library_path.empty()) {
+    if (cvars::guide_game_library_at_boot) {
+      InstallGameLibraryFolder(cvars::guide_game_library_path, true);
+    }
+  } else if (cvars::guide_game_library_prompt) {
+    XELOGI("Game library: no games folder set - asking for one");
+    game_library_prompt_dialog_ =
+        std::make_unique<GameLibraryPromptDialog>(imgui_drawer_.get(), *this);
+  }
+}
+
+void EmulatorWindow::ChooseGameLibraryFolder() {
+  if (cvars::guide_hdd_path.empty()) {
+    XELOGE("Game library: there is no emulated hard drive (guide_hdd_path)");
+    return;
+  }
+  if (game_library_installer_ && game_library_installer_->running()) {
+    return;
+  }
+  auto file_picker = xe::ui::FilePicker::Create();
+  file_picker->set_mode(ui::FilePicker::Mode::kOpen);
+  file_picker->set_type(ui::FilePicker::Type::kDirectory);
+  file_picker->set_multi_selection(false);
+  file_picker->set_title("Choose a folder of disc images");
+  if (!file_picker->Show(window_.get())) {
+    return;
+  }
+  auto selected = file_picker->selected_files();
+  if (selected.empty()) {
+    return;
+  }
+  // Remember the folder, so the next run installs anything added to it.
+  auto* library_var = dynamic_cast<cvar::ConfigVar<std::filesystem::path>*>(
+      cvar::ConfigVars->count("guide_game_library_path")
+          ? cvar::ConfigVars->at("guide_game_library_path")
+          : nullptr);
+  if (library_var) {
+    library_var->OverrideConfigValue(selected[0]);
+    config::SaveConfig();
+  }
+  InstallGameLibraryFolder(selected[0], false);
+}
+
+void EmulatorWindow::InstallGameLibraryFolder(
+    const std::filesystem::path& folder, bool quiet) {
+  if (cvars::guide_hdd_path.empty()) {
+    XELOGE("Game library: there is no emulated hard drive (guide_hdd_path)");
+    return;
+  }
+  if (game_library_installer_ && game_library_installer_->running()) {
+    return;
+  }
+  auto discs = FindDiscImagesInFolder(folder);
+  if (discs.empty()) {
+    XELOGW("Game library: no disc images in {}", xe::path_to_utf8(folder));
+    if (!quiet) {
+      ui::ImGuiDialog::ShowMessageBox(
+          imgui_drawer_.get(), "Game Library",
+          "There are no disc images (.iso) in " + xe::path_to_utf8(folder));
+    }
+    return;
+  }
+  XELOGI("Game library: installing {} disc image(s) from {} into {}",
+         discs.size(), xe::path_to_utf8(folder),
+         xe::path_to_utf8(cvars::guide_hdd_path));
+  game_library_installer_ = std::make_unique<GameLibraryInstaller>();
+  // The emulated drive's file tree was read when it was mounted; add the new
+  // packages to it so the dashboard's content scan sees them on this boot.
+  auto on_written = [emulator = emulator_]() {
+    auto global_lock = global_critical_region::AcquireDirect();
+    vfs::Entry* root = emulator->file_system()->ResolvePath(
+        "\\Device\\Harddisk0\\Partition1");
+    if (!root) {
+      return;  // Not mounted yet; the mount reads the new files itself.
+    }
+    if (auto* device = dynamic_cast<vfs::HostPathDevice*>(root->device())) {
+      device->RefreshFromHost(root);
+    }
+  };
+  game_library_installer_->Start(cvars::guide_hdd_path, std::move(discs),
+                                 std::move(on_written));
+  if (game_library_dialog_) {
+    game_library_dialog_->Dismiss();
+  }
+  game_library_dialog_ =
+      std::make_unique<GameLibraryDialog>(imgui_drawer_.get(), *this, quiet);
+}
+
+void EmulatorWindow::GameLibraryDialog::Dismiss() {
+  Close();
+  // The dialog deletes itself after this frame.
+  if (emulator_window_.game_library_dialog_.get() == this) {
+    emulator_window_.game_library_dialog_.release();
+  }
+}
+
+// Keeps the current ImGui window inside the emulator window (after a resize,
+// for instance).
+static void KeepWindowOnScreen(const ImGuiIO& io) {
+  const ImVec2 pos = ImGui::GetWindowPos();
+  const ImVec2 size = ImGui::GetWindowSize();
+  const ImVec2 clamped(
+      std::max(0.0f, std::min(pos.x, io.DisplaySize.x - size.x)),
+      std::max(0.0f, std::min(pos.y, io.DisplaySize.y - size.y)));
+  if (clamped.x != pos.x || clamped.y != pos.y) {
+    ImGui::SetWindowPos(clamped);
+  }
+}
+
+void EmulatorWindow::GameLibraryDialog::OnDraw(ImGuiIO& io) {
+  auto* installer = emulator_window_.game_library_installer_.get();
+  if (!installer) {
+    Dismiss();
+    return;
+  }
+  const auto& entries = installer->entries();
+  const bool running = installer->running();
+
+  // Only discs this run installs (or fails to) are listed; discs that were
+  // already installed are checked silently.
+  size_t checked = 0;
+  std::vector<GameLibraryEntry*> shown;
+  for (const auto& entry : entries) {
+    const GameLibraryEntry::State state = entry->state.load();
+    if (state != GameLibraryEntry::State::kPending &&
+        state != GameLibraryEntry::State::kReadingDisc) {
+      ++checked;
+    }
+    if (state == GameLibraryEntry::State::kWritingPackage ||
+        state == GameLibraryEntry::State::kInstalled ||
+        state == GameLibraryEntry::State::kFailed) {
+      shown.push_back(entry.get());
+    }
+  }
+  if (quiet_ && shown.empty()) {
+    if (!running) {
+      Dismiss();  // Nothing new at startup: never shown.
+    }
+    return;
+  }
+
+  ImGui::SetNextWindowPos(ImVec2(40, 40), ImGuiCond_FirstUseEver);
+  // A fixed, user-resizable size. AlwaysAutoResize made the window track its
+  // contents every frame (status text, error paths, one block per disc), and
+  // the -1-width progress bars fed back into that width.
+  ImGui::SetNextWindowSize(ImVec2(520, 320), ImGuiCond_FirstUseEver);
+  ImGui::SetNextWindowSizeConstraints(
+      ImVec2(std::min(320.0f, io.DisplaySize.x),
+             std::min(160.0f, io.DisplaySize.y)),
+      ImVec2(std::max(320.0f, io.DisplaySize.x),
+             std::max(160.0f, io.DisplaySize.y)));
+  bool dialog_open = true;
+  if (ImGui::Begin("Game Library Install", &dialog_open,
+                   ImGuiWindowFlags_NoCollapse)) {
+    KeepWindowOnScreen(io);
+    const size_t installed = installer->installed_count();
+    if (running) {
+      ImGui::Text("Checking disc %zu of %zu",
+                  std::min(checked + 1, entries.size()), entries.size());
+    } else if (installed) {
+      ImGui::Text("%zu new disc%s installed", installed,
+                  installed == 1 ? "" : "s");
+    } else if (shown.empty()) {
+      ImGui::Text("No new discs - everything in this folder is installed.");
+    } else {
+      ImGui::Text("No discs were installed.");
+    }
+    ImGui::Separator();
+
+    // The disc list scrolls; the footer (separator + one button row) stays
+    // pinned below it.
+    const float footer_height = ImGui::GetStyle().ItemSpacing.y +
+                                ImGui::GetFrameHeightWithSpacing();
+    ImGui::BeginChild("##discs", ImVec2(0.0f, -footer_height), false,
+                      ImGuiWindowFlags_HorizontalScrollbar);
+    for (GameLibraryEntry* entry : shown) {
+      const GameLibraryEntry::State state = entry->state.load();
+      const char* state_text =
+          state == GameLibraryEntry::State::kWritingPackage ? "installing"
+          : state == GameLibraryEntry::State::kInstalled    ? "installed"
+                                                            : "failed";
+      std::string name = entry->info.title_name;
+      if (name.empty()) {
+        name = xe::path_to_utf8(entry->path.filename());
+      }
+      ImGui::Text("%s", name.c_str());
+      if (entry->info.valid) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("(%08X)", entry->info.title_id);
+      }
+      ImGui::ProgressBar(entry->progress.load(), ImVec2(-1.0f, 0.0f));
+      if (state == GameLibraryEntry::State::kFailed &&
+          !entry->message.empty()) {
+        ImGui::TextDisabled("%s - %s", state_text, entry->message.c_str());
+      } else {
+        ImGui::TextDisabled("%s", state_text);
+      }
+      ImGui::Spacing();
+    }
+    ImGui::EndChild();
+
+    ImGui::Separator();
+    if (running) {
+      ImGui::BeginDisabled(installer->cancelled());
+      if (ImGui::Button("Cancel")) {
+        installer->Cancel();
+      }
+      ImGui::EndDisabled();
+      if (installer->cancelled()) {
+        ImGui::SameLine();
+        ImGui::Text("Stopping after the current disc...");
+      }
+    } else if (ImGui::Button("Close")) {
+      dialog_open = false;
+    }
+  }
+  ImGui::End();
+  if (!dialog_open) {
+    if (running) {
+      installer->Cancel();  // The title bar's X while running stops it too.
+    }
+    Dismiss();
+  }
+}
+
+void EmulatorWindow::GameLibraryPromptDialog::OnDraw(ImGuiIO& io) {
+  const float width = std::min(440.0f, io.DisplaySize.x);
+  ImGui::SetNextWindowPos(
+      ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f),
+      ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+  ImGui::SetNextWindowSizeConstraints(ImVec2(width, 0),
+                                      ImVec2(width, FLT_MAX));
+  bool answered = false;
+  bool yes = false;
+  if (ImGui::Begin("Game Library", nullptr,
+                   ImGuiWindowFlags_NoCollapse |
+                       ImGuiWindowFlags_AlwaysAutoResize)) {
+    KeepWindowOnScreen(io);
+    ImGui::TextWrapped(
+        "No games folder is set.\n\nChoose a folder of disc images (.iso)? "
+        "Its games are added to My Games, and anything new in it is added "
+        "each time the emulator starts.");
+    ImGui::Spacing();
+    ImGui::Checkbox("Don't show this again", &dont_show_again_);
+    ImGui::Separator();
+    if (ImGui::Button("Yes", ImVec2(120, 0))) {
+      answered = yes = true;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("No", ImVec2(120, 0))) {
+      answered = true;
+    }
+  }
+  ImGui::End();
+  if (!answered) {
+    return;
+  }
+  if (dont_show_again_) {
+    auto* prompt_var = dynamic_cast<cvar::ConfigVar<bool>*>(
+        cvar::ConfigVars->count("guide_game_library_prompt")
+            ? cvar::ConfigVars->at("guide_game_library_prompt")
+            : nullptr);
+    if (prompt_var) {
+      prompt_var->OverrideConfigValue(false);
+      config::SaveConfig();
+    }
+  }
+  EmulatorWindow& emulator_window = emulator_window_;
+  Close();  // Deletes this after the frame.
+  emulator_window.game_library_prompt_dialog_.release();
+  if (yes) {
+    // The native folder picker is modal; open it after this ImGui frame.
+    emulator_window.app_context().CallInUIThreadDeferred(
+        [&emulator_window]() { emulator_window.ChooseGameLibraryFolder(); });
+  }
 }
 
 void EmulatorWindow::FileOpen() {
@@ -1356,6 +1877,25 @@ void EmulatorWindow::FileOpen() {
 }
 
 void EmulatorWindow::FileClose() { emulator_->TerminateTitle(); }
+
+void EmulatorWindow::PowerOff() {
+  if (!emulator_initialized_ || emulator_->awaiting_power_on()) {
+    return;  // Already off (or still being built).
+  }
+  if (power_off_action_) {
+    power_off_action_();
+  }
+}
+
+void EmulatorWindow::StopGamepadHotKeys() {
+  if (!Gamepad_HotKeys_Listener) {
+    return;
+  }
+  gamepad_hotkeys_stop_ = true;
+  xe::threading::Wait(Gamepad_HotKeys_Listener.get(), false);
+  Gamepad_HotKeys_Listener.reset();
+  gamepad_hotkeys_stop_ = false;
+}
 
 void EmulatorWindow::InstallContent() {
   std::vector<std::filesystem::path> paths;
@@ -1650,6 +2190,23 @@ void EmulatorWindow::SetFullscreen(bool fullscreen_) {
   window_->SetCursorVisibility(fullscreen_
                                    ? ui::Window::CursorVisibility::kAutoHidden
                                    : ui::Window::CursorVisibility::kVisible);
+}
+
+// The draw resolution scale is fixed when the GPU is created, so this only
+// persists the choice; xenia_main.cc applies it at the next GPU setup.
+void EmulatorWindow::SetUpscaleToWindow(bool enabled) {
+  OVERRIDE_bool(upscale_to_window, enabled);
+  config::SaveConfig();
+  XELOGI("Display: upscale_to_window = {} (applies on next launch or after "
+         "Power Off Console)",
+         enabled);
+  const std::string text =
+      fmt::format("Upscale to window {} - applies on next launch or after "
+                  "File > Power Off Console.",
+                  enabled ? "on" : "off");
+  app_context_.CallInUIThread([this, text]() {
+    new xe::ui::HostNotificationWindow(imgui_drawer(), "Display", text, 0);
+  });
 }
 
 void EmulatorWindow::ToggleFullscreen() {
@@ -1951,7 +2508,7 @@ EmulatorWindow::ControllerHotKey EmulatorWindow::ProcessControllerHotkey(
   // Phase 1099z138: while the console is "off" waiting for the Guide button,
   // Xenia's launcher hotkeys must not start a title behind its back (Start ran
   // the recent-titles entry, i.e. the dashboard, with no cold boot request).
-  if (cvars::guide_power_on_with_guide_button && !emulator_->is_title_open() &&
+  if (emulator_->awaiting_power_on() &&
       (it->second.function == ButtonFunctions::RunTitle ||
        it->second.function == ButtonFunctions::IncTitleSelect ||
        it->second.function == ButtonFunctions::DecTitleSelect)) {
@@ -2153,7 +2710,7 @@ void EmulatorWindow::GamepadHotKeys() {
   auto input_sys = emulator_->input_system();
 
   if (input_sys) {
-    while (true) {
+    while (!gamepad_hotkeys_stop_) {
       // Collect controller states while holding the lock
       std::array<std::pair<bool, X_INPUT_STATE>, XUserMaxUserCount>
           controller_states;
@@ -2349,6 +2906,7 @@ xe::X_STATUS EmulatorWindow::RunTitle(
     emulator_->file_system()->Clear();
   } else {
     AddRecentlyLaunchedTitle(path_to_file, emulator_->title_name());
+    StartGameLibraryCheck();
 
     auto xam =
         emulator_->kernel_state()->GetKernelModule<kernel::xam::XamModule>(
@@ -2382,9 +2940,14 @@ void EmulatorWindow::FillRecentlyLaunchedTitlesMenu(
   }
 }
 
-void EmulatorWindow::LoadRecentlyLaunchedTitles() {
-  std::ifstream file(emulator()->storage_root() /
-                     kRecentlyPlayedTitlesFilename);
+// Phase 1099z165: split out of LoadRecentlyLaunchedTitles so the Disc menu's
+// recents can use the same file format and the same rules (drop entries whose
+// file is gone). Also hardened: an entry missing a key used to be dereferenced
+// through a null pointer.
+void EmulatorWindow::LoadRecentEntries(
+    const std::filesystem::path& path,
+    std::vector<RecentTitleEntry>* out_entries) {
+  std::ifstream file(path);
   if (!file.is_open()) {
     return;
   }
@@ -2393,32 +2956,62 @@ void EmulatorWindow::LoadRecentlyLaunchedTitles() {
   try {
     parsed_file = toml::parse(file);
   } catch (toml::parse_error& exception) {
-    XELOGE("Cannot parse file: recent.toml. Error: {}", exception.what());
+    XELOGE("Cannot parse file: {}. Error: {}", xe::path_to_utf8(path),
+           exception.what());
     return;
   }
 
-  if (parsed_file.is_table()) {
-    for (const auto& [index, entry] : *parsed_file.as_table()) {
-      if (!entry.is_table()) {
-        continue;
-      }
+  if (!parsed_file.is_table()) {
+    return;
+  }
+  for (const auto& [index, entry] : *parsed_file.as_table()) {
+    if (!entry.is_table()) {
+      continue;
+    }
+    const toml::table* entry_table = entry.as_table();
+    const auto* name_node = entry_table->get_as<std::string>("title_name");
+    const auto* path_node = entry_table->get_as<std::string>("path");
+    const auto* time_node = entry_table->get_as<int64_t>("last_run_time");
+    if (!path_node) {
+      continue;
+    }
+    const std::string title_name = name_node ? name_node->get() : "";
+    const std::string entry_path = path_node->get();
+    const std::time_t last_run_time =
+        time_node ? std::time_t(time_node->get()) : 0;
 
-      const toml::table* entry_table = entry.as_table();
+    std::error_code ec = {};
+    if (entry_path.empty() || !std::filesystem::exists(entry_path, ec)) {
+      continue;
+    }
+    out_entries->push_back({title_name, entry_path, last_run_time});
+  }
+}
 
-      std::string title_name =
-          entry_table->get_as<std::string>("title_name")->get();
-      std::string path = entry_table->get_as<std::string>("path")->get();
-      std::time_t last_run_time =
-          entry_table->get_as<int64_t>("last_run_time")->get();
-
-      std::error_code ec = {};
-      if (path.empty() || !std::filesystem::exists(path, ec)) {
-        continue;
-      }
-
-      recently_launched_titles_.push_back({title_name, path, last_run_time});
+void EmulatorWindow::SaveRecentEntries(
+    const std::filesystem::path& path,
+    const std::vector<RecentTitleEntry>& entries) {
+  auto toml_table = toml::table();
+  uint8_t index = 0;
+  for (const RecentTitleEntry& entry : entries) {
+    auto entry_table = toml::table();
+    entry_table.insert("title_name", entry.title_name);
+    entry_table.insert("path", xe::path_to_utf8(entry.path_to_file));
+    entry_table.insert("last_run_time", entry.last_run_time);
+    toml_table.insert(std::to_string(index++), entry_table);
+    if (cvars::recent_titles_entry_amount > 0 &&
+        index >= cvars::recent_titles_entry_amount) {
+      break;
     }
   }
+  std::ofstream file(path, std::ofstream::trunc);
+  file << toml_table;
+  file.close();
+}
+
+void EmulatorWindow::LoadRecentlyLaunchedTitles() {
+  LoadRecentEntries(emulator()->storage_root() / kRecentlyPlayedTitlesFilename,
+                    &recently_launched_titles_);
 }
 
 void EmulatorWindow::AddRecentlyLaunchedTitle(
@@ -2439,30 +3032,22 @@ void EmulatorWindow::AddRecentlyLaunchedTitle(
 
   recently_launched_titles_.insert(recently_launched_titles_.cbegin(),
                                    {title_name, path_to_file, time(nullptr)});
-  // Serialize to toml
-  auto toml_table = toml::table();
+  SaveRecentEntries(
+      emulator()->storage_root() / kRecentlyPlayedTitlesFilename,
+      recently_launched_titles_);
+}
 
-  uint8_t index = 0;
-  for (const RecentTitleEntry& entry : recently_launched_titles_) {
-    auto entry_table = toml::table();
-
-    // Fill entry under specific index.
-    std::string str_path = xe::path_to_utf8(entry.path_to_file);
-    entry_table.insert("title_name", entry.title_name);
-    entry_table.insert("path", str_path);
-    entry_table.insert("last_run_time", entry.last_run_time);
-
-    toml_table.insert(std::to_string(index++), entry_table);
-
-    if (index >= cvars::recent_titles_entry_amount) {
-      break;
-    }
+void EmulatorWindow::ShowFirmwareDialog() {
+  if (!firmware_dialog_) {
+    firmware_dialog_ =
+        std::make_unique<FirmwareDialog>(imgui_drawer_.get(), *this);
   }
-  // Open and write serialized data.
-  std::ofstream file(emulator()->storage_root() / kRecentlyPlayedTitlesFilename,
-                     std::ofstream::trunc);
-  file << toml_table;
-  file.close();
+}
+
+void EmulatorWindow::ReleaseFirmwareDialog(FirmwareDialog* dialog) {
+  if (firmware_dialog_.get() == dialog) {
+    firmware_dialog_.release();
+  }
 }
 
 void EmulatorWindow::ClearDialogs() {
@@ -2474,9 +3059,15 @@ void EmulatorWindow::ClearDialogs() {
     display_config_dialog_.reset();
   }
 
+  firmware_dialog_.reset();
   if (console_settings_dialog_) {
     console_settings_dialog_.reset();
   }
+
+  // The drawer only forgets its dialogs; owned ones must be deleted here or
+  // they are kept but never drawn again. The installer itself keeps running.
+  game_library_dialog_.reset();
+  game_library_prompt_dialog_.reset();
 
   imgui_drawer_.get()->ClearDialogs();
   emulator_->kernel_state()->xam_state()->is_xam_dialog_present_.store(false);

@@ -18,6 +18,7 @@
 #include "xenia/kernel/kernel_flags.h"
 #include "xenia/kernel/user_module.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_private.h"
+#include "xenia/kernel/xmutant.h"
 #include "xenia/kernel/xsemaphore.h"
 #include "xenia/kernel/xtimer.h"
 #include "xenia/xbox.h"
@@ -25,6 +26,43 @@
 namespace xe {
 namespace kernel {
 namespace xboxkrnl {
+
+// Phase 1099z159 (DIAGNOSTIC, --kernel_log_long_waits_ms): times one wait or
+// delay export call and logs it when it blocked for at least the threshold,
+// so a fixed pause in guest behaviour can be matched to the call that caused
+// it. `what` is the object pointer or handle (first one for multiple waits).
+struct LongWaitLog {
+  const char* name;
+  uint32_t what;
+  uint32_t lr = 0;
+  int64_t timeout_100ns = 0;
+  bool has_timeout;
+  std::chrono::steady_clock::time_point start;
+  LongWaitLog(const char* n, uint32_t w, const uint64_t* timeout)
+      : name(n), what(w), has_timeout(timeout != nullptr) {
+    if (cvars::kernel_log_long_waits_ms <= 0) return;
+    if (timeout) timeout_100ns = int64_t(*timeout);
+    auto* th = XThread::GetCurrentThread();
+    if (th && th->thread_state() && th->thread_state()->context()) {
+      lr = uint32_t(th->thread_state()->context()->lr);
+    }
+    start = std::chrono::steady_clock::now();
+  }
+  ~LongWaitLog() {
+    if (cvars::kernel_log_long_waits_ms <= 0) return;
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - start)
+                        .count();
+    if (ms < cvars::kernel_log_long_waits_ms) return;
+    if (has_timeout) {
+      XELOGI("LongWait: {} lr={:08X} obj={:08X} timeout={} ms elapsed={} ms",
+             name, lr, what, timeout_100ns / 10000, ms);
+    } else {
+      XELOGI("LongWait: {} lr={:08X} obj={:08X} timeout=INFINITE elapsed={} ms",
+             name, lr, what, ms);
+    }
+  }
+};
 
 // r13 + 0x100: pointer to thread local state
 // Thread local state:
@@ -509,6 +547,8 @@ dword_result_t KeDelayExecutionThread_entry(dword_t processor_mode,
                                             lpqword_t interval_ptr,
                                             const ppc_context_t& context) {
   uint64_t interval = interval_ptr ? static_cast<uint64_t>(*interval_ptr) : 0u;
+  LongWaitLog long_wait("KeDelayExecutionThread", 0,
+                        interval_ptr ? &interval : nullptr);
   return KeDelayExecutionThread(processor_mode, alertable,
                                 interval_ptr ? &interval : nullptr, context);
 }
@@ -927,6 +967,58 @@ void KeInitializeSemaphore_entry(pointer_t<X_KSEMAPHORE> semaphore_ptr,
   }
 }
 DECLARE_XBOXKRNL_EXPORT1(KeInitializeSemaphore, kThreading, kImplemented);
+
+// Phase 1099z161: KeInitializeMutant (ordinal 0x72) and KeReleaseMutant
+// (0x87) had no body; the 17559 Avatar Editor imports KeInitializeMutant.
+// After the 17489 kernel 80099B30: header.type = MutantObject; initial owner
+// -> signal_state 0, owner = current KTHREAD (and the mutant is linked into
+// the thread's mutant list); otherwise signal_state 1, owner 0; the wait list
+// head points at itself; abandoned = 0.
+// HOST-SIDE: the thread mutant-list link is not made (Xenia keeps ownership in
+// the host mutant, so abandonment at thread exit is not modelled).
+// Gated by --kernel_guest_mutants (off = the old undefined-extern behaviour).
+void KeInitializeMutant_entry(pointer_t<X_KMUTANT> mutant_ptr,
+                              dword_t initial_owner) {
+  if (!cvars::kernel_guest_mutants || !mutant_ptr) return;
+  auto* th = XThread::GetCurrentThread();
+  mutant_ptr->header.type = MutantObject;
+  const uint32_t self = mutant_ptr.guest_address();
+  if (uint8_t(initial_owner) && th) {
+    mutant_ptr->header.signal_state = 0;
+    mutant_ptr->owner = th->guest_object();
+  } else {
+    mutant_ptr->header.signal_state = 1;
+    mutant_ptr->owner = 0;
+  }
+  mutant_ptr->header.wait_list.flink_ptr = self + 8;
+  mutant_ptr->header.wait_list.blink_ptr = self + 8;
+  mutant_ptr->abandoned = false;
+  // Create the host mutant now, on this thread, so an initial owner owns it.
+  auto m = XObject::GetNativeObject<XMutant>(kernel_state(), mutant_ptr,
+                                             MutantObject);
+  if (!m) {
+    XELOGE("KeInitializeMutant: could not create native mutant for {:08X}",
+           self);
+  }
+}
+DECLARE_XBOXKRNL_EXPORT1(KeInitializeMutant, kThreading, kImplemented);
+
+dword_result_t KeReleaseMutant_entry(pointer_t<X_KMUTANT> mutant_ptr,
+                                     dword_t increment, dword_t abandoned,
+                                     dword_t wait) {
+  if (!cvars::kernel_guest_mutants || !mutant_ptr) return 0;
+  auto m = XObject::GetNativeObject<XMutant>(kernel_state(), mutant_ptr,
+                                             MutantObject);
+  if (!m) return 0;
+  const int32_t previous = int32_t(uint32_t(mutant_ptr->header.signal_state));
+  if (XSUCCEEDED(m->ReleaseMutant(increment, false, wait != 0))) {
+    // Guest-visible state after a release that frees it.
+    mutant_ptr->header.signal_state = 1;
+    mutant_ptr->owner = 0;
+  }
+  return uint32_t(previous);
+}
+DECLARE_XBOXKRNL_EXPORT1(KeReleaseMutant, kThreading, kImplemented);
 
 uint32_t xeKeReleaseSemaphore(X_KSEMAPHORE* semaphore_ptr, uint32_t increment,
                               uint32_t adjustment, uint32_t wait) {
@@ -1374,6 +1466,8 @@ dword_result_t KeWaitForSingleObject_entry(lpvoid_t object_ptr,
                                            dword_t alertable,
                                            lpqword_t timeout_ptr) {
   uint64_t timeout = timeout_ptr ? static_cast<uint64_t>(*timeout_ptr) : 0u;
+  LongWaitLog long_wait("KeWaitForSingleObject", object_ptr.guest_address(),
+                        timeout_ptr ? &timeout : nullptr);
   // Phase 1095m: 81750FA8's init task blocks forever at 817BC0C8, an infinite
   // KeWaitForSingleObject inside 817BBC20 (coverage: 140/467, furthest
   // 817BC0C8; the next instruction never executes). Name the object and its
@@ -1471,6 +1565,8 @@ dword_result_t NtWaitForSingleObjectEx_entry(dword_t object_handle,
                                              dword_t alertable,
                                              lpqword_t timeout_ptr) {
   uint64_t timeout = timeout_ptr ? static_cast<uint64_t>(*timeout_ptr) : 0u;
+  LongWaitLog long_wait("NtWaitForSingleObjectEx", object_handle,
+                        timeout_ptr ? &timeout : nullptr);
   return NtWaitForSingleObjectEx(object_handle, wait_mode, alertable,
                                  timeout_ptr ? &timeout : nullptr);
 }
@@ -1481,6 +1577,11 @@ dword_result_t KeWaitForMultipleObjects_entry(
     dword_t count, lpdword_t objects_ptr, dword_t wait_type,
     dword_t wait_reason, dword_t processor_mode, dword_t alertable,
     lpqword_t timeout_ptr, pointer_t<X_KWAIT_BLOCK> wait_block_array_ptr) {
+  uint64_t long_wait_timeout =
+      timeout_ptr ? static_cast<uint64_t>(*timeout_ptr) : 0u;
+  LongWaitLog long_wait("KeWaitForMultipleObjects",
+                        (objects_ptr && count) ? uint32_t(objects_ptr[0]) : 0u,
+                        timeout_ptr ? &long_wait_timeout : nullptr);
   if (cvars::guide_log_pool_sync && objects_ptr) {
     for (uint32_t i = 0; i < count && i < 8; ++i) {
       GuidePoolSyncLog("wait-begin", objects_ptr[i], count, i);
@@ -1845,6 +1946,9 @@ dword_result_t NtWaitForMultipleObjectsEx_entry(
     dword_t count, lpdword_t handles, dword_t wait_type, dword_t wait_mode,
     dword_t alertable, lpqword_t timeout_ptr) {
   uint64_t timeout = timeout_ptr ? static_cast<uint64_t>(*timeout_ptr) : 0u;
+  LongWaitLog long_wait("NtWaitForMultipleObjectsEx",
+                        (handles && count) ? uint32_t(handles[0]) : 0u,
+                        timeout_ptr ? &timeout : nullptr);
   if (!count || count > 64 ||
       (wait_type != X_KWAIT_REASON::WaitAny && wait_type)) {
     return X_STATUS_INVALID_PARAMETER;

@@ -111,6 +111,8 @@ if(WIN32)
     xenia-hid-winkey
     xenia-hid-xinput
     xenia-ui-d3d12
+    # 2026-09-16: game_library_art.cc (HOST-SIDE cover art lookup).
+    winhttp
   )
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   target_link_libraries(xenia-app PRIVATE
@@ -123,3 +125,8 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 xe_target_defaults(xenia-app)
+
+# Phase 1099z165: game_library.cc added (picked up by the glob above).
+# 2026-09-16: game_library_art.cc added (same glob).
+# 2026-09-16: system_update_import.cc added (same glob).
+# 2026-09-16: firmware_dialog.cc added (same glob).

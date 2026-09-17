@@ -35,8 +35,27 @@ void XMutant::InitializeNative(void* native_ptr,
                                const X_DISPATCH_HEADER* header) {
   assert_false(mutant_);
 
-  // Haven't seen this yet, but it's possible.
-  assert_always();
+  // Phase 1099z161: a mutant the guest built itself (KeInitializeMutant, used
+  // by the 17559 Avatar Editor). X_KMUTANT: signal_state 1 = free, 0 = owned
+  // by +0x18 (a KTHREAD). A host mutant can only be owned by the thread that
+  // takes it, so it starts owned only when created on the owning thread
+  // (KeInitializeMutant creates it immediately for that reason).
+  auto* m = reinterpret_cast<X_KMUTANT*>(native_ptr);
+  bool owned = false;
+  const uint32_t owner_ptr = uint32_t(m->owner.m_ptr);
+  if (header && header->signal_state == 0 && owner_ptr) {
+    auto* current = XThread::GetCurrentThread();
+    owned = current &&
+            current->guest_object() == owner_ptr;
+    if (!owned) {
+      XELOGW("XMutant::InitializeNative: {:08X} owned by KTHREAD {:08X}, not "
+             "the creating thread - created unowned",
+             kernel_state()->memory()->HostToGuestVirtual(native_ptr),
+             owner_ptr);
+    }
+  }
+  mutant_ = xe::threading::Mutant::Create(owned);
+  if (owned) owning_thread_ = XThread::GetCurrentThread();
 }
 
 X_STATUS XMutant::ReleaseMutant(uint32_t priority_increment, bool abandon,

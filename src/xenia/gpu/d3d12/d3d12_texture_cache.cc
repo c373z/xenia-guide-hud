@@ -1265,6 +1265,21 @@ ID3D12Resource* D3D12TextureCache::RequestGuideTexture(
   key.signed_separate = 0;
   key.scaled_resolve = 0;
   key.is_valid = 1;
+  // Use the resolution-scaled copy of the surface when the guest's resolve
+  // wrote one, the way BindingInfoFromFetchConstant does for the title's swap
+  // texture. Without it the Guide was always loaded at its guest 852x480 and
+  // stretched over a scaled title frame (measured: 852x480 at scale 2).
+  if (cvars::guide_present_scaled_resolve && IsDrawResolutionScaled()) {
+    const uint32_t extent = key.GetGuestLayout().base.level_data_extent_bytes;
+    if (extent && IsRangeScaledResolved(key.base_page << 12, extent)) {
+      key.scaled_resolve = 1;
+    }
+    static uint32_t logged = 0;
+    if (logged++ < 2) {
+      XELOGI("GuidePresent: scaled resolve {} for {:08X} ({} bytes)",
+             key.scaled_resolve ? "used" : "not present", base_addr, extent);
+    }
+  }
   D3D12Texture* texture = static_cast<D3D12Texture*>(FindOrCreateTexture(key));
   if (texture == nullptr || !LoadTextureData(*texture)) {
     return nullptr;
@@ -1318,6 +1333,16 @@ ID3D12Resource* D3D12TextureCache::RequestSwapTexture(
   BindingInfoFromFetchConstant(fetch, key, nullptr);
   if (!key.is_valid || key.base_page == 0 ||
       key.dimension != xenos::DataDimension::k2DOrStacked) {
+    // 1099z170: xam's launch-fade device presents with no persisted frame.
+    static uint32_t nl = 0;
+    if (nl++ < 20) {
+      XELOGI("SwapSource: no swap texture - valid {} base_page {:05X} "
+             "dimension {} {}x{} fmt {} (fetch0 {:08X} {:08X} {:08X})",
+             bool(key.is_valid), uint32_t(key.base_page),
+             uint32_t(key.dimension), key.GetWidth(), key.GetHeight(),
+             uint32_t(key.format), fetch.dword_0, fetch.dword_1,
+             fetch.dword_2);
+    }
     return nullptr;
   }
   // Phase 941: the presented image is loaded from guest memory at texture

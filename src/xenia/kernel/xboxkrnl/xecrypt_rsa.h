@@ -91,13 +91,17 @@ static inline uint64_t u128_div64(u128 num, uint64_t den, uint64_t* rem) {
   uint64_t q = 0;
   uint64_t r = 0;
   for (int i = 127; i >= 0; i--) {
+    // Phase 1099z159: keep the bit shifted out of r. Knuth D normalises the
+    // divisor so its top bit is set; r < den can then be >= 2^63, and dropping
+    // that bit made every 2048-bit RSA result wrong.
+    const bool overflow = (r >> 63) != 0;
     r = (r << 1);
     if (i >= 64) {
       r |= (num.hi >> (i - 64)) & 1;
     } else {
       r |= (num.lo >> i) & 1;
     }
-    if (r >= den) {
+    if (overflow || r >= den) {
       r -= den;
       if (i < 64) {
         q |= (1ULL << i);
@@ -317,12 +321,23 @@ class BigNum {
     uint64_t vn_2 = (n >= 2) ? v.limbs[n - 2] : 0;
 
     for (size_t j = total; j >= n; j--) {
-      u128 num_top =
-          u128_or64(u128_shl(u128_from(u.limbs[j]), 64), u.limbs[j - 1]);
+      // Phase 1099z159: Knuth D step D3 fixes. After normalisation
+      // u[j] <= v[n-1]; when they are equal the 128/64 division would
+      // overflow, so the estimate is clamped to b-1 (rhat = u[j-1] + v[n-1]).
       uint64_t rhat_val;
-      uint64_t qhat_val = u128_div64(num_top, vn_1, &rhat_val);
+      uint64_t qhat_val;
+      bool rhat_overflow = false;
+      if (u.limbs[j] >= vn_1) {
+        qhat_val = ~0ULL;
+        rhat_val = u.limbs[j - 1] + vn_1;
+        rhat_overflow = rhat_val < u.limbs[j - 1];
+      } else {
+        u128 num_top =
+            u128_or64(u128_shl(u128_from(u.limbs[j]), 64), u.limbs[j - 1]);
+        qhat_val = u128_div64(num_top, vn_1, &rhat_val);
+      }
 
-      while (true) {
+      while (!rhat_overflow) {
         u128 qv2 = u128_mul64(qhat_val, vn_2);
         u128 rhs = u128_or64(u128_shl(u128_from(rhat_val), 64), u.limbs[j - 2]);
         bool gt = (qv2.hi > rhs.hi) || (qv2.hi == rhs.hi && qv2.lo > rhs.lo);
@@ -337,23 +352,31 @@ class BigNum {
         }
       }
 
+      // D4: u[j-n..j] -= qhat * v, with an explicit borrow (the old code
+      // folded the borrow into the multiply carry, which can wrap, and tested
+      // the unsigned top limb's sign).
       uint64_t carry = 0;
+      uint64_t borrow = 0;
       for (size_t i = 0; i < n; i++) {
         u128 prod = u128_mul64(qhat_val, v.limbs[i]);
         prod = u128_add(prod, carry);
-        uint64_t prod_lo = prod.lo;
         carry = prod.hi;
         uint64_t u_val = u.limbs[j - n + i];
-        u.limbs[j - n + i] = u_val - prod_lo;
-        if (u_val < prod_lo) {
-          carry++;
-        }
+        uint64_t d1 = u_val - prod.lo;
+        uint64_t b1 = u_val < prod.lo ? 1 : 0;
+        uint64_t d2 = d1 - borrow;
+        uint64_t b2 = d1 < borrow ? 1 : 0;
+        u.limbs[j - n + i] = d2;
+        borrow = b1 + b2;
       }
-      int64_t final_diff =
-          static_cast<int64_t>(u.limbs[j]) - static_cast<int64_t>(carry);
-      u.limbs[j] = static_cast<uint64_t>(final_diff);
+      uint64_t top = u.limbs[j];
+      uint64_t t1 = top - carry;
+      bool neg = top < carry;
+      uint64_t t2 = t1 - borrow;
+      neg = neg || (t1 < borrow);
+      u.limbs[j] = t2;
 
-      if (final_diff < 0) {
+      if (neg) {
         uint64_t c = 0;
         for (size_t i = 0; i < n; i++) {
           u128 sum = u128_add(u128_from(u.limbs[j - n + i]), v.limbs[i]);

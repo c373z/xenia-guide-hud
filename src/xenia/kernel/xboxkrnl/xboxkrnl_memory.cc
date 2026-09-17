@@ -15,6 +15,7 @@
 #include <unordered_set>
 #include <chrono>
 #include <algorithm>
+#include "xenia/kernel/power_reset.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_memory.h"
 #include "xenia/base/logging.h"
 #include "xenia/kernel/kernel_flags.h"
@@ -196,6 +197,24 @@ dword_result_t NtAllocateVirtualMemory_entry(lpdword_t base_addr_ptr,
   }
   if (!address) {
     // Failed - assume no memory available.
+    // Phase 1099z168: this used to be silent, and a guest that keeps going
+    // after its own allocator returns NULL (Fable III does: it prints "Out Of
+    // Memory allocating %u in %s" and publishes a NULL render view, then
+    // faults at 821DBAEC) left nothing in the log to connect the crash to.
+    // DIAGNOSTIC ONLY - the status returned is unchanged.
+    if (cvars::kernel_log_alloc_failures) {
+      auto* fheap = heap;
+      XELOGE(
+          "NtAllocateVirtualMemory: NO MEMORY for base {:08X} size {:08X} "
+          "(adjusted {:08X}/{:08X}, {} KB pages) type {:X} protect {:X}; heap "
+          "{:08X}-{:08X} has {} of {} pages unreserved",
+          uint32_t(*base_addr_ptr), uint32_t(*region_size_ptr), adjusted_base,
+          adjusted_size, page_size / 1024, uint32_t(alloc_type),
+          uint32_t(protect_bits), fheap ? fheap->heap_base() : 0u,
+          fheap ? fheap->heap_base() + (fheap->heap_size() - 1) : 0u,
+          fheap ? fheap->unreserved_page_count() : 0u,
+          fheap ? fheap->total_page_count() : 0u);
+    }
     return X_STATUS_NO_MEMORY;
   }
 
@@ -534,6 +553,23 @@ uint32_t xeMmAllocatePhysicalMemoryEx(uint32_t flags, uint32_t region_size,
   uint32_t allocation_type = kMemoryAllocationReserve | kMemoryAllocationCommit;
   uint32_t protect = FromXdkProtectFlags(protect_bits);
   bool top_down = true;
+  // Phase 1099z169: system-process allocations (flags 2 - xam's Guide
+  // textures) go bottom-up. Top-down they landed just under whatever the
+  // running title held, stayed after it exited, and split physical memory:
+  // an 8 KB Guide texture at 0FAFD000 left Sonic Generations' next launch no
+  // run for its 256 MB allocation (largest EAFD000) and it crashed at
+  // 82C8F098. HOST-SIDE: the real kernel's placement was not traced.
+  if (cvars::guide_system_phys_bottom_up) {
+    bool system = flags == X_PROCTYPE_SYSTEM;
+    if (auto* th = XThread::GetCurrentThread()) {
+      if (auto* kt = th->guest_object<X_KTHREAD>()) {
+        system = system || kt->process_type == X_PROCTYPE_SYSTEM;
+      }
+    }
+    if (system) {
+      top_down = false;
+    }
+  }
   auto heap = static_cast<PhysicalHeap*>(
       kernel_memory()->LookupHeapByType(true, page_size));
   // min_addr_range/max_addr_range are bounds in physical memory, not virtual.
@@ -1118,6 +1154,14 @@ dword_result_t MmIsAddressValid_entry(dword_t address,
 }
 
 DECLARE_XBOXKRNL_EXPORT1(MmIsAddressValid, kMemory, kImplemented);
+
+void ResetMemoryStateForPowerOff() {
+  auto& c = g_guide_page_cache;
+  std::lock_guard<std::mutex> lock(c.mu);
+  c.pages.clear();
+  c.pinned.clear();
+  c.pin_history.clear();
+}
 
 }  // namespace xboxkrnl
 }  // namespace kernel

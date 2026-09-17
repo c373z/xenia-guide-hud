@@ -29,6 +29,7 @@
 #include "xenia/base/logging.h"
 #include "xenia/base/math.h"
 #include "xenia/cpu/processor.h"
+#include "xenia/kernel/power_reset.h"
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/util/shim_utils.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_private.h"
@@ -260,6 +261,14 @@ dword_result_t LDIDestroyDecompression_entry(dword_t handle) {
   return 0;
 }
 DECLARE_XBOXKRNL_EXPORT1(LDIDestroyDecompression, kNone, kImplemented);
+
+void ResetLzxStateForPowerOff() {
+  std::lock_guard<std::mutex> lock(ldi_lock);
+  for (auto& kv : ldi_states) {
+    if (kv.second.lzx) lzxd_free(kv.second.lzx);
+  }
+  ldi_states.clear();
+}
 
 }  // namespace xboxkrnl
 }  // namespace kernel

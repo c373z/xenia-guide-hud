@@ -9,9 +9,15 @@
 
 #include "xenia/vfs/devices/disc_image_file.h"
 
+#include <cstring>
+
+#include "xenia/base/cvar.h"
 #include "xenia/base/logging.h"
 #include "xenia/vfs/devices/disc_image_entry.h"
 #include "xenia/vfs/devices/disc_read_model.h"
+
+DECLARE_bool(disc_synth_security_block);
+
 namespace xe {
 namespace vfs {
 
@@ -25,6 +31,18 @@ void DiscImageFile::Destroy() { delete this; }
 X_STATUS DiscImageFile::ReadSync(std::span<uint8_t> buffer, size_t byte_offset,
                                  size_t* out_bytes_read) {
   if (byte_offset >= entry_->size()) {
+    // HOST-SIDE (disc_synth_security_block): the raw device (root entry)
+    // serves 16 zero sectors past the partition - the block IOCTL 0x24090
+    // points at, standing in for the security sector's hash-tree root.
+    const size_t kBlock = 0x8000;
+    if (cvars::disc_synth_security_block && !entry_->parent() &&
+        byte_offset < entry_->size() + kBlock) {
+      const size_t n =
+          std::min(buffer.size(), entry_->size() + kBlock - byte_offset);
+      std::memset(buffer.data(), 0, n);
+      *out_bytes_read = n;
+      return X_STATUS_SUCCESS;
+    }
     return X_STATUS_END_OF_FILE;
   }
 

@@ -57,9 +57,21 @@ class MenuItem {
   void AddChild(std::unique_ptr<MenuItem> child_item);
   void AddChild(MenuItemPtr child_item);
   void RemoveChild(MenuItem* child_item);
+  // Phase 1099z165: drops every child and the platform entries backing them,
+  // so a menu whose contents change at runtime can simply be rebuilt. Must be
+  // called from the UI thread, never from inside a menu item's own callback
+  // (post it with WindowedAppContext::CallInUIThreadDeferred instead - the
+  // callback being executed is owned by the item that would be destroyed).
+  void RemoveAllChildren();
   MenuItem* child(size_t index);
+  size_t child_count() const { return children_.size(); }
 
+  // Enables or disables every CHILD of this item.
   virtual void SetEnabled(bool enabled) {}
+  // Phase 1099z165: enables or disables THIS item within its parent, so a
+  // single entry can be grayed out (a disabled label, or an action that is
+  // only available in some states) without graying its siblings.
+  virtual void SetItemEnabled(bool enabled) {}
 
  protected:
   MenuItem(Type type, const std::string& text, const std::string& hotkey,
@@ -67,6 +79,8 @@ class MenuItem {
 
   virtual void OnChildAdded(MenuItem* child_item) {}
   virtual void OnChildRemoved(MenuItem* child_item) {}
+  // Called with children_ still populated, before they are dropped.
+  virtual void OnChildrenRemoved() {}
 
   // This MenuItem may be destroyed as a result of the callback, don't do
   // anything with it after the call.

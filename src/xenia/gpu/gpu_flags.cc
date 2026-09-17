@@ -20,9 +20,9 @@ DEFINE_path(
 
 DEFINE_bool(vsync, true, "Enable VSYNC.", "GPU");
 
-DEFINE_uint64(framerate_limit, 0,
-              "Maximum frames per second. 0 = Unlimited frames.\n"
-              "Defaults to 60, when set to 0, and VSYNC is enabled.",
+DEFINE_uint64(framerate_limit, 60,
+              "Maximum frames per second. Default 60. 0 = Unlimited frames "
+              "(still 60 when VSYNC is enabled).",
               "GPU");
 UPDATE_from_uint64(framerate_limit, 2024, 8, 31, 20, 60);
 
@@ -268,6 +268,30 @@ DEFINE_bool(guide_syscmd_at_swap, true,
             "Run the Guide's system command buffer at swap (as VdSwap does) "
             "instead of at the title's resolve.",
             "Guide");
+DEFINE_bool(guide_overlay_without_enable, true,
+            "HOST-SIDE: show the display overlay plane while xam keeps "
+            "resolving the overlay surface even if D1OVL_ENABLE was never "
+            "written (xam writes ENABLE only from its HUD thread, and the "
+            "toast is rendered on another thread in this emulator).",
+            "Guide");
+DEFINE_bool(guide_display_overlay, true,
+            "Emulate the display overlay plane (D1OVL registers) xam uses for "
+            "notification toasts, and present the full Guide surface only "
+            "when the system command buffer descriptor names one (+0x08).",
+            "Guide");
+DEFINE_bool(guide_present_scaled_resolve, true,
+            "Present the Guide surface from its resolution-scaled resolve when "
+            "draw_resolution_scale > 1, as the title's swap texture is.",
+            "Guide");
+DEFINE_bool(guide_text_trace, false,
+            "Diagnostic: log each distinct draw in the Guide's stream (bound "
+            "textures, render target width, viewport, first vertices) and "
+            "dump each bound texture once as guide_tex_*.bin next to the exe.",
+            "Guide");
+DEFINE_bool(guide_text_trace_title, false,
+            "With guide_text_trace: also trace the running title's own draws "
+            "(e.g. the dashboard), dumping textures up to 1024x1024.",
+            "Guide");
 DEFINE_bool(guide_alpha_trace, false,
             "Trace the Guide surface alpha over time: GPU readback of the "
             "Guide texture each swap, guest clear registers at its resolves, "
@@ -276,6 +300,15 @@ DEFINE_bool(guide_alpha_trace, false,
 DEFINE_bool(guide_composite_blend, true,
             "Blend the Guide's surface over the title's frame rather than "
             "replacing it.",
+            "Guide");
+// Phase 1099z177: faithful - the real VdSwap substitutes the scanout address
+// with descriptor +0x08 (xboxkrnl 17489 800F8EF4..800F8F28), so that surface
+// is the primary plane and its alpha is not blended with anything.
+DEFINE_bool(guide_scanout_opaque, true,
+            "When xam's system command buffer descriptor names the Guide "
+            "surface (+0x08), show it opaque (scanned out in place of the "
+            "title's frame) instead of blending by its alpha. Old xam "
+            "(2.0.6770-8955) leaves alpha < 1 in opaque panel pixels.",
             "Guide");
 DEFINE_bool(guide_present_pitch_width, false,
             "Use RB_COPY_DEST_PITCH as the Guide texture's width instead of the "

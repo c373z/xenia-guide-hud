@@ -84,6 +84,47 @@ dword_result_t HalGetNotedArgonErrors_entry() {
 }
 DECLARE_XBOXKRNL_EXPORT1(HalGetNotedArgonErrors, kNone, kImplemented);
 
+// 1099z17559-11: XexVerifyImageHeaders (0x1A4). The dash calls it on
+// the disc's default.xex header before launching a disc; it had no body,
+// so the call returned the caller's r3 (the header pointer) as the status.
+// 17489 kernel 800A0AE8: size < 0x18 or size < header_size ([hdr+8]) ->
+// 0xC0000023 (BUFFER_TOO_SMALL); otherwise 800A08C8 checks the security info
+// lies inside the header (else 0xC000007B), hashes it and verifies the RSA
+// signature against the kernel's public key (0xC0000221 on mismatch), then
+// checks the image size alignment (0xC000007B). HOST-SIDE: the bounds checks below are the kernel's; the
+// SHA-1/RSA signature check is NOT performed (Xenia runs unsigned/modified
+// images and does not carry the kernel's key material) - a header that passes
+// the bounds checks is reported valid.
+dword_result_t XexVerifyImageHeaders_entry(lpvoid_t header, dword_t size) {
+  if (!cvars::kernel_xex_verify_headers) {
+    return UnchangedR3();
+  }
+  const uint32_t sz = size;
+  if (!header || sz < 0x18) {
+    return 0xC0000023;
+  }
+  auto* h = header.as<uint8_t*>();
+  const uint32_t header_size = xe::load_and_swap<uint32_t>(h + 8);
+  if (sz < header_size) {
+    return 0xC0000023;
+  }
+  const uint32_t sec_off = xe::load_and_swap<uint32_t>(h + 0x10);
+  uint32_t status = 0;
+  if (sec_off > header_size || header_size - sec_off < 4) {
+    status = 0xC000007B;  // 800A0ACC: STATUS_INVALID_IMAGE_FORMAT
+  } else {
+    const uint32_t sec_len = xe::load_and_swap<uint32_t>(h + sec_off);
+    if (sec_len < 0x184 || sec_len > header_size - sec_off) {
+      status = 0xC000007B;  // 800A0AC0
+    }
+  }
+  XELOGI("XexVerifyImageHeaders({:08X}, {:X}): header_size {:X} security {:X} "
+         "-> {:08X} (signature not checked)",
+         header.guest_address(), sz, header_size, sec_off, status);
+  return status;
+}
+DECLARE_XBOXKRNL_EXPORT1(XexVerifyImageHeaders, kModules, kImplemented);
+
 }  // namespace xboxkrnl
 }  // namespace kernel
 }  // namespace xe

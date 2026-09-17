@@ -165,12 +165,14 @@ class Win32MenuItem : public MenuItem {
   HMENU handle() const { return handle_; }
 
   void SetEnabled(bool enabled) override;
+  void SetItemEnabled(bool enabled) override;
 
   using MenuItem::OnSelected;
 
  protected:
   void OnChildAdded(MenuItem* child_item) override;
   void OnChildRemoved(MenuItem* child_item) override;
+  void OnChildrenRemoved() override;
 
  private:
   HMENU handle_ = nullptr;

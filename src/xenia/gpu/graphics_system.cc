@@ -121,7 +121,9 @@ X_STATUS GraphicsSystem::Setup(cpu::Processor* processor,
 
             const double vsync_duration_d =
                 cvars::vsync
-                    ? std::max<double>(5.0,
+                    // 1 ms floor (was 5 ms, which capped framerate_limit
+                    // at 200 Hz, so 240 gave a 100 fps interval-2 title).
+                    ? std::max<double>(1.0,
                                        1000.0 / static_cast<double>(
                                                     normalized_framerate_limit))
                     : 1.0;
@@ -155,7 +157,15 @@ X_STATUS GraphicsSystem::Setup(cpu::Processor* processor,
                     static_cast<double>(time_delta) /
                     (static_cast<double>(tick_freq) / 1000.0);
                 if (elapsed_d >= vsync_duration_d) {
-                  last_frame_time = current_time;
+                  // Advance by whole periods so each wake-up's overshoot
+                  // does not lower the rate (240 measured ~180 before);
+                  // resync after a stall instead of bursting to catch up.
+                  const uint64_t period_ticks = static_cast<uint64_t>(
+                      vsync_duration_d * static_cast<double>(tick_freq) /
+                      1000.0);
+                  last_frame_time = time_delta >= 2 * period_ticks
+                                        ? current_time
+                                        : last_frame_time + period_ticks;
 
                   MarkVblank();
                   const uint64_t estimated_nanoseconds = static_cast<uint64_t>(
@@ -323,14 +333,14 @@ void GraphicsSystem::EnableReadPointerWriteBack(uint32_t ptr,
 
 void GraphicsSystem::SetInterruptCallback(uint32_t callback,
                                           uint32_t user_data) {
-  interrupt_callback_ = callback;
-  interrupt_callback_data_ = user_data;
+  interrupt_callback_pair_.store((uint64_t(callback) << 32) | user_data);
   XELOGGPU("SetInterruptCallback({:08X}, {:08X})", callback, user_data);
 }
 
 void GraphicsSystem::DispatchInterruptCallback(uint32_t source, uint32_t cpu) {
-  kernel_state()->EmulateCPInterruptDPC(interrupt_callback_,
-                                        interrupt_callback_data_, source, cpu);
+  const uint64_t pair = interrupt_callback_pair_.load();
+  kernel_state()->EmulateCPInterruptDPC(uint32_t(pair >> 32), uint32_t(pair),
+                                        source, cpu);
 }
 
 void GraphicsSystem::MarkVblank() {
@@ -409,15 +419,16 @@ void GraphicsSystem::Resume() {
 }
 
 bool GraphicsSystem::Save(ByteStream* stream) {
-  stream->Write<uint32_t>(interrupt_callback_);
-  stream->Write<uint32_t>(interrupt_callback_data_);
+  stream->Write<uint32_t>(interrupt_callback());
+  stream->Write<uint32_t>(interrupt_callback_data());
 
   return command_processor_->Save(stream);
 }
 
 bool GraphicsSystem::Restore(ByteStream* stream) {
-  interrupt_callback_ = stream->Read<uint32_t>();
-  interrupt_callback_data_ = stream->Read<uint32_t>();
+  const uint32_t cb = stream->Read<uint32_t>();
+  const uint32_t cb_data = stream->Read<uint32_t>();
+  interrupt_callback_pair_.store((uint64_t(cb) << 32) | cb_data);
 
   return command_processor_->Restore(stream);
 }

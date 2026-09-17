@@ -50,6 +50,7 @@ enum class ZPDMode {
   kFast,     // Real queries with speculative cached writes (fast)
   kFastAlt,  // Fast queries, but preserves cached zeroes (fast-alt)
   kStrict,   // Real queries, waits before writeback (strict)
+  kAsync,    // Real queries, guest sees pending until the GPU answers (async)
 };
 
 void SaveGPUSetting(GPUSetting setting, uint64_t value);
@@ -419,8 +420,15 @@ class CommandProcessor {
                                  uint64_t wait_for_submission) {
     return false;
   }
+  // Async ZPD: hand the submission holding wait_for_submission's queries to
+  // the GPU without waiting for it (no-op if it was already submitted).
+  virtual void FlushZPDSubmission(uint64_t wait_for_submission) {}
+  // Async ZPD: true while the worker is idle waiting for guest commands.
+  bool zpd_worker_idle_ = false;
 
   bool BeginZPDReport(uint32_t report_address);
+  // --zpd_stats_log diagnostic.
+  void LogZPDStats();
   bool EndZPDReport(uint32_t report_address, bool guest_forced_end);
   // Opens a new host query segment when CanOpenZPDQuery is true.
   void OpenQuerySegment(bool can_close_submission);
@@ -477,6 +485,8 @@ class CommandProcessor {
 #include "pm4_command_processor_declare.h"
 
  public:
+  kernel::XHostThread* worker_thread() const { return worker_thread_.get(); }
+
   // Experimental entry point for running a command buffer the guest built but
   // never submitted - the Guide's case, where xam writes a real PM4 stream
   // into its own buffers and nothing consumes them. ExecuteIndirectBuffer is
@@ -723,6 +733,14 @@ class CommandProcessor {
 
   uint32_t guide_desc_width_ = 0;
   uint32_t guide_desc_height_ = 0;
+  // Descriptor +0x08: the surface the real kernel's VdSwap scans out in place
+  // of the title's front buffer; 0 when xam is not replacing the screen
+  // (e.g. while only a notification toast is up, which uses the overlay plane).
+  uint32_t guide_desc_surface_ = 0;
+  // Descriptor +0x68 / +0x6C: the display output size (e.g. 1920x1080), kept
+  // from the last descriptor that had it. D1OVL START/END are in this space.
+  uint32_t guide_desc_display_width_ = 0;
+  uint32_t guide_desc_display_height_ = 0;
   // Phase 1098zd: swap index at which the Guide last resolved its surface, and
   // the running swap count. xam resolves only while the Guide is up, so
   // "resolved within the last few swaps" is a GUEST-DRIVEN test for "the Guide

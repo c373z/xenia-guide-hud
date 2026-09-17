@@ -817,6 +817,22 @@ struct XConfigData {
     xe::be<uint64_t> alarm_time;              // 0x04  union_LARGE_INTEGER
     xe::be<uint32_t> previous_flash_version;  // 0x0C
   } system;
+
+  // -------------------------------------------------------------------------
+  // 0x7 XCONFIG_CONSOLE settings this file did not model (1099z165)
+  // -------------------------------------------------------------------------
+  // MEASURED 1099z165: the retail 17559 dashboard calls
+  // ExReadModifyWriteXConfigSettingUlong(category 7, setting 0x0B) on every
+  // boot to Home. There was no descriptor for it, so FindField returned null:
+  // the read gave 0 and the write was dropped - the flags never persisted.
+  // They are APPENDED here instead of being grown into Console, because
+  // XConfigData is persisted as a raw dump and inserting bytes inside Console
+  // would shift dvd / iptv / system in every existing xconfig.settings file.
+  // An older, shorter file simply leaves this block at its zero default.
+  struct ConsoleExt {
+    xe::be<uint32_t> retail_ex_flags;                // console 0x0B
+    xe::be<uint32_t> dash_first_use_tutorial_flags;  // console 0x0C
+  } console_ext;
 };
 
 static_assert(offsetof(XConfigData::Secured, mac_address) == 32);
@@ -879,10 +895,21 @@ class XConfig {
     uint16_t setting;
     uint16_t size;
     size_t block_offset;
+    // 1099z165: block_offset is relative to the appended ConsoleExt block
+    // instead of the field's own category base. See XConfigData::ConsoleExt.
+    bool ext = false;
   };
 
   static const FieldDescriptor* FindField(X_CONFIG_CATEGORY category,
                                           uint16_t setting);
+  // 1099z165: where a field's bytes live - its category block, or the
+  // appended ConsoleExt block for an ext field.
+  uint8_t* FieldBase(X_CONFIG_CATEGORY category, const FieldDescriptor& field);
+  // 1099z165: --kernel_oobe_on_fresh_console / --kernel_oobe_force. Puts the
+  // console into the state a console out of the box is in, so the dashboard
+  // runs its OOBE: XCONFIG_USER_RETAIL_FLAGS bit 0x40 clear, no first-use
+  // tutorial flags.
+  void ApplyOobeState();
   uint8_t* CategoryBase(X_CONFIG_CATEGORY category);
   const uint8_t* CategoryBase(X_CONFIG_CATEGORY category) const;
 
@@ -1056,7 +1083,18 @@ class XConfig {
                     alarm_time),
       XCONFIG_FIELD(XCONFIG_SYSTEM_CATEGORY,
                     XCONFIG_SYSTEM_PREVIOUS_FLASH_VERSION, System,
-                    previous_flash_version)};
+                    previous_flash_version),
+
+      // -- appended XCONFIG_CONSOLE (0x7) fields (1099z165) ------------------
+      // ext = true: block_offset is into XConfigData::console_ext, not into
+      // the console block. See XConfigData::ConsoleExt for why.
+      {XCONFIG_CONSOLE_CATEGORY, XCONFIG_CONSOLE_RETAIL_EX_FLAGS,
+       static_cast<uint16_t>(sizeof(XConfigData::ConsoleExt::retail_ex_flags)),
+       offsetof(XConfigData::ConsoleExt, retail_ex_flags), true},
+      {XCONFIG_CONSOLE_CATEGORY, XCONFIG_CONSOLE_DASH_FIRST_USE_TUTORIAL_FLAGS,
+       static_cast<uint16_t>(
+           sizeof(XConfigData::ConsoleExt::dash_first_use_tutorial_flags)),
+       offsetof(XConfigData::ConsoleExt, dash_first_use_tutorial_flags), true}};
 
 #undef XCONFIG_FIELD
 

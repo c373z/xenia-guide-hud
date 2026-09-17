@@ -10,6 +10,7 @@
 #include "xenia/base/logging.h"
 #include "xenia/base/math.h"
 #include "xenia/base/string_util.h"
+#include "xenia/kernel/kernel_flags.h"
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/smc.h"
 #include "xenia/kernel/user_module.h"
@@ -305,9 +306,20 @@ dword_result_t xeXamContentCreate(dword_t user_index, lpstring_t root_name,
     symlink_path += ':';
   }
 
-  if (kernel_state()->file_system()->IsSymbolicLinkRegistered(symlink_path)) {
-    return X_ERROR_INVALID_PARAMETER;
+  // 1099z167 diagnostic: a game that creates its save slot and then never
+  // writes the data (Fable III leaves only saveuid.bin) needs the content
+  // calls and their results, uncapped - the NtCreateFile log stops at 400
+  // lines a session.
+  if (cvars::kernel_trace_xam_content) {
+    const auto* traced = content_data_ptr.as<XCONTENT_DATA*>();
+    XELOGI("XamContent: create root='{}' flags={:X} type={:X} file='{}'",
+           symlink_path, uint32_t(flags),
+           traced ? uint32_t(traced->content_type.get()) : 0u,
+           traced ? traced->file_name() : std::string());
   }
+
+  const bool root_already_mounted =
+      kernel_state()->file_system()->IsSymbolicLinkRegistered(symlink_path);
 
   XCONTENT_AGGREGATE_DATA content_data;
   if (content_data_size == sizeof(XCONTENT_DATA)) {
@@ -324,6 +336,48 @@ dword_result_t xeXamContentCreate(dword_t user_index, lpstring_t root_name,
   }
 
   auto content_manager = kernel_state()->content_manager();
+
+  // 1099z167 HOST-SIDE: a title may re-open a root it still holds open.
+  // Fable III does exactly that when saving: create-always on 'Save:'
+  // (succeeds, root mounted), then open-always on 'Save:' a fraction of a
+  // second later. Returning X_ERROR_INVALID_PARAMETER for that second call
+  // left the game with an error it does not handle - it wrote nothing further
+  // (only saveuid.bin ever reached disk) and then bugchecked through
+  // VdDisplayFatalError. Hand back the content that is already open instead,
+  // which is what the title expects. A DIFFERENT content under a live root is
+  // still a caller error and keeps the old result.
+  // Limitation, declared: this matches on the content itself
+  // (ContentManager::IsContentOpen), not on "the package mounted under THIS
+  // root", because the content manager exposes no per-root lookup.
+  if (root_already_mounted) {
+    const bool same_content = content_manager->IsContentOpen(content_data);
+    if (cvars::kernel_trace_xam_content) {
+      XELOGI("XamContent: '{}' already mounted, same content={} -> {}",
+             symlink_path, same_content,
+             same_content ? "reusing it" : "INVALID_PARAMETER");
+    }
+    if (!same_content) {
+      return X_ERROR_INVALID_PARAMETER;
+    }
+    if (disposition_ptr) {
+      *disposition_ptr = static_cast<uint32_t>(kDispositionState::Open);
+    }
+    if (license_mask_ptr) {
+      *license_mask_ptr = static_cast<uint32_t>(cvars::license_mask);
+    }
+    if (overlapped_ptr) {
+      // Same shape the normal path completes with: extended error from the
+      // result, and LENGTH carrying the disposition - a caller that reads the
+      // disposition out of the overlapped rather than from disposition_ptr
+      // got 0 (Unknown) here and crashed three seconds later (Fable III,
+      // guest PC 821DBAEC, fault 000003EC).
+      kernel_state()->CompleteOverlappedImmediateEx(
+          overlapped_ptr, X_ERROR_SUCCESS, X_HRESULT_FROM_WIN32(X_ERROR_SUCCESS),
+          static_cast<uint32_t>(kDispositionState::Open));
+      return X_ERROR_IO_PENDING;
+    }
+    return X_ERROR_SUCCESS;
+  }
 
   if (overlapped_ptr && disposition_ptr) {
     *disposition_ptr = 0;
@@ -400,6 +454,11 @@ dword_result_t xeXamContentCreate(dword_t user_index, lpstring_t root_name,
 
     if (disposition_ptr) {
       *disposition_ptr = static_cast<uint32_t>(disposition);
+    }
+
+    if (cvars::kernel_trace_xam_content) {
+      XELOGI("XamContent: create root='{}' -> disposition={} result={:08X}",
+             root_name, uint32_t(disposition), uint32_t(result));
     }
 
     if (result && overlapped_ptr) {
@@ -484,6 +543,10 @@ dword_result_t XamContentClose_entry(lpstring_t root_name,
   // Closes a previously opened root from XamContentCreate*.
   auto result =
       kernel_state()->content_manager()->CloseContent(root_name.value());
+  if (cvars::kernel_trace_xam_content) {
+    XELOGI("XamContent: close root='{}' -> {:08X}", root_name.value(),
+           uint32_t(result));
+  }
 
   if (overlapped_ptr) {
     kernel_state()->CompleteOverlappedImmediate(overlapped_ptr, result);

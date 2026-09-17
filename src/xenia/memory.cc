@@ -45,6 +45,10 @@ DEFINE_bool(record_mmio_access_exceptions, true,
             "for them. This info can then be used on a subsequent run to "
             "instruct the recompiler to emit checks",
             "CPU");
+DEFINE_uint32(trace_heap_watch_addr, 0,
+              "Diagnostic: log heap Alloc/Release/Decommit/Protect calls that "
+              "cover this guest address (0 = off).",
+              "Memory");
 DEFINE_bool(protect_on_release, false,
             "Protect released memory to prevent accesses.", "Memory");
 DEFINE_bool(scribble_heap, false,
@@ -835,10 +839,42 @@ namespace {
 constexpr uint32_t kXamWatchLow = 0x81700000u;
 constexpr uint32_t kXamWatchHigh = 0x81D60000u;
 void LogXamRangeOp(const char* op, uint32_t address, uint32_t size) {
+  // 1099z17559-11 (diagnostic): --trace_heap_watch_addr logs every heap
+  // operation whose range covers that guest address (size 0 = a region
+  // release starting at address, reported when address <= watch).
+  if (cvars::trace_heap_watch_addr) {
+    const uint32_t w = cvars::trace_heap_watch_addr;
+    if ((size && address <= w && w - address < size) ||
+        (!size && address <= w && w - address < 0x2000000u)) {
+      XELOGE("HeapWatch {:08X}: {} address={:08X} size={:08X}", w, op, address,
+             size);
+    }
+  }
   if (address >= kXamWatchHigh || (address + size) <= kXamWatchLow) {
     return;
   }
   XELOGE("XamRangeOp: {} address={:08X} size={:08X}", op, address, size);
+}
+// 1099z17559-11 (diagnostic): report when the watched page's entry changes,
+// naming the heap operation that is about to run (the change happened between
+// the previous op and this one) and the op itself after it ran.
+void WatchPageEntry(const BaseHeap* heap, const char* when, const char* op,
+                    uint32_t a, uint32_t b) {
+  const uint32_t w = cvars::trace_heap_watch_addr;
+  if (!w || w < heap->heap_base() || w - heap->heap_base() >= heap->heap_size()) {
+    return;
+  }
+  static std::atomic<uint64_t> last{~0ull};
+  uint32_t st = 0, pr = 0, base = 0, pages = 0;
+  heap->QueryPageEntry(w, &st, nullptr, &pr, &base, &pages);
+  const uint64_t cur = (uint64_t(st) << 56) | (uint64_t(pr) << 48) |
+                       (uint64_t(pages) << 24) | (base >> 12);
+  const uint64_t prev = last.exchange(cur);
+  if (prev != cur) {
+    XELOGE("HeapWatch {:08X}: entry now state {} prot {:X} base {:08X} pages "
+           "{} ({} {} {:08X} {:08X})",
+           w, st, pr, base, pages, when, op, a, b);
+  }
 }
 }  // namespace
 
@@ -1129,6 +1165,7 @@ bool BaseHeap::AllocFixed(uint32_t base_address, uint32_t size,
                           uint32_t alignment, uint32_t allocation_type,
                           uint32_t protect) {
   LogXamRangeOp("AllocFixed", base_address, size);
+  WatchPageEntry(this, "before", "AllocFixed", base_address, size);
   alignment = xe::round_up(alignment, page_size_);
   size = xe::align(size, alignment);
   assert_true((base_address + host_address_offset_) % alignment == 0);
@@ -1434,6 +1471,7 @@ bool BaseHeap::AllocSystemHeap(uint32_t size, uint32_t alignment,
 
 bool BaseHeap::Decommit(uint32_t address, uint32_t size) {
   LogXamRangeOp("Decommit", address, size);
+  WatchPageEntry(this, "before", "Decommit", address, size);
   uint32_t page_count = get_page_count(size, page_size_);
   uint32_t start_page_number = (address - heap_base_) / page_size_;
   uint32_t end_page_number = start_page_number + page_count - 1;
@@ -1466,6 +1504,7 @@ bool BaseHeap::Decommit(uint32_t address, uint32_t size) {
 
 bool BaseHeap::Release(uint32_t base_address, uint32_t* out_region_size) {
   LogXamRangeOp("Release", base_address, 0u);
+  WatchPageEntry(this, "before", "Release", base_address, 0u);
   auto global_lock = global_critical_region_.Acquire();
 
   // Given address must be a region base address.
@@ -1476,6 +1515,12 @@ bool BaseHeap::Release(uint32_t base_address, uint32_t* out_region_size) {
     return false;
   }
 
+  if (cvars::trace_heap_watch_addr) {
+    XELOGE("HeapWatch: Release {:08X} region {} pages x {:X} -> end {:08X}",
+           base_address, uint32_t(base_page_entry.region_page_count),
+           page_size_,
+           base_address + base_page_entry.region_page_count * page_size_);
+  }
   if (heap_base_ == 0x00000000 && base_page_number == 0) {
     XELOGE("BaseHeap::Release: Attempt to free 0!");
     return false;
@@ -1530,6 +1575,7 @@ bool BaseHeap::Release(uint32_t base_address, uint32_t* out_region_size) {
 bool BaseHeap::Protect(uint32_t address, uint32_t size, uint32_t protect,
                        uint32_t* old_protect) {
   LogXamRangeOp("Protect", address, size);
+  WatchPageEntry(this, "before", "Protect", address, size);
   if (!size) {
     XELOGE("BaseHeap::Protect failed due to zero size");
     return false;

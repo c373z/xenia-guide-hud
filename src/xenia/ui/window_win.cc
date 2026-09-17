@@ -1351,6 +1351,35 @@ void Win32MenuItem::SetEnabled(bool enabled) {
   }
 }
 
+// Phase 1099z165: gray out this one entry inside its parent's popup. Menu
+// entries here carry no command ids (the menus are MNS_NOTIFYBYPOS and every
+// AppendMenuW passes id 0), so the entry is addressed by its position, which
+// is this item's index among the parent's children.
+void Win32MenuItem::SetItemEnabled(bool enabled) {
+  auto* parent = static_cast<Win32MenuItem*>(parent_item());
+  if (!parent || !parent->handle_) {
+    return;
+  }
+  for (size_t i = 0; i < parent->child_count(); ++i) {
+    if (parent->child(i) == this) {
+      EnableMenuItem(parent->handle_, static_cast<UINT>(i),
+                     MF_BYPOSITION | (enabled ? MF_ENABLED : MF_GRAYED));
+      return;
+    }
+  }
+}
+
+void Win32MenuItem::OnChildrenRemoved() {
+  if (!handle_) {
+    return;
+  }
+  // RemoveMenu, not DeleteMenu: DeleteMenu destroys a submenu's HMENU, which
+  // the child Win32MenuItem destroys itself when it is dropped right after.
+  while (GetMenuItemCount(handle_) > 0) {
+    RemoveMenu(handle_, 0, MF_BYPOSITION);
+  }
+}
+
 void Win32MenuItem::OnChildAdded(MenuItem* generic_child_item) {
   auto child_item = static_cast<Win32MenuItem*>(generic_child_item);
 

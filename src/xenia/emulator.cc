@@ -11,7 +11,10 @@
 
 #include <cstdio>
 #include <cstring>
+#include <algorithm>
 #include <map>
+#include <vector>
+#include <set>
 #include <mutex>
 #include <thread>
 
@@ -49,6 +52,7 @@
 #include "xenia/cpu/backend/null_backend.h"
 #include "xenia/cpu/cpu_flags.h"
 #include "xenia/cpu/thread_state.h"
+#include "xenia/apu/xma_decoder.h"
 #include "xenia/gpu/command_processor.h"
 #include "xenia/gpu/graphics_system.h"
 #include "xenia/ui/presenter.h"
@@ -65,6 +69,7 @@
 #include "xenia/cpu/symbol.h"
 #include "xenia/cpu/ppc/ppc_context.h"
 #include "xenia/cpu/xex_module.h"
+#include "xenia/kernel/power_reset.h"
 #include "xenia/kernel/xthread.h"
 #include "xenia/kernel/xam/achievement_manager.h"
 #include "xenia/kernel/xam/xam_module.h"
@@ -120,6 +125,8 @@ DEFINE_bool(allow_game_relative_writes, false,
             "generating test data to compare with original hardware. ",
             "General");
 
+DECLARE_int32(draw_resolution_scale_x);
+DECLARE_int32(draw_resolution_scale_y);
 DECLARE_bool(allow_plugins);
 
 DEFINE_int32(priority_class, 0,
@@ -224,6 +231,11 @@ Emulator::~Emulator() {
   audio_system_.reset();
   audio_media_player_.reset();
 
+  // Host Power Off: ~XThread unregisters from the kernel state, so the main
+  // thread and module-level object refs must go first (as a member it would
+  // outlive kernel_state_).
+  kernel::ResetModuleStateForPowerOff();
+  main_thread_.reset();
   kernel_state_.reset();
   file_system_.reset();
 
@@ -310,27 +322,328 @@ X_STATUS Emulator::Setup(
     while (i < tp.size()) {
       size_t comma = tp.find(',', i);
       if (comma == std::string::npos) comma = tp.size();
-      const uint32_t addr = uint32_t(
-          std::strtoul(tp.substr(i, comma - i).c_str(), nullptr, 16));
+      // 1099z160: "addr:max" raises the per-address hit cap (default 8).
+      const std::string item = tp.substr(i, comma - i);
+      const uint32_t addr = uint32_t(std::strtoul(item.c_str(), nullptr, 16));
+      const size_t colon = item.find(':');
+      const uint32_t max_hits =
+          colon == std::string::npos
+              ? 8u
+              : uint32_t(std::strtoul(item.c_str() + colon + 1, nullptr, 10));
+      // "addr:max:rN:hexoff" dumps the words at rN+off instead of r1+0x70.
+      uint32_t dump_reg = 1, dump_off = 0x70;
+      const size_t colon2 =
+          colon == std::string::npos ? colon : item.find(':', colon + 1);
+      if (colon2 != std::string::npos && colon2 + 1 < item.size() &&
+          item[colon2 + 1] == 'r') {
+        char* end = nullptr;
+        dump_reg =
+            uint32_t(std::strtoul(item.c_str() + colon2 + 2, &end, 10)) & 31;
+        if (end && *end == ':') {
+          dump_off = uint32_t(std::strtoul(end + 1, nullptr, 16));
+        }
+      }
       i = comma + 1;
       if (!addr) continue;
       auto hits = std::make_shared<std::atomic<uint32_t>>(0);
+      auto* mem = memory_.get();
       processor_->AddGuestHook(
-          addr, [addr, hits](cpu::ppc::PPCContext* c) {
+          addr, [addr, hits, max_hits, mem, dump_reg,
+                 dump_off](cpu::ppc::PPCContext* c) {
+            // 1099z166: when --kernel_sample_to_ms is set, trace only inside
+            // that window (a pc that runs constantly burns its cap long
+            // before the moment of interest otherwise).
+            static const auto t0 = std::chrono::steady_clock::now();
+            if (cvars::kernel_sample_to_ms > 0) {
+              const int64_t now_ms =
+                  std::chrono::duration_cast<std::chrono::milliseconds>(
+                      std::chrono::steady_clock::now() - t0)
+                      .count();
+              if (now_ms < cvars::kernel_sample_from_ms ||
+                  now_ms > cvars::kernel_sample_to_ms) {
+                return;
+              }
+            }
             const uint32_t n = ++*hits;
-            if (n > 8) return;
+            if (n > max_hits) return;
             auto* th = kernel::XThread::GetCurrentThread();
             auto* ks = th ? th->kernel_state() : nullptr;
+            // 1099z160: r1 and 4 words at rN+off (default r1+0x70).
+            const uint32_t sp = uint32_t(c->r[1]);
+            const uint32_t base = uint32_t(c->r[dump_reg]) + dump_off;
+            uint32_t w[4] = {0, 0, 0, 0};
+            if (base >= 0x10000 && base < 0xFFFF0000) {
+              for (int k = 0; k < 4; ++k) {
+                w[k] = xe::load_and_swap<uint32_t>(
+                    mem->TranslateVirtual(base + 4 * k));
+              }
+            }
             XELOGI("TracePC {:08X} #{}: r3 {:08X} r4 {:08X} r5 {:08X} r6 "
-                   "{:08X} r10 {:08X} r11 {:08X} r31 {:08X} lr {:08X} tid "
-                   "{:08X} | {}",
+                   "{:08X} r7 {:08X} r8 {:08X} r9 {:08X} "
+                   "r10 {:08X} r11 {:08X} r31 {:08X} lr {:08X} r1 "
+                   "{:08X} [r{}+{:X}] {:08X} {:08X} {:08X} {:08X} tid {:08X} "
+                   "| {}",
                    addr, n, uint32_t(c->r[3]), uint32_t(c->r[4]),
-                   uint32_t(c->r[5]), uint32_t(c->r[6]), uint32_t(c->r[10]),
+                   uint32_t(c->r[5]), uint32_t(c->r[6]), uint32_t(c->r[7]),
+                   uint32_t(c->r[8]), uint32_t(c->r[9]), uint32_t(c->r[10]),
                    uint32_t(c->r[11]), uint32_t(c->r[31]), uint32_t(c->lr),
+                   sp, dump_reg, dump_off, w[0], w[1], w[2], w[3],
                    th ? th->thread_id() : 0u,
                    ks ? ks->GuestBackChain(8) : std::string());
           });
     }
+  }
+  if (!cvars::trace_guest_list.empty()) {
+    // Phase 1099z161 (DIAGNOSTIC): "pc:rN:headoff:nextoff:words" - at guest
+    // pc, walk a singly linked list starting at [rN+headoff], following
+    // [node+nextoff] (up to 32 nodes, first 4 hits), and log each node's
+    // first `words` words plus any word that points at printable ASCII.
+    const std::string& s = cvars::trace_guest_list;
+    uint32_t pc = 0, reg = 3, head_off = 0, next_off = 0, words = 8;
+    char* p = nullptr;
+    pc = uint32_t(std::strtoul(s.c_str(), &p, 16));
+    if (p && *p == ':' && p[1] == 'r') {
+      reg = uint32_t(std::strtoul(p + 2, &p, 10)) & 31;
+      if (p && *p == ':') head_off = uint32_t(std::strtoul(p + 1, &p, 16));
+      if (p && *p == ':') next_off = uint32_t(std::strtoul(p + 1, &p, 16));
+      if (p && *p == ':') words = uint32_t(std::strtoul(p + 1, &p, 10));
+    }
+    words = std::min<uint32_t>(std::max<uint32_t>(words, 1), 32);
+    auto hits = std::make_shared<std::atomic<uint32_t>>(0);
+    auto* mem = memory_.get();
+    if (pc) {
+      processor_->AddGuestHook(pc, [=](cpu::ppc::PPCContext* c) {
+        if (++*hits > 4) return;
+        auto readable = [mem](uint32_t a) {
+          if (a < 0x10000 || a >= 0xA0000000) return false;
+          auto* heap = mem->LookupHeap(a);
+          uint32_t prot = 0;
+          return heap && heap->QueryProtect(a, &prot) &&
+                 (prot & kMemoryProtectRead) != 0;
+        };
+        auto rd = [mem](uint32_t a) {
+          return xe::load_and_swap<uint32_t>(mem->TranslateVirtual(a));
+        };
+        uint32_t base = uint32_t(c->r[reg]) + head_off;
+        uint32_t node = readable(base) ? rd(base) : 0;
+        XELOGI("TraceList {:08X} hit {}: r{}={:08X} head {:08X}", pc,
+               hits->load(), reg, uint32_t(c->r[reg]), node);
+        for (int n = 0; n < 32 && readable(node); ++n) {
+          std::string line;
+          for (uint32_t k = 0; k < words; ++k) {
+            const uint32_t w = rd(node + 4 * k);
+            line += fmt::format("{:08X} ", w);
+            if (readable(w)) {
+              std::string str;
+              for (int j = 0; j < 64; ++j) {
+                if (((w + uint32_t(j)) & 0xFFF) == 0 &&
+                    !readable(w + uint32_t(j))) {
+                  break;
+                }
+                const uint8_t ch =
+                    *mem->TranslateVirtual<uint8_t*>(w + uint32_t(j));
+                if (ch < 0x20 || ch >= 0x7F) break;
+                str.push_back(char(ch));
+              }
+              if (str.size() >= 4) line += "\"" + str + "\" ";
+            }
+          }
+          XELOGI("TraceList   node {} @{:08X}: {}", n, node, line);
+          const uint32_t next = rd(node + next_off);
+          if (next == node) break;
+          node = next;
+        }
+      });
+    }
+  }
+  // HOST-SIDE (xui_glyph_2x): the XUI text scale follows the integer render
+  // scale, which the app has fixed by now (upscale_to_window included).
+  const uint32_t g2_scale = uint32_t(std::clamp(
+      cvars::xui_glyph_scale > 0
+          ? cvars::xui_glyph_scale
+          : std::min(cvars::draw_resolution_scale_x,
+                     cvars::draw_resolution_scale_y),
+      1, 8));
+  if (cvars::xui_glyph_2x && g2_scale >= 2) {
+    // HOST-SIDE (xui_glyph_2x): bake XUI glyphs at N times their pixel size
+    // (N = the render scale) while every layout value stays 1x, in xam
+    // (Guide/HUD) and the statically linked copy in dash. Sites from static
+    // analysis of xam and dash 17559, located in every other build by
+    // research/glyph2x_sites.py + research/g2old.py (xam and dash 6770-17559;
+    // 6770-8955 from runtime images, their modules are flash-patched):
+    //  dpi     the renderer's DPI store: 96 -> 96N, so fonts are built at Nx.
+    //  metric  the three x0.125 conversions from 8x font units to pixels:
+    //          x1/N, so advances, boxes and line metrics stay 1x.
+    //  scratch the x8.0 metric->scratch conversions (-8.0 before 12625's
+    //          dash): xN, so the 8x oversampled scratch fits an Nx glyph.
+    //          Both hooks scale the constant the previous instruction loaded,
+    //          and only that value (a loop can re-enter the site).
+    //  create  the cache page texture create: width and height xN. The
+    //          allocator and the UV divisor keep the 1x page size, so UVs
+    //          are unchanged and address the same fraction of an Nx texture.
+    //          kCreateR3R4: xam <= 8955 passes (w, h) in r3/r4 to a helper
+    //          with one caller; the hook sits on that call.
+    //  write   the glyph write call: cell x, y, w, h and the 3/2 padding xN,
+    //          so glyphs land in the Nx texture where the 1x UVs point.
+    //          kWriteR7: xam <= 8955 passes x, y, w, h in r7..r10 and the
+    //          padding at sp+0x54/0x5C; it rasterizes straight into the
+    //          locked rect, so it has no second scratch conversion.
+    //  phase   the rasterizer keeps a glyph's sub-pixel phase as |left| mod 8
+    //          subsamples (one font pixel) and stores the scratch x offset
+    //          (phase - left, left in r29) at sp+0x50. At Nx one font pixel
+    //          is one texel, not one layout pixel, so glyphs whose 1x phase
+    //          was >= 0.5 px landed a texel left of where the 1x quad expects
+    //          (measured at 2x: letters up to 1 px off). Use mod 8N. The
+    //          stored register comes from the site's own stw.
+    // Not covered: the placeholder box drawn into each new page stays 1x, and
+    // any glyph supplied by the precomputed lookup (xam 81790418) stays 1x.
+    // Every dash loads at the same base, so one build's site is another
+    // build's unrelated code (kCreate/kWrite are a bare mtctr). A hook acts
+    // only for the build whose nine words around the site match exactly, so
+    // other code and unlisted builds are left alone.
+    enum class G2 { kDpi, kMetricF0, kMetricF31, kScratchF11, kScratchF12,
+                    kCreate, kCreateR3R4, kWrite, kWriteR7, kPhase };
+    struct G2Site {
+      uint32_t addr;
+      G2 kind;
+      uint32_t words[9];  // site-4 .. site+4
+    };
+    static const G2Site kSites[] = {
+#include "xenia/xui_glyph_2x_sites.inc"
+    };
+    XELOGI("XuiGlyph2x: text scale {}x, {} sites (HOST-SIDE)", g2_scale,
+           std::size(kSites));
+    auto* mem = memory_.get();
+    static std::atomic<uint32_t> g2_counts[std::size(kSites)] = {};
+    // One hook per address; it picks the build whose fingerprint matches.
+    std::map<uint32_t, std::vector<size_t>> by_addr;
+    for (size_t i = 0; i < std::size(kSites); ++i) {
+      by_addr[kSites[i].addr].push_back(i);
+    }
+    for (auto& [addr, cands] : by_addr) {
+      processor_->AddGuestHook(addr, [mem, cands,
+                                      g2_scale](cpu::ppc::PPCContext* c) {
+        const G2Site* sp = nullptr;
+        size_t i = 0;
+        for (size_t k : cands) {
+          const G2Site& t = kSites[k];
+          const uint8_t* ip = mem->TranslateVirtual(t.addr - 16);
+          if (!ip) continue;
+          bool match = true;
+          for (int j = 0; j < 9 && match; ++j) {
+            match = xe::load_and_swap<uint32_t>(ip + 4 * j) == t.words[j];
+          }
+          if (match) {
+            sp = &t;
+            i = k;
+            break;
+          }
+        }
+        if (!sp) return;
+        const G2Site& s = *sp;
+        const uint32_t n = ++g2_counts[i];
+        const double inv = 1.0 / double(g2_scale);
+        auto scale_stack = [&](std::initializer_list<uint32_t> offs) {
+          for (uint32_t off : offs) {
+            uint8_t* p = mem->TranslateVirtual(uint32_t(c->r[1]) + off);
+            xe::store_and_swap<uint32_t>(
+                p, xe::load_and_swap<uint32_t>(p) * g2_scale);
+          }
+        };
+        // Metric/scratch sites scale the constant only while the register
+        // still holds it: newer engines loop back to their first scratch
+        // site (9222A0EC -> 9222A068 in dash 17559) without reloading f11.
+        auto metric = [&](double& f) {
+          if (f == 0.125) f = 0.125 * inv;
+        };
+        auto scratch = [&](double& f) {
+          if (f == 8.0 || f == -8.0) f *= g2_scale;
+        };
+        switch (s.kind) {
+          case G2::kDpi:
+            c->f[31] *= g2_scale;
+            break;
+          case G2::kMetricF0:
+            metric(c->f[0]);
+            break;
+          case G2::kMetricF31:
+            metric(c->f[31]);
+            break;
+          case G2::kScratchF11:
+            scratch(c->f[11]);
+            break;
+          case G2::kScratchF12:
+            scratch(c->f[12]);
+            break;
+          case G2::kCreate:
+            c->r[4] *= g2_scale;
+            c->r[5] *= g2_scale;
+            break;
+          case G2::kCreateR3R4:
+            c->r[3] *= g2_scale;
+            c->r[4] *= g2_scale;
+            break;
+          case G2::kWrite:
+            c->r[8] *= g2_scale;
+            c->r[9] *= g2_scale;
+            c->r[10] *= g2_scale;
+            scale_stack({0x54u, 0x5Cu, 0x64u});
+            break;
+          case G2::kWriteR7:
+            c->r[7] *= g2_scale;
+            c->r[8] *= g2_scale;
+            c->r[9] *= g2_scale;
+            c->r[10] *= g2_scale;
+            scale_stack({0x54u, 0x5Cu});
+            break;
+          case G2::kPhase: {
+            // r29 = glyph left in subsamples (lha, sign-extended); the site
+            // is `stw rS, 0x50(r1)`.
+            const uint32_t rs = (s.words[4] >> 21) & 31;
+            const int32_t left = int16_t(uint32_t(c->r[29]) & 0xFFFF);
+            const int32_t phase =
+                (left < 0 ? -left : left) % int32_t(8 * g2_scale);
+            c->r[rs] = uint32_t(phase - left);
+            break;
+          }
+        }
+        if (n <= 2) {
+          XELOGI("XuiGlyph2x: {:08X} kind {} hit {} (HOST-SIDE) r3={:X} "
+                 "r4={:X} r5={:X} r7={:X} r8={:X} r9={:X} r10={:X} f31={}",
+                 s.addr, int(s.kind), n, uint32_t(c->r[3]), uint32_t(c->r[4]),
+                 uint32_t(c->r[5]), uint32_t(c->r[7]), uint32_t(c->r[8]),
+                 uint32_t(c->r[9]), uint32_t(c->r[10]), c->f[31]);
+        }
+      });
+    }
+  }
+  if (cvars::xui_glyph_dpi > 0.0) {
+    // HOST-SIDE (xui_glyph_dpi): xam 17559's XUI text renderer init stores
+    // its DPI with `stfs f31, 8(r31)` at 8178E30C; CreateFont (8178F640)
+    // turns a font size into pixels as size * [renderer+8] / 72. Replace the
+    // value about to be stored. Acts only if the instruction there is the
+    // expected one, so another xam build is left alone.
+    auto* mem = memory_.get();
+    const float dpi = float(cvars::xui_glyph_dpi);
+    processor_->AddGuestHook(0x8178E30C, [mem, dpi](cpu::ppc::PPCContext* c) {
+      const uint32_t insn =
+          xe::load_and_swap<uint32_t>(mem->TranslateVirtual(0x8178E30C));
+      static std::atomic<uint32_t> hits{0};
+      const uint32_t n = ++hits;
+      if (insn != 0xD3FF0008u) {
+        if (n == 1) {
+          XELOGW("XuiGlyphDpi: 8178E30C is {:08X}, not xam 17559's stfs; "
+                 "left unchanged",
+                 insn);
+        }
+        return;
+      }
+      if (n <= 4) {
+        XELOGI("XuiGlyphDpi: renderer {:08X} dpi {} -> {} (HOST-SIDE)",
+               uint32_t(c->r[31]), c->f[31], dpi);
+      }
+      c->f[31] = dpi;
+    });
   }
 
   XELOGI("{}: Initializing Audio...", __func__);
@@ -686,6 +999,70 @@ X_STATUS Emulator::TerminateTitle() {
   return X_STATUS_SUCCESS;
 }
 
+// Host Power Off: detached diagnostic threads that poll guest memory count
+// themselves here and exit once stop is set, before Memory is destroyed.
+std::atomic<bool> g_memory_pollers_stop{false};
+std::atomic<int> g_memory_pollers{0};
+
+void kernel::ResetModuleStateForPowerOff() {
+  kernel::ResetXObjectStateForPowerOff();
+  kernel::ResetXTimerStateForPowerOff();
+  kernel::xboxkrnl::ResetObStateForPowerOff();
+  kernel::xboxkrnl::ResetXInputdStateForPowerOff();
+  kernel::xboxkrnl::ResetAniStateForPowerOff();
+  kernel::xboxkrnl::ResetVideoStateForPowerOff();
+  kernel::xboxkrnl::ResetMiscStateForPowerOff();
+  kernel::xboxkrnl::ResetIoStateForPowerOff();
+  kernel::xboxkrnl::ResetCryptStateForPowerOff();
+  kernel::xboxkrnl::ResetAudioStateForPowerOff();
+  kernel::xboxkrnl::ResetLzxStateForPowerOff();
+  kernel::xboxkrnl::ResetMemoryStateForPowerOff();
+  kernel::xboxkrnl::ResetModulesStateForPowerOff();
+  kernel::ResetXThreadStateForPowerOff();
+}
+
+void Emulator::PowerOff() {
+  XELOGI("Power: powering off (title open: {})", is_title_open());
+  awaiting_power_on_ = false;
+  kernel::xboxkrnl::GuidePaintThreadStop();
+  // Every guest thread - title, LLE xam, hud, the boot animation - the way a
+  // title switch stops title threads. Not KernelState::TerminateTitle: its
+  // StepToGuestSafePoint never returns for a thread parked in a wait
+  // (measured: Power Off hung there with the dashboard up).
+  // Host XThreads too: most run guest code (SMC, ani, timers, XInputd RGC,
+  // "Boot Launch (xam)", which the app's WaitUntilExit waits on) and have no
+  // owner to stop them; the audio worker blocks forever inside xam's audio
+  // callback once xam's threads are gone (measured: AudioSystem::Shutdown
+  // hung). Spared: host threads whose owner stops them on destruction - the
+  // GPU and XMA workers, and kernel dispatch (killed inside its condition
+  // variable wait, ~KernelState's notify_all faulted - measured).
+  std::vector<kernel::XThread*> spared = {kernel_state_->dispatch_thread()};
+  if (graphics_system_) {
+    spared.push_back(graphics_system_->frame_limiter_thread());
+    if (graphics_system_->command_processor()) {
+      spared.push_back(graphics_system_->command_processor()->worker_thread());
+    }
+  }
+  if (audio_system_ && audio_system_->xma_decoder()) {
+    spared.push_back(audio_system_->xma_decoder()->worker_thread());
+  }
+  g_memory_pollers_stop = true;
+  for (int i = 0; i < 2000 && g_memory_pollers > 0; ++i) {
+    xe::threading::Sleep(std::chrono::milliseconds(1));
+  }
+  // Left set if one is still running, so it cannot outlive its Memory.
+  if (g_memory_pollers == 0) g_memory_pollers_stop = false;
+  kernel_state_->TerminateGuestThreadsSafely(
+      [&spared](kernel::XThread* thread) {
+        return std::find(spared.begin(), spared.end(), thread) == spared.end();
+      },
+      "Power", false);
+  title_id_ = std::nullopt;
+  title_name_ = "";
+  title_version_ = "";
+  on_terminate();
+}
+
 const std::unique_ptr<vfs::Device> Emulator::CreateVfsDevice(
     const std::filesystem::path& path, const std::string_view mount_path) {
   // Must check if the type has changed e.g. XamSwapDisc
@@ -889,8 +1266,18 @@ X_STATUS Emulator::LaunchPath(const std::filesystem::path& path) {
     std::filesystem::create_directories(hdd, ec);
     auto hdd_device = std::make_unique<vfs::HostPathDevice>(
         "\\Device\\Harddisk0\\Partition1", hdd, false);
+    // Phase 1099z159: xam 17559 reads this volume's size for storage devices
+    // and save locations; Xenia's fixed answer is a 64 MB drive.
+    hdd_device->set_model_bytes(uint64_t(std::max(cvars::kernel_hdd_size_gb, 0)) *
+                                1000 * 1000 * 1000);
     if (hdd_device->Initialize() &&
         file_system_->RegisterDevice(std::move(hdd_device))) {
+      // The dash's own \??\HDD: link (it creates it only for EDID uploads);
+      // file://HDD:/... box art paths need it (InstallCoverArtHooks).
+      if (cvars::guide_game_library_cover_art) {
+        file_system_->RegisterSymbolicLink("HDD:",
+                                           "\\Device\\Harddisk0\\Partition1");
+      }
       XELOGI("VirtualHDD: \\Device\\Harddisk0\\Partition1 -> {} (writable)",
              xe::path_to_utf8(hdd));
     } else {
@@ -1643,7 +2030,7 @@ static void GuideRecordPress(uint16_t vk) {
 }
 
 void Emulator::on_guide_button_pressed(uint8_t user_index) {
-  if (cvars::guide_power_on_with_guide_button && !is_title_open()) {
+  if (awaiting_power_on()) {
     // Phase 1099z138: nothing running - this press is the power button.
     guide_power_press_ = true;
     XELOGI("Guide button: pressed with no title open (power on)");
@@ -5563,13 +5950,325 @@ static void InstallGuideSigninTraces(xe::kernel::KernelState* ks) {
   XELOGI("GuideSignin: hooks added");
 }
 
-static void InstallGuideLuaTraces(xe::kernel::KernelState* ks) {
+// Defaults are dash.xex 2.0.17489; --trace_dash_lua passes another build's
+// luaD_throw,Sleep,lua_yield and skips the 17489-only hooks after them.
+// Phase 1099z170: what the guest does around a title launch - which XUI
+// timelines and scene transitions xam (the Guide) and the 17559 dash play,
+// and when xam's launcher, the dash's persist and the terminate run relative
+// to them. Every site is checked against the instruction it was read from.
+// Phase 1099z170: guide_capture_count shots, guide_capture_interval_ms apart,
+// written as <prefix>_N.raw next to the exe (research/rawtopng.py).
+static void GuideCaptureBurst(xe::gpu::GraphicsSystem* gs, std::string prefix) {
+  std::thread([gs, prefix]() {
+    xe::threading::set_name("GuideCaptureBurst");
+    auto* presenter = gs ? gs->presenter() : nullptr;
+    if (!presenter) return;
+    const auto t0 = std::chrono::steady_clock::now();
+    const int shots = std::max(1, int(cvars::guide_capture_count));
+    for (int shot = 0; shot < shots; ++shot) {
+      xe::ui::RawImage image;
+      if (!presenter->CaptureGuestOutput(image)) {
+        XELOGW("GuideCaptureBurst: capture failed at shot {}", shot);
+        return;
+      }
+      auto path = xe::filesystem::GetExecutableFolder() /
+                  fmt::format("{}_{:02}.raw", prefix, shot);
+      if (FILE* f = xe::filesystem::OpenFile(path, "wb")) {
+        uint32_t hdr[3] = {image.width, image.height,
+                           static_cast<uint32_t>(image.stride)};
+        fwrite(hdr, sizeof(hdr), 1, f);
+        fwrite(image.data.data(), 1, image.data.size(), f);
+        fclose(f);
+      }
+      XELOGI("GuideCaptureBurst: {} shot {} at +{} ms", prefix, shot,
+             std::chrono::duration_cast<std::chrono::milliseconds>(
+                 std::chrono::steady_clock::now() - t0)
+                 .count());
+      xe::threading::Sleep(std::chrono::milliseconds(
+          std::max(1, int(cvars::guide_capture_interval_ms))));
+    }
+  }).detach();
+}
+
+static void InstallGuideTransitionTraces(xe::kernel::KernelState* ks) {
+  auto* proc = ks->processor();
+  auto* mem = ks->memory();
+  enum Kind { kPlay, kFind, kPlayNamed, kCreate, kPlain, kLaunch };
+  struct Site {
+    uint32_t addr;
+    uint32_t word;
+    Kind kind;
+    const char* name;
+  };
+  static const Site kSites[] = {
+      {0x817BDC78u, 0x7D8802A6u, kPlay, "xam PlayTimeline"},
+      {0x817BDDE8u, 0x7D8802A6u, kFind, "xam FindNamedFrame"},
+      {0x817BDCE0u, 0x7D8802A6u, kPlayNamed, "xam PlayNamedFrames"},
+      {0x817C4D90u, 0x7D8802A6u, kPlain, "xam ScenePlayBackFromTransition"},
+      {0x817C4DE8u, 0x7D8802A6u, kPlain, "xam ScenePlayBackToTransition"},
+      {0x817C4E98u, 0x7D8802A6u, kPlain, "xam ScenePlayFromTransition"},
+      {0x817C4E40u, 0x7D8802A6u, kPlain, "xam ScenePlayToTransition"},
+      {0x817C0B70u, 0x7D8802A6u, kPlain, "xam SceneInterruptTransitions"},
+      {0x817C56E0u, 0x7D8802A6u, kPlain, "xam SceneNavigateBack"},
+      {0x817C54D0u, 0x7D8802A6u, kPlain, "xam SceneNavigateForward"},
+      {0x817C5390u, 0x7D8802A6u, kPlain, "xam SceneNavigateFirst"},
+      {0x817BCBE8u, 0x7D8802A6u, kPlain, "xam ElementUnlink"},
+      {0x817C4A58u, 0x7CC83378u, kCreate, "xam SceneCreate"},
+      {0x8169E120u, 0x7D8802A6u, kLaunch, "xam launch request"},
+      {0x816A0798u, 0x7D8802A6u, kPlain, "xam launcher"},
+      {0x8169E5D8u, 0x7D8802A6u, kPlain, "xam terminate title"},
+      {0x921DFDB0u, 0x7D8802A6u, kPlay, "dash PlayTimeline"},
+      {0x921DFFD0u, 0x7D8802A6u, kFind, "dash FindNamedFrame"},
+      {0x921DFE18u, 0x7D8802A6u, kPlayNamed, "dash PlayNamedFrames"},
+      {0x921E7AE0u, 0x7D8802A6u, kPlain, "dash ScenePlayBackFromTransition"},
+      {0x921E7B38u, 0x7D8802A6u, kPlain, "dash ScenePlayBackToTransition"},
+      {0x921E7BE8u, 0x7D8802A6u, kPlain, "dash ScenePlayFromTransition"},
+      {0x921E7B90u, 0x7D8802A6u, kPlain, "dash ScenePlayToTransition"},
+      {0x921E8430u, 0x7D8802A6u, kPlain, "dash SceneNavigateBack"},
+      {0x921E8220u, 0x7D8802A6u, kPlain, "dash SceneNavigateForward"},
+      {0x921E80E0u, 0x7D8802A6u, kPlain, "dash SceneNavigateFirst"},
+      {0x921DEBD0u, 0x7D8802A6u, kPlain, "dash ElementUnlink"},
+      {0x921E77A8u, 0x7CC83378u, kCreate, "dash SceneCreate"},
+      {0x92183B18u, 0x7D8802A6u, kPlain, "dash launch callback"},
+      {0x92182120u, 0x7D8802A6u, kPlain, "dash persist display"},
+  };
+  static std::atomic<uint32_t> lines{0};
+  for (const Site& s : kSites) {
+    proc->AddGuestHook(s.addr, [mem, ks, s](cpu::ppc::PPCContext* c) {
+      const uint8_t* ip = mem->TranslateVirtual(s.addr);
+      if (!ip || xe::load_and_swap<uint32_t>(ip) != s.word) return;
+      if (lines.fetch_add(1) > 200000) return;
+      auto wstr = [mem](uint64_t a) -> std::string {
+        const uint32_t ga = static_cast<uint32_t>(a);
+        if (ga < 0x10000 || ga >= 0xE0000000u) return {};
+        const uint8_t* p = mem->TranslateVirtual(ga);
+        if (!p) return {};
+        std::string out;
+        for (int i = 0; i < 96; ++i) {
+          const uint16_t ch = xe::load_and_swap<uint16_t>(p + i * 2);
+          if (!ch) break;
+          out.push_back(ch < 0x80 ? char(ch) : '?');
+        }
+        return out;
+      };
+      const uint32_t lr = static_cast<uint32_t>(c->lr);
+      const uint32_t th = xe::kernel::XThread::GetCurrentThreadHandle();
+      const uint32_t r3 = static_cast<uint32_t>(c->r[3]);
+      switch (s.kind) {
+        case kPlay:
+          XELOGI("Transition: {} elem {:08X} start {} init {} end {} loop {} "
+                 "recurse {} lr {:08X} th {:08X}",
+                 s.name, r3, int32_t(c->r[4]), int32_t(c->r[5]),
+                 int32_t(c->r[6]), uint32_t(c->r[7]), uint32_t(c->r[8]), lr,
+                 th);
+          break;
+        case kFind:
+          XELOGI("Transition: {} elem {:08X} '{}' lr {:08X} th {:08X}", s.name,
+                 r3, wstr(c->r[4]), lr, th);
+          break;
+        case kPlayNamed:
+          XELOGI("Transition: {} elem {:08X} '{}' '{}' '{}' lr {:08X} th "
+                 "{:08X}",
+                 s.name, r3, wstr(c->r[4]), wstr(c->r[5]), wstr(c->r[6]), lr,
+                 th);
+          break;
+        case kCreate:
+          XELOGI("Transition: {} '{}' '{}' lr {:08X} th {:08X}", s.name,
+                 wstr(c->r[3]), wstr(c->r[4]), lr, th);
+          break;
+        case kLaunch: {
+          const int64_t now_ms =
+              std::chrono::duration_cast<std::chrono::milliseconds>(
+                  std::chrono::steady_clock::now().time_since_epoch())
+                  .count();
+          ks->transition_trace_until_ms.store(now_ms + 5000);
+          static std::atomic<int32_t> launches{0};
+          const int32_t nth = ++launches;
+          if (cvars::guide_capture_on_launch > 0 &&
+              nth == cvars::guide_capture_on_launch) {
+            GuideCaptureBurst(ks->emulator()->graphics_system(),
+                              fmt::format("launch{}", nth));
+          }
+          XELOGI("Transition: {} r3 {:08X} r4 {:08X} r5 {:08X} lr {:08X} th "
+                 "{:08X}",
+                 s.name, r3, uint32_t(c->r[4]), uint32_t(c->r[5]), lr, th);
+          break;
+        }
+        default:
+          XELOGI("Transition: {} r3 {:08X} r4 {:08X} r5 {:08X} lr {:08X} th "
+                 "{:08X}",
+                 s.name, r3, uint32_t(c->r[4]), uint32_t(c->r[5]), lr, th);
+          break;
+      }
+    });
+  }
+  XELOGI("Transition: {} trace sites installed", std::size(kSites));
+}
+
+// 2026-09-16, HOST-SIDE (guide_game_library_cover_art): My Games box art on
+// dash 2.0.17559. The dash's ConvertToLibraryItem (Marketplace.GameLibrary
+// .lua) builds every installed game's library item with boxart = '' (pc10
+// `LOADK r6 ''`, pc104 `SETTABLE item.boxart r6`), so the LibrarySlot tile
+// (MarketplaceSlot.xui, img_0=boxart) only ever shows its built-in
+// placeholder. Two changes, both checked against the exact 17559 bytes:
+//  1. pc10 becomes `GETTABLE r6 r1 'boxart'` (content.boxart; r1 is the
+//     native title record, never nil there).
+//  2. The record's __index getter (928ADF90) has no "boxart" property; its
+//     last key compare (928AE778) is redirected for that key only, and the
+//     string it pushes (928AE0E0, r4 = UTF-16BE) becomes
+//     file://HDD:/BoxArt/<titleid>/largeboxart.jpg when the game library
+//     saved one, or NULL (pushes '') so the placeholder stays.
+// The cover files are written by app/game_library.cc. "HDD:" is the
+// \??\HDD: -> Partition1 link the dash itself creates elsewhere.
+namespace {
+constexpr uint32_t kCoverArtPatchPc10 = 0x92FB7943;
+constexpr uint32_t kCoverArtCheckPc104 = 0x92FB7ABB;
+constexpr uint32_t kCoverArtCheckPc108 = 0x92FB7ACB;
+constexpr uint32_t kCoverArtLastCompare = 0x928AE778;
+constexpr uint32_t kCoverArtPushString = 0x928AE0E0;
+std::atomic<bool> cover_art_patched{false};
+thread_local bool cover_art_pending = false;
+thread_local uint32_t cover_art_title_id = 0;
+}  // namespace
+
+static void InstallCoverArtHooks(xe::kernel::KernelState* ks) {
+  auto* mem = ks->memory();
+  auto* proc = ks->processor();
+  const auto read_be32 = [mem](uint32_t address) {
+    return xe::load_and_swap<uint32_t>(mem->TranslateVirtual(address));
+  };
+
+  ks->user_module_loaded_hook = [mem, read_be32](
+                                    xe::kernel::UserModule* module) {
+    const auto is_dash = [](const std::string& name) {
+      return xe::utf8::equal_case(name, "dash") ||
+             xe::utf8::equal_case(name, "dash.xex");
+    };
+    if (!module ||
+        !(is_dash(module->name()) || is_dash(module->bounding_filename()))) {
+      return;
+    }
+    // Older dashboards (e.g. 2.0.13604) are smaller: these addresses are not
+    // mapped and reading them faulted the launch. Check before reading.
+    const auto readable = [mem](uint32_t address) {
+      auto* heap = mem->LookupHeap(address);
+      uint32_t protect = 0;
+      return heap && heap->QueryProtect(address, &protect) &&
+             (protect & kMemoryProtectRead);
+    };
+    if (!readable(kCoverArtPatchPc10) || !readable(kCoverArtCheckPc104) ||
+        !readable(kCoverArtCheckPc108)) {
+      XELOGW("CoverArt: {} does not map dash 2.0.17559's GameLibrary "
+             "bytecode; My Games box art left off",
+             module->name());
+      cover_art_patched = false;
+      return;
+    }
+    const uint32_t pc10 = read_be32(kCoverArtPatchPc10);
+    const uint32_t pc104 = read_be32(kCoverArtCheckPc104);
+    const uint32_t pc108 = read_be32(kCoverArtCheckPc108);
+    if (pc10 == 0x00C7C186u) {
+      cover_art_patched = true;  // A second load of the same image.
+      return;
+    }
+    if (pc10 != 0x00014181u || pc104 != 0x8F818449u || pc108 != 0x91048449u) {
+      XELOGW("CoverArt: {} is not dash 2.0.17559's GameLibrary bytecode "
+             "({:08X} {:08X} {:08X}); My Games box art left off",
+             module->name(), pc10, pc104, pc108);
+      cover_art_patched = false;
+      return;
+    }
+    // Image pages are read-only; lift that for the write, as the patcher does.
+    auto* heap = mem->LookupHeap(kCoverArtPatchPc10);
+    uint32_t old_protect = 0;
+    if (!heap || !heap->QueryProtect(kCoverArtPatchPc10, &old_protect)) {
+      XELOGW("CoverArt: cannot query the dash image protection");
+      return;
+    }
+    heap->Protect(kCoverArtPatchPc10, 4,
+                  kMemoryProtectRead | kMemoryProtectWrite);
+    xe::store_and_swap<uint32_t>(mem->TranslateVirtual(kCoverArtPatchPc10),
+                                 0x00C7C186u);
+    heap->Protect(kCoverArtPatchPc10, 4, old_protect);
+    cover_art_patched = true;
+    XELOGI("CoverArt: patched ConvertToLibraryItem pc10 (HOST-SIDE)");
+  };
+
+  proc->AddGuestHook(kCoverArtLastCompare, [mem, read_be32](
+                                               cpu::ppc::PPCContext* c) {
+    if (!cover_art_patched) {
+      return;
+    }
+    const uint32_t key = uint32_t(c->r[30]);
+    if (!key) {
+      return;
+    }
+    const char* text = mem->TranslateVirtual<const char*>(key);
+    if (!xe::utf8::equal_case(std::string_view(text, strnlen(text, 16)),
+                              "boxart")) {
+      return;
+    }
+    const uint32_t record = read_be32(uint32_t(c->r[31]) + 0xC);
+    cover_art_title_id = record ? read_be32(record + 8) : 0;
+    cover_art_pending = true;
+    c->r[3] = 0;  // "matched": take this compare's branch to the push.
+  });
+
+  auto paths = std::make_shared<std::map<uint32_t, uint32_t>>();
+  auto paths_mutex = std::make_shared<std::mutex>();
+  proc->AddGuestHook(kCoverArtPushString, [mem, paths, paths_mutex](
+                                              cpu::ppc::PPCContext* c) {
+    if (!cover_art_pending) {
+      return;
+    }
+    cover_art_pending = false;
+    const uint32_t title_id = cover_art_title_id;
+    uint32_t guest_path = 0;
+    if (title_id && !cvars::guide_hdd_path.empty()) {
+      const std::string name = fmt::format("{:08x}", title_id);
+      std::error_code ec;
+      const bool exists = std::filesystem::exists(
+          std::filesystem::path(cvars::guide_hdd_path) / "BoxArt" / name /
+              "largeboxart.jpg",
+          ec);
+      if (exists) {
+        std::lock_guard<std::mutex> lock(*paths_mutex);
+        auto it = paths->find(title_id);
+        if (it == paths->end()) {
+          const std::string url =
+              "file://HDD:/BoxArt/" + name + "/largeboxart.jpg";
+          const uint32_t size = uint32_t(url.size() + 1) * 2;
+          const uint32_t address = mem->SystemHeapAlloc(size);
+          if (address) {
+            auto* out = mem->TranslateVirtual<uint8_t*>(address);
+            for (size_t i = 0; i <= url.size(); ++i) {
+              const char16_t ch = i < url.size() ? char16_t(url[i]) : 0;
+              xe::store_and_swap<uint16_t>(out + i * 2, uint16_t(ch));
+            }
+            it = paths->emplace(title_id, address).first;
+            XELOGI("CoverArt: {:08X} -> {}", title_id, url);
+          }
+        }
+        if (it != paths->end()) {
+          guest_path = it->second;
+        }
+      }
+    }
+    c->r[4] = guest_path;  // NULL pushes '': the tile keeps its placeholder.
+  });
+}
+
+static void InstallGuideLuaTraces(xe::kernel::KernelState* ks,
+                                  uint32_t throw_pc = 0x928E4838,
+                                  uint32_t sleep_pc = 0x928F6C58,
+                                  uint32_t yield_pc = 0x928E4608,
+                                  bool generic_only = false) {
   static bool installed = false;
   if (installed) return;
   installed = true;
   auto* proc = ks->processor();
   // luaD_throw(L, errcode)
-  proc->AddGuestHook(0x928E4838, [ks](cpu::ppc::PPCContext* c) {
+  proc->AddGuestHook(throw_pc, [ks](cpu::ppc::PPCContext* c) {
     static std::atomic<uint32_t> n{0};
     const uint32_t k = ++n;
     if (k > 200) return;
@@ -5587,7 +6286,7 @@ static void InstallGuideLuaTraces(xe::kernel::KernelState* ks) {
   });
   // Lua Sleep: log each distinct Lua call site once, then every 20000 calls
   // the counts, so a coroutine stuck in a wait shows up as a growing site.
-  proc->AddGuestHook(0x928F6C58, [ks](cpu::ppc::PPCContext* c) {
+  proc->AddGuestHook(sleep_pc, [ks, generic_only](cpu::ppc::PPCContext* c) {
     auto* mm = ks->memory();
     const std::string site = GuideLuaCaller(mm, uint32_t(c->r[3]));
     static std::mutex mu;
@@ -5597,14 +6296,14 @@ static void InstallGuideLuaTraces(xe::kernel::KernelState* ks) {
     if (++counts[site] == 1) {
       XELOGI("GuideLua: new Sleep site {}", site);
     }
-    if (++total % 20000 == 0) {
+    if (++total % (generic_only ? 2000 : 20000) == 0) {
       std::string s;
       for (auto& kv : counts) s += fmt::format(" {}={}", kv.first, kv.second);
       XELOGI("GuideLua: Sleep counts after {}:{}", total, s);
     }
   });
   // lua_yield(L, nresults): where coroutines park. Distinct (site, lr) once.
-  proc->AddGuestHook(0x928E4608, [ks](cpu::ppc::PPCContext* c) {
+  proc->AddGuestHook(yield_pc, [ks](cpu::ppc::PPCContext* c) {
     auto* mm = ks->memory();
     const std::string key = fmt::format(
         "{} lr={:08X}", GuideLuaCaller(mm, uint32_t(c->r[3])), uint32_t(c->lr));
@@ -5616,6 +6315,53 @@ static void InstallGuideLuaTraces(xe::kernel::KernelState* ks) {
              uint32_t(c->r[3]), ks->GuestBackChain(6));
     }
   });
+  if (generic_only) {
+    // luaD_precall(L, func, nresults), if a 4th pc was given: each distinct
+    // (callee, calling Lua line) once - Lua callees as source:linedefined,
+    // C callees by address. Proto 5.1: +0x20 source, +0x3C linedefined.
+    uint32_t pcs[4] = {};
+    if (std::sscanf(cvars::trace_dash_lua.c_str(), "%x,%x,%x,%x", &pcs[0],
+                    &pcs[1], &pcs[2], &pcs[3]) != 4) {
+      return;
+    }
+    proc->AddGuestHook(pcs[3], [ks](cpu::ppc::PPCContext* c) {
+      auto* mm = ks->memory();
+      const uint32_t func = uint32_t(c->r[4]);
+      if (GuideLuaU32(mm, func + 8) != 6) return;
+      const uint32_t cl = GuideLuaU32(mm, func);
+      if (!cl || !GuideLuaRead(mm, cl + 6, 1)) return;
+      std::string callee;
+      if (*mm->TranslateVirtual<uint8_t*>(cl + 6)) {
+        callee = fmt::format("C:{:08X}", GuideLuaU32(mm, cl + 0x10));
+      } else {
+        const uint32_t proto = GuideLuaU32(mm, cl + 0x10);
+        callee = fmt::format("{}:{}",
+                             GuideLuaTString(mm, GuideLuaU32(mm, proto + 0x20)),
+                             GuideLuaU32(mm, proto + 0x3C));
+      }
+      std::string key =
+          callee + " from " + GuideLuaCaller(mm, uint32_t(c->r[3]));
+      static std::mutex mu;
+      static std::set<std::string> seen;
+      static const auto t0 = std::chrono::steady_clock::now();
+      std::lock_guard<std::mutex> lk(mu);
+      // Inside --kernel_sample_from_ms..to_ms every call is logged (a
+      // stack of events, not a set).
+      const int64_t now_ms =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::steady_clock::now() - t0)
+              .count();
+      const bool window = cvars::kernel_sample_to_ms > 0 &&
+                          now_ms >= cvars::kernel_sample_from_ms &&
+                          now_ms <= cvars::kernel_sample_to_ms;
+      if (window) {
+        XELOGI("GuideLuaCall* {}", key);
+      } else if (seen.size() < 20000 && seen.insert(key).second) {
+        XELOGI("GuideLuaCall: {}", key);
+      }
+    });
+    return;
+  }
   // Phase 1099z66: the LoadGameLibrary op's completion poll and the content
   // manager (static 929695F8) that has to finish a scan first.
   auto site_hook = [ks, proc](uint32_t addr, const char* what, bool cm_state) {
@@ -5821,6 +6567,30 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
   // Partition1 will go to this. Registering during CompleteLaunch allows us
   // to make sure any HostPathDevices are ready beforehand. (see comment above
   // cache:\ device registration for more info about why)
+  // Phase 1099z159: the hard drive's system auxiliary partition, which a
+  // system update fills with the avatar asset pack (xam 17559 reads
+  // \Device\Harddisk0\SystemAuxPartition\ and "%s\AvatarAssetPack"). Served
+  // read-only from the update package the importer extracted.
+  if (!cvars::kernel_system_aux_path.empty()) {
+    auto aux = std::make_unique<vfs::HostPathDevice>(
+        "\\Device\\Harddisk0\\SystemAuxPartition",
+        cvars::kernel_system_aux_path, true);
+    if (aux->Initialize() && file_system_->RegisterDevice(std::move(aux))) {
+      XELOGI("SystemAux: \\Device\\Harddisk0\\SystemAuxPartition -> {}",
+             xe::path_to_utf8(cvars::kernel_system_aux_path));
+    }
+  }
+  // Phase 1099z159: the system extended partition (the update's versioned
+  // system files, "SystemExtPartition\%08X\dash.xex" in xam 17559).
+  if (!cvars::kernel_system_ext_path.empty()) {
+    auto ext = std::make_unique<vfs::HostPathDevice>(
+        "\\Device\\Harddisk0\\SystemExtPartition",
+        cvars::kernel_system_ext_path, true);
+    if (ext->Initialize() && file_system_->RegisterDevice(std::move(ext))) {
+      XELOGI("SystemExt: \\Device\\Harddisk0\\SystemExtPartition -> {}",
+             xe::path_to_utf8(cvars::kernel_system_ext_path));
+    }
+  }
   auto null_paths = {std::string("\\Partition0"), std::string("\\Cache0"),
                      std::string("\\Cache1")};
   auto null_device =
@@ -6028,6 +6798,13 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
       XELOGE("LLE xam: failed to load {}", cvars::lle_xam);
       return X_STATUS_NOT_FOUND;
     }
+    // 2026-09-16: a pre-2010 update's xam is the base 2.0.1888 image plus
+    // xam.xexp beside it (kernel_system_flash_patches); every other module
+    // loader applies patches before finishing, and so must this one.
+    if (cvars::kernel_system_flash_patches &&
+        file_system_->ResolvePath(cvars::lle_xam + 'p')) {
+      kernel_state_->ApplyTitleUpdate(xam_module);
+    }
     // call_entry=false: DllMain is run later on a real guest thread by the
     // bootstrap below. CompleteLaunch runs on the UI thread, which has no
     // guest thread state, so executing guest code here is not valid.
@@ -6142,6 +6919,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
     // timestamped against the surrounding log rather than inferred.
     {
       Memory* wmem = memory();
+      ++g_memory_pollers;
       std::thread([wmem]() {
         xe::threading::set_name("XamTextWatch");
         // 81D3F8A0 is xam's 64-bit feature-enable bitmask (bit id-1 per the
@@ -6367,7 +7145,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
         bool skip_reported[kWatchCount] = {};
         bool first_reported[kWatchCount] = {};
         bool primed = false;
-        for (int iter = 0; iter < 120000; ++iter) {
+        for (int iter = 0; iter < 120000 && !g_memory_pollers_stop; ++iter) {
           for (size_t i = 0; i < kWatchCount; ++i) {
             auto* hp = wmem->LookupHeap(addrs[i]);
             // Phase 1096hr: this guard silently skipped every dash address.
@@ -6470,6 +7248,7 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
           }
           std::this_thread::sleep_for(std::chrono::microseconds(500));
         }
+        --g_memory_pollers;
       }).detach();
       XELOGI("XamTextWatch: polling 8 xam addresses");
       // Opt-in (XENIA_XAM_RO=1): make xam's .text read-only at the host level
@@ -7353,13 +8132,120 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
     ArmGuideThreadProbe(kernel_state_.get(),
                         cvars::guide_probe_threads_seconds);
   }
+  if (!cvars::guide_test_tray_seconds.empty()) {
+    // TEST-ONLY (HOST-SIDE): the eject button, pressed at two times.
+    auto* ks = kernel_state_.get();
+    int open_s = -1, close_s = -1;
+    std::sscanf(cvars::guide_test_tray_seconds.c_str(), "%d,%d", &open_s,
+                &close_s);
+    std::thread([ks, open_s, close_s]() {
+      xe::threading::set_name("TestTray");
+      const auto t0 = std::chrono::steady_clock::now();
+      auto at = [&](int s, bool open) {
+        if (s < 0) return;
+        std::this_thread::sleep_until(t0 + std::chrono::seconds(s));
+        XELOGI("TestTray: {} the tray", open ? "opening" : "closing");
+        ks->smc()->MoveTray(open);
+      };
+      at(open_s, true);
+      at(close_s, false);
+    }).detach();
+  }
+  if (cvars::guide_test_notify_seconds > 0) {
+    // DIAGNOSTIC (HOST-SIDE, not console behaviour): N seconds after start,
+    // call the real xam.xex's XNotifyQueueUI (ordinal 0x290) on a guest
+    // thread, so the notification toast path can be verified in an automated
+    // run without a game unlocking an achievement.
+    // XNotifyQueueUI(type, user index, areas (64-bit), text, reserved).
+    auto* ks = kernel_state_.get();
+    const int delay = cvars::guide_test_notify_seconds;
+    std::thread([ks, delay]() {
+      xe::threading::set_name("TestNotify");
+      std::this_thread::sleep_for(std::chrono::seconds(delay));
+      auto real_xam = ks->GetModule("xam.xex", true);
+      const uint32_t fn =
+          real_xam ? real_xam->GetProcAddressByOrdinal(0x290) : 0;
+      if (!fn) {
+        XELOGW("TestNotify: real xam XNotifyQueueUI not found");
+        return;
+      }
+      static const char16_t kText[] = u"Toast test from the emulator";
+      const uint32_t text_len = uint32_t(xe::countof(kText));
+      const uint32_t text_ptr = ks->memory()->SystemHeapAlloc(text_len * 2);
+      for (uint32_t i = 0; i < text_len; ++i) {
+        xe::store_and_swap<uint16_t>(
+            ks->memory()->TranslateVirtual(text_ptr + i * 2),
+            uint16_t(kText[i]));
+      }
+      const uint32_t first_type = uint32_t(cvars::guide_test_notify_type);
+      auto t = kernel::object_ref<kernel::XHostThread>(
+          new kernel::XHostThread(ks, 256 * 1024, 0,
+                                  [ks, fn, text_ptr, first_type]() -> int {
+            auto* ts = kernel::XThread::GetCurrentThread()->thread_state();
+            // Try argument combinations until xam accepts one (0).
+            const uint32_t types[] = {first_type, 12, 0, 1};
+            const uint32_t users[] = {0xFF, 0};
+            const uint64_t areas[] = {0xFFFFFFFFFFFFFFFFull, 0};
+            for (uint32_t type : types) {
+              for (uint32_t user : users) {
+                for (uint64_t area : areas) {
+                  uint64_t a[] = {type, user, area, text_ptr, 0};
+                  uint64_t r =
+                      ks->processor()->Execute(ts, fn, a, xe::countof(a));
+                  XELOGI("TestNotify: XNotifyQueueUI({:08X}) type {} user {:X} "
+                         "areas {:X} -> {:08X}",
+                         fn, type, user, area, uint32_t(r));
+                  if (uint32_t(r) == 0) return 0;
+                }
+              }
+            }
+            return 0;
+          }));
+      t->set_name("TestNotify");
+      t->Create();
+    }).detach();
+  }
+  if (cvars::kernel_probe_on_request) {
+    // DIAGNOSTIC: take the thread probe (probe.txt) on demand. Creating a file
+    // named probe_now next to the exe triggers it ~2 s later (the probe's
+    // thread cache needs one refresh); the file is deleted so it can be
+    // requested again. For hangs whose timing can't be predicted at launch.
+    auto* ks = kernel_state_.get();
+    std::thread([ks]() {
+      xe::threading::set_name("ProbeOnRequest");
+      const auto trigger = xe::filesystem::GetExecutableFolder() / "probe_now";
+      for (;;) {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        std::error_code ec;
+        if (std::filesystem::exists(trigger, ec)) {
+          std::filesystem::remove(trigger, ec);
+          XELOGI("ProbeOnRequest: probe_now found, probing in 2 s");
+          ArmGuideThreadProbe(ks, 2);
+        }
+      }
+    }).detach();
+  }
   if (cvars::guide_trace_signin) {
     InstallGuideSigninTraces(kernel_state_.get());
+  }
+  if (cvars::guide_trace_transitions) {
+    InstallGuideTransitionTraces(kernel_state_.get());
+  }
+  if (cvars::guide_game_library_cover_art) {
+    InstallCoverArtHooks(kernel_state_.get());
   }
   if (cvars::guide_trace_dash_lua) {
     // Guest hooks apply to code translated afterwards: add them before the
     // title module loads.
     InstallGuideLuaTraces(kernel_state_.get());
+  } else if (!cvars::trace_dash_lua.empty()) {
+    uint32_t pcs[3] = {};
+    if (std::sscanf(cvars::trace_dash_lua.c_str(), "%x,%x,%x", &pcs[0],
+                    &pcs[1], &pcs[2]) == 3) {
+      InstallGuideLuaTraces(kernel_state_.get(), pcs[0], pcs[1], pcs[2], true);
+    } else {
+      XELOGW("trace_dash_lua: expected throw,sleep,yield hex pcs");
+    }
   }
   if (cvars::guide_probe_threads_at_terminate > 0 &&
       !kernel_state_->title_terminate_hook) {
@@ -7375,6 +8261,279 @@ X_STATUS Emulator::CompleteLaunch(const std::filesystem::path& path,
       }
     };
   }
+  // Phase 1099z168: FABLE III POST-SAVE GUEST CRASH AT 821DBAEC.
+  //
+  // Disassembled (image dumped by XexTool, base 82000000):
+  //   821DBAE0  the crashing function: lwz r11,4(r3) with r3 = 0x3E8
+  //   82258F84  addi r3, r30, 0x3e8 ; bl 821DBAE0     -> r30 is NULL
+  //   821BC5C0  mr r11,r4 / mr r4,r3 / mr r3,r11 / b 82258F00  (arg-swap thunk,
+  //             vtable slot +0x34 of the draw item) -> 82258F00(scene, item)
+  //   821F1900  bctrl vtable[+0x34](item=r29, scene=r27)       -> r27 is NULL
+  //   82302FDC / 82303030  lwzx r5, idx*4, [8355F454]          -> the NULL
+  // So the render-view slot the draw names is empty. Slots are handed out by
+  // 82C4F1A8, which on a failed 0x5A0 `new` takes the branch at 82C4F228,
+  // prints the title's own wide string "Out Of Memory allocating %u in %s"
+  // (82077 3E8) and stores NULL in the slot anyway. These hooks say which of
+  // those it is. RESEARCH ONLY - they read registers and log, nothing else.
+  if (cvars::guide_trace_fable_views) {
+    enum class FV {
+      kAllocRet,
+      kOom,
+      kDraw,
+      kSetId,
+      kNewB,
+      kStoreB,
+      kMove,
+      kStoreA,
+      kDestroy,
+      kBindEnter,
+      kBindPick,
+      kThreadCmp
+    };
+    struct FVSite {
+      uint32_t addr, word;
+      FV kind;
+      const char* name;
+    };
+    static const FVSite kFV[] = {
+        // Fable III retail default.xex, load address 82000000.
+        {0x82C4F334u, 0x7F83E378u, FV::kAllocRet, "AllocView"},
+        {0x82C4F228u, 0x3D608207u, FV::kOom, "AllocView-OOM"},
+        {0x82302FE0u, 0x4BEEE7D1u, FV::kDraw, "Draw(mode2)"},
+        {0x82303034u, 0x4BEEE77Du, FV::kDraw, "Draw(mode1)"},
+        {0x82300C24u, 0x93DF0000u, FV::kSetId, "SetViewId"},
+        // 822A21A8 is a SECOND creator for the same slots (reached from
+        // 82C4FDE0, the per-draw "which thread am I" helper). It allocates the
+        // same 0x5A0 object and, like 82C4F1A8, publishes NULL into the slot if
+        // that allocation fails.
+        {0x822A2E70u, 0x2B030000u, FV::kNewB, "NewB-alloc"},
+        {0x822A2F00u, 0x7F9DF12Eu, FV::kStoreB, "StoreB"},
+        // The vector's own move loop clears a destination slot before writing
+        // it; it runs whenever the vector is resized.
+        {0x82C52DBCu, 0x937F0000u, FV::kMove, "VectorMove"},
+        {0x82C4F2C0u, 0x7FBEF92Eu, FV::kStoreA, "StoreA"},
+        // 82C4F358 is the registry's DestroyView(id): it releases the object,
+        // stores NULL in the slot (82C4F4B0/82C4F4B8) and pushes the id back on
+        // the free list. Nothing else empties a slot.
+        {0x82C4F358u, 0x7D8802A6u, FV::kDestroy, "DestroyView"},
+        // 82C4FCE8 runs between the draw's "read the view id" and its "read the
+        // registry slot" (82303004 lwz r30,0(r31) / 82303008 bl / 82303030
+        // lwzx). It binds the calling thread to a scratch view and, through
+        // 822A21A8, can DESTROY one first.
+        {0x82C4FD0Cu, 0x7F035840u, FV::kThreadCmp, "ThreadCmp"},
+        {0x822A21A8u, 0x7D8802A6u, FV::kBindEnter, "Bind"},
+        {0x822A2FF8u, 0x7C68482Eu, FV::kBindPick, "BindPick"},
+    };
+    static std::atomic<uint32_t> fv_counts[std::size(kFV)] = {};
+    auto* fvmem = memory_.get();
+    auto* fvks = kernel_state_.get();
+    for (size_t i = 0; i < std::size(kFV); ++i) {
+      const FVSite s = kFV[i];
+      processor_->AddGuestHook(s.addr, [fvmem, fvks, s,
+                                        i](cpu::ppc::PPCContext* c) {
+        // The addresses are Fable-specific: refuse to report anything if the
+        // code at the site is not the instruction they were read from.
+        const uint8_t* ip = fvmem->TranslateVirtual(s.addr);
+        if (!ip || xe::load_and_swap<uint32_t>(ip) != s.word) return;
+        const uint32_t n = ++fv_counts[i];
+        switch (s.kind) {
+          case FV::kAllocRet: {
+            const uint32_t id = static_cast<uint32_t>(c->r[28]);
+            const uint32_t obj = static_cast<uint32_t>(c->r[29]);
+            if (obj == 0 || n <= 64) {
+              XELOGI("FableView: {} #{} -> id {} object {:08X}{}", s.name, n, id,
+                     obj, obj ? "" : "  <-- NULL SLOT");
+            }
+            break;
+          }
+          case FV::kOom:
+            XELOGE(
+                "FableView: {} #{} - the title's own allocator returned NULL "
+                "for 0x5A0 bytes; the slot it is about to publish will be "
+                "NULL (lr {:08X})",
+                s.name, n, static_cast<uint32_t>(c->lr));
+            break;
+          case FV::kDraw: {
+            // r5 = the slot contents, r30 = the slot id. Only the empty ones
+            // matter; this runs several times per frame.
+            if (static_cast<uint32_t>(c->r[5]) != 0) break;
+            const uint32_t id = static_cast<uint32_t>(c->r[30]);
+            const uint32_t base = static_cast<uint32_t>(c->r[11]);
+            // The registry's own header (8355F450: +4 begin, +8 end) and the
+            // slots either side, so a zeroed neighbourhood (a fresh buffer) is
+            // told apart from one cleared slot.
+            std::string around;
+            const uint8_t* hdr = fvmem->TranslateVirtual(0x8355F450u);
+            const uint32_t begin =
+                hdr ? xe::load_and_swap<uint32_t>(hdr + 4) : 0u;
+            const uint32_t end = hdr ? xe::load_and_swap<uint32_t>(hdr + 8) : 0u;
+            const uint32_t count =
+                (end > begin) ? std::min<uint32_t>((end - begin) / 4u, 512u) : 0;
+            uint32_t nonzero = 0;
+            for (uint32_t sl = 0; sl < count; ++sl) {
+              const uint8_t* p = fvmem->TranslateVirtual(begin + sl * 4u);
+              const uint32_t v = p ? xe::load_and_swap<uint32_t>(p) : 0u;
+              if (!v) continue;
+              ++nonzero;
+              if (nonzero <= 24) around += fmt::format(" [{}]={:08X}", sl, v);
+            }
+            around += fmt::format("  ({} of {} slots occupied)", nonzero, count);
+            XELOGE(
+                "FableView: {} #{} with EMPTY slot id {} (vector {:08X}) - this "
+                "is the 821DBAEC crash; header begin {:08X} end {:08X};{}",
+                s.name, n, id, base, begin, end, around);
+            break;
+          }
+          case FV::kStoreA: {
+            const uint32_t id = static_cast<uint32_t>(c->r[30]) >> 2;
+            const uint32_t obj = static_cast<uint32_t>(c->r[29]);
+            const uint32_t base = static_cast<uint32_t>(c->r[31]);
+            XELOGI("FableView: {} #{} slot {} <- {:08X} (vector {:08X}){}",
+                   s.name, n, id, obj, base,
+                   obj ? "" : "  <-- CLEARS THE SLOT");
+            // From the second publish on, protect the page the slot lives on
+            // and report the GUEST PC of everything that writes it. The slot
+            // written here reads back as zero ~9 s later and no registry writer
+            // clears it, so the culprit is not in this registry at all.
+            // --guide_watch_write_addr=0xFFFFFFFF asks for it; the page
+            // protection perturbs timing, so it is not on by default.
+            if (n >= 2 && cvars::guide_watch_write_addr == 0xFFFFFFFFu) {
+              ArmGuideWriteWatch(fvks, base + id * 4u);
+            }
+            break;
+          }
+          case FV::kSetId:
+            if (n <= 64) {
+              XELOGI("FableView: {} #{} object {:08X} id {}", s.name, n,
+                     static_cast<uint32_t>(c->r[31]),
+                     static_cast<uint32_t>(c->r[30]));
+            }
+            break;
+          case FV::kNewB: {
+            const uint32_t p = static_cast<uint32_t>(c->r[3]);
+            if (p == 0) {
+              XELOGE(
+                  "FableView: {} #{} - operator new(0x5A0) returned NULL; the "
+                  "slot this publishes will be NULL",
+                  s.name, n);
+            } else if (n <= 64) {
+              XELOGI("FableView: {} #{} -> {:08X}", s.name, n, p);
+            }
+            break;
+          }
+          case FV::kStoreB: {
+            const uint32_t obj = static_cast<uint32_t>(c->r[28]);
+            const uint32_t id = static_cast<uint32_t>(c->r[29]) >> 2;
+            if (obj == 0 || n <= 64) {
+              XELOGI("FableView: {} #{} slot {} <- {:08X} (vector {:08X}){}",
+                     s.name, n, id, obj, static_cast<uint32_t>(c->r[30]),
+                     obj ? "" : "  <-- CLEARS THE SLOT");
+            }
+            break;
+          }
+          case FV::kDestroy:
+            XELOGI("FableView: {} #{} id {} lr {:08X}", s.name, n,
+                   static_cast<uint32_t>(c->r[3]),
+                   static_cast<uint32_t>(c->lr));
+            break;
+          case FV::kThreadCmp:
+            if (n <= 8) {
+              XELOGI(
+                  "FableView: {} #{} this thread id {:08X} vs the registered "
+                  "one {:08X} ({})",
+                  s.name, n, static_cast<uint32_t>(c->r[3]),
+                  static_cast<uint32_t>(c->r[11]),
+                  static_cast<uint32_t>(c->r[3]) ==
+                          static_cast<uint32_t>(c->r[11])
+                      ? "same - early out"
+                      : "DIFFERENT - takes the bind path");
+            }
+            break;
+          case FV::kBindEnter:
+            if (n <= 24) {
+              XELOGI("FableView: {} #{} r3 {:08X} r4 {:08X} r5 {:08X} lr {:08X}",
+                     s.name, n, static_cast<uint32_t>(c->r[3]),
+                     static_cast<uint32_t>(c->r[4]),
+                     static_cast<uint32_t>(c->r[5]),
+                     static_cast<uint32_t>(c->lr));
+            }
+            break;
+          case FV::kBindPick: {
+            // lwzx r3, r8, r9 has not run yet: read the same word here, so the
+            // id this is about to tear down is on record.
+            const uint32_t at = static_cast<uint32_t>(c->r[9]) +
+                                static_cast<uint32_t>(c->r[8]);
+            const uint8_t* p = fvmem->TranslateVirtual(at);
+            const uint32_t picked = p ? xe::load_and_swap<uint32_t>(p) : 0u;
+            if (n <= 24 || picked >= 100u) {
+              XELOGI(
+                  "FableView: {} #{} record {:08X} ids@{:08X} slot*4 {:08X} -> "
+                  "id {}",
+                  s.name, n, static_cast<uint32_t>(c->r[31]),
+                  static_cast<uint32_t>(c->r[9]),
+                  static_cast<uint32_t>(c->r[8]), int32_t(picked));
+            }
+            break;
+          }
+          case FV::kMove:
+            if (n <= 64) {
+              XELOGI("FableView: {} #{} at {:08X}", s.name, n,
+                     static_cast<uint32_t>(c->r[31]));
+            }
+            break;
+        }
+      });
+      XELOGI("FableView: arming {:08X} {}", s.addr, s.name);
+    }
+  }
+  // Phase 1099z165: WHERE DO xam's LIVE AUTH EXPORTS LAND?
+  //
+  // All seven exist as real guest code in 17559 (Xenia implements none of them,
+  // and with blank lle_xam_scope every importer binds to real xam, so the
+  // guest's own implementations are what run). Resolved from xam's export table
+  // at 81A73D34. Hooks must be registered BEFORE the title module loads, and
+  // only affect code translated afterwards - see the guest-hooks note.
+  if (cvars::guide_trace_live_auth) {
+    struct LiveSite {
+      uint32_t addr;
+      const char* name;
+    };
+    static const LiveSite kLive[] = {
+        {0x81689AE0u, "XamIsCSVDrainageSupported"},
+        {0x8168EB50u, "XamSetKerbTimeouts"},
+        {0x8168EB88u, "XamGetKerbTimeouts"},
+        {0x8168EBC0u, "XamSetMacsTimeouts"},
+        {0x8168EBF8u, "XamGetMacsTimeouts"},
+        {0x816DEF20u, "XamProfileHasWindowsLiveCredentials"},
+        {0x816FE538u, "XamGetTLSConfig"},
+        // POSITIVE CONTROLS. These two are called constantly on any boot. If
+        // they do not fire, the hooks did not install and a zero for the seven
+        // above says nothing at all.
+        {0x816DD118u, "XamUserGetSigninState [CONTROL]"},
+        {0x816F14E8u, "XamInputGetState [CONTROL]"},
+    };
+    static std::atomic<uint32_t> live_counts[std::size(kLive)] = {};
+    auto* lmem = memory_.get();
+    for (size_t i = 0; i < std::size(kLive); ++i) {
+      const LiveSite s = kLive[i];
+      // Record what is actually AT each address, so a wrong build shows up as
+      // nonsense rather than as a quiet zero.
+      const uint8_t* ip = lmem->TranslateVirtual(s.addr);
+      XELOGI("LiveAuth: arming {:08X} {} (first word {:08X})", s.addr, s.name,
+             ip ? xe::load_and_swap<uint32_t>(ip) : 0u);
+      processor_->AddGuestHook(s.addr, [s, i](cpu::ppc::PPCContext* c) {
+        const uint32_t n = ++live_counts[i];
+        if (n <= 4 || (n % 500) == 0) {
+          XELOGI("LiveAuth: {} #{} lr={:08X} r3={:08X} r4={:08X} r5={:08X}",
+                 s.name, n, static_cast<uint32_t>(c->lr),
+                 static_cast<uint32_t>(c->r[3]), static_cast<uint32_t>(c->r[4]),
+                 static_cast<uint32_t>(c->r[5]));
+        }
+      });
+    }
+    XELOGI("LiveAuth: {} hooks armed", std::size(kLive));
+  }
+
   XELOGI("Loading module {}", module_path);
   auto module = kernel_state_->LoadUserModule(module_path);
   // xam code that was correct right after xam loaded reads back as zero later

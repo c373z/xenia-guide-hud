@@ -79,7 +79,15 @@ std::unique_ptr<Entry> HostPathEntry::CreateEntryInternal(
     const std::string_view name, uint32_t attributes) {
   auto full_path = host_path_ / xe::to_path(name);
   if (attributes & kFileAttributeDirectory) {
-    if (!std::filesystem::create_directories(full_path)) {
+    // Phase 1099z164: the throwing overload escaped NtCreateFile while the VFS
+    // lock was held (a 250-character host path is over CreateDirectoryW's 248
+    // limit), which hung every later file open.
+    std::error_code ec;
+    if (!std::filesystem::create_directories(full_path, ec)) {
+      if (ec) {
+        XELOGE("HostPathEntry: cannot create directory {}: {}", full_path,
+               ec.message());
+      }
       return nullptr;
     }
   } else {

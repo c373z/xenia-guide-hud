@@ -10,9 +10,13 @@
 #ifndef XENIA_APP_EMULATOR_WINDOW_H_
 #define XENIA_APP_EMULATOR_WINDOW_H_
 
+#include <atomic>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 
+#include "xenia/app/game_library.h"
 #include "xenia/app/profile_dialogs.h"
 #include "xenia/emulator.h"
 #include "xenia/gpu/command_processor.h"
@@ -30,6 +34,7 @@ namespace xe {
 namespace app {
 
 class ConsoleSettingsDialog;
+class FirmwareDialog;
 
 struct RecentTitleEntry {
   std::string title_name;
@@ -73,6 +78,16 @@ class EmulatorWindow {
   steady_clock::time_point last_mouse_down = steady_clock::now();
 
   Emulator* emulator() const { return emulator_; }
+  // Host Power Off: the app replaces the Emulator in-process. Called on the
+  // UI thread after StopGamepadHotKeys and presenter shutdown.
+  void set_emulator(Emulator* emulator) {
+    emulator_ = emulator;
+    emulator_initialized_ = false;
+  }
+  void StopGamepadHotKeys();
+  void set_power_off_action(std::function<void()> action) {
+    power_off_action_ = std::move(action);
+  }
   ui::WindowedAppContext& app_context() const { return app_context_; }
   ui::Window* window() const { return window_.get(); }
   ui::ImGuiDrawer* imgui_drawer() const { return imgui_drawer_.get(); }
@@ -83,10 +98,16 @@ class EmulatorWindow {
 
   void OnEmulatorInitialized();
 
+  // Console > Firmware (firmware_dialog.cc).
+  void ShowFirmwareDialog();
+  // The dialog deletes itself after Close(); this only drops the pointer.
+  void ReleaseFirmwareDialog(FirmwareDialog* dialog);
+
   xe::X_STATUS RunTitle(const std::filesystem::path& path_to_file);
   void UpdateTitle();
   void SetFullscreen(bool fullscreen);
   void ToggleFullscreen();
+  void SetUpscaleToWindow(bool enabled);
   void SetInitializingShaderStorage(bool initializing);
 
   void TakeScreenshot();
@@ -202,6 +223,50 @@ class EmulatorWindow {
         installation_entries_;
   };
 
+  // Phase 1099z165: the host-side game library's progress window - one row per
+  // disc with its own progress bar, and a cancel that stops the installer
+  // between titles.
+  // 2026-09-16: quiet = the startup check. It stays hidden while discs are
+  // checked, lists only discs that get installed (or fail), and closes by
+  // itself when there was nothing new.
+  class GameLibraryDialog final : public ui::ImGuiDialog {
+   public:
+    GameLibraryDialog(ui::ImGuiDrawer* imgui_drawer,
+                      EmulatorWindow& emulator_window, bool quiet)
+        : ui::ImGuiDialog(imgui_drawer),
+          emulator_window_(emulator_window),
+          quiet_(quiet) {}
+
+    // Closes the window and gives up the EmulatorWindow's ownership (the
+    // dialog deletes itself after the frame).
+    void Dismiss();
+
+   protected:
+    void OnDraw(ImGuiIO& io) override;
+
+   private:
+
+    EmulatorWindow& emulator_window_;
+    bool quiet_;
+  };
+
+  // 2026-09-16: asked at startup when there is an emulated drive but no games
+  // folder. Yes opens the folder picker; "Don't show this again" clears
+  // guide_game_library_prompt in the config.
+  class GameLibraryPromptDialog final : public ui::ImGuiDialog {
+   public:
+    GameLibraryPromptDialog(ui::ImGuiDrawer* imgui_drawer,
+                            EmulatorWindow& emulator_window)
+        : ui::ImGuiDialog(imgui_drawer), emulator_window_(emulator_window) {}
+
+   protected:
+    void OnDraw(ImGuiIO& io) override;
+
+   private:
+    EmulatorWindow& emulator_window_;
+    bool dont_show_again_ = false;
+  };
+
   class DisplayConfigDialog final : public ui::ImGuiDialog {
    public:
     DisplayConfigDialog(ui::ImGuiDrawer* imgui_drawer,
@@ -265,6 +330,7 @@ class EmulatorWindow {
   void FileOpen();
   void ChangeTrayDisc();
   void FileClose();
+  void PowerOff();
   void InstallContent();
   void ExtractZarchive();
   void CreateZarchive();
@@ -298,6 +364,27 @@ class EmulatorWindow {
   void LoadRecentlyLaunchedTitles();
   void AddRecentlyLaunchedTitle(std::filesystem::path path_to_file,
                                 std::string title_name);
+  // Phase 1099z165: the same toml list mechanism as recent.toml, for the discs
+  // that have been put in the tray.
+  static void LoadRecentEntries(const std::filesystem::path& path,
+                                std::vector<RecentTitleEntry>* out_entries);
+  static void SaveRecentEntries(
+      const std::filesystem::path& path,
+      const std::vector<RecentTitleEntry>& entries);
+
+  // Phase 1099z165: Disc menu. Its contents change at runtime (the recents
+  // list, the saved default's title name), so it is rebuilt wholesale rather
+  // than edited in place.
+  void RebuildDiscMenu();
+  void SetTrayDiscFromMenu(std::filesystem::path path);
+  void SaveDefaultDisc();
+  void StartGameLibraryCheck();
+  void ChooseGameLibraryFolder();
+  void InstallGameLibraryFolder(const std::filesystem::path& folder,
+                                bool quiet);
+  // Looks a disc's title name up in the cache, starting a background lookup
+  // and a menu rebuild if it is not there yet.
+  std::string GetDiscTitleName(const std::filesystem::path& path);
 
   void ClearDialogs();
 
@@ -313,6 +400,8 @@ class EmulatorWindow {
   std::unique_ptr<ui::ImmediateDrawer> immediate_drawer_;
 
   bool emulator_initialized_ = false;
+  std::atomic<bool> gamepad_hotkeys_stop_ = false;
+  std::function<void()> power_off_action_;
   std::atomic<bool> disable_hotkeys_ = false;
 
   std::string base_title_;
@@ -320,6 +409,7 @@ class EmulatorWindow {
 
   std::unique_ptr<DisplayConfigDialog> display_config_dialog_;
   std::unique_ptr<ConsoleSettingsDialog> console_settings_dialog_;
+  std::unique_ptr<FirmwareDialog> firmware_dialog_;
 
   // Storing pointers and toggling dialog state is useful for broadcasting
   // messages back to guest.
@@ -328,6 +418,19 @@ class EmulatorWindow {
   std::unique_ptr<XMPConfigDialog> xmp_config_dialog_;
 
   std::vector<RecentTitleEntry> recently_launched_titles_;
+
+  // Phase 1099z165: Disc menu state.
+  std::vector<RecentTitleEntry> recent_discs_;
+  // The disc that "Save Default" would persist / has persisted: the one in the
+  // tray if there is one, otherwise whatever guide_tray_disc_path names.
+  std::filesystem::path default_disc_path_;
+  std::mutex disc_title_names_mutex_;
+  std::map<std::string, std::string> disc_title_names_;
+  std::atomic<bool> disc_title_lookup_running_{false};
+  std::unique_ptr<GameLibraryInstaller> game_library_installer_;
+  std::unique_ptr<GameLibraryDialog> game_library_dialog_;
+  std::unique_ptr<GameLibraryPromptDialog> game_library_prompt_dialog_;
+  bool game_library_checked_ = false;
 };
 
 }  // namespace app

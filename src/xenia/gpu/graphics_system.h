@@ -62,6 +62,9 @@ class GraphicsSystem {
   CommandProcessor* command_processor() const {
     return command_processor_.get();
   }
+  kernel::XHostThread* frame_limiter_thread() const {
+    return frame_limiter_worker_thread_.get();
+  }
 
   virtual void InitializeRingBuffer(uint32_t ptr, uint32_t size_log2);
   virtual void EnableReadPointerWriteBack(uint32_t ptr,
@@ -71,8 +74,12 @@ class GraphicsSystem {
   // Phase 645: the callback's user_data is the device its service routine
   // inspects. Expose it so the Guide work can re-point it at the device that
   // actually receives submissions.
-  uint32_t interrupt_callback() const { return interrupt_callback_; }
-  uint32_t interrupt_callback_data() const { return interrupt_callback_data_; }
+  uint32_t interrupt_callback() const {
+    return static_cast<uint32_t>(interrupt_callback_pair_.load() >> 32);
+  }
+  uint32_t interrupt_callback_data() const {
+    return static_cast<uint32_t>(interrupt_callback_pair_.load());
+  }
   void DispatchInterruptCallback(uint32_t source, uint32_t cpu);
 
   virtual void ClearCaches();
@@ -122,8 +129,13 @@ class GraphicsSystem {
   ui::WindowedAppContext* app_context_ = nullptr;
   std::unique_ptr<ui::GraphicsProvider> provider_;
 
-  uint32_t interrupt_callback_ = 0;
-  uint32_t interrupt_callback_data_ = 0;
+  // 1099z170: callback (high 32 bits) and its data (low 32 bits) as ONE
+  // value. Two separate fields let the GPU thread dispatch a newly registered
+  // callback with the previous registration's data - xam's launch-fade device
+  // registered 81843390/407F1800 right after bootanim cleared 0/0, and its ISR
+  // ran with data 0 (host fault at 0x42E0). On the console registration and
+  // interrupt delivery cannot interleave.
+  std::atomic<uint64_t> interrupt_callback_pair_{0};
 
   std::atomic<bool> frame_limiter_worker_running_;
   kernel::object_ref<kernel::XHostThread> frame_limiter_worker_thread_;

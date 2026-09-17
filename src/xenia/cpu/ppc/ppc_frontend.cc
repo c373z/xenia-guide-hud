@@ -9,6 +9,8 @@
 
 #include "xenia/cpu/ppc/ppc_frontend.h"
 
+#include <atomic>
+
 #include "xenia/base/atomic.h"
 #include "xenia/base/logging.h"
 #include "xenia/base/mutex.h"
@@ -75,6 +77,22 @@ void EnterGlobalLock(PPCContext* ppc_context, void* arg0, void* arg1) {
 void LeaveGlobalLock(PPCContext* ppc_context, void* arg0, void* arg1) {
   auto global_mutex = reinterpret_cast<global_mutex_type*>(arg0);
   auto global_lock_count = reinterpret_cast<int32_t*>(arg1);
+#if XE_PLATFORM_WIN32 == 1 && XE_ENABLE_FAST_WIN32_MUTEX == 1
+  // 2026-09-16: guest code that sets MSR[EE] when it is already set (no
+  // matching disable on this thread) is a no-op on the console. Unlocking
+  // here released a lock this thread did not hold: the owner's recursion
+  // count and the SRW lock state were corrupted, and a later unlock faulted
+  // in ntdll (AC2 launch, EntryTable::GetOrCreate).
+  if (global_mutex->owner_thread_id() != GetCurrentThreadId()) {
+    static std::atomic<uint32_t> unbalanced{0};
+    if (++unbalanced <= 8) {
+      XELOGW("LeaveGlobalLock: thread does not hold the global lock "
+             "(lr {:08X}); ignored",
+             uint32_t(ppc_context->lr));
+    }
+    return;
+  }
+#endif
   auto new_lock_count = xe::atomic_dec(global_lock_count);
   assert_true(new_lock_count >= 0);
   global_mutex->unlock();

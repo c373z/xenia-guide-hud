@@ -130,12 +130,15 @@ static bool g_guide_slide_armed = false, g_guide_slide_done = false;
 #include <deque>
 #include <condition_variable>
 #include <mutex>
+#include "xenia/kernel/power_reset.h"
 #include "xenia/kernel/kernel_flags.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_memory.h"
 #include "xenia/hid/input_system.h"
 #include <array>
 #include <cstring>
 #include "xenia/kernel/xboxkrnl/xboxkrnl_video.h"
+
+DECLARE_uint32(kernel_build_version);
 
 #include "xenia/base/exception_handler.h"
 #include "xenia/cpu/backend/code_cache.h"
@@ -719,6 +722,11 @@ DECLARE_XBOXKRNL_EXPORT1(VdInitializeRingBuffer, kVideo, kImplemented);
 void VdEnableRingBufferRPtrWriteBack_entry(lpvoid_t ptr,
                                            int_t block_size_log2) {
   // r4 = log2(block size), 6, usually --- <=19
+  // 1099z166: which address the GPU reports the ring read pointer to, and
+  // when - a title switch leaves the previous title's address in place
+  // unless the incoming title sets its own.
+  XELOGI("VdEnableRingBufferRPtrWriteBack: ptr={:08X} block_log2={}",
+         ptr.guest_address(), int32_t(block_size_log2));
   auto graphics_system = kernel_state()->emulator()->graphics_system();
   graphics_system->EnableReadPointerWriteBack(ptr, block_size_log2);
 }
@@ -910,6 +918,7 @@ DECLARE_XBOXKRNL_EXPORT1(VdGetSystemCommandBuffer, kVideo, kStub);
 // about the HOST's own state, which is this function's job to report; it
 // hardcodes nothing about the Guide, and every decision that follows is the
 // guest's. Gated so the old behaviour is one flag away.
+static std::atomic<uint64_t> g_syscmd_submits{0};  // phase 1099z159 census
 dword_result_t VdQuerySystemCommandBuffer_entry(dword_t which) {
   if (!cvars::guide_sys_cmdbuf_ready) return 0;
   // Phase 1098w: answer the question the console answers, which is not "yes"
@@ -927,15 +936,38 @@ dword_result_t VdQuerySystemCommandBuffer_entry(dword_t which) {
   // is still in use and the truthful answer is 0. The guest then waits, exactly
   // as it would on hardware, the backlog stays small, and every queued pointer
   // still describes the bytes that were in it.
+  // Phase 1099z159 (DIAGNOSTIC, --kernel_log_long_waits_ms != 0): calls and
+  // busy answers per 250 ms, to tell a slot wait from a poll that spins on
+  // something else.
+  static std::atomic<uint64_t> calls{0}, busy{0};
+  auto census = [](bool was_busy) {
+    if (cvars::kernel_log_long_waits_ms == 0) return;
+    ++calls;
+    if (was_busy) ++busy;
+    static std::atomic<int64_t> last_ms{0};
+    const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now().time_since_epoch())
+                            .count();
+    int64_t prev = last_ms.load();
+    if (now - prev >= 250 && last_ms.compare_exchange_strong(prev, now)) {
+      XELOGI("SysCmdQuery: {} calls, {} busy, {} submits in the last {} ms",
+             calls.exchange(0), busy.exchange(0), g_syscmd_submits.exchange(0),
+             prev ? now - prev : 0);
+    }
+  };
   if (cvars::guide_syscmd_slot_contract) {
     auto* gs = kernel_state()->emulator()->graphics_system();
     auto* cp = gs ? gs->command_processor() : nullptr;
     if (cp) {
       uint32_t h = cp->guide_syscmd_head_.load(std::memory_order_acquire);
       uint32_t t = cp->guide_syscmd_tail_.load(std::memory_order_acquire);
-      if ((h - t) >= uint32_t(cvars::guide_syscmd_slots)) return 0;
+      if ((h - t) >= uint32_t(cvars::guide_syscmd_slots)) {
+        census(true);
+        return 0;
+      }
     }
   }
+  census(false);
   return 1;
 }
 DECLARE_XBOXKRNL_EXPORT1(VdQuerySystemCommandBuffer, kVideo, kStub);
@@ -962,6 +994,7 @@ void VdSetSystemCommandBuffer_entry(dword_t r3, dword_t r4) {
   // ring). Knowing the field offsets is the prerequisite for routing it.
   static std::atomic<uint32_t> once{0};
   uint32_t n = ++once;
+  ++g_syscmd_submits;
   // Phase 1098o: the descriptor's base changes every call (1FC68000, 1FC28000,
   // 1FBE8000 ...), which is the signature of a per-frame SUBMIT rather than a
   // one-time registration. Sample late as well as early so the call RATE is
@@ -978,6 +1011,26 @@ void VdSetSystemCommandBuffer_entry(dword_t r3, dword_t r4) {
     }
     XELOGI("VdSetSystemCommandBuffer #{} desc@{:08X}: {}", n, uint32_t(r3),
            dump.empty() ? "<unmapped>" : dump);
+  }
+  // The descriptor beyond the stream pointer/length (+0x08..+0x8F): log it
+  // whenever it CHANGES, so states that come and go (a notification toast vs
+  // the Guide blade) are captured with their exact fields rather than only at
+  // sampled submit counts.
+  {
+    auto* d = kernel_state()->memory()->TranslateVirtual(uint32_t(r3));
+    static uint8_t last[0x88] = {};
+    static std::atomic<uint32_t> change_lines{0};
+    if (d && std::memcmp(last, static_cast<uint8_t*>(d) + 0x08, 0x88) != 0) {
+      std::memcpy(last, static_cast<uint8_t*>(d) + 0x08, 0x88);
+      if (change_lines++ < 400) {
+        std::string dump;
+        for (uint32_t i = 0x08; i < 0x90; i += 4) {
+          dump += fmt::format("{:08X} ", xe::load_and_swap<uint32_t>(
+                                             static_cast<uint8_t*>(d) + i));
+        }
+        XELOGI("SysCmdDesc change #{} (+0x08..): {}", n, dump);
+      }
+    }
   }
   // Phase 1098p: publish the submitted stream for the GPU thread.
   if (cvars::guide_route_sys_cmdbuf) {
@@ -1011,6 +1064,16 @@ void VdSetSystemCommandBuffer_entry(dword_t r3, dword_t r4) {
             xe::load_and_swap<uint32_t>(static_cast<uint8_t*>(d) + 0x14);
         cp->guide_desc_height_ =
             xe::load_and_swap<uint32_t>(static_cast<uint8_t*>(d) + 0x18);
+        cp->guide_desc_surface_ =
+            xe::load_and_swap<uint32_t>(static_cast<uint8_t*>(d) + 0x08);
+        const uint32_t disp_w =
+            xe::load_and_swap<uint32_t>(static_cast<uint8_t*>(d) + 0x68);
+        const uint32_t disp_h =
+            xe::load_and_swap<uint32_t>(static_cast<uint8_t*>(d) + 0x6C);
+        if (disp_w && disp_h) {
+          cp->guide_desc_display_width_ = disp_w;
+          cp->guide_desc_display_height_ = disp_h;
+        }
         // Phase 1099a: WHERE DOES THE GUEST STATE THE GUIDE'S OPACITY?
         // The resolved surface is opaque (alpha 255 everywhere), so if there
         // is a background/plane alpha it is stated somewhere else. The submit
@@ -2379,18 +2442,101 @@ static void GuideSendXamEngineNotification(uint32_t id, uint32_t words[3]) {
   auto* memory = kernel_memory();
   const uint32_t desc = memory->SystemHeapAlloc(12);
   if (!desc) return;
+  // 2026-09-16: xam before 2.0.14699 (the first Metro dashboard) reads this
+  // descriptor as {width:16 height:16, physical base, format}: 13604's launch
+  // fade task (8189D858) tests [+4] for "no persisted display" and takes the
+  // size from +0/+2, so the 17489 order gave its CreateDevice a 0xFE7C x
+  // 0xA000 back buffer, the device failed, and the task wrote through the
+  // null device (819C9B80) - on every cold boot, when bootanim's
+  // VdShutdownEngines sends id 5. 14699's task (816C64B8) and 14717's
+  // (816C63B0) test [+0] and take the size from +4/+6, the 17489 order.
+  // Measured (cold boot + this notification): 12625 and 13604 crashed with
+  // the 17489 order, 14699 14717 14719 15574 16197 16547 16747 17559 did
+  // not. No public dashboard was released between 13604 and 14699.
+  uint32_t out_words[3] = {desc_words[0], desc_words[1], desc_words[2]};
+  if (!words && cvars::kernel_build_version < 14699) {
+    out_words[0] = desc_words[1];
+    out_words[1] = desc_words[0];
+  }
   for (int i = 0; i < 3; ++i) {
     xe::store_and_swap<uint32_t>(memory->TranslateVirtual(desc + i * 4),
-                                 desc_words[i]);
+                                 out_words[i]);
+  }
+  // 1099z170: what xam's launch fade will present - the persisted pixels as
+  // guest memory holds them (persist_N.raw next to the exe, rawtopng.py).
+  if (::cvars::guide_trace_transitions && id == 5 && desc_words[0]) {
+    static uint32_t dumps = 0;
+    const uint32_t w = desc_words[1] >> 16, h = desc_words[1] & 0xFFFF;
+    const uint8_t* px = memory->TranslateVirtual(desc_words[0]);
+    if (px && w && h && w <= 4096 && h <= 4096) {
+      auto path = xe::filesystem::GetExecutableFolder() /
+                  fmt::format("persist_{}.raw", dumps++);
+      if (FILE* f = xe::filesystem::OpenFile(path, "wb")) {
+        uint32_t hdr[3] = {w, h, w * 4};
+        fwrite(hdr, sizeof(hdr), 1, f);
+        std::vector<uint8_t> row(w * 4);
+        for (uint32_t y = 0; y < h; ++y) {
+          // Guest k_8_8_8_8 is big-endian ARGB; the raw format is RGBX.
+          for (uint32_t x = 0; x < w; ++x) {
+            const uint8_t* s = px + (y * w + x) * 4;
+            row[x * 4] = s[1];
+            row[x * 4 + 1] = s[2];
+            row[x * 4 + 2] = s[3];
+            row[x * 4 + 3] = 0xFF;
+          }
+          fwrite(row.data(), 1, row.size(), f);
+        }
+        fclose(f);
+        XELOGI("VdEngines: dumped persisted display to {}",
+               xe::path_to_utf8(path));
+      }
+    }
   }
   XELOGI("VdEngines: graphics notification {} to xam {:08X} desc {:08X} "
          "{:08X} {:08X}",
-         id, xam_callback, desc_words[0], desc_words[1], desc_words[2]);
+         id, xam_callback, out_words[0], out_words[1], out_words[2]);
   uint64_t args[] = {0, id, desc};
   kernel_state()->processor()->Execute(XThread::GetCurrentThread()->thread_state(),
                                        xam_callback, args, xe::countof(args));
   XELOGI("VdEngines: graphics notification {} returned", id);
   memory->SystemHeapFree(desc);
+}
+
+// 2026-09-16: the 17489 kernel's VdSwap (800F8E20) ends by sending graphics
+// notification 8 with a NULL descriptor (800F8F94: li r4,0 / li r3,8 /
+// bl 800EC6A0). NXE 7357 xam's routine records the swap time for it
+// (81915580: mftb into the 8-entry ring 81BC54C8) and its XUI clock
+// (81912320) uses 3x the average swap interval as the clamp for an animation
+// step. Without it the clamp is 0, the first HUD tick after an idle Guide
+// advanced timelines by the whole idle time, a new scene's show timeline
+// ended (XM 0x0F) before its 50 ms setup timer, and hud 7357's Quick Launch
+// handler (913F6098) read a child it had not looked up yet. As
+// GuideSendXamEngineNotification: only xam's routine (800EC6A0 then walks
+// the other registered routines too; not modelled).
+DEFINE_bool(kernel_swap_notification, false,
+            "VdSwap sends xam graphics notification 8 (swap) as the 17489 "
+            "kernel does (800F8F94). xam's XUI clock is built from it.",
+            "Kernel");
+static void GuideSendXamSwapNotification() {
+  if (!cvars::kernel_swap_notification) return;
+  uint32_t xam_callback = 0;
+  {
+    auto global_lock = graphics_notification_region_.Acquire();
+    if (graphics_notification_routines_) {
+      for (auto& r : *graphics_notification_routines_) {
+        if (r.is_xam) xam_callback = r.callback;
+      }
+    }
+  }
+  auto* thread = XThread::GetCurrentThread();
+  if (!xam_callback || !thread) return;
+  static std::atomic<uint32_t> sent{0};
+  if (sent++ == 0) {
+    XELOGI("VdSwap: graphics notification 8 to xam {:08X}", xam_callback);
+  }
+  uint64_t args[] = {0, 8, 0};
+  kernel_state()->processor()->Execute(thread->thread_state(), xam_callback,
+                                       args, xe::countof(args));
 }
 
 dword_result_t VdRetrainEDRAMWorker_entry(unknown_t unk0) { return 0; }
@@ -5749,7 +5895,10 @@ static void GuideSwapWorkBody(uint32_t fetch_ptr_ga) {
                    : 0u;
         };
         uint32_t td = rdw2(0x801E6FC4u);
-        uint32_t a = rdw2(td + 0x32A0u), b = rdw2(td + 0x32B0u);
+        // 1099z170: xam's launch fade presents while no title device exists
+        // (td = 0) - reading td+0x32A0 then faulted on the host.
+        uint32_t a = td ? rdw2(td + 0x32A0u) : 0u;
+        uint32_t b = td ? rdw2(td + 0x32B0u) : 0u;
         if (a || b) {
           ++rt_seen;
           XELOGI("SwapRT: title device {:08X} has a render target at "
@@ -18288,6 +18437,18 @@ void VdSwap_entry(
     lpdword_t frontbuffer_ptr,  // ptr to frontbuffer address
     lpdword_t texture_format_ptr, lpdword_t color_space_ptr, lpdword_t width,
     lpdword_t height) {
+  if (::cvars::guide_trace_transitions) {
+    const int64_t now_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+            .count();
+    if (now_ms < kernel_state()->transition_trace_until_ms.load()) {
+      XELOGI("Transition: VdSwap fb {:08X} {}x{} thread {:08X}",
+             frontbuffer_ptr ? uint32_t(*frontbuffer_ptr) : 0u,
+             width ? uint32_t(*width) : 0u, height ? uint32_t(*height) : 0u,
+             XThread::GetCurrentThreadHandle());
+    }
+  }
   GuideSwapDispatch(fetch_ptr.guest_address());
   // All of these parameters are REQUIRED.
   assert(buffer_ptr);
@@ -18363,6 +18524,7 @@ void VdSwap_entry(
   for (uint32_t i = offset; i < 64; i++) {
     dwords[i] = xenos::MakePacketType2();
   }
+  GuideSendXamSwapNotification();
 }
 DECLARE_XBOXKRNL_EXPORT3(VdSwap, kVideo, kImplemented, kHighFrequency,
                          kImportant);
@@ -18407,6 +18569,71 @@ void RegisterVideoExports(xe::cpu::ExportResolver* export_resolver,
       memory->TranslateVirtual<X_RTL_CRITICAL_SECTION*>(pVdHSIOCalibrationLock);
   xeRtlInitializeCriticalSectionAndSpinCount(hsio_lock, pVdHSIOCalibrationLock,
                                              10000);
+}
+
+// Host Power Off: the Guide and video state below belongs to one console
+// power-on (guest addresses, xam slots resolved from the old image, one-shot
+// flags). The research paint body's function-local statics are not reset;
+// that path (the Guide paint thread) is not used by the current Guide.
+void ResetVideoStateForPowerOff() {
+  {
+    auto lock = graphics_notification_region_.Acquire();
+    if (graphics_notification_routines_) {
+      graphics_notification_routines_->clear();
+    }
+  }
+  guide_prev_device_ = 0;
+  guide_draw_fn_ = 0;
+  guide_draw_this_ = 0;
+  guide_resv_pre_ = 0;
+  guide_cmdbuf_base_ = 0;
+  guide_boot_dc_ = 0;
+  guide_cmdbuf_size_ = 0;
+  g_ui_thread_slot = 0;
+  g_ui_thread_slot_done = false;
+  g_xam_dev_slot = 0;
+  g_xam_dev_slot_done = false;
+  g_render_host = 0;
+  g_render_host_done = false;
+  g_xui_ctx_slot = 0;
+  g_xui_createdc = 0;
+  g_xui_ctx_slot_done = false;
+  g_provider_slot = 0;
+  g_provider_slot_done = false;
+  g_nop_fn = 0;
+  guide_alloc_arena_ = 0;
+  guide_alloc_end_ = 0;
+  {
+    std::lock_guard<std::mutex> lock(persist_lock);
+    persisted[0] = persisted[1] = persisted[2] = 0;
+  }
+  guide_ring_buffer_ptr = 0;
+  guide_title_owns_engines = false;
+  guide_bs_hud_base_ = 0;
+  guide_bs_obj_ = 0;
+  guide_bs_use_title_device_ = false;
+  guide_bs_skin_module_ = 0;
+  guide_title_surface_ = 0;
+  guide_mode1_device_ = 0;
+  guide_devcreate_arg5_ = 0;
+  guide_bs_scene_ = 0;
+  guide_bs_ready_ = false;
+  guide_bs_pending_ = false;
+  g_guide_bkgnd_guest_state = 0xFFFFFFFFu;
+  saved_ring_ = {};
+  saved_ring_valid_ = false;
+  guide_syscmdbuf_ptr_ = 0;
+  guide_syscmdbuf_size_ = 0;
+  {
+    std::lock_guard<std::mutex> lock(g_guide_pt_mu);
+    g_guide_pt_swaps = 0;
+    g_guide_pt_fetch_ga = 0;
+    g_guide_pt_started = false;
+    g_guide_pt_failed = false;
+  }
+  g_guide_pt_thread.reset();
+  g_guide_pt_stop = false;
+  g_guide_pt_done = false;
 }
 
 }  // namespace xboxkrnl

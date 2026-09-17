@@ -8,6 +8,7 @@
  */
 
 #include "xenia/kernel/xthread.h"
+#include "xenia/kernel/power_reset.h"
 
 #if !XE_PLATFORM_WIN32
 #include <signal.h>
@@ -154,6 +155,11 @@ void XThread::set_name(const std::string_view name) {
 }
 
 static uint8_t next_cpu = 0;
+// Host Power Off: threads get the same CPUs as on the first power-on. xam's
+// audio code indexes per-CPU tables by the PCR's CPU number (819AFFC8); with
+// the counter carried over, the audio worker landed on a CPU whose entry is
+// null and xam's render callback crashed at 819A4158 (measured).
+void ResetXThreadStateForPowerOff() { next_cpu = 0; }
 static uint8_t GetFakeCpuNumber(uint8_t proc_mask) {
   // NOTE: proc_mask is logical processors, not physical processors or cores.
   if (!proc_mask) {

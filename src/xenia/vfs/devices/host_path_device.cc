@@ -28,6 +28,22 @@ HostPathDevice::HostPathDevice(const std::string_view mount_path,
 
 HostPathDevice::~HostPathDevice() = default;
 
+uint32_t HostPathDevice::total_allocation_units() const {
+  if (!model_bytes_) return 128 * 1024;
+  const uint64_t unit = uint64_t(sectors_per_allocation_unit()) * bytes_per_sector();
+  return uint32_t(std::min<uint64_t>(model_bytes_ / unit, UINT32_MAX));
+}
+
+uint32_t HostPathDevice::available_allocation_units() const {
+  if (!model_bytes_) return 128 * 1024;
+  std::error_code ec;
+  const auto space = std::filesystem::space(host_path_, ec);
+  const uint64_t free_bytes =
+      ec ? 0 : std::min<uint64_t>(space.available, model_bytes_);
+  const uint64_t unit = uint64_t(sectors_per_allocation_unit()) * bytes_per_sector();
+  return uint32_t(std::min<uint64_t>(free_bytes / unit, UINT32_MAX));
+}
+
 bool HostPathDevice::Initialize() {
   if (!std::filesystem::exists(host_path_)) {
     if (!read_only_) {
@@ -69,6 +85,34 @@ void HostPathDevice::PopulateEntry(HostPathEntry* parent_entry) {
     parent_entry->children_.push_back(std::unique_ptr<Entry>(child));
 
     if (child_info.type == xe::filesystem::FileInfo::Type::kDirectory) {
+      PopulateEntry(child);
+    }
+  }
+}
+
+void HostPathDevice::RefreshFromHost(Entry* entry) {
+  if (!entry || entry->device() != this ||
+      !(entry->attributes() & kFileAttributeDirectory)) {
+    return;
+  }
+  auto global_lock = global_critical_region_.Acquire();
+  auto* parent_entry = static_cast<HostPathEntry*>(entry);
+  auto child_infos = xe::filesystem::ListFiles(parent_entry->host_path());
+  for (auto& child_info : child_infos) {
+    const bool is_directory =
+        child_info.type == xe::filesystem::FileInfo::Type::kDirectory;
+    if (auto* existing =
+            parent_entry->GetChild(xe::path_to_utf8(child_info.name))) {
+      if (is_directory) {
+        RefreshFromHost(existing);
+      }
+      continue;
+    }
+    auto child = HostPathEntry::Create(
+        this, parent_entry, parent_entry->host_path() / child_info.name,
+        child_info);
+    parent_entry->children_.push_back(std::unique_ptr<Entry>(child));
+    if (is_directory) {
       PopulateEntry(child);
     }
   }

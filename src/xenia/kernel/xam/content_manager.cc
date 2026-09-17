@@ -9,16 +9,22 @@
 
 #include "xenia/kernel/xam/content_manager.h"
 
+#include <fstream>
+
+#include "third_party/crypto/TinySHA1.hpp"
+
 #include "third_party/fmt/include/fmt/format.h"
 #include "xenia/base/filesystem.h"
 #include "xenia/base/logging.h"
 #include "xenia/base/string.h"
 #include "xenia/emulator.h"
+#include "xenia/kernel/kernel_flags.h"
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/xam/user_profile.h"
 #include "xenia/kernel/xfile.h"
 #include "xenia/kernel/xobject.h"
 #include "xenia/vfs/devices/host_path_device.h"
+#include "xenia/vfs/devices/stfs_xbox.h"
 
 DECLARE_int32(license_mask);
 
@@ -31,6 +37,123 @@ static const char* kGameContentHeaderDirName = "Headers";
 static const char* kSpaFilename = "spa.bin";
 
 static int content_device_id_ = 0;
+
+static constexpr const char* kConsolePackageSuffix = ".stfs";
+
+std::filesystem::path ContentPackageFilesPath(
+    const std::filesystem::path& package_path) {
+  std::filesystem::path files = package_path;
+  files += kConsolePackageSuffix;
+  std::error_code ec;
+  if (std::filesystem::is_directory(files, ec)) {
+    return files;
+  }
+  return package_path;
+}
+
+bool IsConsolePackage(const std::filesystem::path& package_path) {
+  std::error_code ec;
+  std::filesystem::path files = package_path;
+  files += kConsolePackageSuffix;
+  return std::filesystem::is_regular_file(package_path, ec) &&
+         std::filesystem::is_directory(files, ec);
+}
+
+bool ReadConsolePackageHeader(const std::filesystem::path& package_path,
+                              XCONTENT_AGGREGATE_DATA& data) {
+  std::ifstream in(package_path, std::ios::binary);
+  if (!in) {
+    return false;
+  }
+  vfs::XContentContainerHeader header = {};
+  in.read(reinterpret_cast<char*>(&header), sizeof(header));
+  if (in.gcount() != sizeof(header) ||
+      !header.content_header.is_magic_valid()) {
+    return false;
+  }
+  const auto& metadata = header.content_metadata;
+  data.content_type = metadata.content_type;
+  data.title_id = metadata.execution_info.title_id;
+  data.xuid = metadata.profile_id;
+  data.set_file_name(xe::path_to_utf8(package_path.filename()));
+  const std::u16string name = metadata.display_name(XLanguage::kEnglish);
+  data.set_display_name(name.empty()
+                            ? xe::path_to_utf16(package_path.filename())
+                            : name);
+  return true;
+}
+
+bool WriteConsolePackage(const std::filesystem::path& package_path,
+                         XContentType content_type, uint32_t title_id,
+                         uint64_t profile_id,
+                         const std::u16string& display_name) {
+  std::error_code ec;
+  std::filesystem::create_directories(package_path.parent_path(), ec);
+  std::filesystem::path files = package_path;
+  files += kConsolePackageSuffix;
+  if (!std::filesystem::is_directory(files, ec) &&
+      !std::filesystem::create_directories(files, ec)) {
+    return false;
+  }
+
+  auto header = std::make_unique<vfs::XContentContainerHeader>();
+  std::memset(header.get(), 0, sizeof(*header));
+  auto& content_header = header->content_header;
+  content_header.magic = vfs::XContentPackageType::kCon;
+
+  // The signature area of a CON package is the console certificate followed by
+  // the signature. This build's XeKeysConsolePrivateKeySign (xboxkrnl_crypt.cc)
+  // signs with the console id 93 01 64 E6 07, type Retail and that manufacture
+  // date, so packages the host writes carry the same certificate xam's own do;
+  // the signature itself stays zero and is accepted by
+  // XeKeysConsoleSignatureVerification (kernel_accept_console_signatures).
+  static const uint8_t kConsoleId[5] = {0x93, 0x01, 0x64, 0xE6, 0x07};
+  static const uint8_t kManufactureDate[8] = {2, 0, 0, 5, 1, 1, 2, 2};
+  std::memcpy(content_header.signature + 0x2, kConsoleId, sizeof(kConsoleId));
+  content_header.signature[0x18 + 0x3] = 0x02;  // console type: Retail (be32)
+  std::memcpy(content_header.signature + 0x1C, kManufactureDate,
+              sizeof(kManufactureDate));
+
+  // One license for every console, the licence xam writes for content it
+  // creates itself.
+  content_header.licenses[0].licensee_id = 0xFFFFFFFFFFFFFFFFull;
+  content_header.header_size = sizeof(vfs::XContentContainerHeader);
+
+  auto& metadata = header->content_metadata;
+  metadata.content_type = content_type;
+  metadata.metadata_version = 2;
+  metadata.execution_info.title_id = title_id;
+  std::memcpy(metadata.console_id, kConsoleId, sizeof(kConsoleId));
+  metadata.profile_id = profile_id;
+  metadata.volume_type = vfs::XContentVolumeType::kStfs;
+  metadata.set_display_name(XLanguage::kEnglish, display_name);
+
+  // The header file is padded out to a block boundary, and the content id is
+  // the SHA-1 of everything from the metadata to the end of that padding -
+  // measured over the packages on the emulated hard drive, where 18 of the 19
+  // match exactly. xam recomputes it when it reads a package: a header whose
+  // id does not match its metadata is rejected, which is why an id made up
+  // here (or a package edited in place) is never mounted.
+  const size_t padded =
+      xe::round_up(size_t(content_header.header_size.get()), size_t(0x1000));
+  std::vector<uint8_t> file(padded, 0);
+  std::memcpy(file.data(), header.get(), sizeof(*header));
+  sha1::SHA1 sha;
+  sha.processBytes(file.data() + sizeof(vfs::XContentHeader),
+                   padded - sizeof(vfs::XContentHeader));
+  uint8_t digest[20];
+  sha.finalize(digest);
+  std::memcpy(reinterpret_cast<vfs::XContentHeader*>(file.data())->content_id,
+              digest, sizeof(content_header.content_id));
+
+  std::ofstream out(package_path, std::ios::binary | std::ios::trunc);
+  if (!out) {
+    return false;
+  }
+  out.write(reinterpret_cast<const char*>(file.data()), file.size());
+  out.close();
+  return bool(out);
+}
 
 ContentPackage::ContentPackage(KernelState* kernel_state,
                                const std::string_view root_name,
@@ -220,6 +343,16 @@ std::vector<XCONTENT_AGGREGATE_DATA> ContentManager::ListContent(
         // Directories only.
         continue;
       }
+      // ...and never a console package's contents directory. With the content
+      // root on the emulated hard drive the console's own packages sit in
+      // this tree, and a title that goes through HLE XamContent must not see
+      // them: listing them made Fable III take the HLE path for a save the
+      // real xam owns, and the save it had loaded that morning came back
+      // "corrupted" without ever being mounted. HLE owns Xenia's folders, the
+      // real xam owns its packages.
+      if (IsConsolePackage(package_root / file_info.name.stem())) {
+        continue;
+      }
 
       XCONTENT_AGGREGATE_DATA content_data;
       if (XSUCCEEDED(ReadContentHeaderFile(xe::path_to_utf8(file_info.name),
@@ -286,6 +419,12 @@ std::unique_ptr<ContentPackage> ContentManager::ResolvePackage(
 
   auto global_lock = global_critical_region_.Acquire();
 
+  // The package path itself, NOT "<package>.stfs". Redirecting the HLE mount
+  // at a console-written package changed how a title that goes through HLE
+  // XamContentOpen sees its own save (Fable III does - see CreateContent),
+  // and a save that loaded before this change reported itself corrupted
+  // after it. The host reads console packages for LISTING only; anything
+  // that opens, writes or deletes one stays with the real xam.
   auto package = std::make_unique<ContentPackage>(kernel_state_, root_name,
                                                   data, package_path);
   return package;
@@ -377,6 +516,13 @@ X_RESULT ContentManager::CreateContent(const std::string_view root_name,
     return X_ERROR_ALREADY_EXISTS;
   }
 
+  // Xenia's own form - a plain folder - even when the content root is the
+  // console's Content tree. Writing the console's form here (a header file)
+  // BROKE SAVING on 2026-09-15: Fable III creates its save through HLE
+  // XamContentCreate, the header made the real xam see a package that already
+  // existed, so it opened it instead of creating it, never committed, and the
+  // save data was never written ("Load Failed", then xam deleted the package).
+  // A folder is invisible to xam, which is what keeps the two sides apart.
   if (!std::filesystem::create_directories(package_path)) {
     return X_ERROR_ACCESS_DENIED;
   }

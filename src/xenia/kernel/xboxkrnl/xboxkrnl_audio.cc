@@ -7,8 +7,12 @@
  ******************************************************************************
  */
 
+#include <atomic>
+
 #include "xenia/apu/audio_system.h"
 #include "xenia/emulator.h"
+#include "xenia/kernel/power_reset.h"
+#include "xenia/kernel/kernel_flags.h"
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/util/shim_utils.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_private.h"
@@ -54,6 +58,36 @@ DECLARE_XBOXKRNL_EXPORT2(XAudioGetVoiceCategoryVolume, kAudio, kStub,
 
 dword_result_t XAudioEnableDucker_entry(dword_t unk) { return X_ERROR_SUCCESS; }
 DECLARE_XBOXKRNL_EXPORT1(XAudioEnableDucker, kAudio, kStub);
+
+// Phase 1099z155: the ducker parameter exports, after the 17489 kernel
+// (8016DA38..8016DB34). Each is a two-instruction accessor on a float in the
+// audio driver's zero-initialised data block (801EB610 + 0xBD28 level,
+// +0xBD34 threshold, +0xBD38 attack, +0xBD3C release, +0xBD40 hold): the setter
+// stores f1, the getter loads f1. Nothing else in the kernel image writes them.
+// They were undefined, so xam's audio mixer read whatever f1 held (~13k calls a
+// minute). The mixer's use of the values is not modelled here. Gated
+// (--kernel_audio_ducker) so the 17489 setup can be compared both ways.
+namespace {
+std::atomic<float> ducker_level{0.0f}, ducker_threshold{0.0f},
+    ducker_attack{0.0f}, ducker_release{0.0f}, ducker_hold{0.0f};
+}  // namespace
+
+#define XE_DUCKER_ACCESSORS(Name, var)                                  \
+  void XAudioSetDucker##Name##_entry(const ppc_context_t& ctx) {        \
+    if (cvars::kernel_audio_ducker) var = static_cast<float>(ctx->f[1]); \
+  }                                                                     \
+  DECLARE_XBOXKRNL_EXPORT1(XAudioSetDucker##Name, kAudio, kImplemented); \
+  void XAudioGetDucker##Name##_entry(const ppc_context_t& ctx) {        \
+    if (cvars::kernel_audio_ducker) ctx->f[1] = var.load();             \
+  }                                                                     \
+  DECLARE_XBOXKRNL_EXPORT1(XAudioGetDucker##Name, kAudio, kImplemented);
+
+XE_DUCKER_ACCESSORS(Level, ducker_level)
+XE_DUCKER_ACCESSORS(Threshold, ducker_threshold)
+XE_DUCKER_ACCESSORS(AttackTime, ducker_attack)
+XE_DUCKER_ACCESSORS(ReleaseTime, ducker_release)
+XE_DUCKER_ACCESSORS(HoldTime, ducker_hold)
+#undef XE_DUCKER_ACCESSORS
 
 dword_result_t XAudioRegisterRenderDriverClient_entry(lpdword_t callback_ptr,
                                                       lpdword_t driver_ptr) {
@@ -107,6 +141,14 @@ dword_result_t XAudioSubmitRenderDriverFrame_entry(lpunknown_t driver_ptr,
 }
 DECLARE_XBOXKRNL_EXPORT2(XAudioSubmitRenderDriverFrame, kAudio, kImplemented,
                          kHighFrequency);
+
+void ResetAudioStateForPowerOff() {
+  ducker_level = 0.0f;
+  ducker_threshold = 0.0f;
+  ducker_attack = 0.0f;
+  ducker_release = 0.0f;
+  ducker_hold = 0.0f;
+}
 
 }  // namespace xboxkrnl
 }  // namespace kernel

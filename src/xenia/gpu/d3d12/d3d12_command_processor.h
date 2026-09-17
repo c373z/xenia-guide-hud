@@ -163,11 +163,17 @@ class D3D12CommandProcessor final : public CommandProcessor {
       ID3D12Resource* title_resource,
       const D3D12_SHADER_RESOURCE_VIEW_DESC& guide_srv_desc,
       ID3D12Resource* guide_resource,
-      D3D12_SHADER_RESOURCE_VIEW_DESC& srv_desc_out);
+      D3D12_SHADER_RESOURCE_VIEW_DESC& srv_desc_out,
+      const D3D12_VIEWPORT* dest_rect = nullptr,
+      const D3D12_SHADER_RESOURCE_VIEW_DESC* title_srv_desc = nullptr,
+      bool opaque = false);
   bool GuideBlendEnsureObjects(DXGI_FORMAT rt_format);
 
   Microsoft::WRL::ComPtr<ID3D12RootSignature> guide_blend_root_signature_;
   Microsoft::WRL::ComPtr<ID3D12PipelineState> guide_blend_pipeline_;
+  // Same shader, blending off: draws the title's frame into the composite
+  // through the title's own SRV channel mapping (see GuideCompositeOverTitle).
+  Microsoft::WRL::ComPtr<ID3D12PipelineState> guide_blend_copy_pipeline_;
   Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> guide_blend_rtv_heap_;
   Microsoft::WRL::ComPtr<ID3D12Resource> guide_composite_texture_;
   DXGI_FORMAT guide_blend_rt_format_ = DXGI_FORMAT_UNKNOWN;
@@ -608,6 +614,7 @@ class D3D12CommandProcessor final : public CommandProcessor {
                      uint64_t& out_submission) override;
   bool DiscardZPDQuery() override;
   void PumpQueryResolves() override;
+  void FlushZPDSubmission(uint64_t wait_for_submission) override;
   bool AwaitQueryResolve(ReportHandle report_handle,
                          uint64_t wait_for_submission) override;
 
@@ -827,6 +834,11 @@ class D3D12CommandProcessor final : public CommandProcessor {
     uint32_t sizes[2] = {0, 0};
     uint32_t current_index = 0;
     uint64_t last_used_frame = 0;
+    // 1099z170: the frame each buffer was last written in. A "fast" read is
+    // only this resolve's data if the other buffer was written in the
+    // previous frame; otherwise it holds whatever was last resolved to this
+    // address, possibly minutes ago by another title.
+    uint64_t written_frame[2] = {UINT64_MAX, UINT64_MAX};
   };
   // Map: (written_address << 32 | written_length) -> ReadbackBuffer
   std::unordered_map<uint64_t, ReadbackBuffer> readback_buffers_;

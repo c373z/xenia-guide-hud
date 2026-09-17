@@ -32,6 +32,7 @@ class XmaDecoder {
 
   Memory* memory() const { return memory_; }
   cpu::Processor* processor() const { return processor_; }
+  kernel::XHostThread* worker_thread() const { return worker_thread_.get(); }
 
   X_STATUS Setup(kernel::KernelState* kernel_state);
   void Shutdown();

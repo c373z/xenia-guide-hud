@@ -7,11 +7,16 @@
  ******************************************************************************
  */
 
+#include "xenia/kernel/power_reset.h"
+
+#include <string>
+#include <vector>
 #include "xenia/kernel/xboxkrnl/xboxkrnl_modules.h"
 #include "xenia/base/logging.h"
 #include "xenia/base/utf8.h"
 #include "xenia/cpu/function.h"
 #include "xenia/cpu/processor.h"
+#include "xenia/emulator.h"
 #include "xenia/kernel/kernel_flags.h"
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/user_module.h"
@@ -66,7 +71,27 @@ dword_result_t XexGetModuleHandle(std::string module_name,
 }
 
 dword_result_t XexGetModuleHandle_entry(lpstring_t module_name,
-                                        lpdword_t hmodule_ptr) {
+                                        lpdword_t hmodule_ptr,
+                                        const ppc_context_t& ctx) {
+  // Old-dashboard support: a name of (PSZ)-1 means "the module this call
+  // came from". The 17489 kernel (800A2B40) takes the caller's return
+  // address (800A2218: [[r1]-8]) and returns the loader entry whose image
+  // contains it (800A1D88: +0x18 base, +0x20 size), or 0 and
+  // STATUS_NOT_FOUND (C0000225). dash.firstuse.xex (2.0.12625-15574) builds
+  // its own resource locator this way; reading -1 as a string failed it and
+  // the dashboard showed "This feature is temporarily unavailable
+  // (80004005)" at every boot.
+  if (cvars::kernel_xex_module_handle_self &&
+      module_name.guest_address() == 0xFFFFFFFF) {
+    auto module =
+        kernel_state()->GetUserModuleByAddress(uint32_t(ctx->lr));
+    if (!module) {
+      *hmodule_ptr = 0;
+      return X_STATUS_NOT_FOUND;
+    }
+    *hmodule_ptr = module->hmodule_ptr();
+    return X_STATUS_SUCCESS;
+  }
   return XexGetModuleHandle(module_name ? module_name.value() : "",
                             hmodule_ptr);
 }
@@ -124,6 +149,77 @@ dword_result_t XexGetModuleSection_entry(lpvoid_t hmodule, lpstring_t name,
 }
 DECLARE_XBOXKRNL_EXPORT1(XexGetModuleSection, kModules, kImplemented);
 
+// 2026-09-16 (disc-agent): the import-library version check the console makes
+// while binding an image's imports. The 17489 kernel hands import binding to
+// the hypervisor (8009F920 = syscall 0x17); the HV (se_17489_hv_kernel.bin
+// 2AC6C-2ACF4) reads the exporting module's xex2 export table and fails with
+// STATUS_REVISION_MISMATCH when export version < import version_min, or when
+// import version < the export's minimum compatible version. Checked only
+// against real guest modules (LLE xam and friends): Xenia's HLE modules have
+// no export table, and its reported kernel version is a cvar (default 1888).
+// Measured without it: Sonic & All-Stars Racing Transformed (xam min
+// 2.0.15574) on 2.0.6770 bound its missing xam ordinals to xam's image base
+// and crashed at 824B5A14 (ctr=81870000) 0.6 s after start.
+static X_STATUS CheckImportLibraryVersions(UserModule* module) {
+  if (!module->xex_module()) {
+    return X_STATUS_SUCCESS;
+  }
+  xex2_opt_import_libraries* libs = nullptr;
+  if (!module->xex_module()->GetOptHeader(XEX_HEADER_IMPORT_LIBRARIES, &libs) ||
+      !libs) {
+    return X_STATUS_SUCCESS;
+  }
+  std::vector<std::string_view> names;
+  for (size_t i = 0; i < libs->string_table.size &&
+                     names.size() < libs->string_table.count;) {
+    std::string_view s(&libs->string_table.data[i]);
+    names.push_back(s);
+    i += s.size() + 1;
+    i = (i + 3) & ~size_t(3);
+  }
+  auto* data = reinterpret_cast<const uint8_t*>(libs);
+  for (uint32_t off = libs->string_table.size + 12; off < libs->size;) {
+    auto* lib = reinterpret_cast<const xex2_import_library*>(data + off);
+    if (!lib->size) {
+      break;
+    }
+    off += lib->size;
+    const size_t index = lib->name_index & 0xFF;
+    if (index >= names.size()) {
+      continue;
+    }
+    const std::string name(names[index]);
+    // Only libraries that bind to the guest image (see SetupLibraryImports).
+    const bool is_xam = utf8::equal_case(name, "xam.xex");
+    if (is_xam && (cvars::lle_xam.empty() || !cvars::lle_xam_scope.empty())) {
+      continue;
+    }
+    auto exporter = kernel_state()->GetModule(name, true);
+    auto* exporter_module =
+        exporter ? static_cast<UserModule*>(exporter.get()) : nullptr;
+    if (!exporter_module || !exporter_module->xex_module() ||
+        !exporter_module->xex_module()->xex_security_info()->export_table) {
+      continue;
+    }
+    auto* table = kernel_memory()->TranslateVirtual<const xex2_export_table*>(
+        exporter_module->xex_module()->xex_security_info()->export_table);
+    const uint32_t tail = table->version[2];
+    const uint32_t exp_version =
+        ((tail >> 8) & 0xFF) << 24 | (table->version[0] & 0xFFFFFF);
+    const uint32_t exp_min =
+        (tail & 0xFF) << 24 | (table->version[1] & 0xFFFFFF);
+    const uint32_t imp_version = lib->version_value;
+    const uint32_t imp_min = lib->version_min_value;
+    if (exp_version < imp_min || imp_version < exp_min) {
+      XELOGW("XexLoadImage: {} needs {} {:08X} (built against {:08X}); the "
+             "loaded one is {:08X} (compatible back to {:08X}) -> C0000059",
+             module->path(), name, imp_min, imp_version, exp_version, exp_min);
+      return X_STATUS(0xC0000059);  // STATUS_REVISION_MISMATCH
+    }
+  }
+  return X_STATUS_SUCCESS;
+}
+
 dword_result_t xeXexLoadImage(
     lpstring_t module_name, dword_t module_flags, dword_t min_version,
     lpdword_t hmodule_ptr,
@@ -152,6 +248,16 @@ dword_result_t xeXexLoadImage(
     auto user_module = load_callback();
     if (user_module) {
       kernel_state()->ApplyTitleUpdate(user_module);
+      const X_STATUS version_status =
+          cvars::kernel_check_title_system_version
+              ? CheckImportLibraryVersions(user_module.get())
+              : X_STATUS_SUCCESS;
+      if (XFAILED(version_status)) {
+        kernel_state()->UnloadUserModule(user_module, false);
+        user_module->Unload();
+        *hmodule_ptr = 0;
+        return version_status;
+      }
       kernel_state()->FinishLoadingUserModule(user_module);
       // Give up object ownership, this reference will be released by the last
       // XexUnloadImage call
@@ -225,6 +331,10 @@ static void GuideDumpLauncher(const char* tag) {
   }
 }
 
+// One-time terminate of the title Xenia booted (see XexLoadExecutable).
+static bool g_host_terminated_boot_title = false;
+void ResetModulesStateForPowerOff() { g_host_terminated_boot_title = false; }
+
 dword_result_t XexLoadExecutable_entry(lpstring_t module_name,
                                        lpstring_t command_line,
                                        dword_t module_flags,
@@ -277,6 +387,9 @@ dword_result_t XexLoadExecutable_entry(lpstring_t module_name,
     XELOGW("XexLoadExecutable: boot image {} does not match '{}'; loading "
            "normally and leaving the boot image unstarted",
            boot->path(), module_name.value());
+    // 2026-09-16: and not loaded - a console had nothing loaded before xam's
+    // first launch (6770 + disc at power-on; see DiscardUnstartedBootImage).
+    kernel_state()->DiscardUnstartedBootImage(boot);
   }
   // Phase 1099v: the real XexLoadExecutable (80069888) refuses while an
   // executable is still loaded - XexExecutableModuleHandle must be 0, i.e. the
@@ -291,9 +404,9 @@ dword_result_t XexLoadExecutable_entry(lpstring_t module_name,
     // dash -> C0000022 x3, no ExTerminateTitleProcess). For a TITLE executable
     // (0x40000000) replacing the title Xenia booted, do the terminate xam
     // would have done, once, then load normally.
-    static bool host_terminated_boot_title = false;
-    if ((uint32_t(module_flags) & 0x40000000u) && !host_terminated_boot_title) {
-      host_terminated_boot_title = true;
+    if ((uint32_t(module_flags) & 0x40000000u) &&
+        !g_host_terminated_boot_title) {
+      g_host_terminated_boot_title = true;
       XELOGI("XexLoadExecutable: boot title {} was launched by Xenia, not xam; "
              "running the title terminate xam skips",
              kernel_state()->GetExecutableModule()->path());
@@ -426,11 +539,89 @@ dword_result_t XexGetProcedureAddress_entry(lpvoid_t hmodule, dword_t ordinal,
     module = XModule::GetFromHModule(kernel_state(), hmodule);
   }
   if (module) {
-    uint32_t ptr;
-    if (is_string_name) {
-      ptr = module->GetProcAddressByName(string_name);
-    } else {
-      ptr = module->GetProcAddressByOrdinal(ordinal);
+    uint32_t ptr = 0;
+    // With LLE xam, runtime lookups against xam keep answering from Xenia's
+    // HLE XamModule (what worked before), with two exceptions that resolve
+    // against the real xam.xex's export table instead:
+    //  1. Exports HLE does not implement (HLE returns 0). Fable III's
+    //     XexGetProcedureAddress(xam, 0x48C XamVoiceSetMicArrayIdleUsers)
+    //     got 0 although retail xam 17559 exports it (816FB9C0).
+    //  2. Enumerator-creating exports (*CreateEnumerator*,
+    //     XamCreateEnumeratorHandle): the object they return is consumed by
+    //     real xam's enumerate path (static imports, XMsgInProcessCall). Fable
+    //     III's HLE XamContentAggregateCreateEnumerator (0x279) built an
+    //     8-byte stub and real xam's handler 81687B48 then entered an
+    //     uninitialized critical section in it forever (the loading screen
+    //     after choosing a character).
+    // Resolving EVERYTHING against real xam first was tried and broke two
+    // titles: NetDll_XNetStartupEx (Fable III first loading screen, real
+    // xam's XNet never gets an address) and XamMediaVerificationCreate
+    // (Sonic Generations set XeKeysSecuritySetDetected(12) 84 ms later and
+    // in-game sign-in failed).
+    const bool module_is_xam = utf8::equal_case(
+        utf8::find_base_name_from_guest_path(module->name()), "xam");
+    bool caller_wants_real_xam = cvars::lle_xam_scope.empty();
+    if (!caller_wants_real_xam) {
+      if (auto exe = kernel_state()->GetExecutableModule()) {
+        const auto self = utf8::find_base_name_from_guest_path(exe->name());
+        const std::string& spec = cvars::lle_xam_scope;
+        size_t pos = 0;
+        while (pos <= spec.size() && !caller_wants_real_xam) {
+          size_t comma = spec.find(',', pos);
+          std::string tok = spec.substr(
+              pos, comma == std::string::npos ? std::string::npos
+                                              : comma - pos);
+          pos = (comma == std::string::npos) ? spec.size() + 1 : comma + 1;
+          while (!tok.empty() && tok.front() == ' ') tok.erase(tok.begin());
+          while (!tok.empty() && tok.back() == ' ') tok.pop_back();
+          caller_wants_real_xam =
+              !tok.empty() &&
+              utf8::equal_case(self,
+                               utf8::find_base_name_from_guest_path(tok));
+        }
+      }
+    }
+    bool creates_enumerator = false;
+    if (module_is_xam) {
+      std::string_view export_name;
+      if (is_string_name) {
+        export_name = string_name;
+      } else if (auto* exp = kernel_state()->emulator()->export_resolver()
+                                 ->GetExportByOrdinal("xam.xex",
+                                                      uint16_t(ordinal))) {
+        export_name = exp->name;
+      }
+      creates_enumerator =
+          export_name.find("CreateEnumerator") != std::string_view::npos ||
+          export_name == "XamCreateEnumeratorHandle";
+    }
+    const bool lle_xam_active =
+        module_is_xam && !cvars::lle_xam.empty() && caller_wants_real_xam;
+    if (!(lle_xam_active && creates_enumerator)) {
+      ptr = is_string_name ? module->GetProcAddressByName(string_name)
+                           : module->GetProcAddressByOrdinal(ordinal);
+    }
+    if (!ptr && lle_xam_active) {
+      if (auto real_xam = kernel_state()->GetModule("xam.xex", true)) {
+        ptr = is_string_name ? real_xam->GetProcAddressByName(string_name)
+                             : real_xam->GetProcAddressByOrdinal(ordinal);
+        if (ptr) {
+          static std::atomic<uint32_t> logged{0};
+          if (logged++ < 32) {
+            XELOGI("XexGetProcedureAddress: {} {} resolved against real xam "
+                   "-> {:08X}",
+                   is_string_name ? "export" : "ordinal",
+                   is_string_name ? std::string(string_name)
+                                  : fmt::format("0x{:X}", uint32_t(ordinal)),
+                   ptr);
+          }
+        }
+      }
+    }
+    if (!ptr && lle_xam_active && creates_enumerator) {
+      // Real xam lacks it: fall back to HLE.
+      ptr = is_string_name ? module->GetProcAddressByName(string_name)
+                           : module->GetProcAddressByOrdinal(ordinal);
     }
     if (ptr) {
       *out_function_ptr = ptr;
@@ -525,6 +716,32 @@ dword_result_t XexLoadImageHeaders_entry(pointer_t<X_ANSI_STRING> path,
 
   } else {
     result_status = X_STATUS_BUFFER_TOO_SMALL;
+  }
+
+  // Phase 1099z159: the real XexLoadImageHeaders (17489 800A0B18) ends with
+  // 800A08C8(header, 1, 0), which bounds-checks the security info
+  // (offset + 4 <= header_size, its size in 0x184..header_size - offset) and,
+  // because the second argument is 1, stores the ABSOLUTE address of the
+  // security info into header+0x10 (800A0A8C). xam 17559 then hashes 0x100
+  // bytes at [header+0x10]; with the raw offset left in place it hashed guest
+  // address 0x98 and faulted (system manifest check of AvatarEditor.xex).
+  // HOST-SIDE: that routine's RSA check of the header signature (8014A168) is
+  // not performed.
+  if (result_status == X_STATUS_SUCCESS &&
+      cvars::kernel_xex_load_headers_fixup) {
+    const uint32_t sec_offset = header->security_offset;
+    const uint32_t hdr_size = header->header_size;
+    if (sec_offset > hdr_size || hdr_size - sec_offset < 4) {
+      result_status = X_STATUS_INVALID_IMAGE_FORMAT;
+    } else {
+      const uint32_t sec_size = xe::load_and_swap<uint32_t>(
+          reinterpret_cast<const uint8_t*>(header.host_address()) + sec_offset);
+      if (sec_size < 0x184 || sec_size > hdr_size - sec_offset) {
+        result_status = X_STATUS_INVALID_IMAGE_FORMAT;
+      } else {
+        header->security_offset = header.guest_address() + sec_offset;
+      }
+    }
   }
 
   vfs_file->Destroy();

@@ -12,6 +12,7 @@
 #include <cstring>
 
 #include "xenia/base/threading.h"
+#include "xenia/kernel/power_reset.h"
 #include "xenia/kernel/kernel_flags.h"
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/util/shim_utils.h"
@@ -284,6 +285,32 @@ DECLARE_XBOXKRNL_EXPORT1(KeSetPriorityClassThread, kNone, kStub);
 dword_result_t ExExpansionCall_entry(dword_t expansion_id, dword_t command,
                                      dword_t arg1, dword_t arg2,
                                      dword_t arg3) {
+  // Phase 1099z161: HOST-SIDE shim for the hypervisor expansion 'PV03'
+  // (--kernel_pv03_host_shim, default off; asked for by the user). The real
+  // expansion is Microsoft hypervisor code that no file available to this
+  // project contains, so its computation is NOT modelled. Only the two
+  // commands whose use in xam 17559 was read are answered:
+  //   command 1: presence query (8167E4F8, 8168632C, 816CF898 - failure makes
+  //              xam mark system packages state 5 instead of 3, and returns
+  //              0x500000 from 816CF868). Answered: success.
+  //   command 3: license lookup (8167F6E0): xam copies a 16-byte license
+  //              descriptor from the package header into the buffer, the
+  //              expansion rewrites it in place, and xam treats licensee
+  //              FFFFFFFFFFFFFFFF as "everyone" (returns 1 at 8167F738), type
+  //              9 as a user, 0xF000 as this console, 0xE000 other. Answered:
+  //              the descriptor unchanged (what the header stores; the 17559
+  //              update packages all store FFFFFFFFFFFFFFFF) and success.
+  // Commands 2 and 4 (81682598, 81682E30/81683320) keep the real "not
+  // installed" answer and are logged.
+  if (cvars::kernel_pv03_host_shim && expansion_id == 0x50563033u &&
+      (command == 1 || command == 3)) {
+    static std::atomic<uint32_t> shim_logs{0};
+    if (++shim_logs <= 20) {
+      XELOGI("ExExpansionCall(PV03, {}, {:08X}) -> HOST-SIDE shim success",
+             uint32_t(command), uint32_t(arg1));
+    }
+    return X_STATUS_SUCCESS;
+  }
   static std::atomic<uint32_t> logs{0};
   if (++logs <= 20) {
     XELOGI("ExExpansionCall({:08X}, {}, {:08X}) -> not installed",
@@ -752,6 +779,8 @@ uint32_t GuideDeliverXenonButton(uint32_t device, uint32_t cls,
   t->Wait(0, 0, 0, nullptr);
   return cb;
 }
+
+void ResetMiscStateForPowerOff() { xe_sysreq_callback_ = 0; }
 
 }  // namespace xboxkrnl
 }  // namespace kernel

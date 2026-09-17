@@ -24,6 +24,11 @@
 #include "xenia/gpu/xenos_zpd_report.h"
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/user_module.h"
+
+// Phase 1099z166: the system-command-buffer slot contract lives in
+// xboxkrnl_video.cc; the drain that satisfies it lives here.
+DECLARE_bool(guide_syscmd_slot_contract);
+DECLARE_int32(guide_syscmd_slots);
 #if !defined(NDEBUG)
 
 #define XE_ENABLE_GPU_REG_WRITE_LOGGING 1
@@ -64,7 +69,18 @@ DEFINE_string(
     "           unresolved reports. May improve effects relying on precise\n"
     "           visibility, but may be less stable for occlusion culling.\n"
     " strict: Ask the GPU and wait for the real result before continuing.\n"
-    "         Most accurate, but may be somewhat less performant.",
+    "         Most accurate, but may be somewhat less performant.\n"
+    " async: Ask the GPU and leave the report pending (as the console's GPU\n"
+    "        does) until the real result arrives; no guesses and no GPU wait\n"
+    "        while the guest keeps submitting. When the guest stops to poll,\n"
+    "        the pending work is submitted without waiting.",
+    "GPU");
+
+DEFINE_bool(
+    zpd_stats_log, false,
+    "Diagnostic: log occlusion query (EVENT_WRITE_ZPD) report statistics every "
+    "few seconds - reports ended, values the guest was given at END (real, "
+    "speculative), and late results that differ from what the guest was given.",
     "GPU");
 
 DEFINE_string(
@@ -156,6 +172,8 @@ ZPDMode GetZPDMode() {
     return ZPDMode::kStrict;
   } else if (mode == "fast-alt") {
     return ZPDMode::kFastAlt;
+  } else if (mode == "async") {
+    return ZPDMode::kAsync;
   }
   return ZPDMode::kFast;
 }
@@ -346,9 +364,12 @@ void CommandProcessor::WorkerThreadMain() {
     {
       static uint32_t hb = 0;
       if (cvars::guide_cp_probe && (++hb % 400u) == 1u) {
-        XELOGI("CPBeat {}: ring={:08X} rptr={} wptr={} pending={}", hb,
-               primary_buffer_ptr_, read_ptr_index_, write_ptr_index_.load(),
-               pending_fns_.empty() ? 0 : 1);
+        XELOGI("CPBeat {}: ring={:08X} rptr={} wptr={} pending={} "
+               "syscmd h={} t={}",
+               hb, primary_buffer_ptr_, read_ptr_index_,
+               write_ptr_index_.load(), pending_fns_.empty() ? 0 : 1,
+               guide_syscmd_head_.load(std::memory_order_relaxed),
+               guide_syscmd_tail_.load(std::memory_order_relaxed));
       }
     }
     // Phase 613: bracket the drain. If "in" prints without "out", a queued
@@ -382,10 +403,18 @@ void CommandProcessor::WorkerThreadMain() {
       if (cvars::guide_cp_probe)
       XELOGI("CPWait enter #{} ring={:08X} rptr={} wptr={}", pw_seq,
              primary_buffer_ptr_, read_ptr_index_, write_ptr_index_.load());
+      zpd_worker_idle_ = true;
       PrepareForWait();
       if (cvars::guide_cp_probe) XELOGI("CPWait prepared #{}", pw_seq);
       uint32_t loop_count = 0;
       do {
+        // Async ZPD: a guest polling a report submits nothing, so keep its
+        // queries moving while the ring is idle.
+        if ((loop_count % 8u) == 7u &&
+            zpd_pending_retire_handle_ != kInvalidReportHandle &&
+            GetZPDMode() == ZPDMode::kAsync) {
+          PumpPendingRetire();
+        }
         // If we spin around too much, revert to a "low-power" state.
         if (loop_count > 500) {
           constexpr int wait_time_ms = 2;
@@ -417,6 +446,7 @@ void CommandProcessor::WorkerThreadMain() {
       } while (worker_running_ && pending_fns_.empty() &&
                (write_ptr_index == 0xBAADF00D ||
                 read_ptr_index_ == write_ptr_index));
+      zpd_worker_idle_ = false;
       ReturnFromWait();
       if (cvars::guide_cp_probe)
       XELOGI("CPWait returned #{} rptr={} wptr={}", pw_seq, read_ptr_index_,
@@ -564,6 +594,29 @@ void CommandProcessor::InitializeRingBuffer(uint32_t ptr, uint32_t size_log2) {
            primary_buffer_ptr_, ptr, write_ptr_index_.load());
     write_ptr_index_ = 0;
   }
+  XELOGI("InitializeRingBuffer: ptr={:08X} size_log2={} (read-pointer "
+         "writeback still {:08X}, syscmd depth {})",
+         ptr, size_log2, read_ptr_writeback_ptr_, guide_syscmd_depth_);
+  // Phase 1099z166: a ring handover is a title change. Everything still
+  // queued from xam's system command buffer was submitted against the title
+  // that just went away - those streams describe its buffers and nothing will
+  // ever consume them, because the drains run at a swap/resolve and the
+  // incoming title has not presented yet. Left queued, the backlog stays at
+  // capacity, VdQuerySystemCommandBuffer answers "busy" for good and xam's
+  // Guide tick - and with it the new title's first frame - never runs, which
+  // is why Guide > Y > Xbox Home never reached the dashboard. Discard them,
+  // and clear a depth that a drain interrupted by the handover would have
+  // left set (it would disable every later drain).
+  {
+    const uint32_t h = guide_syscmd_head_.load(std::memory_order_acquire);
+    const uint32_t t = guide_syscmd_tail_.load(std::memory_order_relaxed);
+    if (h != t) {
+      XELOGI("GuideSysCmd: dropping {} stream(s) queued by the previous title",
+             h - t);
+      guide_syscmd_tail_.store(h, std::memory_order_release);
+    }
+  }
+  guide_syscmd_depth_ = 0;
   primary_buffer_ptr_ = ptr;
   primary_buffer_size_ = uint32_t(1) << (size_log2 + 3);
 
@@ -840,7 +893,9 @@ void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
   // ring (862) is correct rather than a fault. Log writes to the scanout
   // surface registers so which pipe the Guide uses stops being a guess.
   if (index == 0x1844u || index == 0x1848u || index == 0x1930u ||
-      index == 0x1921u || index == 0x1922u) {
+      index == 0x1921u || index == 0x1922u ||
+      (index >= 0x1860u && index <= 0x186Bu) ||
+      (index >= 0x18C1u && index <= 0x18C3u)) {
     static std::map<uint32_t, uint32_t> dc_seen;
     uint32_t& n = dc_seen[index];
     if (++n <= 3u || (n % 500u) == 0u) {
@@ -1079,10 +1134,45 @@ CommandProcessor::PendingZPDSlot CommandProcessor::GetPendingZPDSlot(
   return pending_slot;
 }
 
+// zpd_stats_log counters (diagnostic only).
+namespace {
+struct ZPDStats {
+  uint64_t begins = 0, ends = 0, end_no_logical = 0;
+  uint64_t imm_zero = 0, imm_nonzero = 0;
+  uint64_t spec_one = 0, spec_cached = 0;
+  uint64_t late_zero = 0, late_nonzero = 0, late_stale = 0;
+  uint64_t pool_exhausted = 0, deferred = 0, retire_abandon = 0;
+  uint64_t last_log_ms = 0;
+};
+ZPDStats zpd_stats_;
+}  // namespace
+
+void CommandProcessor::LogZPDStats() {
+  if (!cvars::zpd_stats_log) {
+    return;
+  }
+  uint64_t now = Clock::QueryHostUptimeMillis();
+  if (now - zpd_stats_.last_log_ms < 3000) {
+    return;
+  }
+  zpd_stats_.last_log_ms = now;
+  const ZPDStats& s = zpd_stats_;
+  XELOGI(
+      "ZPDStats mode={} begins={} ends={} end_no_logical={} imm0={} imm+={} "
+      "spec1={} spec_cached={} late0={} late+={} late_stale={} pool_exh={} "
+      "deferred={} retire_abandon={} live_reports={}",
+      cvars::occlusion_query, s.begins, s.ends, s.end_no_logical, s.imm_zero,
+      s.imm_nonzero, s.spec_one, s.spec_cached, s.late_zero, s.late_nonzero,
+      s.late_stale, s.pool_exhausted, s.deferred, s.retire_abandon,
+      logical_zpd_reports_.size());
+}
+
 bool CommandProcessor::BeginZPDReport(uint32_t report_address) {
   if (GetZPDMode() == ZPDMode::kFake) {
     return false;
   }
+  ++zpd_stats_.begins;
+  LogZPDStats();
 
   // Track any delta to carry forward if the same slot is immediately reused.
   uint32_t carried_cached_delta = 0;
@@ -1142,7 +1232,7 @@ bool CommandProcessor::BeginZPDReport(uint32_t report_address) {
         has_carried_cached_delta = true;
         carried_from_slot_base = slot_base;
       }
-    } else {
+    } else if (GetZPDMode() == ZPDMode::kStrict) {
       while (pending_slot.report_handle != kInvalidReportHandle) {
         auto report_it = logical_zpd_reports_.find(pending_slot.report_handle);
         if (report_it == logical_zpd_reports_.end()) {
@@ -1258,9 +1348,11 @@ bool CommandProcessor::EndZPDReport(uint32_t report_address,
 
   auto it = logical_zpd_reports_.find(report_handle);
   if (it == logical_zpd_reports_.end()) {
+    ++zpd_stats_.end_no_logical;
     zpd_active_segment_ = {};
     return false;
   }
+  ++zpd_stats_.ends;
 
   ZPDReport& logical = it->second;
   logical.ended = true;
@@ -1297,6 +1389,7 @@ bool CommandProcessor::EndZPDReport(uint32_t report_address,
   }
 
   if (resolved_immediately) {
+    ++(final_value ? zpd_stats_.imm_nonzero : zpd_stats_.imm_zero);
     CommitZPDReport(logical, final_value);
     logical_zpd_reports_.erase(it);
   }
@@ -1324,6 +1417,7 @@ bool CommandProcessor::EndZPDReport(uint32_t report_address,
           (cached_delta != 0 || GetZPDMode() == ZPDMode::kFastAlt)) {
         speculative = cached_delta;
       }
+      ++(speculative == 1 ? zpd_stats_.spec_one : zpd_stats_.spec_cached);
     }
     WriteZPDReport(begin_record, report_record_base, begin_value, speculative,
                    write_begin);
@@ -1372,8 +1466,10 @@ void CommandProcessor::OpenQuerySegment(bool can_close_submission) {
     case QueryOpenResult::kOpened:
       break;
     case QueryOpenResult::kDeferred:
+      ++zpd_stats_.deferred;
       return;
     case QueryOpenResult::kPoolExhausted: {
+      ++zpd_stats_.pool_exhausted;
       if (GetZPDMode() == ZPDMode::kFast || GetZPDMode() == ZPDMode::kFastAlt) {
         // Fast mode favors forward progress over accuracy. Keep a minimal
         // accumulated value instead of waiting for a slot to become available.
@@ -1475,7 +1571,10 @@ void CommandProcessor::OnZPDQueryResolved(ReportHandle report_handle,
       fast_zpd_report_cached_values_[logical.end_record] = final_value;
     }
     if (IsZPDReportCurrent(logical)) {
+      ++(final_value ? zpd_stats_.late_nonzero : zpd_stats_.late_zero);
       CommitZPDReport(logical, final_value);
+    } else {
+      ++zpd_stats_.late_stale;
     }
     logical_zpd_reports_.erase(it);
   }
@@ -1500,6 +1599,24 @@ void CommandProcessor::PumpPendingRetire() {
       logical_report->second.last_segment_end_submission;
   uint64_t first_submission =
       logical_report->second.first_segment_end_submission;
+
+  // Async: never wait on the GPU and never write a guess. While the guest is
+  // feeding commands just drain what has finished; once the worker is idle
+  // (the guest may be polling the report), submit the pending work so the
+  // result can arrive, and poll completion without blocking.
+  if (GetZPDMode() == ZPDMode::kAsync) {
+    if (zpd_worker_idle_) {
+      FlushZPDSubmission(wait_for_submission);
+      PollCompletedSubmission();
+    } else {
+      PumpQueryResolves();
+    }
+    if (!logical_zpd_reports_.count(handle_to_await)) {
+      zpd_pending_retire_handle_ = kInvalidReportHandle;
+      zpd_pending_retire_stalls_ = 0;
+    }
+    return;
+  }
 
   // Early segments can be retired here and, in the best case, the report
   // fully resolves without any wait.
@@ -1533,6 +1650,7 @@ void CommandProcessor::PumpPendingRetire() {
        kStrictZPDRetireDeadlineMs);
   if (deadline_exceeded ||
       zpd_pending_retire_stalls_ >= kStrictZPDRetireMaxStalls) {
+    ++zpd_stats_.retire_abandon;
     // Write the cached delta to guest memory to avoid a sudden occlusion flash.
     if (IsZPDReportCurrent(logical_report->second)) {
       uint32_t fallback_delta = logical_report->second.cached_delta

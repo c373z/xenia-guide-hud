@@ -67,6 +67,10 @@ class UserModule : public XModule {
 
   bool is_executable() const { return processor_module_->is_executable(); }
   bool is_dll_module() const { return is_dll_module_; }
+  // Phase 1099z161: loaded by a thread of the title process (a DLL the title
+  // pulled in, e.g. dash's dashnui.xex) - unloaded with the title.
+  bool loaded_by_title() const { return loaded_by_title_; }
+  void set_loaded_by_title(bool v) { loaded_by_title_ = v; }
   bool is_attached() const {
     // Special case for skipping real XAM initialization as it will fail.
     if (bounding_filename() == "xam" || name_ == "xam" ||
@@ -133,6 +137,7 @@ class UserModule : public XModule {
   ModuleFormat module_format_ = kModuleFormatUndefined;
 
   bool is_dll_module_ = false;
+  bool loaded_by_title_ = false;
   uint32_t entry_point_ = 0;
   uint32_t stack_size_ = 0;
   uint32_t workspace_size_ = 384 * 1024;

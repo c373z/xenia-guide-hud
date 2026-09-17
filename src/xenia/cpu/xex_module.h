@@ -202,6 +202,18 @@ class XexModule : public xe::cpu::Module {
 
   static const void* GetSecurityInfo(const xex2_header* header);
 
+  // Phase 1099z165: decrypt and decompress a XEX2 basefile into a host buffer,
+  // with no guest memory, no Processor and no KernelState, so host-side UI can
+  // read a title's embedded resources (the XDBF with its name and icon)
+  // without loading the title. Does what ReadImage does, except that the
+  // destination is a std::vector instead of the guest address space, and the
+  // decryption key is chosen by validating the resulting PE header.
+  // out_base_address receives the image's guest base, which is what the
+  // resource table's addresses are relative to. XEX2 only.
+  static bool ReadImageToHostBuffer(const void* xex_addr, size_t xex_length,
+                                    std::vector<uint8_t>* out_image,
+                                    uint32_t* out_base_address);
+
   const PESection* GetPESection(const char* name);
 
   uint32_t GetProcAddress(uint16_t ordinal) const;
@@ -298,6 +310,9 @@ class XexModule : public xe::cpu::Module {
 
   uint8_t session_key_[0x10];
   bool is_dev_kit_ = false;
+  // The loader key ReadImage succeeded with (xex2 retail/devkit or xex1
+  // retail/devkit). ApplyPatch re-derives the base session key with it.
+  uint8_t image_load_key_[0x10] = {};
 
   bool loaded_ = false;         // Loaded into memory?
   bool finished_load_ = false;  // PE/imports/symbols/etc all loaded?

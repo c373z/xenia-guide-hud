@@ -11,6 +11,7 @@
 #include <unordered_map>
 
 #include "xenia/kernel/xobject.h"
+#include "xenia/kernel/power_reset.h"
 
 #include <mutex>
 
@@ -426,6 +427,16 @@ static std::unordered_map<uint32_t, uint32_t>& GuestTimerTable() {
   return table;
 }
 
+// Host-page-mapped cache for GetNativeObject's dispatch guard, per 64 KB page.
+static std::mutex mp_mu;
+static std::unordered_map<uint32_t, bool> mp_ok;
+
+void ResetXObjectStateForPowerOff() {
+  GuestTimerTable().clear();
+  std::lock_guard<std::mutex> lk(mp_mu);
+  mp_ok.clear();
+}
+
 object_ref<XObject> XObject::GetNativeObject(KernelState* kernel_state,
                                              void* native_ptr,
                                              X_OBJECT_TYPES as_type,
@@ -484,8 +495,6 @@ object_ref<XObject> XObject::GetNativeObject(KernelState* kernel_state,
     default: {
       // Is the host page mapped? Cached per 64 KB page: only positive answers
       // are cached, so the cache can never turn a mapped page into a refusal.
-      static std::mutex mp_mu;
-      static std::unordered_map<uint32_t, bool> mp_ok;
       mapped = false;
       if (guest_ptr) {
         const uint32_t key = guest_ptr >> 16;
@@ -766,6 +775,9 @@ object_ref<XObject> XObject::GetNativeObject(KernelState* kernel_state,
     if (result && type != X_OBJECT_TYPES::TimerNotificationObject &&
         type != X_OBJECT_TYPES::TimerSynchronizationObject) {
       StashHandle(header, result->handle());
+    }
+    if (result) {
+      result->guest_dispatcher_wrapper_ = true;
     }
     // Phase 1099h: and record WHICH guest object the handle refers to.
     //

@@ -8,6 +8,10 @@
 */
 
 #include <random>
+#include <atomic>
+#include <cstdio>
+#include <cstring>
+#include <vector>
 #include <algorithm>
 #include <array>
 #include <mutex>
@@ -17,6 +21,8 @@
 #include "xenia/base/string.h"
 #include "xenia/emulator.h"
 #include "xenia/base/platform.h"
+#include "xenia/kernel/power_reset.h"
+#include "xenia/kernel/kernel_flags.h"
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/util/crypto_utils.h"
 #include "xenia/kernel/util/xex2_info.h"
@@ -766,6 +772,142 @@ dword_result_t XeCryptBnDwLePkcs1Verify_entry(lpvoid_t hash, lpvoid_t sig,
 }
 DECLARE_XBOXKRNL_EXPORT1(XeCryptBnDwLePkcs1Verify, kNone, kStub);
 
+// Phase 1099z159: XeKeysVerifyRSASignature (ordinal 0x258), after the 17489
+// kernel 8014A0A8:
+//   key type 0 -> key 8E03A1B0, alternate 8E03A700
+//   key type 1 -> 8E03A2C0, alternate 8E03A810
+//   key type 2 -> 8E03A4E0, alternate 8E03A810
+//   key type 3 -> 8E03A5F0, alternate 8E03A920   (type > 3 -> FALSE)
+// Try the key; on failure try the alternate if its cqw is 0x20. Per key
+// (8014A028): cqw*8 <= 0x200; signature bytes -> qwords
+// (XeCryptBnQw_SwapDwQwLeBe), RSA public crypt (FALSE if it fails), swap back,
+// then XeCryptBnDwLePkcs1Verify (80151FE0/80151F28): the expected block is
+// 0xFF-filled with [cb-1] = 0x00, [cb-2] = 0x01, [0..0x13] = the SHA-1 hash
+// reversed, then at 0x14 by format: sig[0x16] == 0 -> 16 bytes 8005DFE0,
+// sig[0x16] == 0x1A -> 14 bytes 8005DFF0, else one 0x00 byte.
+// The kernel's key table is filled by the hypervisor (HV 17489 0x2DE54..)
+// from PUBLIC keys in its own image: slot +0x1B0 <- HV 0x105B8, +0x2C0 <-
+// 0x10DE8, +0x4E0 <- 0x11118, +0x5F0 <- 0x11228, +0x700 <- 0x11988, +0x810 <-
+// 0x108E8, +0x920 <- 0x11878. Those are read from --kernel_hv_image_path.
+namespace {
+std::vector<uint8_t> g_hv_keys[7];  // 0x110-byte XECRYPT_RSA blobs, BE
+bool g_hv_keys_loaded = false;
+
+void LoadHvKeys() {
+  if (g_hv_keys_loaded) return;
+  g_hv_keys_loaded = true;
+  static const uint32_t kOffsets[7] = {0x105B8, 0x10DE8, 0x11118, 0x11228,
+                                       0x11988, 0x108E8, 0x11878};
+  FILE* f = xe::filesystem::OpenFile(cvars::kernel_hv_image_path, "rb");
+  if (!f) {
+    XELOGE("XeKeysVerifyRSASignature: cannot open HV image {}",
+           xe::path_to_utf8(cvars::kernel_hv_image_path));
+    return;
+  }
+  for (int i = 0; i < 7; ++i) {
+    std::vector<uint8_t> blob(0x110);
+    if (std::fseek(f, long(kOffsets[i]), SEEK_SET) == 0 &&
+        std::fread(blob.data(), 1, blob.size(), f) == blob.size() &&
+        xe::load_and_swap<uint32_t>(blob.data()) == 0x20) {
+      g_hv_keys[i] = std::move(blob);
+    }
+  }
+  std::fclose(f);
+  int loaded = 0;
+  for (auto& k : g_hv_keys) loaded += k.empty() ? 0 : 1;
+  XELOGI("XeKeysVerifyRSASignature: {} of 7 public keys loaded from {}",
+         loaded, xe::path_to_utf8(cvars::kernel_hv_image_path));
+}
+
+bool VerifyWithKey(const uint8_t* hash, const uint8_t* sig,
+                   const std::vector<uint8_t>& key) {
+  if (key.size() < 16) return false;
+  const uint32_t cqw = xe::load_and_swap<uint32_t>(key.data());
+  const uint32_t exponent = xe::load_and_swap<uint32_t>(key.data() + 4);
+  const uint32_t cb = cqw * 8;
+  if (cb > 0x200 || key.size() < 16 + size_t(cb)) return false;
+  // Signature bytes -> qwords: reverse each 8-byte group.
+  std::vector<uint8_t> buf(cb), out(cb);
+  for (uint32_t q = 0; q < cqw; ++q) {
+    for (int b = 0; b < 8; ++b) buf[q * 8 + b] = sig[q * 8 + 7 - b];
+  }
+  if (!XeCryptBnQwNeRsaPubCrypt(buf.data(), out.data(), key.data() + 16, cqw,
+                                exponent)) {
+    return false;
+  }
+  for (uint32_t q = 0; q < cqw; ++q) {
+    for (int b = 0; b < 8; ++b) buf[q * 8 + b] = out[q * 8 + 7 - b];
+  }
+  if (cb < 0x27) return false;
+  {
+    static std::atomic<uint32_t> dbg{0};
+    if (++dbg <= 4) {
+      std::string head;
+      for (int i = 0; i < 40; ++i) head += fmt::format("{:02X}", buf[i]);
+      XELOGI("XeKeysVerifyRSASignature: key {:016X} e {} decoded head {} "
+             "tail {:02X}{:02X}",
+             xe::load_and_swap<uint64_t>(key.data() + 16), exponent, head,
+             buf[cb - 2], buf[cb - 1]);
+    }
+  }
+  static const uint8_t kFormat0[16] = {0x14, 0x04, 0x00, 0x05, 0x1A, 0x02,
+                                       0x03, 0x0E, 0x2B, 0x05, 0x06, 0x09,
+                                       0x30, 0x21, 0x30, 0x00};
+  static const uint8_t kFormat1[14] = {0x14, 0x04, 0x1A, 0x02, 0x03,
+                                       0x0E, 0x2B, 0x05, 0x06, 0x07,
+                                       0x30, 0x1F, 0x30, 0x00};
+  std::vector<uint8_t> expect(cb, 0xFF);
+  expect[cb - 1] = 0x00;
+  expect[cb - 2] = 0x01;
+  for (int i = 0; i < 0x14; ++i) expect[i] = hash[0x13 - i];
+  if (buf[0x16] == 0x00) {
+    std::memcpy(expect.data() + 0x14, kFormat0, sizeof(kFormat0));
+  } else if (buf[0x16] == 0x1A) {
+    std::memcpy(expect.data() + 0x14, kFormat1, sizeof(kFormat1));
+  } else {
+    expect[0x14] = 0x00;
+  }
+  return std::memcmp(expect.data(), buf.data(), cb) == 0;
+}
+}  // namespace
+
+dword_result_t XeKeysVerifyRSASignature_entry(dword_t key_type,
+                                              lpvoid_t hash_ptr,
+                                              lpvoid_t sig_ptr) {
+  if (cvars::kernel_hv_image_path.empty()) {
+    // Unchanged from before this export existed: an undefined extern returns
+    // with r3 as it was (the key type).
+    return uint32_t(key_type);
+  }
+  LoadHvKeys();
+  if (key_type > 3 || !hash_ptr || !sig_ptr) return 0;
+  static const int kPrimary[4] = {0, 1, 2, 3};
+  static const int kAlternate[4] = {4, 5, 5, 6};
+  const uint8_t* hash = hash_ptr.as<uint8_t*>();
+  const uint8_t* sig = sig_ptr.as<uint8_t*>();
+  bool ok = VerifyWithKey(hash, sig, g_hv_keys[kPrimary[key_type]]);
+  if (!ok) {
+    const auto& alt = g_hv_keys[kAlternate[key_type]];
+    if (alt.size() >= 4 && xe::load_and_swap<uint32_t>(alt.data()) == 0x20) {
+      ok = VerifyWithKey(hash, sig, alt);
+    }
+  }
+  static std::atomic<uint32_t> logs{0};
+  const uint32_t n = ++logs;
+  if (n <= 32) {
+    XELOGI("XeKeysVerifyRSASignature(type {}) -> {}", uint32_t(key_type),
+           ok ? "TRUE" : "FALSE");
+  }
+  if (!ok && n <= 3) {
+    std::string h, s;
+    for (int i = 0; i < 0x14; ++i) h += fmt::format("{:02X}", hash[i]);
+    for (int i = 0; i < 0x100; ++i) s += fmt::format("{:02X}", sig[i]);
+    XELOGI("XeKeysVerifyRSASignature: hash {} sig {}", h, s);
+  }
+  return ok ? 1 : 0;
+}
+DECLARE_XBOXKRNL_EXPORT1(XeKeysVerifyRSASignature, kNone, kImplemented);
+
 void XeCryptRandom_entry(lpvoid_t buf, dword_t buf_size) {
   // Phase 1096w: this used to `memset(buf, 0xFD, buf_size)` - a HOST-INVENTED
   // CONSTANT standing in for the console's hardware RNG. It is not random, and
@@ -1372,12 +1514,57 @@ dword_result_t XeKeysSecuritySetStat_entry(dword_t index, dword_t unused1,
 }
 DECLARE_XBOXKRNL_EXPORT1(XeKeysSecuritySetStat, kNone, kImplemented);
 
+// Phase 1099z161: was an empty stub (the output digest was never written; xam
+// 17559 compares it with system.manifest hashes for .xtt fonts, 816ECB74).
+// After the 17489 kernel:
+//   XeCryptRotSum 80155BA8, per big-endian qword w of the input:
+//     t = w + s1; c = t < w;  s3 -= w; s0 += c; b = s3 > w;
+//     s1 = rotl(t, 29); s2 -= b; s3 = rotl(s3, 31)
+//   XeCryptRotSumSha 80155C20: state = 0; RotSum(p1, cb1/8); RotSum(p2, cb2/8);
+//     SHA-1 of state, state, p1[cb1], p2[cb2], ~state, ~state (state as its
+//     32 big-endian bytes); digest truncated to out_size.
+static void XeCryptRotSum(uint64_t* s, const uint8_t* p, uint32_t qwords) {
+  for (uint32_t i = 0; i < qwords; ++i) {
+    const uint64_t w = xe::load_and_swap<uint64_t>(p + i * 8);
+    const uint64_t t = w + s[1];
+    const uint64_t c = t < w ? 1 : 0;
+    s[3] -= w;
+    s[0] += c;
+    const uint64_t b = s[3] > w ? 1 : 0;
+    s[1] = (t << 29) | (t >> 35);
+    s[2] -= b;
+    s[3] = (s[3] << 31) | (s[3] >> 33);
+  }
+}
+
 void XeCryptRotSumSha_entry(lpvoid_t inp_1, dword_t inp_1_size, lpvoid_t inp_2,
                             dword_t inp_2_size, lpvoid_t out,
                             dword_t out_size) {
-  // out used by XeCryptBnQwBeSigVerify
+  uint64_t s[4] = {0, 0, 0, 0};
+  const uint8_t* p1 = inp_1 ? inp_1.as<uint8_t*>() : nullptr;
+  const uint8_t* p2 = inp_2 ? inp_2.as<uint8_t*>() : nullptr;
+  const uint32_t cb1 = p1 ? uint32_t(inp_1_size) : 0;
+  const uint32_t cb2 = p2 ? uint32_t(inp_2_size) : 0;
+  if (cb1) XeCryptRotSum(s, p1, cb1 / 8);
+  if (cb2) XeCryptRotSum(s, p2, cb2 / 8);
+  uint8_t state_be[32];
+  for (int i = 0; i < 4; ++i) xe::store_and_swap<uint64_t>(state_be + i * 8, s[i]);
+  sha1::SHA1 sha;
+  sha.processBytes(state_be, 32);
+  sha.processBytes(state_be, 32);
+  if (cb1) sha.processBytes(p1, cb1);
+  if (cb2) sha.processBytes(p2, cb2);
+  for (int i = 0; i < 4; ++i) xe::store_and_swap<uint64_t>(state_be + i * 8, ~s[i]);
+  sha.processBytes(state_be, 32);
+  sha.processBytes(state_be, 32);
+  uint8_t digest[0x14];
+  sha.finalize(digest);
+  if (out) {
+    std::memcpy(out.as<uint8_t*>(), digest,
+                std::min<size_t>(sizeof(digest), out_size));
+  }
 }
-DECLARE_XBOXKRNL_EXPORT1(XeCryptRotSumSha, kNone, kStub);
+DECLARE_XBOXKRNL_EXPORT1(XeCryptRotSumSha, kNone, kImplemented);
 
 dword_result_t XeKeysAesCbcUsingKey_entry(lpvoid_t obscured_key,
                                           lpvoid_t inp_ptr, dword_t inp_size,
@@ -1560,6 +1747,66 @@ dword_result_t XeKeysConsolePrivateKeySign_entry(
   return true;
 }
 DECLARE_XBOXKRNL_EXPORT1(XeKeysConsolePrivateKeySign, kNone, kSketchy);
+
+// 1099z163: BOOL XeKeysConsoleSignatureVerification(hash, signature,
+// is_this_console). Real kernel 8014C1E8: r3 = 20-byte hash, r4 =
+// XE_CONSOLE_SIGNATURE (certificate 0x1A8 + signature), r5 = optional out BOOL
+// set to "certificate == this console's certificate" before any check; returns
+// TRUE only if the certificate verifies against the master key and the
+// signature verifies against the certificate's key. HOST-SIDE with
+// kernel_accept_console_signatures: any signature is accepted. Without the
+// flag it returns FALSE, which is what the undefined extern returned.
+dword_result_t XeKeysConsoleSignatureVerification_entry(
+    lpvoid_t hash, pointer_t<XE_CONSOLE_SIGNATURE> signature,
+    lpdword_t is_this_console, const ppc_context_t& ctx) {
+  // The console ID XeKeysConsolePrivateKeySign puts in this build's
+  // certificates.
+  XE_CONSOLE_ID ours = {};
+  ours.RefurbBits = 0b0011;
+  ours.ManufactureMonth = 0b1001;
+  ours.ManufactureYear = 0b0001;
+  ours.MacIndex3 = 0b01000000;
+  ours.MacIndex4 = 0b01100110;
+  ours.MacIndex5 = 0b01111110;
+  ours.Crc = 0b0000;
+
+  const bool own =
+      signature && std::memcmp(signature->console_certificate.console_id.Data,
+                               ours.Data, sizeof(ours.Data)) == 0;
+  const bool accept = hash && signature && cvars::kernel_accept_console_signatures;
+
+  // Flag off = the behaviour this export had while it was an undefined extern:
+  // guest r3 untouched (so the caller reads back its own first argument, a
+  // nonzero hash pointer) and the out parameter not written. Kept as an A/B
+  // switch, because callers silently depended on that (see the flag comment).
+  if (!accept) {
+    return hash.guest_address();
+  }
+  if (is_this_console) {
+    *is_this_console = own ? 1 : 0;
+  }
+
+  // Every other console's certificate is logged; this console's own only for
+  // the first 32 calls (xam verifies its own packages constantly).
+  static std::atomic<uint32_t> logged{0};
+  if (signature && (!own || logged.fetch_add(1) < 32)) {
+    const auto& id = signature->console_certificate.console_id.Data;
+    XELOGI("XeKeysConsoleSignatureVerification: console {:02X}{:02X}{:02X}"
+           "{:02X}{:02X} own={} -> {}{} lr={:08X}",
+           id[0], id[1], id[2], id[3], id[4], own, accept ? 1 : 0,
+           accept ? " (HOST-SIDE: not verified)" : "", uint32_t(ctx->lr));
+  }
+  return 1;
+}
+DECLARE_XBOXKRNL_EXPORT1(XeKeysConsoleSignatureVerification, kNone, kSketchy);
+
+// A power cycle clears these, as it clears the console's RAM.
+void ResetCryptStateForPowerOff() {
+  xekeys_protected_flags = 0;
+  xekeys_security_detected = 0;
+  xekeys_security_activated = 0;
+  for (auto& stat : xekeys_security_stats) stat = 0;
+}
 
 }  // namespace xboxkrnl
 }  // namespace kernel

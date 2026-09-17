@@ -10,6 +10,7 @@
 #include "xenia/kernel/xconfig.h"
 
 #include "xenia/base/logging.h"
+#include "xenia/kernel/kernel_flags.h"
 
 #include "xenia/base/filesystem.h"
 
@@ -29,8 +30,20 @@ static std::filesystem::path SideRecordPath(const std::filesystem::path& p) {
 
 XConfig::XConfig(const std::filesystem::path& xconfig_path)
     : file_path_(xconfig_path) {
-  if (!std::filesystem::exists(xconfig_path)) {
+  // Phase 1099z165: "no xconfig.settings" is this emulated console's
+  // out-of-the-box state - nothing has ever been set up in this folder. That
+  // is the only point --kernel_oobe_on_fresh_console acts at, so a console
+  // that already has state can never be pushed back into OOBE by it.
+  const bool fresh_console = !std::filesystem::exists(xconfig_path);
+  if (fresh_console) {
     SetDefaults();
+    if (cvars::kernel_oobe_on_fresh_console) {
+      ApplyOobeState();
+      XELOGI(
+          "XConfig: fresh console and --kernel_oobe_on_fresh_console - "
+          "DashboardInitialized cleared, the dashboard will run its "
+          "out-of-box experience on this first launch");
+    }
 
     if (xe::filesystem::CreateEmptyFile(xconfig_path)) {
       FlushToFile();
@@ -44,7 +57,10 @@ XConfig::XConfig(const std::filesystem::path& xconfig_path)
     return;
   }
 
-  fread(&xconfig_data_, sizeof(XConfigData), 1, file);
+  // A file written before ConsoleExt was appended is short; the tail keeps its
+  // zero default (fread stops at end of file).
+  std::memset(&xconfig_data_, 0, sizeof(XConfigData));
+  fread(&xconfig_data_, 1, sizeof(XConfigData), file);
   fclose(file);
 
   if (FILE* side = xe::filesystem::OpenFile(SideRecordPath(xconfig_path), "rb")) {
@@ -52,6 +68,28 @@ XConfig::XConfig(const std::filesystem::path& xconfig_path)
           side);
     fclose(side);
   }
+
+  // TEST-ONLY: re-run OOBE on a console that has already been set up. Not
+  // written back here, but any later guest xconfig write persists the whole
+  // block - see the flag's description.
+  if (cvars::kernel_oobe_force) {
+    ApplyOobeState();
+    XELOGW(
+        "XConfig: --kernel_oobe_force - DashboardInitialized cleared in "
+        "memory; the dashboard will run its out-of-box experience");
+  }
+}
+
+void XConfig::ApplyOobeState() {
+  // MEASURED 1099z165 (runs oobe_base / oobe_clear / oobe_drive, frames
+  // looked at): with bit 0x40 of XCONFIG_USER_RETAIL_FLAGS clear, the retail
+  // 17559 dashboard loads its 'oobe' section instead of dashmain/hubui/... and
+  // renders the out-of-box "press the Guide button" screen.
+  xconfig_data_.user.retail_flags =
+      xconfig_data_.user.retail_flags.get() &
+      ~static_cast<uint32_t>(X_RETAIL_FLAGS::DashboardInitialized);
+  // A console out of the box has shown no first-use tutorial either.
+  xconfig_data_.console_ext.dash_first_use_tutorial_flags = 0;
 }
 
 void XConfig::ResetXnetCategoryIfStale(X_CONFIG_CATEGORY category) {
@@ -81,7 +119,7 @@ void XConfig::ReadSetting(const X_CONFIG_CATEGORY category,
 
   std::lock_guard<xe_mutex> lock(lock_);
   ResetXnetCategoryIfStale(category);
-  std::memcpy(buffer, CategoryBase(category) + setting->block_offset,
+  std::memcpy(buffer, FieldBase(category, *setting) + setting->block_offset,
               setting->size);
 }
 
@@ -95,10 +133,18 @@ void XConfig::WriteSetting(const X_CONFIG_CATEGORY category,
 
   std::lock_guard<xe_mutex> lock(lock_);
   ResetXnetCategoryIfStale(category);
-  std::memcpy(CategoryBase(category) + setting->block_offset, buffer,
+  std::memcpy(FieldBase(category, *setting) + setting->block_offset, buffer,
               setting->size);
 
   FlushToFile();
+}
+
+uint8_t* XConfig::FieldBase(X_CONFIG_CATEGORY category,
+                            const FieldDescriptor& field) {
+  if (field.ext) {
+    return reinterpret_cast<uint8_t*>(&xconfig_data_.console_ext);
+  }
+  return CategoryBase(category);
 }
 
 uint16_t XConfig::GetSettingSize(const X_CONFIG_CATEGORY category,

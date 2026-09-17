@@ -9,6 +9,8 @@
 
 #include "xenia/kernel/util/object_table.h"
 
+#include <functional>
+
 #include "xenia/base/byte_stream.h"
 #include "xenia/base/logging.h"
 #include "xenia/kernel/xobject.h"
@@ -167,8 +169,11 @@ X_STATUS ObjectTable::AddHandle(XObject* object, X_HANDLE* out_handle) {
   return result;
 }
 
-uint32_t ObjectTable::CloseHandlesOwnedBy(uint8_t owner) {
+uint32_t ObjectTable::CloseHandlesOwnedBy(
+    uint8_t owner, const std::function<bool(uint32_t)>& keep_wrapper,
+    uint32_t* out_kept, uint32_t* out_wrappers) {
   std::vector<X_HANDLE> handles;
+  uint32_t wrappers = 0, kept = 0;
   {
     auto global_lock = global_critical_region_.Acquire();
     for (uint32_t slot = 0; slot < table_capacity_; ++slot) {
@@ -179,9 +184,35 @@ uint32_t ObjectTable::CloseHandlesOwnedBy(uint8_t owner) {
         if (entry.object->type() != XObject::Type::Socket) {
           handle += XObject::kHandleBase;
         }
+        // Phase 1099z160: a dispatcher the guest built in its own memory
+        // (xam's task completion KEVENT in its heap, say) has no handle on the
+        // console, so the Ob slot cannot close it. The entry here only records
+        // which thread happened to touch it first. Closing it orphaned the
+        // stash in the guest header: every later wait on it returned at once.
+        if (entry.object->is_guest_dispatcher_wrapper()) {
+          ++wrappers;
+          const uint32_t guest = entry.object->guest_object();
+          const bool keep = keep_wrapper && keep_wrapper(guest);
+          if (keep) {
+            ++kept;
+            if (kept <= 24) {
+              XELOGI("TitleSwitch:   Ob:   kept guest dispatcher {:08X} "
+                     "handle {:08X} type {}",
+                     guest, handle,
+                     static_cast<uint32_t>(entry.object->type()));
+            }
+            continue;
+          }
+        }
         handles.push_back(handle);
       }
     }
+  }
+  if (out_kept) {
+    *out_kept = kept;
+  }
+  if (out_wrappers) {
+    *out_wrappers = wrappers;
   }
   uint32_t closed = 0;
   for (X_HANDLE handle : handles) {

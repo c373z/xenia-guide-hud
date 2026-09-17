@@ -2134,6 +2134,31 @@ DEFINE_bool(guide_button_via_automation, true,
             "The synthesised one crashes the guest at 817A6174 on CLOSE and "
             "leaves the Guide half torn down on screen.",
             "Guide");
+DEFINE_bool(guide_trace_live_auth, false,
+            "Hook xam's Live AUTHENTICATION exports and report every call with "
+            "its caller and arguments. 17559 ADDRESSES ONLY - they are wrong on "
+            "17489 (which does not even export four of them), so do not pass "
+            "this on a dashroot run. Two always-called exports are hooked as "
+            "POSITIVE CONTROLS; if those do not fire, the hooks never installed "
+            "and a zero count for the rest means nothing.",
+            "Guide");
+DEFINE_bool(guide_trace_fable_views, false,
+            "Phase 1099z168 RESEARCH PROBE, Fable III (4D5308D6) ONLY. Hook the "
+            "title's render-view slot registry (the vector at guest 8355F450) "
+            "and report (a) every slot the game allocates, (b) the title's own "
+            "'Out Of Memory allocating 1440' branch at 82C4F228, and (c) every "
+            "draw submission that finds a NULL slot - which is the crash at "
+            "821DBAEC a couple of seconds after the first save. ADDRESSES ARE "
+            "FABLE III RETAIL ONLY; the first word at each site is checked and "
+            "a mismatch disarms that hook, so a different title reports zero "
+            "rather than corrupting itself.",
+            "Guide");
+DEFINE_bool(kernel_log_alloc_failures, true,
+            "Report every NtAllocateVirtualMemory / MmAllocatePhysicalMemoryEx "
+            "that fails for want of address space, with the request and the "
+            "guest caller. The console has no such log; this is host-side "
+            "DIAGNOSTIC output only and changes no guest-visible behaviour.",
+            "Kernel");
 DEFINE_bool(guide_automation_input, true,
             "Route controller input into LLE xam through xam's OWN XAutomation "
             "API (ordinals 0x3D5 XAutomationpBindController and 0x3D9 "
@@ -2166,6 +2191,133 @@ DEFINE_bool(guide_title_switch_close_handles, true,
             "ExTerminateTitleProcess Ob slot: close handles created by title "
             "threads (phase 1099z47).",
             "Guide");
+DEFINE_path(kernel_xinputd_record_path, "",
+            "TEST TOOLING: record controller port 0 button changes seen by "
+            "the kernel controller driver (kernel_xinputd) to this file in "
+            "hid_test_pad_script format, for replay with --hid=nop "
+            "--hid_test_pad_script=@<file> (phase 1099z156).",
+            "Kernel");
+DEFINE_bool(kernel_title_unload_dlls, false,
+            "Title terminate also unloads DLLs a title-process thread loaded "
+            "(dash's dashnui.xex), as the console does (phase 1099z161).",
+            "Kernel");
+DEFINE_bool(kernel_guest_mutants, false,
+            "KeInitializeMutant / KeReleaseMutant for mutants the guest builds "
+            "itself, after the 17489 kernel (phase 1099z161).",
+            "Kernel");
+DEFINE_bool(kernel_pv03_host_shim, false,
+            "HOST-SIDE: answer hypervisor expansion 'PV03' commands 1 (present) "
+            "and 3 (license descriptor returned unchanged) with success. The "
+            "real expansion is not available; phase 1099z161.",
+            "Kernel");
+DEFINE_bool(kernel_xex_load_headers_fixup, false,
+            "XexLoadImageHeaders stores the absolute security-info address in "
+            "header+0x10, as the real kernel's 800A08C8(header, 1, 0) does "
+            "(phase 1099z159). The header RSA check is not performed.",
+            "Kernel");
+DEFINE_path(kernel_hv_image_path, "",
+            "Hypervisor image whose built-in PUBLIC RSA keys back "
+            "XeKeysVerifyRSASignature (17489: research\\kernel17489\\"
+            "se_17489_hv_kernel.bin). Empty = the export is not implemented "
+            "(returns r3 unchanged, as the undefined extern did). Phase 1099z159.",
+            "Kernel");
+DEFINE_path(kernel_system_ext_path, "",
+            "Host folder served read-only as \\Device\\Harddisk0\\SystemExtPartition "
+            "(the system update's extended system files). Empty = not present "
+            "(phase 1099z159).",
+            "Kernel");
+DEFINE_path(kernel_system_aux_path, "",
+            "Host folder served read-only as \\Device\\Harddisk0\\SystemAuxPartition "
+            "(the system update's avatar asset pack; for 17559 the importer's "
+            "_packages\\FFFE07DF00000002). Empty = not present (phase 1099z159).",
+            "Kernel");
+DEFINE_bool(kernel_terminate_lock_check, false,
+            "Title terminate: never kill a title thread while it owns the "
+            "emulator's global lock (retry until it releases it). Without it, "
+            "launching a game while the dash is busy can hang the switch "
+            "(phase 1099z159).",
+            "Kernel");
+DEFINE_bool(kernel_ob_keep_guest_dispatchers, false,
+            "Title terminate Ob slot: do not close Xenia's handle entries for "
+            "dispatcher objects the guest built in its own memory (events, "
+            "semaphores, mutants, timers); the console has no handle for "
+            "them. Without it, xam's wait for a still-running title task "
+            "returned at once and the task crashed in the freed title heap "
+            "(Fable III fast launch, phase 1099z160).",
+            "Kernel");
+DEFINE_bool(kernel_svod_create_device, false,
+            "SvodCreateDevice mounts a Games-on-Demand package (a disc "
+            "installed to the hard drive) with Xenia's XContent reader; the "
+            "device object/extension are zeroed stand-ins (phase 1099z164).",
+            "Kernel");
+DEFINE_uint32(kernel_game_region, 0,
+              "Console game region written to 8E038602, the hypervisor's key "
+              "vault copy that the kernel and retail xam's XGetGameRegion "
+              "read (00FF NTSC-U, 01FE NTSC-J, 02FE PAL). 0 = leave zero; "
+              "4294967295 = derive from the xconfig country like Xenia's HLE "
+              "XGetGameRegion (phase 1099z164).",
+              "Kernel");
+DEFINE_bool(kernel_hv_console_flags, true,
+            "Write the hypervisor's console flags word at 8E038614 "
+            "(0x00070000, or 0x107 for game region 0102) like the 17489 "
+            "hypervisor does. Every dashboard's System Settings > Initial "
+            "Setup is greyed out without it.",
+            "Kernel");
+DEFINE_int32(kernel_hdd_size_gb, 0,
+             "Size of the modelled hard drive behind --guide_hdd_path, in GB "
+             "(FATX geometry; free space = the host folder's free space, "
+             "capped at this size). 250 = the Xbox 360 S 250 GB drive. 0 = "
+             "Xenia's fixed 64 MB volume (phase 1099z159).",
+             "Kernel");
+DEFINE_int32(guide_test_notify_seconds, 0,
+             "DIAGNOSTIC (HOST-SIDE): N seconds after start, call real xam's "
+             "XNotifyQueueUI on a guest thread to show a test notification "
+             "toast. 0 = off.",
+             "Guide");
+DEFINE_bool(kernel_check_title_system_version, false,
+            "Refuse to load a title whose xam import library needs a newer "
+            "system than the running xam (C0000059), as the console's "
+            "hypervisor does (17489 HV 2AC6C). OFF by default (user choice, "
+            "2026-09-16): every game is loaded on every dashboard, and xam "
+            "ordinals the old xam lacks bind to Xenia's HLE xam (HOST-SIDE, "
+            "xex_module.cc SetupLibraryImports).",
+            "Kernel");
+DEFINE_string(guide_test_tray_seconds, "",
+              "TEST-ONLY (HOST-SIDE, 2026-09-16): \"open,close\" seconds after "
+              "start at which to move the virtual DVD tray, as the console's "
+              "eject button does (SMC tray motion, no kernel call). Lets an "
+              "automated run insert guide_tray_disc_path while a dashboard "
+              "runs. Empty = off.",
+              "Guide");
+DEFINE_int32(guide_test_notify_type, 3,
+             "DIAGNOSTIC: XNOTIFYQUEUEUI type for guide_test_notify_seconds "
+             "(3 = generic).",
+             "Guide");
+DEFINE_bool(kernel_probe_on_request, false,
+            "DIAGNOSTIC: poll for a file named probe_now next to the exe; when "
+            "it appears, write the guest thread probe (probe.txt) and delete "
+            "the file.",
+            "Kernel");
+DEFINE_int32(kernel_sample_from_ms, 0,
+             "DIAGNOSTIC: sampling profiler for guest threads. Between these "
+             "two times (ms since process start) every running guest thread "
+             "is sampled each ~1 ms; at the end the log gets each thread's "
+             "hottest guest functions and host routines (phase 1099z159).",
+             "Kernel");
+DEFINE_int32(kernel_sample_to_ms, 0,
+             "DIAGNOSTIC: end of the --kernel_sample_from_ms window; 0 = off.",
+             "Kernel");
+DEFINE_int32(kernel_log_long_waits_ms, 0,
+             "DIAGNOSTIC: log every guest wait/delay export call that blocks "
+             "at least this many ms (caller lr, requested timeout, elapsed). "
+             "0 = off (phase 1099z159).",
+             "Kernel");
+DEFINE_bool(kernel_audio_ducker, false,
+            "XAudioGet/SetDucker{Level,Threshold,AttackTime,ReleaseTime,"
+            "HoldTime} keep their float like the 17489 kernel's accessors "
+            "(8016DA38..8016DB34). Off: getters leave f1 untouched, as when "
+            "the exports were undefined (phase 1099z155).",
+            "Kernel");
 DEFINE_bool(guide_power_on_with_guide_button, false,
             "Start powered off: a black window with nothing loaded until the "
             "Guide button (any controller, or the keyboard's Guide binding) "
@@ -2214,6 +2366,28 @@ DEFINE_bool(guide_title_switch_release_memory, true,
             "NtAllocateVirtualMemory regions (physical memory is kept; phase "
             "1099z47).",
             "Guide");
+DEFINE_bool(kernel_isr_process_type, true,
+            "Graphics interrupt callbacks run as the SYSTEM process while "
+            "VdGlobalXamDevice is set, TITLE otherwise (17489 kernel "
+            "80102E00). false = always TITLE (old Xenia behaviour).",
+            "Kernel");
+DEFINE_int32(guide_capture_on_launch, 0,
+             "With guide_trace_transitions: at the Nth xam launch request, "
+             "capture guide_capture_count frames guide_capture_interval_ms "
+             "apart to launchN_MM.raw (phase 1099z170).",
+             "Guide");
+DEFINE_bool(guide_trace_transitions, false,
+            "Diagnostic (phase 1099z170): log XUI timeline / scene transition "
+            "calls in xam and the 17559 dash, xam's launch request, launcher "
+            "and terminate, the dash's launch callback and display persist, "
+            "and every VdSwap for 5 s after a launch request.",
+            "Guide");
+DEFINE_bool(guide_system_phys_bottom_up, true,
+            "MmAllocatePhysicalMemoryEx: system-process allocations (xam's "
+            "Guide textures) go bottom-up so they do not split the physical "
+            "memory the next title allocates top-down (phase 1099z169). "
+            "HOST-SIDE placement.",
+            "Guide");
 DEFINE_bool(guide_ob_insert_forward_waits, true,
             "ObInsertObject placeholders forward waits to the object's "
             "default dispatcher object (phase 1099z25). false = old "
@@ -2234,6 +2408,30 @@ DEFINE_path(guide_tray_disc_path, "",
             "Guide");
 DEFINE_bool(guide_tray_disc_at_boot, false,
             "Start with guide_tray_disc_path already in the closed tray.",
+            "Guide");
+// Phase 1099z165: the host-side game library.
+DEFINE_path(guide_game_library_path, "",
+            "Host folder of disc images (*.iso) to install into the emulated "
+            "hard drive so the dashboard's My Games lists them. Installed "
+            "once at startup (discs already there are skipped), and the "
+            "folder the Disc > Add Game Library Folder picker starts in. "
+            "HOST-SIDE: the package payload is a link to the disc image on "
+            "the host, not the 6-8 GB copy a real install makes.",
+            "Guide");
+DEFINE_bool(guide_game_library_prompt, true,
+            "At startup, when there is an emulated hard drive but no "
+            "guide_game_library_path, ask for a games folder. Cleared by the "
+            "prompt's \"Don't show this again\".",
+            "Guide");
+DEFINE_bool(guide_game_library_cover_art, true,
+            "HOST-SIDE: when the game library installs a game (or finds one "
+            "installed without cover art), look its cover up once in "
+            "Microsoft's store catalog and save it under <hdd>/BoxArt. The "
+            "store is not asked again for that title.",
+            "Guide");
+DEFINE_bool(guide_game_library_at_boot, true,
+            "Install guide_game_library_path's discs when the emulator "
+            "finishes initializing. false = only from the Disc menu.",
             "Guide");
 DEFINE_int32(guide_net_probe_seconds, 0,
              "Research probe: seconds after the xam boot launch to call real "
@@ -2717,9 +2915,13 @@ DEFINE_bool(guide_xex_header_security_ptr, false,
             "lwz r5,4(r11) with r11 = [xex_header+0x10], and the value it "
             "faults on is 000000E8 - exactly ximecore.xex's "
             "security_offset as it reads on disk. [security_info+4] is "
-            "image_size, which is what the surrounding code gathers. Off "
-            "by default: the pointer reading is inferred from the "
-            "dereference, not yet confirmed from the console loader.",
+            "image_size, which is what the surrounding code gathers. "
+            "Phase 1099z154: confirmed as KERNEL behaviour, not a "
+            "workaround - the 17489 kernel itself reads the loaded "
+            "header's +0x10 as a pointer with no base added ([ldr+0x58] "
+            "-> +0x10 -> +0x10C at 800A04C0, -> +0x160 at 800A131C). Off by "
+            "default only so existing configs behave the same; covrun and "
+            "the 17559 runs turn it on.",
             "Kernel");
 
 DEFINE_bool(guide_guest_hud_init, false,
@@ -2799,9 +3001,40 @@ DEFINE_bool(kernel_xinputd, false,
 
 // 1099z17559-3: diagnostic only. Addresses come from the command line, so the
 // host carries no build-specific address.
+DEFINE_bool(xui_glyph_2x, true,
+            "HOST-SIDE enhancement, not console behaviour: bake XUI text "
+            "(dashboard and Guide, every system 6770-17559) at the integer "
+            "render scale (min of draw_resolution_scale_x/_y, as picked by "
+            "upscale_to_window) with 1x layout, so text is as sharp as the "
+            "rest of the upscaled frame. No effect at scale 1. Unlisted "
+            "builds are left unchanged.",
+            "Guide");
+DEFINE_int32(xui_glyph_scale, 0,
+             "HOST-SIDE: XUI text scale for xui_glyph_2x. 0 = follow the "
+             "render scale (min of draw_resolution_scale_x/_y); 2-8 = force "
+             "that scale.",
+             "Guide");
+DEFINE_double(xui_glyph_dpi, 0.0,
+              "HOST-SIDE enhancement, not console behaviour: replace the DPI "
+              "xam 17559's XUI text renderer stores at init (96.0, stfs "
+              "f31,8(r31) at 8178E30C) so glyphs are rasterized at "
+              "size*dpi/72 pixels. Changes text size as well as sharpness "
+              "(metrics are not compensated). 0 = off.",
+              "Guide");
+DEFINE_string(trace_dash_lua, "",
+              "Diagnostic: throw,sleep,yield hex pcs of dash.xex's luaD_throw, "
+              "Lua Sleep and lua_yield for a build other than 17489 (17559: "
+              "928E4A00,928F6DE0,928E47D0) - logs Lua errors and wait sites.",
+              "Kernel");
+DEFINE_string(trace_guest_list, "",
+              "Diagnostic: pc:rN:headoff:nextoff:words - at guest pc walk the "
+              "linked list at [rN+headoff] via [node+nextoff] and log each "
+              "node's words (phase 1099z161).",
+              "Kernel");
 DEFINE_string(trace_guest_pcs, "",
               "Diagnostic: comma-separated hex guest addresses. Each logs its "
-              "first 8 executions (r3-r6, lr, thread id) through a guest hook. "
+              "first 8 executions (r3-r6, lr, r1, [r1+0x70..0x7C], thread "
+              "id) through a guest hook; 'addr:N' logs N executions. "
               "Hooks apply to code translated after start-up.",
               "Kernel");
 
@@ -2828,6 +3061,35 @@ DEFINE_bool(kernel_device_auth, false,
             "are already authenticated, so the request stays pending.",
             "Kernel");
 
+// 1099z167: diagnostic for "a game creates its save slot and never writes the
+// data" (Fable III: only saveuid.bin appears). Logs every HLE XamContent entry
+// point with its arguments and result, uncapped - the NtCreateFile log caps at
+// 400 lines a session, which hides everything after the first minute.
+DEFINE_bool(kernel_trace_xam_content, false,
+            "Log every HLE XamContent call (create/open/close/flush and the "
+            "content manager result) with root name, content type, file name, "
+            "flags, disposition and status. Diagnostic only.",
+            "Kernel");
+
+// 1099z163: XeKeysConsoleSignatureVerification (ordinal 0x257) was an
+// undefined extern returning 0, so xam treated every package signed by a real
+// console as invalid - a Fable III save copied off the user's console read as
+// "corrupted" while the same data inside an emulator-signed package loaded.
+// Default ON: while this export was an undefined extern the guest saw r3 =
+// its own first argument (a nonzero hash pointer = TRUE), so every signature
+// was already being accepted. Returning FALSE here is a behaviour CHANGE that
+// makes xam mark every profile "Corrupted Profile" (seen 2026-09-15).
+DEFINE_bool(kernel_accept_console_signatures, true,
+            "HOST-SIDE: XeKeysConsoleSignatureVerification accepts any console "
+            "signature. The real kernel (8014C1E8) checks the console "
+            "certificate against the master key and the signature against "
+            "the certificate's public key; this build has neither the "
+            "master key check nor other consoles' keys wired in, so content "
+            "signed by a real console (saves, profiles) is taken as valid. "
+            "The 'is this console's certificate' out parameter is still "
+            "computed from the console ID.",
+            "Kernel");
+
 // 1099z17559-8
 DEFINE_bool(kernel_boot_via_xam, false,
             "Load the boot title but do not start it: xam's own loader "
@@ -2845,4 +3107,83 @@ DEFINE_bool(kernel_boot_state_exports, false,
             "the undefined-extern result (r3 unchanged) that 17489 runs get; "
             "retail xam reads it as 'crash dump present' and launches "
             "ProcessDump.xex.",
+            "Kernel");
+
+// 1099z17559-11
+DEFINE_bool(kernel_xex_load_keep_heap, false,
+            "Do not Reset() the whole guest heap when an XEX image is loaded "
+            "into it (xex_module.cc ReadImage). The reset freed the page "
+            "table of every module already in that heap, so objects inside "
+            "their images were refused as unmapped. Off keeps the upstream "
+            "behaviour the 17489 setup was measured with.",
+            "Kernel");
+
+DEFINE_bool(kernel_system_flash_patches, true,
+            "A system module (SYS: or the flash device) with a <name>.xexp "
+            "beside it is loaded with that delta patch applied, as the console "
+            "applies an update's $flash_*.xexp to the base 2.0.1888 flash "
+            "files. Only acts when such a file exists (pre-2010 updates "
+            "imported with a base firmware).",
+            "Kernel");
+DEFINE_bool(kernel_xex_module_handle_self, false,
+            "XexGetModuleHandle with a name of (PSZ)-1 returns the module "
+            "containing the caller's return address, as the 17489 kernel does "
+            "(800A2B40). Old dashboards' dash.firstuse.xex (2.0.12625-15574) "
+            "need it. Off keeps the upstream behaviour (reads -1 as a string).",
+            "Kernel");
+
+DEFINE_bool(kernel_xex_verify_headers, false,
+            "XexVerifyImageHeaders with the 17489 kernel's bounds checks "
+            "(signature not checked - HOST-SIDE). Off reproduces the "
+            "undefined-extern result (r3 unchanged).",
+            "Kernel");
+
+// ---------------------------------------------------------------------------
+// 1099z165: first-launch out-of-box experience (OOBE)
+// ---------------------------------------------------------------------------
+// MEASURED on retail 2.0.17559 (runs oobe_base / oobe_clear / oobe_drive):
+// the dashboard's OOBE gate is bit 0x40 (DashboardInitialized) of
+// XCONFIG_USER_RETAIL_FLAGS (category 3, setting 0x0C).
+//   set   -> dash loads dashmain/hubui/hubapp/slots/... and shows Home.
+//   clear -> dash loads its 'oobe' section (from L.dash.xex.oobe.xzp) and
+//            dashnui.xex, and renders the "press the Guide button" screen;
+//            pressing Guide gets xam's "Finish initial setup to enable the
+//            Xbox Guide." Confirmed by looking at captured frames.
+//
+// Read out of the decompressed images (dash load base 0x92000000, xam
+// 0x815F0000), which says the same thing:
+//   dash 92182810  ExGetXConfigSetting(3, 0x0C, &flags, 4, &req)
+//        92182820  rlwinm. r11,r11,0,25,25      ; mask 0x00000040
+//        92182824  beq -> 92182838 li r11,1     ; BIT CLEAR => OOBE
+//        9218283C  stw r11,0x158(r31)           ; the only runtime writer of
+//                                               ; the dash's OOBE gate
+//   dash 9217E91C  reads +0x158; only when set does it bl 92339588, which
+//                  loads "oobeStrings.xus" out of package "oobe.xzp" and
+//                  registers the OOBE scenes; the same test swaps ordinary
+//                  scenes for their Oobe*.xur twins (922DDB74, 922CEF20,
+//                  922E16A0).
+// On the real console the bit is cleared by xam itself: 816E3510 reads
+// XCONFIG_USER_LANGUAGE (3, 9) and, when it is 0 - a console that has never
+// been set up - calls ExReadModifyWriteXConfigSettingUlong(3, 0x0C,
+// 0xFFFFFFBF, 0) at 816E3564. Xenia's XConfig::SetDefaults writes a language
+// AND the bit, so a fresh console never ran OOBE.
+//
+// Both flags are off by default, and the fresh-console one only ever runs
+// when there is no xconfig.settings at all, so an existing console state is
+// never touched.
+DEFINE_bool(kernel_oobe_on_fresh_console, false,
+            "On a console with no xconfig.settings yet (a fresh install), "
+            "start with XCONFIG_USER_RETAIL_FLAGS bit 0x40 "
+            "(DashboardInitialized) CLEAR so the dashboard runs its "
+            "out-of-box experience on first launch, as a console out of the "
+            "box does. Completing OOBE sets the bit and it never runs again. "
+            "Has no effect once an xconfig.settings exists (phase 1099z165).",
+            "Kernel");
+
+DEFINE_bool(kernel_oobe_force, false,
+            "Clear XCONFIG_USER_RETAIL_FLAGS bit 0x40 at every boot, even on "
+            "a console that has already been set up, so the dashboard runs "
+            "OOBE again. TEST-ONLY: the cleared value is in memory, but any "
+            "later guest xconfig write persists the whole block, so point it "
+            "at a scratch run folder, never the user's own (phase 1099z165).",
             "Kernel");

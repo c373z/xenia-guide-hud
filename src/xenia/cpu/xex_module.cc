@@ -140,6 +140,192 @@ const void* XexModule::GetSecurityInfo(const xex2_header* header) {
                                        header->security_offset);
 }
 
+// Phase 1099z165: the host-buffer twin of ReadImage, for reading a title's
+// resources (XDBF: title name, icon) out of a disc image without loading the
+// title. Same key order and the same three decoders as Load()/ReadImage, with
+// the guest heap replaced by a std::vector and the "is this the right key?"
+// test replaced by the PE magic check ReadPEHeaders would do afterwards.
+static bool XexDecodeImageWithKey(const xex2_header* hdr, size_t xex_length,
+                                  const xex2_security_info* sec,
+                                  const xex2_opt_file_format_info* file_info,
+                                  const uint8_t* key,
+                                  std::vector<uint8_t>* out_image) {
+  uint8_t session_key[16];
+  aes_decrypt_buffer(key, reinterpret_cast<const uint8_t*>(sec->aes_key), 16,
+                     session_key, 16);
+
+  const uint32_t header_size = hdr->header_size;
+  if (xex_length <= header_size) {
+    return false;
+  }
+  const uint32_t exe_length = static_cast<uint32_t>(xex_length - header_size);
+  const uint8_t* source = reinterpret_cast<const uint8_t*>(hdr) + header_size;
+  const uint32_t image_size = sec->image_size;
+
+  switch (file_info->compression_type) {
+    case XEX_COMPRESSION_NONE: {
+      out_image->assign(std::max(image_size, exe_length), 0);
+      if (file_info->encryption_type == XEX_ENCRYPTION_NONE) {
+        std::memcpy(out_image->data(), source, exe_length);
+      } else {
+        aes_decrypt_buffer(session_key, source, exe_length, out_image->data(),
+                           out_image->size());
+      }
+    } break;
+    case XEX_COMPRESSION_BASIC: {
+      const auto& comp_info = file_info->compression_info.basic;
+      const uint32_t block_count = (file_info->info_size - 8) / 8;
+      uint64_t uncompressed_size = 0;
+      for (uint32_t n = 0; n < block_count; n++) {
+        uncompressed_size += uint64_t(uint32_t(comp_info.blocks[n].data_size)) +
+                             uint32_t(comp_info.blocks[n].zero_size);
+      }
+      if (!uncompressed_size || uncompressed_size > 0x10000000ull) {
+        return false;
+      }
+      out_image->assign(
+          std::max<size_t>(size_t(uncompressed_size), image_size), 0);
+      uint8_t* d = out_image->data();
+      const uint8_t* p = source;
+      uint32_t rk[4 * (MAXNR + 1)];
+      uint8_t ivec[16] = {0};
+      int32_t Nr = rijndaelKeySetupDec(rk, session_key, 128);
+      for (uint32_t n = 0; n < block_count; n++) {
+        const uint32_t data_size = comp_info.blocks[n].data_size;
+        const uint32_t zero_size = comp_info.blocks[n].zero_size;
+        if (size_t(p - source) + data_size > exe_length ||
+            size_t(d - out_image->data()) + data_size > out_image->size()) {
+          return false;
+        }
+        if (file_info->encryption_type == XEX_ENCRYPTION_NONE) {
+          std::memcpy(d, p, data_size);
+        } else {
+          const uint8_t* ct = p;
+          uint8_t* pt = d;
+          for (size_t m = 0; m < data_size; m += 16, ct += 16, pt += 16) {
+            rijndaelDecrypt(rk, Nr, ct, pt);
+            for (size_t i = 0; i < 16; i++) {
+              pt[i] ^= ivec[i];
+              ivec[i] = ct[i];
+            }
+          }
+        }
+        p += data_size;
+        d += size_t(data_size) + zero_size;
+      }
+    } break;
+    case XEX_COMPRESSION_NORMAL: {
+      std::vector<uint8_t> decrypted;
+      const uint8_t* input = source;
+      if (file_info->encryption_type != XEX_ENCRYPTION_NONE) {
+        decrypted.resize(exe_length);
+        aes_decrypt_buffer(session_key, source, exe_length, decrypted.data(),
+                           decrypted.size());
+        input = decrypted.data();
+      }
+      std::vector<uint8_t> deblocked(exe_length, 0);
+      const uint8_t* p = input;
+      uint8_t* d = deblocked.data();
+      const xex2_compressed_block_info* cur_block =
+          &file_info->compression_info.normal.first_block;
+      sha1::SHA1 s;
+      uint8_t digest[0x14];
+      while (cur_block->block_size) {
+        const uint32_t block_size = cur_block->block_size;
+        if (size_t(p - input) + block_size > exe_length) {
+          return false;
+        }
+        const uint8_t* pnext = p + block_size;
+        const auto* next_block =
+            reinterpret_cast<const xex2_compressed_block_info*>(p);
+        s.reset();
+        s.processBytes(p, block_size);
+        s.finalize(digest);
+        // The hash is what tells a wrong decryption key from a right one.
+        if (std::memcmp(digest, cur_block->block_hash, 0x14) != 0) {
+          return false;
+        }
+        p += 4 + 20;
+        for (;;) {
+          const size_t chunk_size = (p[0] << 8) | p[1];
+          p += 2;
+          if (!chunk_size) {
+            break;
+          }
+          if (size_t(p - input) + chunk_size > exe_length ||
+              size_t(d - deblocked.data()) + chunk_size > deblocked.size()) {
+            return false;
+          }
+          std::memcpy(d, p, chunk_size);
+          p += chunk_size;
+          d += chunk_size;
+        }
+        p = pnext;
+        cur_block = next_block;
+      }
+      if (!image_size || image_size > 0x10000000u) {
+        return false;
+      }
+      out_image->assign(image_size, 0);
+      if (lzx_decompress(deblocked.data(), d - deblocked.data(),
+                         out_image->data(), out_image->size(),
+                         file_info->compression_info.normal.window_size,
+                         nullptr, 0)) {
+        return false;
+      }
+    } break;
+    default:
+      return false;
+  }
+  return true;
+}
+
+bool XexModule::ReadImageToHostBuffer(const void* xex_addr, size_t xex_length,
+                                      std::vector<uint8_t>* out_image,
+                                      uint32_t* out_base_address) {
+  if (!xex_addr || xex_length < sizeof(xex2_header)) {
+    return false;
+  }
+  const auto* hdr = reinterpret_cast<const xex2_header*>(xex_addr);
+  if (hdr->magic != kXEX2Signature) {
+    return false;
+  }
+  if (hdr->header_size > xex_length) {
+    return false;
+  }
+  const auto* sec =
+      reinterpret_cast<const xex2_security_info*>(GetSecurityInfo(hdr));
+  xex2_opt_file_format_info* file_info = nullptr;
+  if (!GetOptHeader(hdr, XEX_HEADER_FILE_FORMAT_INFO, &file_info)) {
+    return false;
+  }
+
+  uint32_t base_address = sec->load_address;
+  xe::be<uint32_t>* base_addr_opt = nullptr;
+  if (GetOptHeader(hdr, XEX_HEADER_IMAGE_BASE_ADDRESS, &base_addr_opt)) {
+    base_address = *base_addr_opt;
+  }
+
+  static const uint8_t* const keys[] = {xe_xex2_retail_key, xe_xex2_devkit_key,
+                                        xe_xex1_retail_key, xe_xex1_devkit_key};
+  for (const uint8_t* key : keys) {
+    out_image->clear();
+    if (!XexDecodeImageWithKey(hdr, xex_length, sec, file_info, key,
+                               out_image)) {
+      continue;
+    }
+    // Same acceptance test as ReadImage's is_valid_executable(): the decoded
+    // basefile must start with an MZ header.
+    if (out_image->size() >= 2 && (*out_image)[0] == 'M' &&
+        (*out_image)[1] == 'Z') {
+      *out_base_address = base_address;
+      return true;
+    }
+  }
+  out_image->clear();
+  return false;
+}
+
 const PESection* XexModule::GetPESection(const char* name) {
   for (std::vector<PESection>::iterator it = pe_sections_.begin();
        it != pe_sections_.end(); ++it) {
@@ -164,6 +350,13 @@ uint32_t XexModule::GetProcAddress(uint16_t ordinal) const {
 
     uint32_t num = ordinal;
     uint32_t ordinal_offset = export_table->ordOffset[num];
+    // 2026-09-16: a zero entry is an ordinal the module does not export. The
+    // 17489 kernel (800A1188) fails the lookup with 0xC0000263 and returns 0;
+    // adding the image base here resolved such imports to the module's base
+    // address (NXE 7357: hud's calls into xam jumped to 81870000).
+    if (!ordinal_offset) {
+      return 0;
+    }
     ordinal_offset += export_table->imagebaseaddr << 16;
     return ordinal_offset;
   }
@@ -323,30 +516,55 @@ int XexModule::ApplyPatch(XexModule* module) {
 
   uint32_t new_image_size = module->image_size();
 
-  // Check if we need to alloc new memory for the patched xex
-  if (new_image_size > original_image_size) {
+  // The patched header decides where the image lives: the security info's
+  // load address, or XEX_HEADER_IMAGE_BASE_ADDRESS when present (the same
+  // rule as Load()).
+  // 2026-09-16: this used to consult only the optional header. Resource-only
+  // images have none, so a patch that moves one went unnoticed: 2.0.6770's
+  // huduiskin.xexp moves huduiskin 91440000 -> 91450000 (its patched 'skin'
+  // resource says 91450000, size 4BA1C) while the image stayed at 91440000
+  // with the XUIZ header at +0. xam read 8F006B42 as the skin magic
+  // (819BC52C), its skin load returned 8030001C (818D3220), the HUD
+  // background scene was never created, and every system UI that notifies it
+  // (Create Profile, the Guide) crashed at 818D3D7C on its null singleton
+  // [81B51238].
+  uint32_t new_base_address = module->xex_security_info()->load_address;
+  xe::be<uint32_t>* base_addr_opt = nullptr;
+  if (module->GetOptHeader(XEX_HEADER_IMAGE_BASE_ADDRESS, &base_addr_opt)) {
+    new_base_address = *base_addr_opt;
+  }
+
+  if (new_base_address != original_base_address) {
+    XELOGI("XEX patch: {} moves from {:08X}+{:08X} to {:08X}+{:08X}",
+           module->name(), original_base_address, original_image_size,
+           new_base_address, new_image_size);
+    // The two ranges may overlap: keep the old image on the host, give its
+    // range back, then map the new one.
+    std::vector<uint8_t> old_image(
+        memory()->TranslateVirtual<uint8_t*>(original_base_address),
+        memory()->TranslateVirtual<uint8_t*>(original_base_address) +
+            original_image_size);
+    memory()->LookupHeap(original_base_address)->Release(original_base_address);
+    bool alloc_result =
+        memory()
+            ->LookupHeap(new_base_address)
+            ->AllocFixed(
+                new_base_address, std::max(new_image_size, original_image_size),
+                4096, xe::kMemoryAllocationReserve | xe::kMemoryAllocationCommit,
+                xe::kMemoryProtectRead | xe::kMemoryProtectWrite);
+    if (!alloc_result) {
+      XELOGE("Unable to allocate XEX memory at {:08X}-{:08X}.",
+             new_base_address, new_image_size);
+      assert_always();
+      return 6;
+    }
+    std::memcpy(memory()->TranslateVirtual<uint8_t*>(new_base_address),
+                old_image.data(), old_image.size());
+    module->base_address_ = new_base_address;
+  } else if (new_image_size > original_image_size) {
+    // Check if we need to alloc new memory for the patched xex
     uint32_t size_delta = new_image_size - original_image_size;
     uint32_t addr_new_mem = module->base_address_ + original_image_size;
-
-    // Before we allocate new range we must check if patch haven't modified
-    // base_address.
-    uint32_t new_base_address = module->base_address();
-    xe::be<uint32_t>* base_addr_opt = nullptr;
-    if (module->GetOptHeader(XEX_HEADER_IMAGE_BASE_ADDRESS, &base_addr_opt)) {
-      new_base_address = *base_addr_opt;
-    }
-
-    if (original_base_address != new_base_address) {
-      XELOGW(
-          "Patch for module: {} changed base_address from {:08X} to {:08X}, "
-          "need to reallocate xex "
-          "data!",
-          module->name(), module->base_address_, new_base_address);
-      module->base_address_ = new_base_address;
-      addr_new_mem = new_base_address;
-      size_delta = new_image_size;
-    }
-
     bool alloc_result =
         memory()
             ->LookupHeap(addr_new_mem)
@@ -361,21 +579,21 @@ int XexModule::ApplyPatch(XexModule* module) {
       assert_always();
       return 6;
     }
-
-    // For base_address change we need to copy data from previous allocation to
-    // new one
-    if (original_base_address != new_base_address) {
-      kernel_state_->memory()->Copy(new_base_address, original_base_address,
-                                    original_image_size);
-    }
   }
 
   uint8_t orig_session_key[0x10];
   memcpy(orig_session_key, module->session_key_, 0x10);
 
-  // Header patch updated the base XEX key, need to redecrypt it
+  // Header patch updated the base XEX key, need to redecrypt it.
+  // 2026-09-16: with the key the base was actually loaded with. The 2.0.1888
+  // system flash files (xam.xex etc.) are protected with the XEX1 retail key,
+  // not the XEX2 one, and so is the 8955 header their .xexp produces
+  // (measured: dec(xex1_retail, new aes_key) = 4CABD2E3..., XexTool's key;
+  // dec(that, image_key_source) = 9FC15DD6... = the base session key; and
+  // dec(that, patch aes_key) decrypts the first delta block to its SHA-1).
+  // Re-deriving with the xex2 retail/devkit key only failed with code 7.
   aes_decrypt_buffer(
-      module->is_dev_kit_ ? xe_xex2_devkit_key : xe_xex2_retail_key,
+      module->image_load_key_,
       reinterpret_cast<const uint8_t*>(module->xex_security_info()->aes_key),
       16, module->session_key_, 16);
 
@@ -433,6 +651,7 @@ int XexModule::ApplyPatch(XexModule* module) {
            base_exe + patch_header->delta_image_source_offset,
            patch_header->delta_image_source_size);
   }
+
 
   // TODO: should we use new_image_size here instead?
   uint32_t image_target_size = patch_header->delta_image_target_offset +
@@ -521,6 +740,7 @@ int XexModule::ReadImage(const void* xex_addr, size_t xex_length,
   }
 
   is_dev_kit_ = key[0] == 0x00;
+  std::memcpy(image_load_key_, key, sizeof(image_load_key_));
 
   if (is_patch()) {
     // Make a copy of patch data for other XEX's to use with ApplyPatch()
@@ -532,7 +752,20 @@ int XexModule::ReadImage(const void* xex_addr, size_t xex_length,
     return 0;
   }
 
-  memory()->LookupHeap(base_address_)->Reset();
+  // 1099z17559-11: Reset() frees EVERY page of the heap the image goes into,
+  // not only this image's range. Upstream loads one executable, so that was
+  // harmless; with xam, hud, ximecore, signin... all in the 0x90000000 heap it
+  // wipes the page table of every module already loaded there (measured: dash
+  // 92000000+01028000 reads state 3 after its load and state 0 once ximecore
+  // loads at 91680000). The consequences were GetNativeObject refusing dash's
+  // own events ("state 0") so its waits returned at once, a later allocation
+  // free to land on a live image, and "BaseHeap::Release failed because address
+  // is not a region start" when dash is unloaded. A console's loader does not
+  // free other modules' memory. kernel_xex_load_keep_heap skips the reset; the
+  // AllocFixed below still reserves and commits this image's own range.
+  if (!cvars::kernel_xex_load_keep_heap) {
+    memory()->LookupHeap(base_address_)->Reset();
+  }
 
   aes_decrypt_buffer(
       key, reinterpret_cast<const uint8_t*>(xex_security_info()->aes_key), 16,
@@ -1342,6 +1575,18 @@ bool XexModule::SetupLibraryImports(const std::string_view name,
   library_info.version.value = library->version().value;
   library_info.min_version.value = library->version_min().value;
 
+  // A system module: the flash / system root (SYS:, \SYS, \Device\Flash,
+  // \SystemRoot) or the hard drive's system extension partition.
+  const bool importer_is_system = [&]() {
+    std::string p = utf8::lower_ascii(path_);
+    for (const char* prefix : {"sys:", "\\sys\\", "\\device\\flash",
+                               "\\systemroot", "flash:",
+                               "\\device\\harddisk0\\systemextpartition"}) {
+      if (p.rfind(prefix, 0) == 0) return true;
+    }
+    return false;
+  }();
+
   // Imports are stored as {import descriptor, thunk addr, import desc, ...}
   // Even thunks have an import descriptor (albeit unused/useless)
   for (uint32_t i = 0; i < library->count; i++) {
@@ -1362,6 +1607,23 @@ bool XexModule::SetupLibraryImports(const std::string_view name,
       kernel_export = kernel_resolver->GetExportByOrdinal(name, ordinal);
     } else if (user_module) {
       user_export_addr = user_module->GetProcAddressByOrdinal(ordinal);
+    }
+    // 2026-09-16 HOST-SIDE (asked for by the user: every game on every
+    // dashboard): a game built for a newer system imports xam ordinals an old
+    // system's xam does not export (Sonic & All-Stars Racing Transformed needs
+    // 2.0.15574; on 6770 such imports ran into nothing and it crashed 0.6 s in).
+    // A console refuses the title instead (hypervisor version check, see
+    // kernel_check_title_system_version). Bind those imports to Xenia's HLE
+    // xam when it has them. System modules are left alone: they match the xam
+    // they ship with.
+    if (lle_xam_override && !user_export_addr && !importer_is_system) {
+      kernel_export =
+          processor_->export_resolver()->GetExportByOrdinal(name, ordinal);
+      if (kernel_export) {
+        XELOGI("LLE xam: {} imports xam {:03X} ({}) that this xam does not "
+               "export -> HLE xam",
+               name_, ordinal, kernel_export->name);
+      }
     }
 
     // Import not resolved?

@@ -7,7 +7,10 @@
  ******************************************************************************
  */
 
+#include <algorithm>
 #include <atomic>
+#include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <functional>
 #include <memory>
@@ -16,9 +19,12 @@
 
 #include "xenia/app/discord/discord_presence.h"
 #include "xenia/app/emulator_window.h"
+#include "xenia/app/system_update_import.h"
 #include "xenia/base/assert.h"
 #include "xenia/base/cvar.h"
 #include "xenia/base/debugging.h"
+#include "xenia/base/filesystem.h"
+#include "xenia/base/system.h"
 #include "xenia/base/logging.h"
 #include "xenia/base/platform.h"
 #include "xenia/base/profiling.h"
@@ -27,6 +33,7 @@
 #include "xenia/debug/ui/debug_window.h"
 #include "xenia/emulator.h"
 #include "xenia/hid/input_system.h"
+#include "xenia/kernel/kernel_flags.h"
 #include "xenia/kernel/xam/xam_module.h"
 #include "xenia/kernel/xboxkrnl/xboxkrnl_video.h"  // phase 1055 bugs: GuidePaintThreadStop
 #include "xenia/ui/file_picker.h"
@@ -62,6 +69,12 @@
 #if !XE_PLATFORM_ANDROID
 #include "xenia/hid/sdl/sdl_hid.h"
 #endif  // !XE_PLATFORM_ANDROID
+#include "xenia/gpu/texture_cache.h"
+#if XE_PLATFORM_WIN32
+#include "xenia/base/platform_win.h"
+#include "xenia/ui/window_win.h"
+#endif  // XE_PLATFORM_WIN32
+
 #if XE_PLATFORM_WIN32
 #include "xenia/hid/winkey/winkey_hid.h"
 #include "xenia/hid/xinput/xinput_hid.h"
@@ -125,6 +138,30 @@ DEFINE_path(guide_boot_target, "",
             "target, so a plain double-click boots it.",
             "Guide");
 DECLARE_bool(guide_power_on_with_guide_button);
+// 2026-09-16: portable system updates. With this on, opening the exe expands
+// every SystemUpdate zip in <exe>\updates into <exe>\systems\<build>
+// (system_update_import.cc) and boots an imported system: the settings that
+// name the system (guide_system_root, lle_xam, guide_cold_boot_path,
+// guide_boot_target, kernel_build_version, kernel_system_ext_path) are set
+// from it on every launch. Empty guide_hdd_path / kernel_hv_image_path
+// default to <exe>\hdd\Partition1 and <exe>\support\se_17489_hv_kernel.bin;
+// base fonts come from <exe>\support\fonts.
+DEFINE_bool(guide_system_updates_folder, false,
+            "Import SystemUpdate zips from the updates folder next to the exe "
+            "on launch and boot the most recently imported system from the "
+            "systems folder.",
+            "Guide");
+DEFINE_uint32(guide_system_build, 0,
+              "With guide_system_updates_folder: the build in the systems "
+              "folder to boot (0 = the most recently imported).",
+              "Guide");
+DECLARE_string(guide_system_root);
+DECLARE_string(lle_xam);
+DECLARE_string(guide_cold_boot_path);
+DECLARE_path(guide_hdd_path);
+DECLARE_path(kernel_hv_image_path);
+DECLARE_path(kernel_system_ext_path);
+DECLARE_uint32(kernel_build_version);
 #ifndef XE_PLATFORM_WIN32
 DEFINE_transient_bool(portable, false,
                       "Specifies if Xenia should run in portable mode.",
@@ -141,6 +178,10 @@ DEFINE_bool(discord, true, "Enable Discord rich presence", "General");
 
 DECLARE_int32(window_size_x);
 DECLARE_int32(window_size_y);
+DECLARE_bool(upscale_to_window);
+DECLARE_bool(fullscreen);
+DECLARE_int32(draw_resolution_scale_x);
+DECLARE_int32(draw_resolution_scale_y);
 
 namespace xe {
 namespace app {
@@ -155,6 +196,7 @@ class EmulatorApp final : public xe::ui::WindowedApp {
   ~EmulatorApp();
 
   bool OnInitialize() override;
+  void SetUpSystemFromUpdatesFolder();
 
  protected:
   void OnDestroy() override;
@@ -282,16 +324,26 @@ class EmulatorApp final : public xe::ui::WindowedApp {
   static std::unique_ptr<apu::AudioSystem> CreateAudioSystem(
       cpu::Processor* processor);
   static std::unique_ptr<gpu::GraphicsSystem> CreateGraphicsSystem();
+  void ApplyUpscaleToWindow();
   static std::vector<std::unique_ptr<hid::InputDriver>> CreateInputDrivers(
       ui::Window* window);
 
   void EmulatorThread();
+  bool SetUpEmulator(bool wait_for_power_on);
+  void BootEmulator(bool wait_for_power_on, bool after_power_off);
+  bool PowerCycleEmulator();
+  void RequestPowerOff();
   void ShutdownEmulatorThreadFromUIThread();
 
   DebugWindowClosedListener debug_window_closed_listener_;
 
   std::unique_ptr<Emulator> emulator_;
   std::unique_ptr<EmulatorWindow> emulator_window_;
+  // Host Power Off: roots to build the replacement Emulator from.
+  std::filesystem::path storage_root_;
+  std::filesystem::path content_root_;
+  std::filesystem::path cache_root_;
+  std::atomic<bool> power_off_requested_{false};
 
   // Created on demand, used by the emulator.
   std::unique_ptr<xe::debug::ui::DebugWindow> debug_window_;
@@ -504,6 +556,9 @@ bool EmulatorApp::OnInitialize() {
   XELOGI("Storage root: {}", storage_root);
 
   config::SetupConfig(storage_root);
+  if (cvars::guide_system_updates_folder) {
+    SetUpSystemFromUpdatesFolder();
+  }
 
 #if XE_ARCH_AMD64 == 1
   amd64::InitFeatureFlags();
@@ -545,6 +600,9 @@ bool EmulatorApp::OnInitialize() {
   }
 
   // Create the emulator but don't initialize so we can setup the window.
+  storage_root_ = storage_root;
+  content_root_ = content_root;
+  cache_root_ = cache_root;
   emulator_ =
       std::make_unique<Emulator>("", storage_root, content_root, cache_root);
 
@@ -556,6 +614,7 @@ bool EmulatorApp::OnInitialize() {
     XELOGE("Failed to create the main emulator window");
     return false;
   }
+  emulator_window_->set_power_off_action([this]() { RequestPowerOff(); });
 
   // Setup the emulator and run its loop in a separate thread.
   emulator_thread_quit_requested_.store(false, std::memory_order_relaxed);
@@ -591,12 +650,258 @@ void EmulatorApp::OnDestroy() {
   std::quick_exit(EXIT_SUCCESS);
 }
 
+namespace {
+// cvars defined in other files have no cv:: handle here; look them up.
+template <typename T>
+void OverrideOtherCvar(const char* name, const T& value) {
+  auto it = cvar::ConfigVars->find(name);
+  auto* var = it == cvar::ConfigVars->end()
+                  ? nullptr
+                  : dynamic_cast<cvar::ConfigVar<T>*>(it->second);
+  if (var) {
+    var->OverrideConfigValue(value);
+  } else {
+    XELOGE("SystemUpdate: no {} setting to set", name);
+  }
+}
+}  // namespace
+
+void EmulatorApp::SetUpSystemFromUpdatesFolder() {
+  const std::filesystem::path exe_dir = xe::filesystem::GetExecutableFolder();
+  const auto systems_dir = exe_dir / "systems";
+  const auto firmware_root = exe_dir / "firmware";
+  std::string problems;
+  // Pre-2010 updates patch the console's base firmware (2.0.1888.0). An
+  // archive or folder of it dropped into firmware\ is imported once into
+  // firmware\<version>\ (ImportBaseFirmware) and then left alone.
+  {
+    std::error_code ec;
+    std::vector<std::filesystem::path> sources;
+    for (auto& de : std::filesystem::directory_iterator(firmware_root, ec)) {
+      const std::string name = xe::path_to_utf8(de.path().filename());
+      const bool is_version_dir =
+          de.is_directory() && !name.empty() &&
+          std::isdigit(static_cast<unsigned char>(name[0])) &&
+          std::filesystem::is_regular_file(de.path() / "xam.xex", ec);
+      if (is_version_dir || name == "imported" ||
+          name.rfind("importing.", 0) == 0) {
+        continue;
+      }
+      sources.push_back(de.path());
+    }
+    for (auto& src : sources) {
+      auto fw = ImportBaseFirmware(src, firmware_root);
+      if (!fw.error.empty()) {
+        problems += fmt::format("Base firmware {} was not imported:\n  {}\n\n",
+                                xe::path_to_utf8(src.filename()), fw.error);
+        continue;
+      }
+      // Imported: the source is no longer needed to find the firmware, and
+      // leaving it would re-import it on every launch.
+      auto done = firmware_root / "imported";
+      std::filesystem::create_directories(done, ec);
+      std::filesystem::rename(src, done / src.filename(), ec);
+    }
+  }
+  for (auto& r : ImportPendingSystemUpdates(exe_dir / "updates", systems_dir,
+                                            exe_dir / "support" / "fonts",
+                                            firmware_root)) {
+    std::string zip = xe::path_to_utf8(r.zip.filename());
+    if (!r.error.empty()) {
+      problems += fmt::format("{} was not imported:\n  {}\n\n", zip, r.error);
+    } else if (!r.failures.empty()) {
+      problems += fmt::format(
+          "{} (build {}) was imported with problems and will not be "
+          "booted:\n",
+          zip, r.xam_version);
+      for (auto& f : r.failures) problems += "  " + f + "\n";
+      problems += "\n";
+    }
+  }
+  if (!problems.empty()) {
+    xe::ShowSimpleMessageBox(xe::SimpleMessageBoxType::Warning, problems);
+  }
+
+  const ImportedSystem* pick = nullptr;
+  auto systems = ListImportedSystems(systems_dir);
+  for (auto& s : systems) {
+    if (!s.complete) continue;
+    if (cvars::guide_system_build && s.build != cvars::guide_system_build) {
+      continue;
+    }
+    pick = &s;
+    break;
+  }
+  if (!pick) {
+    xe::ShowSimpleMessageBox(
+        xe::SimpleMessageBoxType::Warning,
+        cvars::guide_system_build
+            ? fmt::format("Build {} is not in the systems folder.",
+                          cvars::guide_system_build)
+            : std::string("No system imported yet. Put an Xbox 360 "
+                          "SystemUpdate zip in the updates folder next to "
+                          "xenia_canary.exe and open it again."));
+    return;
+  }
+  XELOGI("SystemUpdate: booting {} from {}", pick->xam_version,
+         xe::path_to_utf8(pick->dir));
+  OverrideOtherCvar<std::string>("guide_system_root", xe::path_to_utf8(pick->dir));
+  OverrideOtherCvar<std::string>("lle_xam", std::string("SYS:\\xam.xex"));
+  OverrideOtherCvar<std::string>("guide_cold_boot_path", std::string("SYS:\\bootanim.xex"));
+  OVERRIDE_path(guide_boot_target, pick->dir / "dash.xex");
+  OverrideOtherCvar<uint32_t>("kernel_build_version", pick->build);
+  OverrideOtherCvar<std::filesystem::path>("kernel_system_ext_path",
+                pick->has_sysext ? pick->dir / "_sysext"
+                                 : std::filesystem::path());
+  if (cvars::guide_hdd_path.empty()) {
+    auto hdd = exe_dir / "hdd" / "Partition1";
+    std::error_code ec;
+    std::filesystem::create_directories(hdd, ec);
+    OverrideOtherCvar<std::filesystem::path>("guide_hdd_path", hdd);
+  }
+  if (cvars::kernel_hv_image_path.empty()) {
+    OverrideOtherCvar<std::filesystem::path>("kernel_hv_image_path",
+                  exe_dir / "support" / "se_17489_hv_kernel.bin");
+  }
+}
+
 void EmulatorApp::EmulatorThread() {
   assert_not_null(emulator_thread_event_);
 
   xe::threading::set_name("Emulator");
   Profiler::ThreadEnter("Emulator");
 
+  if (!SetUpEmulator(cvars::guide_power_on_with_guide_button)) {
+    return;
+  }
+  BootEmulator(cvars::guide_power_on_with_guide_button, false);
+
+  // Now, we're going to use this thread to drive events related to emulation.
+  while (!emulator_thread_quit_requested_.load(std::memory_order_relaxed)) {
+    xe::threading::Wait(emulator_thread_event_.get(), false);
+    if (power_off_requested_.exchange(false)) {
+      if (!PowerCycleEmulator()) {
+        return;
+      }
+      continue;
+    }
+    emulator_->WaitUntilExit();
+  }
+}
+
+// Host Power Off (File > Power Off Console). Guest threads are stopped from a
+// helper thread so the emulator thread's WaitUntilExit on the title's main
+// thread returns, then the emulator thread rebuilds everything.
+void EmulatorApp::RequestPowerOff() {
+  if (power_off_requested_.exchange(true)) {
+    return;
+  }
+  emulator_window_->window()->SetMainMenuEnabled(false);
+  Emulator* emulator = emulator_.get();
+  std::thread([this, emulator]() {
+    xe::threading::set_name("Power Off");
+    emulator->PowerOff();
+    emulator_thread_event_->Set();
+  }).detach();
+}
+
+// Destroys the whole Emulator (xam, kernel, GPU, audio, memory) and builds a
+// new one in this process, then waits powered off for the Guide button, which
+// cold boots the dashboard like the console's power-on.
+bool EmulatorApp::PowerCycleEmulator() {
+  XELOGI("Power: tearing down the emulator");
+  emulator_window_->StopGamepadHotKeys();
+  auto next =
+      std::make_unique<Emulator>("", storage_root_, content_root_, cache_root_);
+  next->set_awaiting_power_on(true);
+  if (debug_window_) {
+    app_context().CallInUIThreadSynchronous([this]() {
+      debug_window_.reset();
+    });
+  }
+  app_context().CallInUIThreadSynchronous([this, &next]() {
+    emulator_window_->ShutdownGraphicsSystemPresenterPainting();
+    emulator_window_->set_emulator(next.get());
+  });
+  std::unique_ptr<Emulator> old = std::move(emulator_);
+  emulator_ = std::move(next);
+  old.reset();
+  XELOGI("Power: emulator destroyed, building a new one");
+  if (!SetUpEmulator(true)) {
+    return false;
+  }
+  BootEmulator(true, true);
+  return true;
+}
+
+// HOST-SIDE enhancement (upscale_to_window): the draw resolution scale is
+// read once when the GPU command processor is created (render target and
+// texture caches are built for it), so it is chosen here, before
+// Emulator::Setup, from the size the guest image is shown at. Written straight
+// to the cvar globals (not OVERRIDE) so the user's configured
+// draw_resolution_scale_x/_y stay as they are in the config file.
+void EmulatorApp::ApplyUpscaleToWindow() {
+  if (!cvars::upscale_to_window) {
+    XELOGI("upscale_to_window: off, draw_resolution_scale {}x{} (HOST-SIDE)",
+           cvars::draw_resolution_scale_x, cvars::draw_resolution_scale_y);
+    return;
+  }
+  uint32_t width = 0, height = 0;
+  const char* source = "none";
+  app_context().CallInUIThreadSynchronous([&]() {
+    ui::Window* window = emulator_window_->window();
+    if (!window) {
+      return;
+    }
+#if XE_PLATFORM_WIN32
+    // Fullscreen: the monitor the window is on (the actual size may not have
+    // caught up yet if fullscreen is entered on the next event loop tick).
+    if (window->IsFullscreen() || cvars::fullscreen) {
+      HWND hwnd = static_cast<ui::Win32Window*>(window)->hwnd();
+      HMONITOR monitor =
+          hwnd ? MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) : nullptr;
+      MONITORINFO info = {sizeof(info)};
+      if (monitor && GetMonitorInfoW(monitor, &info)) {
+        width = uint32_t(info.rcMonitor.right - info.rcMonitor.left);
+        height = uint32_t(info.rcMonitor.bottom - info.rcMonitor.top);
+        source = "monitor";
+        return;
+      }
+    }
+#endif  // XE_PLATFORM_WIN32
+    width = window->GetActualPhysicalWidth();
+    height = window->GetActualPhysicalHeight();
+    source = "window";
+    if (!width || !height) {
+      // Minimized (Windows reports a 0x0 client area) or not shown yet: the
+      // restored size the window will have, which is the saved window size.
+      width = window->SizeToPhysical(window->GetDesiredLogicalWidth());
+      height = window->SizeToPhysical(window->GetDesiredLogicalHeight());
+      source = "saved window size";
+    }
+  });
+  if (!width || !height) {
+    XELOGW("upscale_to_window: no window size, keeping {}x{} (HOST-SIDE)",
+           cvars::draw_resolution_scale_x, cvars::draw_resolution_scale_y);
+    return;
+  }
+  // The presenter keeps the aspect ratio, so the image is limited by the
+  // smaller ratio. Smallest integer scale that covers it, with a 5% slack so
+  // window borders don't bump 1280x720 to 2.
+  const double ratio = std::min(width / 1280.0, height / 720.0);
+  int32_t scale = int32_t(std::ceil(ratio - 0.05));
+  scale = std::clamp(
+      scale, 1,
+      int32_t(gpu::TextureCache::kMaxDrawResolutionScaleAlongAxis));
+  cvars::draw_resolution_scale_x = scale;
+  cvars::draw_resolution_scale_y = scale;
+  XELOGI("upscale_to_window: {} {}x{} -> draw_resolution_scale {}x{} "
+         "(HOST-SIDE; the GPU may clamp further)",
+         source, width, height, scale, scale);
+}
+
+bool EmulatorApp::SetUpEmulator(bool wait_for_power_on) {
+  ApplyUpscaleToWindow();
   // Setup and initialize all subsystems. If we can't do something
   // (unsupported system, memory issues, etc) this will fail early.
   X_STATUS result = emulator_->Setup(
@@ -605,7 +910,7 @@ void EmulatorApp::EmulatorThread() {
   if (XFAILED(result)) {
     XELOGE("Failed to setup emulator: {:08X}", result);
     app_context().RequestDeferredQuit();
-    return;
+    return false;
   }
 
   app_context().CallInUIThread(
@@ -761,18 +1066,26 @@ void EmulatorApp::EmulatorThread() {
   });
 
   // Enable emulator input now that the emulator is properly loaded.
+  emulator_->set_awaiting_power_on(wait_for_power_on);
   app_context().CallInUIThread(
       [this]() { emulator_window_->OnEmulatorInitialized(); });
+  return true;
+}
 
-  // Grab path from the flag or unnamed argument.
+void EmulatorApp::BootEmulator(bool wait_for_power_on, bool after_power_off) {
+  X_STATUS result = X_STATUS_SUCCESS;
+  // Grab path from the flag or unnamed argument. A power-on after Power Off
+  // boots the dashboard, as the console does.
   std::filesystem::path path;
-  if (!cvars::target.empty()) {
+  if (after_power_off && !cvars::guide_boot_target.empty()) {
+    path = cvars::guide_boot_target;
+  } else if (!cvars::target.empty()) {
     path = cvars::target;
   } else if (!cvars::guide_boot_target.empty()) {
     path = cvars::guide_boot_target;
   }
 
-  if (!path.empty() && cvars::guide_power_on_with_guide_button) {
+  if (!path.empty() && wait_for_power_on) {
     XELOGI("Power: waiting for the Guide button to power on");
     bool pressed = false;
     auto* input = emulator_->input_system();
@@ -797,6 +1110,7 @@ void EmulatorApp::EmulatorThread() {
     if (!pressed) return;
     XELOGI("Power: Guide button pressed, booting {}", xe::path_to_utf8(path));
   }
+  emulator_->set_awaiting_power_on(false);
 
   if (!path.empty()) {
     // Normalize the path and make absolute.
@@ -814,7 +1128,8 @@ void EmulatorApp::EmulatorThread() {
   auto xam = emulator_->kernel_state()->GetKernelModule<kernel::xam::XamModule>(
       "xam.xex");
 
-  if (xam) {
+  // A cold boot after Power Off does not resume a pending host launch.
+  if (xam && !after_power_off) {
     xam->LoadLoaderData();
 
     if (!xam->loader_data().host_path.empty()) {
@@ -823,12 +1138,6 @@ void EmulatorApp::EmulatorThread() {
         return emulator_window_->RunTitle(host_path);
       });
     }
-  }
-
-  // Now, we're going to use this thread to drive events related to emulation.
-  while (!emulator_thread_quit_requested_.load(std::memory_order_relaxed)) {
-    xe::threading::Wait(emulator_thread_event_.get(), false);
-    emulator_->WaitUntilExit();
   }
 }
 

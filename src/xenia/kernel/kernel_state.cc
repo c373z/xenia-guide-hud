@@ -16,8 +16,16 @@
 #include "xenia/base/platform.h"
 #if XE_PLATFORM_WIN32
 #include "xenia/base/platform_win.h"
+// For the guest sampler's host symbols (phase 1099z159).
+#include <dbghelp.h>
+#pragma comment(lib, "dbghelp.lib")
 #endif
+#include <map>
+#include <thread>
 #include "xenia/apu/audio_system.h"
+#include "xenia/cpu/backend/backend.h"
+#include "xenia/cpu/backend/code_cache.h"
+#include "xenia/cpu/function.h"
 #include "xenia/base/logging.h"
 #include "xenia/emulator.h"
 #include "xenia/gpu/graphics_system.h"
@@ -34,6 +42,7 @@
 #include "xenia/kernel/xobject.h"
 #include "xenia/kernel/xthread.h"
 #include "xenia/ui/imgui_host_notification.h"
+#include "xenia/vfs/devices/host_path_entry.h"  // 2026-09-16 SystemFlashPatch
 
 #include "third_party/crypto/TinySHA1.hpp"
 
@@ -49,6 +58,9 @@ DECLARE_string(cl);
 
 namespace xe {
 namespace kernel {
+namespace xam {
+uint32_t xeXGetGameRegion();
+}  // namespace xam
 namespace xboxkrnl {
 // xboxkrnl_video.cc: ring buffer + persisted front buffer (phase 1099z97).
 void GuideTitleSwitchKeepAddresses(std::vector<uint32_t>* out);
@@ -91,6 +103,178 @@ KernelState::KernelState(Emulator* emulator)
       kMemoryProtectRead | kMemoryProtectWrite);
 
   xenia_assert(fixed_alloc_worked);
+  // Phase 1099z164: +0x602 of this page is the console's game region (u16).
+  // The hypervisor fills it from the key vault; the 17489 kernel reads it at
+  // 80088768 and for the disc region check (8017D0F8), retail xam's
+  // XGetGameRegion (816FB270) returns it. Zero made the 17559 dash treat every
+  // disc as out of region (no "Install to Hard Drive").
+  if (cvars::kernel_game_region) {
+    const uint32_t region = cvars::kernel_game_region == 0xFFFFFFFFu
+                                ? xam::xeXGetGameRegion()
+                                : cvars::kernel_game_region;
+    xe::store_and_swap<uint16_t>(memory_->TranslateVirtual(0x8E038602),
+                                 uint16_t(region));
+    XELOGI("Kernel: game region {:04X} at 8E038602", uint16_t(region));
+  }
+  // 2026-09-16: +0x614 of the same page. The 17489 hypervisor (se_17489 image
+  // 2DFA8..2DFD8) writes 0x00070000 there on every console whose game region
+  // is not 0102 (China); a China console gets 0x107 or 0x4 depending on a
+  // hypervisor-internal flag (0x30 bit 4) that Xenia does not model - 0x107 is
+  // used. Every dashboard (6770 921C0160, 7357 921FED68, 17559 922832E8)
+  // enables System Settings > Initial Setup only when bit 0 of the upper
+  // halfword is set, and retail xam tests bits 0x10000/0x2/0x1 of it. Zero
+  // left Initial Setup greyed out on every version.
+  if (cvars::kernel_hv_console_flags) {
+    const uint16_t region = xe::load_and_swap<uint16_t>(
+        memory_->TranslateVirtual(0x8E038602));
+    const uint32_t flags = region == 0x0102 ? 0x107u : 0x00070000u;
+    xe::store_and_swap<uint32_t>(memory_->TranslateVirtual(0x8E038614), flags);
+    XELOGI("Kernel: hypervisor console flags {:08X} at 8E038614", flags);
+  }
+  StartGuestSampler();
+}
+
+// Phase 1099z159 (DIAGNOSTIC): the Guide takes ~1 s to open on 17559 with
+// xam's HUD thread ~95% CPU-busy the whole time (per-thread CPU sampling) and
+// no long waits, so the question is which code. Samples every guest thread
+// that consumed CPU cycles since the last sample: translated code is named by
+// its guest function, host code by symbol plus the nearest translated caller
+// found on the stack.
+void KernelState::StartGuestSampler() {
+#if XE_PLATFORM_WIN32
+  if (cvars::kernel_sample_to_ms <= cvars::kernel_sample_from_ms) return;
+  std::thread([this]() {
+    auto process_ms = []() {
+      FILETIME c, e, k, u;
+      GetProcessTimes(GetCurrentProcess(), &c, &e, &k, &u);
+      FILETIME now;
+      GetSystemTimeAsFileTime(&now);
+      const uint64_t c64 = (uint64_t(c.dwHighDateTime) << 32) | c.dwLowDateTime;
+      const uint64_t n64 =
+          (uint64_t(now.dwHighDateTime) << 32) | now.dwLowDateTime;
+      return int64_t((n64 - c64) / 10000);
+    };
+    while (process_ms() < cvars::kernel_sample_from_ms) {
+      xe::threading::Sleep(std::chrono::milliseconds(5));
+    }
+    XELOGI("GuestSampler: started at process time {} ms", process_ms());
+    auto* cache = processor_->backend()->code_cache();
+    const uint64_t code_lo = cache->execute_base_address();
+    const uint64_t code_hi = code_lo + cache->total_size();
+    struct Tracked {
+      HANDLE h;
+      std::string name;
+      uint64_t cycles;
+      uint64_t samples;
+      std::map<std::string, uint64_t> hits;
+    };
+    std::map<uint32_t, Tracked> threads;  // by guest handle
+    std::map<uint64_t, std::string> sym_cache;
+    int64_t last_refresh = -1000;
+    uint64_t total = 0;
+    while (process_ms() < cvars::kernel_sample_to_ms) {
+      const int64_t now = process_ms();
+      if (now - last_refresh >= 100) {
+        last_refresh = now;
+        auto lock = global_critical_region_.Acquire();
+        for (auto& kv : threads_by_id_) {
+          XThread* t = kv.second;
+          if (!t->is_guest_thread() || !t->thread()) continue;
+          if (threads.count(t->handle())) continue;
+          HANDLE dup = nullptr;
+          if (!DuplicateHandle(GetCurrentProcess(),
+                               HANDLE(t->thread()->native_handle()),
+                               GetCurrentProcess(), &dup, 0, FALSE,
+                               DUPLICATE_SAME_ACCESS)) {
+            continue;
+          }
+          Tracked tr{dup, t->name(), 0, 0, {}};
+          QueryThreadCycleTime(dup, &tr.cycles);
+          threads.emplace(t->handle(), std::move(tr));
+        }
+      }
+      for (auto& kv : threads) {
+        Tracked& tr = kv.second;
+        uint64_t cyc = 0;
+        if (!QueryThreadCycleTime(tr.h, &cyc) || cyc == tr.cycles) continue;
+        tr.cycles = cyc;
+        if (SuspendThread(tr.h) == DWORD(-1)) continue;
+        CONTEXT ctx = {};
+        ctx.ContextFlags = CONTEXT_CONTROL;
+        uint64_t stack[512];
+        size_t stack_words = 0;
+        if (GetThreadContext(tr.h, &ctx)) {
+          // The stack belongs to a suspended thread of this process.
+          MEMORY_BASIC_INFORMATION mbi;
+          if (VirtualQuery(PVOID(ctx.Rsp), &mbi, sizeof(mbi))) {
+            const uint64_t avail = uint64_t(mbi.BaseAddress) +
+                                   mbi.RegionSize - ctx.Rsp;
+            stack_words = size_t(std::min<uint64_t>(avail / 8, 512));
+            std::memcpy(stack, PVOID(ctx.Rsp), stack_words * 8);
+          }
+        }
+        ResumeThread(tr.h);
+        if (!ctx.Rip) continue;
+        auto guest_fn_at = [&](uint64_t pc) -> uint32_t {
+          auto lock = global_critical_region_.Acquire();
+          auto* fn = cache->LookupFunction(pc);
+          return fn ? fn->address() : 0;
+        };
+        std::string key;
+        if (ctx.Rip >= code_lo && ctx.Rip < code_hi) {
+          key = fmt::format("guest {:08X}", guest_fn_at(ctx.Rip));
+        } else {
+          auto it = sym_cache.find(ctx.Rip);
+          if (it == sym_cache.end()) {
+            static bool sym_ready = false;
+            if (!sym_ready) {
+              SymSetOptions(SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
+              sym_ready = SymInitialize(GetCurrentProcess(), nullptr, TRUE);
+            }
+            char buf[sizeof(SYMBOL_INFO) + 256] = {};
+            auto* si = reinterpret_cast<SYMBOL_INFO*>(buf);
+            si->SizeOfStruct = sizeof(SYMBOL_INFO);
+            si->MaxNameLen = 255;
+            DWORD64 disp = 0;
+            std::string s = SymFromAddr(GetCurrentProcess(), ctx.Rip, &disp, si)
+                                ? std::string(si->Name)
+                                : fmt::format("rip {:X}", ctx.Rip);
+            it = sym_cache.emplace(ctx.Rip, std::move(s)).first;
+          }
+          uint32_t caller = 0;
+          for (size_t w = 0; w < stack_words; ++w) {
+            if (stack[w] >= code_lo && stack[w] < code_hi) {
+              caller = guest_fn_at(stack[w]);
+              if (caller) break;
+            }
+          }
+          key = fmt::format("host {} <- guest {:08X}", it->second, caller);
+        }
+        ++tr.hits[key];
+        ++tr.samples;
+        ++total;
+      }
+      xe::threading::Sleep(std::chrono::milliseconds(1));
+    }
+    XELOGI("GuestSampler: stopped at process time {} ms, {} samples",
+           process_ms(), total);
+    for (auto& kv : threads) {
+      Tracked& tr = kv.second;
+      if (tr.samples) {
+        XELOGI("GuestSampler: thread {:08X} '{}' {} samples", kv.first, tr.name,
+               tr.samples);
+        std::vector<std::pair<uint64_t, std::string>> v;
+        for (auto& h : tr.hits) v.emplace_back(h.second, h.first);
+        std::sort(v.rbegin(), v.rend());
+        for (size_t i = 0; i < v.size() && i < 30; ++i) {
+          XELOGI("GuestSampler:   {:5} {:5.1f}% {}", v[i].first,
+                 100.0 * double(v[i].first) / double(tr.samples), v[i].second);
+        }
+      }
+      CloseHandle(tr.h);
+    }
+  }).detach();
+#endif
 }
 
 KernelState::~KernelState() {
@@ -395,6 +579,19 @@ bool KernelState::AddressInUserModuleImage(uint32_t address, uint32_t length) {
   return false;
 }
 
+object_ref<UserModule> KernelState::GetUserModuleByAddress(uint32_t address) {
+  auto global_lock = global_critical_region_.Acquire();
+  for (auto& user_module : user_modules_) {
+    auto* xex = user_module ? user_module->xex_module() : nullptr;
+    if (!xex) continue;
+    const uint32_t lo = xex->base_address();
+    if (address >= lo && address - lo < xex->image_size()) {
+      return user_module;
+    }
+  }
+  return nullptr;
+}
+
 object_ref<XModule> KernelState::GetModule(const std::string_view name,
                                            bool user_only) {
   if (name.empty()) {
@@ -621,6 +818,29 @@ object_ref<UserModule> KernelState::LoadUserModule(
       path = xe::utf8::join_guest_paths(
           xe::utf8::find_base_guest_path(executable_module_->path()), name);
     }
+    // A bare name that is not next to the running title is looked up next to
+    // the loaded xam.xex: xam loads its system apps by bare name
+    // ("signin.xex", "hud.xex"), which live beside it in the system
+    // partition. Joining them to the title's directory worked while the
+    // dashboard (itself in the system partition) was running, but with a
+    // disc title it produced \Device\CdRom0\signin.xex, the in-game sign-in
+    // UI failed to load, and xam showed "Xbox Live ... Status Code d000000f".
+    if (!file_system_->ResolvePath(path)) {
+      for (const auto& user_module : user_modules_) {
+        if (xe::utf8::equal_case(
+                xe::utf8::find_name_from_guest_path(user_module->path()),
+                "xam.xex")) {
+          std::string beside_xam = xe::utf8::join_guest_paths(
+              xe::utf8::find_base_guest_path(user_module->path()), name);
+          if (file_system_->ResolvePath(beside_xam)) {
+            XELOGI("LoadUserModule: {} not beside the title; using {}", name,
+                   beside_xam);
+            path = beside_xam;
+          }
+          break;
+        }
+      }
+    }
   }
 
   object_ref<UserModule> module;
@@ -689,6 +909,15 @@ object_ref<UserModule> KernelState::LoadUserModule(
 
     global_lock.lock();
 
+    // Phase 1099z161: remember DLLs a title-process thread loads, so the
+    // title terminate unloads them as the console does.
+    if (auto* th = XThread::GetCurrentThread()) {
+      auto* kt = th->guest_object<X_KTHREAD>();
+      if (kt && kt->process_type == X_PROCTYPE_TITLE) {
+        module->set_loaded_by_title(true);
+      }
+    }
+
     // Putting into the listing automatically retains.
     user_modules_.push_back(module);
   }
@@ -739,6 +968,9 @@ X_RESULT KernelState::FinishLoadingUserModule(
   emulator_->patcher()->ApplyPatchesForTitle(memory_, module->title_id(),
                                              module->hash());
   emulator_->on_patch_apply();
+  if (user_module_loaded_hook) {
+    user_module_loaded_hook(module.get());
+  }
   if (module->xex_module()) {
     module->xex_module()->Precompile();
   }
@@ -776,6 +1008,62 @@ X_RESULT KernelState::FinishLoadingUserModule(
 
 X_RESULT KernelState::ApplyTitleUpdate(
     const object_ref<UserModule> title_module) {
+  // 2026-09-16: pre-2010 system updates ship most flash modules as delta
+  // patches against the base 2.0.1888 flash ($flash_xam.xexp ...); the
+  // console loads the base image and applies the patch. The importer puts
+  // the patch beside the base file as <name>.xexp.
+  if (cvars::kernel_system_flash_patches) {
+    const std::string& path = title_module->path();
+    bool system_module =
+        xe::utf8::starts_with_case(path, "SYS:") ||
+        xe::utf8::starts_with_case(path, "\\SYS\\") ||
+        xe::utf8::starts_with_case(path, "\\Device\\Flash");
+    // 2026-09-16 (NXE 7357): xam loads its system apps by BARE name
+    // ("hud.xex"), which LoadUserModule joins to the running title's
+    // directory. While the dashboard runs, that directory IS the system
+    // folder, so hud.xex came in as \Device\TitleXex\hud.xex and its
+    // hud.xexp was never applied: the 1888 hud ran against 7357 xam and its
+    // imports of ordinals 452/470 (exported by 1888 xam, not by 7357 xam)
+    // jumped to xam's image base when the Guide opened (GUEST CRASH at
+    // 913F0C98, ctr=81870000). On the console these files are all flash
+    // files, so the module is a system module when it IS the file under SYS:.
+    if (!system_module && !cvars::guide_system_root.empty()) {
+      const std::string sys_path =
+          "SYS:\\" + std::string(xe::utf8::find_name_from_guest_path(path));
+      auto* a = dynamic_cast<xe::vfs::HostPathEntry*>(
+          file_system()->ResolvePath(path));
+      auto* b = dynamic_cast<xe::vfs::HostPathEntry*>(
+          file_system()->ResolvePath(sys_path));
+      std::error_code ec;
+      if (a && b &&
+          std::filesystem::equivalent(a->host_path(), b->host_path(), ec)) {
+        XELOGI("SystemFlashPatch: {} is the system file {}", path, sys_path);
+        system_module = true;
+      }
+    }
+    xe::vfs::Entry* patch_entry =
+        system_module ? file_system()->ResolvePath(path + 'p') : nullptr;
+    if (patch_entry) {
+      auto patch_module = object_ref<UserModule>(new UserModule(this));
+      X_RESULT load = patch_module->LoadFromFile(patch_entry->absolute_path());
+      if (load != X_STATUS_SUCCESS || !patch_module->xex_module() ||
+          !patch_module->xex_module()->is_patch()) {
+        XELOGE("SystemFlashPatch: {}p is not a loadable delta patch ({:08X})",
+               path, load);
+        return X_STATUS_UNSUCCESSFUL;
+      }
+      if (!IsPatchSignatureProper(title_module, patch_module)) {
+        XELOGE("SystemFlashPatch: {}p was made for another base image; not "
+               "applied",
+               path);
+        return X_STATUS_UNSUCCESSFUL;
+      }
+      X_RESULT result = ApplyTitleUpdate(title_module, patch_module);
+      XELOGI("SystemFlashPatch: applied {}p -> {:08X}", path, result);
+      return result;
+    }
+  }
+
   const auto title_updates = FindTitleUpdate(title_module->title_id());
   if (title_updates.empty()) {
     return X_STATUS_SUCCESS;
@@ -1071,6 +1359,9 @@ uint32_t KernelState::ReleaseTitleAllocations(uint32_t* out_bytes) {
     if (heap->Release(base, &size)) {
       ++released;
       bytes += size;
+      // 1099z160: name each region (8 or so per switch).
+      XELOGI("TitleSwitch:   Mm:   released virtual {:08X} size {:08X}", base,
+             size);
     }
   }
   if (out_bytes) {
@@ -1152,6 +1443,126 @@ uint32_t KernelState::ReleaseTitlePhysicalAllocations(
   return released;
 }
 
+// Suspends and terminates the threads pick() selects (guest threads only
+// unless guest_only is false), never while one is in the emulator's own code
+// or holds the global critical region. Returns how many were still running
+// afterwards.
+uint32_t KernelState::TerminateGuestThreadsSafely(
+    const std::function<bool(XThread*)>& pick, const char* tag,
+    bool guest_only) {
+  // Snapshot the picked threads WITHOUT holding the global lock while killing.
+  std::vector<object_ref<XThread>> victims;
+  uint32_t kept = 0;
+  {
+    auto global_lock = global_critical_region_.Acquire();
+    for (auto& kv : threads_by_id_) {
+      auto* thread = kv.second;
+      if ((thread->is_guest_thread() || !guest_only) &&
+          !XThread::IsInThread(thread) && pick(thread)) {
+        victims.push_back(retain_object(thread));
+      } else {
+        ++kept;
+      }
+    }
+  }
+#if XE_PLATFORM_WIN32
+  // Host code of the emulator itself: a thread stopped in here may hold a
+  // host lock (the global critical region, a heap lock, ...), and killing it
+  // there abandons that lock - measured: the switch deadlocked on the next
+  // lock acquire. Translated guest code and OS wait routines are safe.
+  const HMODULE exe_module = GetModuleHandleW(nullptr);
+  const auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(exe_module);
+  const auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(
+      reinterpret_cast<uint8_t*>(exe_module) + dos->e_lfanew);
+  const uint64_t exe_lo = reinterpret_cast<uint64_t>(exe_module);
+  const uint64_t exe_hi = exe_lo + nt->OptionalHeader.SizeOfImage;
+#endif
+  uint32_t killed = 0, retries = 0, lock_retries = 0, not_killed = 0;
+  for (auto& thread : victims) {
+    if (!thread->is_running()) {
+      ++killed;
+      continue;
+    }
+    // NO StepToGuestSafePoint, unlike TerminateTitle: it only handles
+    // exports tagged kBlocking and otherwise steps the thread until its
+    // kernel call RETURNS - a title thread parked in a wait never returns
+    // (measured: every dash thread was in a wait and the switch hung). These
+    // threads are never resumed, so no synchronized guest context is needed;
+    // the real kernel ends them with a terminate APC (800620D8).
+    for (int attempt = 0; attempt < 5000; ++attempt) {
+      auto* native = thread->thread();
+#if XE_PLATFORM_WIN32
+      HANDLE h = reinterpret_cast<HANDLE>(native->native_handle());
+      if (SuspendThread(h) == static_cast<DWORD>(-1)) {
+        break;
+      }
+      CONTEXT c = {};
+      c.ContextFlags = CONTEXT_CONTROL;
+      const bool got = GetThreadContext(h, &c) != 0;
+      const bool in_emulator_host_code =
+          got && c.Rip >= exe_lo && c.Rip < exe_hi;
+      // Phase 1099z159: outside the exe is not enough. A thread parked in an
+      // OS wait can still OWN the global critical region (a kernel export
+      // that waits while holding it); killing it abandons the lock and every
+      // later acquire hangs - measured: launching Fable III ~2 s after
+      // inserting the disc hung this step in 3 of 8 runs, and a sampler
+      // thread started afterwards blocked on the global lock too. The target
+      // is suspended, so if the lock can be taken now, the target does not
+      // hold it and cannot take it before it is killed.
+      bool holds_global_lock = false;
+      if (got && !in_emulator_host_code &&
+          cvars::kernel_terminate_lock_check) {
+        auto probe = xe::global_critical_region::TryAcquire();
+        holds_global_lock = !probe.owns_lock();
+      }
+      if (in_emulator_host_code || holds_global_lock) {
+        ResumeThread(h);
+        ++retries;
+        if (holds_global_lock) ++lock_retries;
+        xe::threading::Sleep(std::chrono::milliseconds(1));
+        continue;
+      }
+#else
+      native->Suspend();
+#endif
+      thread->Terminate(0);
+      break;
+    }
+    if (thread->is_running()) ++not_killed;
+    ++killed;
+    UnregisterThread(thread.get());
+  }
+  XELOGI("{}: terminated {} guest thread(s) ({} retries to leave host "
+         "code, {} of them for the global lock; {} never reached a safe "
+         "point), kept {} other(s)",
+         tag, killed, retries, lock_retries, not_killed, kept);
+  return not_killed;
+}
+
+// 2026-09-16 (disc-agent): the boot image Xenia pre-loads for
+// kernel_boot_via_xam is not something a console has loaded. When xam's first
+// launch names a different executable (6770 xam with a disc in the tray at
+// power-on launches \Device\CdRom0\default.xex straight away), drop the
+// never-started image so XexLoadExecutable sees no executable, as on a console.
+// Measured before: -> C0000022 "an executable is still loaded (dash.xex)", xam
+// fell back to relaunching the dashboard.
+void KernelState::DiscardUnstartedBootImage(object_ref<UserModule> module) {
+  if (!module || executable_module_.get() != module.get()) {
+    return;
+  }
+  XELOGI("XexLoadExecutable: discarding the unstarted boot image {}",
+         module->path());
+  executable_module_ = nullptr;
+  auto export_entry = processor()->export_resolver()->GetExportByOrdinal(
+      "xboxkrnl.exe", ordinals::XexExecutableModuleHandle);
+  if (export_entry && export_entry->variable_ptr) {
+    *memory()->TranslateVirtual<xe::be<uint32_t>*>(export_entry->variable_ptr) =
+        0;
+  }
+  UnloadUserModule(module, false);
+  module->Unload();
+}
+
 void KernelState::TerminateTitleProcessSelective() {
   title_switch_log_budget.store(300);
   if (title_terminate_hook) {
@@ -1188,79 +1599,13 @@ void KernelState::TerminateTitleProcessSelective() {
   };
 
   auto kill_title_threads = [&]() {
-    // Snapshot the title threads WITHOUT holding the global lock while killing.
-    std::vector<object_ref<XThread>> victims;
-    uint32_t kept = 0;
-    {
-      auto global_lock = global_critical_region_.Acquire();
-      for (auto& kv : threads_by_id_) {
-        auto* thread = kv.second;
-        const bool is_title =
-            thread->is_guest_thread() && !XThread::IsInThread(thread) &&
-            thread->guest_object<X_KTHREAD>() &&
-            thread->guest_object<X_KTHREAD>()->process_type ==
-                X_PROCTYPE_TITLE;
-        if (is_title) {
-          victims.push_back(retain_object(thread));
-        } else {
-          ++kept;
-        }
-      }
-    }
-#if XE_PLATFORM_WIN32
-    // Host code of the emulator itself: a thread stopped in here may hold a
-    // host lock (the global critical region, a heap lock, ...), and killing it
-    // there abandons that lock - measured: the switch deadlocked on the next
-    // lock acquire. Translated guest code and OS wait routines are safe.
-    const HMODULE exe_module = GetModuleHandleW(nullptr);
-    const auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(exe_module);
-    const auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(
-        reinterpret_cast<uint8_t*>(exe_module) + dos->e_lfanew);
-    const uint64_t exe_lo = reinterpret_cast<uint64_t>(exe_module);
-    const uint64_t exe_hi = exe_lo + nt->OptionalHeader.SizeOfImage;
-#endif
-    uint32_t killed = 0, retries = 0;
-    for (auto& thread : victims) {
-      if (!thread->is_running()) {
-        ++killed;
-        continue;
-      }
-      // NO StepToGuestSafePoint, unlike TerminateTitle: it only handles
-      // exports tagged kBlocking and otherwise steps the thread until its
-      // kernel call RETURNS - a title thread parked in a wait never returns
-      // (measured: every dash thread was in a wait and the switch hung). These
-      // threads are never resumed, so no synchronized guest context is needed;
-      // the real kernel ends them with a terminate APC (800620D8).
-      for (int attempt = 0; attempt < 5000; ++attempt) {
-        auto* native = thread->thread();
-#if XE_PLATFORM_WIN32
-        HANDLE h = reinterpret_cast<HANDLE>(native->native_handle());
-        if (SuspendThread(h) == static_cast<DWORD>(-1)) {
-          break;
-        }
-        CONTEXT c = {};
-        c.ContextFlags = CONTEXT_CONTROL;
-        const bool got = GetThreadContext(h, &c) != 0;
-        const bool in_emulator_host_code =
-            got && c.Rip >= exe_lo && c.Rip < exe_hi;
-        if (in_emulator_host_code) {
-          ResumeThread(h);
-          ++retries;
-          xe::threading::Sleep(std::chrono::milliseconds(1));
-          continue;
-        }
-#else
-        native->Suspend();
-#endif
-        thread->Terminate(0);
-        break;
-      }
-      ++killed;
-      UnregisterThread(thread.get());
-    }
-    XELOGI("TitleSwitch:   Ps: terminated {} title thread(s) ({} retries to "
-           "leave host code), kept {} other(s)",
-           killed, retries, kept);
+    TerminateGuestThreadsSafely(
+        [](XThread* thread) {
+          return thread->guest_object<X_KTHREAD>() &&
+                 thread->guest_object<X_KTHREAD>()->process_type ==
+                     X_PROCTYPE_TITLE;
+        },
+        "TitleSwitch:   Ps");
   };
 
   auto unload_title_executable = [&]() {
@@ -1305,6 +1650,36 @@ void KernelState::TerminateTitleProcessSelective() {
     XELOGI("TitleSwitch:   Xex: image released status={:08X} refs held "
            "elsewhere may still exist",
            status);
+    // Phase 1099z161: DLLs the title process loaded go with it (the console
+    // unloads the whole title process image list). Measured: dash 17559 loads
+    // SEP\20449700\dashnui.xex; left loaded across Dash -> Avatar Editor ->
+    // Dash, the second dash's load returned the stale module, its Kinect
+    // function table (9218B5A0..) was never bound, and it called address 0
+    // (9218B3C0 via [92992CDC]). No DllMain detach: the title's threads are
+    // already gone.
+    if (cvars::kernel_title_unload_dlls) {
+      std::vector<object_ref<UserModule>> dlls;
+      for (auto& m : user_modules_) {
+        if (m->loaded_by_title() && m.get() != exe.get()) dlls.push_back(m);
+      }
+      for (auto& dll : dlls) {
+        XELOGI("TitleSwitch:   Xex: unloading title DLL {}", dll->path());
+        if (dll->xex_module()) {
+          const uint32_t low = dll->xex_module()->low_address();
+          const uint32_t high = dll->xex_module()->high_address();
+          auto* gs = emulator()->graphics_system();
+          if (gs && gs->interrupt_callback() >= low &&
+              gs->interrupt_callback() < high) {
+            gs->SetInterruptCallback(0, 0);
+          }
+          if (auto* as = emulator()->audio_system()) {
+            as->UnregisterClientsInRange(low, high);
+          }
+        }
+        UnloadUserModule(dll, false);
+        dll->Unload();
+      }
+    }
   };
 
   bool did_ps = false, did_ob = false, did_xex = false, did_mm = false;
@@ -1327,9 +1702,51 @@ void KernelState::TerminateTitleProcessSelective() {
       // of the title process (real Ob slot 80075528 empties the title handle
       // table; objects still referenced elsewhere stay alive).
       if (cvars::guide_title_switch_close_handles) {
+        // Phase 1099z160: Xenia's wrapper for a dispatcher the guest built in
+        // its own memory is not a handle on the console; the Ob slot cannot
+        // close it. With --kernel_ob_keep_guest_dispatchers such an entry is
+        // left alone unless its dispatcher lives in memory this terminate is
+        // about to release (the title image or a title virtual allocation),
+        // where the console object ends with its memory.
+        std::function<bool(uint32_t)> keep;
+        if (cvars::kernel_ob_keep_guest_dispatchers) {
+          uint32_t img_lo = 0, img_hi = 0;
+          if (executable_module_ && executable_module_->xex_module()) {
+            img_lo = executable_module_->xex_module()->base_address();
+            img_hi = img_lo + executable_module_->xex_module()->image_size();
+          }
+          std::vector<std::pair<uint32_t, uint32_t>> regions;
+          {
+            std::lock_guard<std::mutex> lock(title_allocations_mutex_);
+            for (uint32_t base : title_allocations_) {
+              auto* heap = memory()->LookupHeap(base);
+              HeapAllocationInfo info = {};
+              if (heap && heap->QueryRegionInfo(base, &info) &&
+                  info.allocation_base == base) {
+                // Walk the allocation's regions to its end.
+                uint32_t end = base;
+                while (heap->QueryRegionInfo(end, &info) &&
+                       info.allocation_base == base && info.region_size) {
+                  end = info.base_address + info.region_size;
+                }
+                regions.emplace_back(base, end);
+              }
+            }
+          }
+          keep = [img_lo, img_hi, regions](uint32_t guest) {
+            if (guest >= img_lo && guest < img_hi) return false;
+            for (const auto& r : regions) {
+              if (guest >= r.first && guest < r.second) return false;
+            }
+            return true;
+          };
+        }
+        uint32_t kept = 0, wrappers = 0;
         const uint32_t closed = object_table()->CloseHandlesOwnedBy(
-            static_cast<uint8_t>(X_PROCTYPE_TITLE));
-        XELOGI("TitleSwitch:   Ob: closed {} title handle(s)", closed);
+            static_cast<uint8_t>(X_PROCTYPE_TITLE), keep, &kept, &wrappers);
+        XELOGI("TitleSwitch:   Ob: closed {} title handle(s); guest dispatcher "
+               "wrappers: {} seen, {} kept",
+               closed, wrappers, kept);
       } else {
         XELOGI("TitleSwitch:   Ob: title handle close disabled");
       }
@@ -1951,9 +2368,16 @@ void KernelState::EmulateCPInterruptDPC(uint32_t interrupt_callback,
   DPCImpersonationScope dpc_scope{};
   BeginDPCImpersonation(current_context, dpc_scope);
 
-  // todo: check VdGlobalXamDevice here. if VdGlobalXamDevice is nonzero, should
-  // set X_PROCTYPE_SYSTEM
-  xboxkrnl::xeKeSetCurrentProcessType(X_PROCTYPE_TITLE, current_context);
+  // 17489 kernel 80102E00..14 (and 80102F84..98): the ISR runs as process
+  // type 1 + (VdGlobalXamDevice [801E6FC8] != 0). xam's D3D picks its device
+  // by process type, so running it as TITLE while only xam's device exists
+  // (the launch fade, notification 5) made it use VdGlobalDevice = 0.
+  uint32_t isr_type = X_PROCTYPE_TITLE;
+  if (cvars::kernel_isr_process_type &&
+      xe::load_and_swap<uint32_t>(memory()->TranslateVirtual(0x801E6FC8u))) {
+    isr_type = X_PROCTYPE_SYSTEM;
+  }
+  xboxkrnl::xeKeSetCurrentProcessType(isr_type, current_context);
 
   uint64_t args[] = {source, interrupt_callback_data};
   processor_->Execute(thread->thread_state(), interrupt_callback, args,
